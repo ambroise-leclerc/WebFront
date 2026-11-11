@@ -8,7 +8,8 @@ const part = await webFront.cppFunction('test.part')();
 await new Promise(requestAnimationFrame);
 // The first case fails. Later cases must still run; terminal deliberately reports failure too, without starting a command.
 await webFront.cppFunction('test.report')(part !== 'app' && part !== 'terminal', `session-failure ${part}`);
-parent.postMessage('webfront-developer-finished', new URL(document.referrer).origin);
+if (parent === self) window.close();
+else parent.postMessage('webfront-developer-finished', new URL(document.referrer).origin);
 ]=])
 execute_process(COMMAND ${PREFIX} "${PROGRAM}" "${WORK}/fixtures" "${WORK}/output" --session
     RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE errors TIMEOUT 45)

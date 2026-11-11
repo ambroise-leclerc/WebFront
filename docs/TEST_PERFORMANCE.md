@@ -93,7 +93,8 @@ Linux's real windows remain on the suite's Xvfb display. Explicit tests of hidde
 `DeveloperBrowserSession` opens **one visible native window for all six developer integration parts**, instead of six.
 It displays up to four parts concurrently in visible iframe panes, each with its own native application, temporary
 project, assigned loopback port and origin. A completed frame is removed and its slot reused; its Workers, listeners
-and bridge go away. Workspace then gets the entire window for its layout/rendering checks. No active pane is hidden.
+and bridge go away. The same native view then navigates to workspace as a top-level page for its layout/rendering and
+keyboard-focus checks; this retains WebKit's original focus ancestry. No active pane is hidden.
 All assertions run in their original single-part mode, including workspace's first-launch/failed-first-build checks.
 The familiar `DeveloperBrowserIntegration*` CTest names validate separate native reports. Closing the window early,
 a missing result or an expired per-part native deadline fails the session. A small fault-injection session verifies
@@ -108,7 +109,7 @@ native 180-second deadline, even while other parts finish. Compare full-suite wa
 claiming a speedup. The session prints `nativeWindows=1 parts=6 durationMs=...` for timing comparisons.
 
 A local Windows/MSVC Release/WebView2 comparison used the same executable and fixtures, with four workers and no
-concurrent compiler: six separate visible windows took 28.83 s; the shared visible window took 27.85 s (27.38 s inside
+concurrent compiler: six separate visible windows took 27.38 s; the shared visible window took 27.26 s (26.91 s inside
 the native session). All six parts passed in both runs. This single pair demonstrates comparable elapsed time and five
 fewer native openings; it does not establish a whole-suite speedup.
 
@@ -116,6 +117,8 @@ Failed navigation, native close, startup failures, watchdogs and cancellation re
 executable/dylib registration orders remain separate images and processes. `ConsumerJasmine` modes and `Automation*`
 retain their own visible windows where they have not yet been grouped; no whole-suite budget of two or three visible
 openings is claimed. Hidden WKWebView tests require macOS 14+ and a WindowServer session.
+The timed `ConsumerJasmine-capture` sequence reserves four CTest processors too, so another test cannot cover its
+visible window and throttle WebKit's rendering while it records.
 
 ## Profiling and interpreting the numbers
 

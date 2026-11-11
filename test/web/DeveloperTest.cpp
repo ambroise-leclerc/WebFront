@@ -402,10 +402,11 @@ function advance() {
     // All running pages remain displayed. Workspace's layout/rendering checks get the entire window afterwards.
     while (cursor < 5 && frames.size < 4) launch(cursor++);
     if (completed === 5 && !frames.size) {
-        document.body.style.gridTemplateColumns = '1fr';
-        launch(cursor++);
+        // Keep the same native view, but give workspace its original top-level focus chain on WebKit.
+        const workspace = new URL(urls[5]);
+        workspace.search = '';
+        location.replace(workspace);
     }
-    if (completed === urls.length) window.close();
 }
 addEventListener('message', event => {
     for (const [index, {pane, frame}] of frames) {

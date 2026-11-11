@@ -224,6 +224,8 @@ if(_browser_tests_available)
             FRONTEND "${WEBFRONT_WEBTEST_FRONTEND}" TIMEOUT 30
             SPECS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer/capture.spec.js"
             ARGS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer")
+        # With visible windows, another test can occlude this view and throttle its timed image sequence on WebKit.
+        set_tests_properties(ConsumerJasmine-capture PROPERTIES PROCESSORS 4)
         # File services of the engine (issue #451), shared by every embedded frontend.
         webfront_add_jasmine_test(NAME ConsumerJasmine-file-services TARGET jasmine_consumer
             FRONTEND "${WEBFRONT_WEBTEST_FRONTEND}" TIMEOUT 60
