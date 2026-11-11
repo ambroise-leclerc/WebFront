@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Version of the environment to release (MAJOR.MINOR.PATCH, greater than the one of distribution.json)
+        description: Version of the environment to release (MAJOR.MINOR.PATCH, greater than the published one and not lower than the one of distribution.json)
         type: string
         required: true
       publish:
@@ -56,12 +56,10 @@ jobs:
         run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Check the requested version
         run: |
-          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Version must be MAJOR.MINOR.PATCH"; exit 1; }
-          current=$(jq -r .version js/developer/tools/distribution.json)
-          if [ "$(printf '%s\n%s\n' "$current" "$VERSION" | sort -V | tail -n 1)" != "$VERSION" ] || [ "$current" = "$VERSION" ]; then
-            echo "::error::Version $VERSION must be greater than the current $current"
-            exit 1
-          fi
+          # The sources may already name the version under development; the published version is never released again.
+          sources=$(jq -r .version js/developer/tools/distribution.json)
+          pinned=$(sed -n 's/.*version{"\([^"]*\)"}.*/\1/p' include/webfront/system/DeveloperReleaseData.hpp)
+          bash js/developer/tools/check-release-version.sh "$VERSION" "$sources" "$pinned"
       - uses: ./.github/actions/remove-node
       - uses: ./.github/actions/wf-driver
       - name: Set the version and close a migration
