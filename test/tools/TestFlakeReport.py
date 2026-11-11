@@ -1,5 +1,5 @@
 import unittest
-from FlakeReport import failed_cases
+from FlakeReport import attempts_to_read, failed_cases
 
 
 class FlakeReportTests(unittest.TestCase):
@@ -11,11 +11,20 @@ class FlakeReportTests(unittest.TestCase):
             'desktop\tTest\t2026-11-11T07:40:03Z 503/505 Test #543: TestResourceMeasurement ....................***Timeout  15.34 sec',
             'desktop\tTest\t2026-11-11T07:40:04Z  49/650 Test #160: Scenario: A window that ignores the close request ...***Failed   16.65 sec',
             'desktop\tTest\t2026-11-11T07:40:05Z \t615 - DeveloperBrowserIntegration-jasmine (Failed)      web-integration',
+            'desktop	Test	2026-11-11T07:40:06Z     Test #612: WebKitGTKAdapter-choose-file ..........***Failed    2.10 sec',
         ])
         self.assertEqual(failed_cases(log), [
             ('DeveloperBrowserIntegration-jasmine', 'Failed'),
             ('TestResourceMeasurement', 'Timeout'),
-            ('Scenario: A window that ignores the close request', 'Failed')])
+            ('Scenario: A window that ignores the close request', 'Failed'),
+            ('WebKitGTKAdapter-choose-file', 'Failed')])
+
+    def test_the_failed_attempts_of_a_run_that_passed_once_run_again_are_read(self):
+        self.assertEqual(attempts_to_read({"conclusion": "success", "attempt": 3}), [1, 2])
+        self.assertEqual(attempts_to_read({"conclusion": "failure", "attempt": 2}), [1, 2])
+        self.assertEqual(attempts_to_read({"conclusion": "failure", "attempt": 1}), [1])
+        self.assertEqual(attempts_to_read({"conclusion": "success", "attempt": 1}), [])
+        self.assertEqual(attempts_to_read({"conclusion": "failure"}), [1])
 
     def test_a_log_without_ctest_has_no_case(self):
         self.assertEqual(failed_cases('ninja: build stopped: subcommand failed.\n'), [])

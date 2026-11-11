@@ -106,8 +106,9 @@ if(_browser_tests_available AND TARGET webfront-agent)
                 --environment "${_fixtures}/environment.tgz" --provision "${_fixtures}/provision.json"
                 --registry "${_registry}" --fixture "${PROJECT_SOURCE_DIR}/test/fixtures/automation-project"
                 --work "${CMAKE_CURRENT_BINARY_DIR}/automation-${_scenario}")
+            # The session scenario closes several agents, each of which may use its own bound of about 9 s to exit.
             set_tests_properties(${_case} PROPERTIES FIXTURES_REQUIRED DeveloperFixtures
-                LABELS web-integration TIMEOUT 120)
+                LABELS web-integration TIMEOUT 180)
             webfront_use_own_profile(${_case} "automation-${_scenario}")
             if(NOT _scenario STREQUAL "session")
                 # One deliberately spinning renderer at a time, without serializing unrelated browser tests.
