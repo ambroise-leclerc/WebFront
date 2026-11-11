@@ -208,6 +208,9 @@ async function check(args, {bridge, signal, write = () => {}, createWorker = che
     return syncNotice(project) + runResult('Type check', outcome, host.publications);
 }
 
+// Milliseconds before each new attempt to empty the directory of a finished run; the last attempt is not followed by a wait.
+const cleanupRetryDelays = [20, 40, 80, 160, 320, undefined];
+
 // wf test [--timeout <seconds>] [pattern]: the specs of "test.specs" under the Jasmine of the lock, in a frame of this page.
 // context.onReport receives the structured report, also when the run fails. --timeout, never later than the deadline
 // of the wf script that runs this command, covers the whole command: no step waits for the bridge past it, and Ctrl+C
@@ -255,12 +258,24 @@ async function test(args, {bridge, signal, write = () => {}, createFrame, onRepo
     } finally {
         clearTimeout(timer);
         signal?.removeEventListener('abort', interrupt);
-        // The files of the run are not needed any more: an empty directory replaces them, for at most two seconds.
-        let cleanupTimer;
+        // The files of the run are not needed any more: an empty directory replaces them, for at most two seconds. The
+        // server may still be sending a file to a frame removed in the middle of its run, and Windows refuses to replace
+        // a directory with an open file: the publication is tried again once the server has had time to close it.
+        let cleanupTimer, retryTimer, expired = false;
+        const empty = async () => {
+            for (const delay of cleanupRetryDelays) {
+                try { return await publish(bridge, directory, new Map()); } catch { /* tried again below */ }
+                if (expired || delay === undefined) return;
+                await new Promise(resolve => { retryTimer = setTimeout(resolve, delay); });
+            }
+        };
         try {
-            await Promise.race([publish(bridge, directory, new Map()).catch(() => {}),
-                new Promise(resolve => { cleanupTimer = setTimeout(resolve, 2000); })]);
-        } finally { clearTimeout(cleanupTimer); }
+            await Promise.race([empty(), new Promise(resolve => { cleanupTimer = setTimeout(resolve, 2000); })]);
+        } finally {
+            expired = true;
+            clearTimeout(cleanupTimer);
+            clearTimeout(retryTimer);
+        }
     }
 }
 
