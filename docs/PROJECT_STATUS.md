@@ -29,7 +29,7 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   `install`, `restore`, `run`, `exec`, `check`, `test`, `build`, `dev`, `preview`, `embed`, `list` and `help`. The manifest and lock describe
   dependencies, entries, providers, scripts and permissions. TypeScript/TSX compilation uses
   esbuild-wasm; type checking uses the project's locked TypeScript. Application commands use
-  `webfront::Commands`. From environment 0.9.1 (sources; the pin is still 0.9.0), a project that has a preview opens
+  `webfront::Commands`. From environment 0.9.1 (published and pinned), a project that has a preview opens
   on its interface over the whole window, with the terminal in a floating window behind a tab on the window's edge. See the
   [developer reference](DEVELOPER_ENVIRONMENT.md).
 - **Distribution.** `wf embed` generates the application's compressed C++ provider.
@@ -44,7 +44,7 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   native attachment. This does not discover arbitrary processes or isolate untrusted project code.
   An application opts in to being driven with `automation::enableAutomation` (its own window and callbacks), shared sessions are
   listed by `webfront-agent --list`, and `--print-mcp-config` generates the client configuration. The owner may allow-list application callbacks that an agent reaches through the `call` operation, and the terminal, `wf help` and
-  the starter's `AGENTS.md` announce automation (environment 0.6.6). Environment 0.6.6 is published; the release pin selects 0.9.0.
+  the starter's `AGENTS.md` announce automation (environment 0.6.6). Environment 0.6.6 is published; the release pin selects 0.9.1.
 - **Maintaining WebFront.** The repository is itself a `wf` project, selected with
   `--manifest-dir js/developer`. Build and publish its environment using
   [PUBLISHING](../js/developer/tools/PUBLISHING.md). Regenerate the core's versioned headers

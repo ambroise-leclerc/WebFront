@@ -47,5 +47,5 @@
   "js/developer/webfront.project.json": "6f4f56783012a792ca8eb1ac8a1ca0be51e6fcc83d760545d65da67c8687dd61",
   "js/core/bootstrap/bootstrap.bundle.mjs": "536831257f0fc92e31911841750e1e59247f7c64e756b0fcb878efd9860a741f",
   "js/developer/environment/packages.bundle.mjs": "c9d5b0c3516b5c14e0583aa12b6f7993dd8b4290997b6281bfaacdfbcd98b9d4",
-  "include/webfront/system/DeveloperReleaseData.hpp": "98094418f18a0ce30f6334c94fb8a1ab2df6d9026a2203223aa11796b622b4ee"
+  "include/webfront/system/DeveloperReleaseData.hpp": "9303f4729172b36e2f105c278e4e67e3d4af85bcd64d5843c3cb0075feead073"
 }
