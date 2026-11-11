@@ -1,6 +1,6 @@
 {
   "LICENSE": "0b96b3ed27eb64ba777eaa049093d0047c7f9a4e690b6e68b52fde2844226ccd",
-  "js/developer/environment/manifest.mjs": "8a655810fd7bd380d861adad9a7870bb677fd530483cf9113ca240e03facdce5",
+  "js/developer/environment/manifest.mjs": "98203e18e4c85b806d03db9fe52d619cc6d8d5e8acf267daeb6944c2b7956806",
   "js/developer/environment/project.mjs": "280cced29e41bc48d5d9d69934186ababfdbbc9dc32ed9517e17af4f19d3bd73",
   "js/developer/environment/installer.mjs": "1159404b151dc8c580d9a155a9ec0dfa3fcb6a8e073d8586d29b329ce91b741b",
   "js/developer/environment/restore.mjs": "cdd22eebd55d68bd705685cd5ee3059e228a35053eaad116ab99c4c05b908098",
@@ -22,7 +22,7 @@
   "js/developer/environment/development.mjs": "1125043016727111031a452fbebec358b9e78231f82fe91df7dea0fe8b22f015",
   "js/developer/environment/testing.mjs": "aeb584505fab5957b9c02e78536e12f7d7f3d12f8adb2e17f1a1a6e395e43f3c",
   "js/developer/environment/terminal.mjs": "7ffcf7ac6ef63c35cdf5ef70284b384525b13ba18422af069289e53b6c4f6be1",
-  "js/developer/environment/workspace.mjs": "7f17910385459fc269928c9a34a8f58e83ca218084a6c43d6c3d89154b3c9bf0",
+  "js/developer/environment/workspace.mjs": "0c7cadd37af3397b73c37b54daa01709b196e27dc8a83f519774b6c5f422e06a",
   "js/developer/environment/tarball.mjs": "1c1e1aea067910e1fec74e85b4bf9fbefed9b38187a04d8d2764f0b9a96fca39",
   "js/developer/environment/commands.mjs": "8de20c01f02f33c0566f204fcf1ee2382a23344d2103581fe2914469ec570531",
   "js/developer/environment/compiler.mjs": "0158931132aa9b43b7bbbd01de6fa4fc34fce8c65515d593dd494930f7a1910f",
@@ -46,6 +46,6 @@
   "js/developer/scripts/build.mjs": "def3c0ccecbc776b76e20571d015f9a1f23a267c0bd6c0c7a07a81ce9293a663",
   "js/developer/webfront.project.json": "6f4f56783012a792ca8eb1ac8a1ca0be51e6fcc83d760545d65da67c8687dd61",
   "js/core/bootstrap/bootstrap.bundle.mjs": "536831257f0fc92e31911841750e1e59247f7c64e756b0fcb878efd9860a741f",
-  "js/developer/environment/packages.bundle.mjs": "2d62f3fcdece8e898f15814d7e80fc3a27ea062f45514cf8e5c3ae32fd9d26c5",
+  "js/developer/environment/packages.bundle.mjs": "c9d5b0c3516b5c14e0583aa12b6f7993dd8b4290997b6281bfaacdfbcd98b9d4",
   "include/webfront/system/DeveloperReleaseData.hpp": "98094418f18a0ce30f6334c94fb8a1ab2df6d9026a2203223aa11796b622b4ee"
 }

@@ -181,7 +181,8 @@ A project has one manifest, which every `wf` command reads:
   "entries": {"main": "ui/main.tsx"},
   "providers": {"LifeUI": {"entry": "main", "output": "generated/LifeUI.hpp"}},
   "test": {"specs": []},
-  "permissions": {}
+  "permissions": {},
+  "developer": {"terminalShortcut": "F9"}
 }
 ```
 
@@ -189,7 +190,8 @@ Only `format`, `name` and `version` are required. Validation is strict: an unkno
 newer than the environment reads, a path leaving the project, a non-HTTPS registry or origin and an
 unknown permission are errors printed in the terminal, never silently ignored. `scripts` and `permissions` are
 used by `wf run` and `wf exec` (below); `test.specs` lists the spec files of `wf test`. Permissions only frame
-the operations of the `context` API of scripts; they are not a sandbox.
+the operations of the `context` API of scripts; they are not a sandbox. `developer.terminalShortcut` (environment 0.9.1;
+an earlier environment refuses the key) is the shortcut of the [terminal window](#the-page-interface-and-floating-terminal).
 
 - `wf init [name]` writes `webfront.project.json` at the project root (or in the application's manifest directory, below),
   the manifest every `wf` command reads; it never replaces an existing one. When a lock already exists (a project installed before
@@ -388,15 +390,19 @@ environment's `mount`, not to the embedded bootstrap page):
   bottom-right corner resizes with the pointer. The window stays inside the browser window, shrinks with it and returns to
   its place when there is room again; xterm.js is fitted to it. Its place and size are kept per project in
   `.webfront/developer/terminal-window.json`.
+- **The shortcut** is F9 by default. The developer page takes it before the interface does, so an application that uses
+  F9 itself names another one in its manifest, and receives F9 as it does in its embedded form:
+  `"developer": {"terminalShortcut": "Ctrl+Shift+F9"}`. A shortcut is a function key, F1 to F12, optionally after `Ctrl`,
+  `Alt`, `Shift` or `Meta`, joined by `+`; anything else is a manifest error. The page reads it when it opens: relaunch
+  the application after changing it. The icon's tooltip names the shortcut in use.
 - While the terminal is collapsed, `wf dev` keeps reloading the full-window interface, and a failed build still shows its
   diagnostic over it.
 
 The icon is a button (`aria-expanded`, 44 px target) and the window a non-modal dialog. The interface stays in the preview
-frame, as before: the layout adds nothing to the application's documents except the F9 listener, installed in the interface
+frame, as before: the layout adds nothing to the application's documents except the shortcut's listener, installed in the interface
 and in the same-origin frames it embeds (not in a frame of another origin, nor one inside a shadow tree: click the interface
 or the icon first). This is a layout, not a
-sandbox (see [limitations](#dependencies-storage-and-limitations)). An application that uses F9 itself does not receive it in
-the developer page; it does in its embedded form. A page that mounts the terminal itself (`runtime.mount`) with a preview frame gets
+sandbox (see [limitations](#dependencies-storage-and-limitations)). A page that mounts the terminal itself (`runtime.mount`) with a preview frame gets
 the same layout; `workspace: false` keeps the page as it is.
 
 ## The terminal and the application's commands

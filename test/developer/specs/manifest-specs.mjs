@@ -1,5 +1,5 @@
 // Specs of the project manifest, its agreement with the lock and the joint publication of both.
-import {validateManifest, parseManifest, serializeManifest, manifestName, dependenciesDigest} from '../../../js/developer/environment/manifest.mjs';
+import {validateManifest, parseManifest, serializeManifest, manifestName, dependenciesDigest, parseShortcut} from '../../../js/developer/environment/manifest.mjs';
 import {install, initProject, loadProject, syncNotice, resolveEntry, embedTarget, lockPath, manifestPath, setManifestDirectory, checkWrite} from '../../../js/developer/environment/packages.bundle.mjs';
 import {compress} from '../../../js/developer/environment/embed.mjs';
 import {tar} from '../../../js/developer/tools/archive.mjs';
@@ -19,7 +19,8 @@ describe('The project manifest', () => {
         const full = {...minimal, dependencies: {react: '^19.0.0', '@scope/lib': '>=1.2.0 <2', tool: 'latest'}, registry: 'https://registry.test/',
             scripts: {build: 'wf embed main'}, entries: {main: 'ui/main.tsx'},
             providers: {AppUI: {entry: 'main', output: 'generated/AppUI.hpp'}}, test: {specs: ['spec/a.mjs']},
-            permissions: {files: ['ui'], publish: ['generated'], fetch: ['https://registry.npmjs.org']}};
+            permissions: {files: ['ui'], publish: ['generated'], fetch: ['https://registry.npmjs.org']},
+            developer: {terminalShortcut: 'Ctrl+Shift+F9'}};
         const text = serializeManifest(validateManifest(full));
         expect(JSON.parse(text)).toEqual(full);
         expect(serializeManifest(parseManifest(encode(text)))).toBe(text);
@@ -50,10 +51,22 @@ describe('The project manifest', () => {
             [{...minimal, permissions: {files: ['a/../../b']}}, /safe project-relative path/],
             [{...minimal, permissions: {fetch: ['http://plain.test']}}, /https origin/],
             [{...minimal, permissions: {fetch: ['https://registry.test/path']}}, /without a path/],
+            [{...minimal, developer: {terminalShortcut: 'Ctrl+C'}}, /developer\.terminalShortcut must be a function key/],
+            [{...minimal, developer: {terminalShortcut: 9}}, /developer\.terminalShortcut must be a function key/],
+            [{...minimal, developer: {shortcut: 'F9'}}, /unknown key "shortcut" in developer/],
+            [{...minimal, developer: 'F9'}, /developer must be an object/],
             [[], /must be an object/],
         ];
         for (const [value, message] of cases) throws(() => validateManifest(value), message);
         throws(() => parseManifest(encode('{')), /not valid JSON/);
+    });
+
+    it('a terminal shortcut is a function key with any of the four modifiers', () => {
+        expect(parseShortcut('F9')).toEqual({key: 'F9', ctrlKey: false, altKey: false, shiftKey: false, metaKey: false});
+        expect(parseShortcut('Shift+Ctrl+F12')).toEqual({key: 'F12', ctrlKey: true, altKey: false, shiftKey: true, metaKey: false});
+        expect(parseShortcut('Alt+Meta+F1')).toEqual({key: 'F1', ctrlKey: false, altKey: true, shiftKey: false, metaKey: true});
+        for (const text of ['', 'F0', 'F13', 'f9', 'Ctrl+', 'Ctrl+C', 'ctrl+F9', 'Ctrl+Ctrl+F9', 'Ctrl+F9+Shift', 'F9 ', 'hasOwnProperty+F9', undefined, 9])
+            expect(parseShortcut(text)).toBeNull();
     });
 
     it('the dependency digest ignores key order and changes with any range', async () => {

@@ -3,6 +3,8 @@
 // once in its window and never moves in the document afterwards: collapsing only hides it, so the session, a running
 // command, the line being typed and the scrollback are kept. The interface stays in the preview frame.
 import {call, readProject, publish} from './io.mjs';
+import {loadProject} from './project.mjs';
+import {parseShortcut, defaultTerminalShortcut} from './manifest.mjs';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -67,8 +69,28 @@ export function keyboardRect(rect, {key, shiftKey = false}, viewport) {
     return clampRect(shiftKey ? {...rect, width: rect.width + dx, height: rect.height + dy} : {...rect, x: rect.x + dx, y: rect.y + dy}, viewport);
 }
 
-/** F9 alone: neither the line editor nor xterm.js uses it, and browsers leave it to the page. */
-export const isToggleKey = event => event.key === 'F9' && !(event.ctrlKey || event.altKey || event.metaKey || event.shiftKey);
+/**
+ * F9 alone by default: neither the line editor nor xterm.js uses it, and browsers leave it to the page. The page takes the
+ * shortcut before the interface does, so an application that uses F9 itself names another one in its manifest.
+ */
+export const defaultShortcut = parseShortcut(defaultTerminalShortcut);
+
+/** Whether a key event is the shortcut: its key with exactly its modifiers. */
+export const isToggleKey = (event, shortcut = defaultShortcut) => event.key === shortcut.key
+    && ['ctrlKey', 'altKey', 'shiftKey', 'metaKey'].every(modifier => Boolean(event[modifier]) === shortcut[modifier]);
+
+/** The shortcut as the manifest writes it ("Ctrl+Shift+F9"), for the labels. */
+export const shortcutText = shortcut => [shortcut.ctrlKey && 'Ctrl', shortcut.altKey && 'Alt', shortcut.shiftKey && 'Shift',
+    shortcut.metaKey && 'Meta', shortcut.key].filter(Boolean).join('+');
+
+/**
+ * The project's shortcut, `developer.terminalShortcut` of its manifest, read when the page opens. Without a manifest or
+ * that key, and with a manifest that is not valid (the commands report it), the default one.
+ */
+export async function readShortcut(bridge) {
+    try { return parseShortcut((await loadProject(bridge)).manifest?.developer?.terminalShortcut) ?? defaultShortcut; }
+    catch { return defaultShortcut; }
+}
 
 // --- Remembered place ------------------------------------------------------------------------------------------
 
@@ -159,12 +181,13 @@ export const isManaged = frame => managed.has(frame);
  * Lays the page out around the terminal's `element` and the preview `frame`, which starts hidden. Call it before the
  * terminal opens in `element`, then attach({focus, fit}) with the functions that focus the terminal and fit it to `element`.
  * The result gives the `state`, `interfaceExists` (the page opened on an existing interface, to load in the frame),
- * toggle(), open({focus}) and close(), `button` and `panel`, and placeSaved().
+ * toggle(), open({focus}) and close(), `button` and `panel`, the `shortcut` in use ("F9") and placeSaved().
  */
 export async function createWorkspace({bridge, element, frame}) {
     managed.add(frame);
     const page = element.ownerDocument, view = page.defaultView, root = page.documentElement;
-    const [interfaceExists, remembered] = await Promise.all([hasInterface(bridge), readPlace(bridge)]);
+    const [interfaceExists, remembered, shortcut] = await Promise.all([hasInterface(bridge), readPlace(bridge), readShortcut(bridge)]);
+    const keys = shortcutText(shortcut);
     const store = placeStore(bridge);
     const viewport = () => ({width: root.clientWidth, height: root.clientHeight});
     let state = initialState(interfaceExists);
@@ -192,7 +215,7 @@ export async function createWorkspace({bridge, element, frame}) {
     closeButton.type = 'button';
     closeButton.className = 'webfront-terminal-close';
     closeButton.setAttribute('aria-label', 'Hide the terminal');
-    closeButton.title = 'Hide the terminal (F9)';
+    closeButton.title = `Hide the terminal (${keys})`;
     closeButton.textContent = '×';
     bar.append(title, closeButton);
     element.replaceWith(panel);
@@ -206,6 +229,7 @@ export async function createWorkspace({bridge, element, frame}) {
     button.className = 'webfront-terminal-toggle';
     button.innerHTML = logo;
     button.setAttribute('aria-controls', panel.id);
+    button.setAttribute('aria-keyshortcuts', keys.replace('Ctrl', 'Control'));
     page.body.append(button);
 
     // The displayed rectangle; the chosen one is kept, so that a window enlarged again gives the terminal its place back.
@@ -215,7 +239,7 @@ export async function createWorkspace({bridge, element, frame}) {
         const open = state === State.floating;
         button.setAttribute('aria-expanded', String(open));
         button.setAttribute('aria-label', open ? 'Hide the WebFront terminal' : 'Show the WebFront terminal');
-        button.title = `${open ? 'Hide' : 'Show'} the terminal (F9)`;
+        button.title = `${open ? 'Hide' : 'Show'} the terminal (${keys})`;
         const rect = state === State.terminal ? null : shown();
         Object.assign(panel.style, rect ? {left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px`}
             : {left: '', top: '', width: '', height: ''});
@@ -246,7 +270,7 @@ export async function createWorkspace({bridge, element, frame}) {
 
     // The shortcut works wherever the focus is: in this page and in the interface, whose window changes at each load.
     const onKey = event => {
-        if (!isToggleKey(event) || state === State.terminal) return;
+        if (!isToggleKey(event, shortcut) || state === State.terminal) return;
         event.preventDefault();
         event.stopPropagation();
         apply('toggle');
@@ -317,7 +341,7 @@ export async function createWorkspace({bridge, element, frame}) {
     render();
     return {
         get state() { return state; },
-        interfaceExists, button, panel, bar,
+        interfaceExists, button, panel, bar, shortcut: keys,
         attach({focus, fit = () => {}}) {
             focusTerminal = focus;
             fitTerminal = fit;

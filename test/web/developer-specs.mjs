@@ -1055,10 +1055,26 @@ try {
         otherPreview.id = 'preview';
         otherPreview.hidden = true;
         otherPage.body.append(otherPreview);
+        // An application that uses F9 names another shortcut in its manifest: this page reads it when it opens.
+        const plainManifest = new TextDecoder().decode(await readFile('webfront.project.json'));
+        await writeFile('webfront.project.json', JSON.stringify({...JSON.parse(plainManifest), developer: {terminalShortcut: 'Ctrl+Shift+F9'}}));
         const mounted = await other.runtime.mount({bridge: other.bridge, config, terminal: otherPage.getElementById('terminal'), preview: otherPreview, onExit: () => {}});
+        await writeFile('webfront.project.json', plainManifest);
         const {terminal, editor, workspace} = mounted;
         const there = layout(otherPage);
         assert(workspace && there.state() === 'interface' && workspace.state === 'interface', `The mounted page must open on the interface: ${there.state()}`);
+        await until(() => otherPreview.contentDocument?.getElementById('root'), 'The mounted page must load the interface');
+        const received = [];
+        otherPreview.contentDocument.addEventListener('keydown', event => received.push(event.key));
+        const untouched = key(otherPreview.contentDocument.body, {key: 'F9'});
+        assert(untouched && received.join() === 'F9' && there.state() === 'interface', `F9 must reach an application whose project names another shortcut: ${received}, ${there.state()}`);
+        const taken = key(otherPreview.contentDocument.body, {key: 'F9', ctrlKey: true, shiftKey: true});
+        assert(!taken && received.join() === 'F9' && there.state() === 'floating', `The project's shortcut must open the terminal: ${there.state()}`);
+        key(otherPage.querySelector('#terminal .xterm-helper-textarea'), {key: 'F9', ctrlKey: true, shiftKey: true});
+        assert(there.state() === 'interface', 'The project\'s shortcut must collapse the terminal');
+        const toggleButton = otherPage.querySelector('.webfront-terminal-toggle');
+        assert(workspace.shortcut === 'Ctrl+Shift+F9' && /Ctrl\+Shift\+F9/.test(toggleButton.title) && toggleButton.getAttribute('aria-keyshortcuts') === 'Control+Shift+F9',
+            `The icon must name the project's shortcut: ${toggleButton.title}`);
         // The place remembered by the other page is the one of the project.
         assert(Math.round(there.box('.webfront-terminal-window').left) === remembered.x, 'The remembered place must be the project\'s');
         // A second terminal in the page leaves its layout alone.

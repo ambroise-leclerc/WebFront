@@ -1,7 +1,7 @@
 // Specs of the developer page's layout (workspace.mjs): what counts as an existing interface, the states of the display,
 // and the place of the floating terminal window. The page itself is checked in test/web/developer-specs.mjs.
 import {hasInterface, previewDirectory, State, initialState, nextState, clampRect, defaultRect, keyboardRect, minimumSize, step,
-    isToggleKey, parsePlace, formatPlace, readPlace, placeStore, placePath} from '../../../js/developer/environment/workspace.mjs';
+    isToggleKey, defaultShortcut, shortcutText, readShortcut, parsePlace, formatPlace, readPlace, placeStore, placePath} from '../../../js/developer/environment/workspace.mjs';
 import {publish} from '../../../js/developer/environment/io.mjs';
 import {memoryBridge} from '../memory-bridge.mjs';
 
@@ -108,6 +108,21 @@ describe('The developer page layout', () => {
             expect(isToggleKey({key: 'F9', ctrlKey: true})).toBeFalse();
             expect(isToggleKey({key: 'F9', shiftKey: true})).toBeFalse();
             expect(isToggleKey({key: 'c', ctrlKey: true})).toBeFalse();
+        });
+
+        it('is toggled by the shortcut of the project\'s manifest instead, which leaves F9 to the application', async () => {
+            const manifest = developer => encode(JSON.stringify({format: 1, name: 'app', version: '0.1.0', ...developer}));
+            const {bridge} = memoryBridge(new Map([['webfront.project.json', manifest({developer: {terminalShortcut: 'Ctrl+Shift+F9'}})]]));
+            const shortcut = await readShortcut(bridge);
+            expect(shortcutText(shortcut)).toBe('Ctrl+Shift+F9');
+            expect(isToggleKey({key: 'F9'}, shortcut)).toBeFalse();
+            expect(isToggleKey({key: 'F9', ctrlKey: true}, shortcut)).toBeFalse();
+            expect(isToggleKey({key: 'F9', ctrlKey: true, shiftKey: true, altKey: true}, shortcut)).toBeFalse();
+            expect(isToggleKey({key: 'F9', ctrlKey: true, shiftKey: true}, shortcut)).toBeTrue();
+            // No manifest, no key, or a manifest that is not valid: F9.
+            for (const files of [[], [['webfront.project.json', manifest({})]], [['webfront.project.json', manifest({developer: {terminalShortcut: 'Ctrl+C'}})]]])
+                expect(shortcutText(await readShortcut(memoryBridge(new Map(files)).bridge))).toBe('F9');
+            expect(shortcutText(defaultShortcut)).toBe('F9');
         });
 
         it('is read from a well-formed file only', () => {
