@@ -13,13 +13,24 @@ runs:
     - name: Install GCC 16 and WebKitGTK
       shell: bash
       run: |
-        # The hosted runner's Azure mirror can trickle large GCC packages until the job times out.
-        # Keep Ubuntu's suites and package verification, using its primary archive instead.
-        if [ -f /etc/apt/apt-mirrors.txt ]; then
-          sudo sed -i 's|azure\.archive\.ubuntu\.com|archive.ubuntu.com|g' /etc/apt/apt-mirrors.txt
+        # The hosted runner's Azure mirror can trickle large GCC packages until the job times out, and so can Ubuntu's
+        # primary archive. Keep Ubuntu's suites and package verification, start with the primary archive, bound the
+        # attempt and fall back to the runner's own mirror. Both attempts and the repair between them take at most
+        # 11 minutes, inside the 15 minutes of the shortest job that uses this action; an install takes under a minute.
+        mirrors=/etc/apt/apt-mirrors.txt
+        install() {
+          sudo timeout 60 apt-get update             && sudo timeout 240 apt-get install -y --no-install-recommends -o Acquire::Retries=3 -o Acquire::http::Timeout=15               gcc-16 g++-16 libwebkitgtk-6.0-dev
+        }
+        if [ -f "$mirrors" ]; then
+          sudo cp "$mirrors" "$mirrors.hosted"
+          sudo sed -i 's|azure\.archive\.ubuntu\.com|archive.ubuntu.com|g' "$mirrors"
         fi
-        sudo apt-get update
-        sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 gcc-16 g++-16 libwebkitgtk-6.0-dev
+        if ! install; then
+          echo "::warning::The primary Ubuntu archive did not deliver the packages in time; using the runner's mirror"
+          if [ -f "$mirrors.hosted" ]; then sudo cp "$mirrors.hosted" "$mirrors"; fi
+          sudo timeout 60 dpkg --configure -a || echo "::warning::The interrupted installation could not be repaired in time"
+          install
+        fi
         echo "CC=gcc-16" >> "$GITHUB_ENV"
         echo "CXX=g++-16" >> "$GITHUB_ENV"
     - name: Build webfront-wf

@@ -409,7 +409,11 @@ SCENARIO("A window that ignores the deadline's close request is declared unrespo
         automation->controller()->close("Developer window disconnected");
         THEN("the record and the endpoint are withdrawn at once, and closing the automation confirms the window is gone") {
             REQUIRE(eventually([&] { return discovery::list(sessions).empty(); }));
-            REQUIRE(eventually([&] { return !std::filesystem::exists(automation->endpoint() / "endpoint.json"); }));
+            // Windows refuses to look at a file whose removal is pending: that is the withdrawal under way, not a failure.
+            REQUIRE(eventually([&] {
+                std::error_code pending;
+                return !std::filesystem::exists(automation->endpoint() / "endpoint.json", pending);
+            }));
             automation->close();
             std::this_thread::sleep_for(std::chrono::milliseconds{100});
             REQUIRE(unresponsive.load() == 0);

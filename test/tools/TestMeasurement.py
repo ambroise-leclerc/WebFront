@@ -13,7 +13,8 @@ class MeasurementTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'resources.json'
             sampled = Path(directory) / 'sampled'
-            # Keep the child alive until a real sample includes it, even on a loaded runner.
+            # Keep the child alive until a real sample includes it with resident memory, even on a loaded runner: a
+            # process caught while it starts is listed with none yet.
             child = """import pathlib, sys, time
 marker = pathlib.Path(sys.argv[1])
 deadline = time.monotonic() + 30
@@ -23,7 +24,7 @@ raise SystemExit(7 if marker.exists() else 8)
 """
             def record_sample(root):
                 processes = snapshot(root)
-                if root in processes:
+                if processes.get(root, (0, 0, 0))[1] > 0:
                     sampled.touch()
                 return processes
             with patch('MeasureCommand.snapshot', side_effect=record_sample):
