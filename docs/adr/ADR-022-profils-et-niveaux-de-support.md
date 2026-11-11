@@ -4,6 +4,7 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
+| 1.1 | 2026-11-11 | Acceptée | Ambroise Leclerc | Audit CMake, plancher commun 3.31 et Git des distributions LTS. | Présente modification (#527). |
 | 1.0 | 2026-11-11 | Acceptée | Ambroise Leclerc | Plancher GCC 13 S2, profils et clause de sortie. | Présente modification (#525). |
 
 ## État
@@ -16,7 +17,7 @@ Acceptée le 2026-11-11 : option B de #525, choisie par le mainteneur.
 interfaces et exemples actuels ; #525 rapporte une qualification sur Orin avec GCC
 13.4, hors sanitizers. #548 fournit déjà le job Linux aarch64. Les faux positifs
 libstdc++ sous `-Wnull-dereference` rendent coûteux un second engagement `-Werror`.
-Les corrections de compatibilité de #526 et le plancher CMake de #527 sont distincts.
+Les corrections de compatibilité de #526 sont distinctes du plancher de compilateur.
 
 ## Décision
 
@@ -60,6 +61,54 @@ profils CI mis à jour. Une montée de dépendance doit donc vérifier ce planch
   un plancher ; il imprime désormais le compilateur effectivement choisi.
 - Aucun BSP NXP i.MX précis n'est sélectionné dans #525. Sa version GCC reste à
   vérifier dans le manifeste du BSP retenu ; aucune qualification i.MX n'est annoncée.
+
+## Outils de construction, distributions LTS (#527)
+
+Le plancher reste **CMake 3.31** pour le dépôt et les consommateurs
+`add_subdirectory`/CPM, même sans exemples ni tests. Il s'agit d'un choix de
+support commun, pas d'une commande 3.31 indispensable à la bibliothèque. Abaisser
+le plancher consommateur à 3.28 demanderait une qualification séparée des
+dépendances épinglées et des générateurs ; le présent audit statique ne la remplace
+pas. Aucun second plancher n'est annoncé. L'adaptateur mddlog garde ses exigences
+4.0–4.3 et sa qualification macOS 4.3.1, décrites dans son guide.
+
+Audit des `CMakeLists.txt`, de `cmake/`, `js/core/*.cmake` et `test/cmake/`, comparé
+aux notes de version officielles [3.29](https://cmake.org/cmake/help/v3.31/release/3.29.html),
+[3.30](https://cmake.org/cmake/help/v3.31/release/3.30.html) et
+[3.31](https://cmake.org/cmake/help/v3.31/release/3.31.html) :
+
+| Chemin | Usages pertinents et fonctionnalités après 3.28 |
+| --- | --- |
+| Consommateur ordinaire : racine, frontends, `ModuleScan`, helpers publics | Pas d'usage identifié après 3.28. `CMP0155` et `CXX_SCAN_FOR_MODULES` datent de 3.28 ; `cmake_language(DEFER)` de 3.19. La lecture de CMP0155 avant le minimum exclut aussi un simple abaissement à 3.22. |
+| Ressources embarquées : `js/core/*.cmake` | Pas d'usage identifié après 3.28 : `cmake_path` (3.20), lecture/écriture de fichiers, expressions régulières, génération de cibles et contrôles de fraîcheur. |
+| Provisionnement et Jasmine optionnel : `WebFrontBootstrap`, `WebFrontRegistry`, `WebFrontJasmine` | Pas d'usage identifié après 3.28 : JSON (3.19), `file(COPY_FILE)` (3.21), `ARCHIVE_EXTRACT` (3.18), téléchargements avec `TLS_VERIFY` et délais. Pas de `TLS_VERSION` (3.30). |
+| Contributeur : `DeveloperCompatibility.cmake`, `test/cmake/` et cibles de tests | Les minima explicites restent 3.31. Les opérations de table de compatibilité, archives, sous-configurations et `ctest --output-junit` n'imposent pas elles-mêmes une version après 3.28. Le test mddlog désactive `CXX_MODULE_STD` (3.30), en complément de la désactivation du scan. Les tests de réflexion GCC 16 sélectionnent C++26, dont la prise en charge complète arrive en 3.30. |
+| Adaptateur mddlog activé | `CXX_MODULE_STD` (3.30), `CMAKE_CXX_COMPILER_IMPORT_STD` et portes expérimentales `import std` ; les contrôles de version imposent déjà CMake 4.x avant la découverte du compilateur. Hors du chemin header-only ordinaire. |
+
+Ni `CODEGEN`, ni politique CMP016x/CMP017x explicite, ni expression génératrice
+introduite après 3.28 n'a été identifiée dans ces chemins ordinaires. Les
+politiques implicites sélectionnées par `cmake_minimum_required(3.31)` et le code
+téléchargé de CPM/stdnet/stdexec et des moteurs restent aussi à qualifier avant
+un éventuel abaissement ; cet inventaire ne promet pas leur compatibilité 3.28.
+
+Ubuntu 22.04 fournit CMake 3.22.1 et Ubuntu 24.04 3.28.3 : installer un CMake tiers
+est donc nécessaire. Le [README](../../README.md#build-tools-on-lts-distributions)
+donne une installation isolée avec Python et un lien vers le dépôt APT Kitware.
+La racine et `DeveloperCompatibility.cmake` indiquent ce chemin avant leur rejet
+d'une version trop ancienne. La version livrée par un BSP Yocto doit être lue
+dans son manifeste ; aucune version Scarthgap n'est déduite de cet audit.
+
+Git 2.34.1 reste utilisable pour `NoAiAttributionRegression`. `--no-graph`, déjà
+retiré par 808a095, ne protège d'aucune configuration qui active le graphe :
+`log.graphColors` en définit seulement les couleurs. Le traitement des clés
+`log.*` dans les sources Git [2.34.1](https://github.com/git/git/blob/v2.34.1/builtin/log.c)
+et [courantes](https://github.com/git/git/blob/master/builtin/log.c), ainsi que la
+[référence de configuration](https://git-scm.com/docs/git-config), ne fournit pas
+de clé `log.graph`. Les alias ne remplacent pas la commande interne `log`.
+Les options qui désactivent signatures, notes, décoration, patch et couleurs
+restent nécessaires au cadrage des enregistrements et sont conservées ; le test
+existant couvre les réglages utilisateur et les commits signés. On ne relève
+donc pas le minimum Git pour une option défensive inutile.
 
 ## Alternatives et conséquences
 

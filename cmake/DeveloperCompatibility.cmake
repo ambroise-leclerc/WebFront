@@ -6,6 +6,11 @@
 #       freezes the "unreleased" row into a row of that library version (the preparation of a library release)
 #
 # The table lies between the markers below; a row is "| library | environment | minimum api |".
+if(CMAKE_VERSION VERSION_LESS "3.31")
+    message(FATAL_ERROR
+        "WebFront requires CMake 3.31 or newer (found ${CMAKE_VERSION}). "
+        "See README.md#build-tools-on-lts-distributions for installation instructions.")
+endif()
 cmake_minimum_required(VERSION 3.31)
 if(NOT ROOT OR NOT MODE)
     message(FATAL_ERROR "ROOT and MODE (unreleased or freeze) are required")
