@@ -12,6 +12,7 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Changed
 
+- Keep automated browser windows visible and reuse one window for the six developer integration parts and additional compatible wf commands (#544, #556, `docs/TEST_PERFORMANCE.md`).
 - Open the developer page on the interface, over the whole window, once the project has a preview; the terminal moves to a floating, movable window behind a tab on the right edge that shows the session's state, and keeps its session when collapsed. Its shortcut is F9, or the manifest's new optional `developer.terminalShortcut`. Environment sources 0.9.1, not published yet (#539, `docs/DEVELOPER_ENVIRONMENT.md`).
 
 ### Fixed

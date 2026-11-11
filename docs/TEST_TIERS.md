@@ -31,8 +31,13 @@ ctest --test-dir build -R DeveloperBrowserIntegration -V        # CTest prints t
 ctest --test-dir build -R DeveloperBrowserIntegration -N -V     # prints the command to run `developer_integration` directly
 ```
 
-Run `developer_integration` with a fixtures directory and an output directory but no `--part=` to play every part in one
-session, as the test did before it was cut; `--part=app|scripts|typescript|jasmine|terminal` plays one.
+`DeveloperBrowserSession` displays all six parts in one visible native window, with a fresh page, project and origin per
+part. `DeveloperBrowserIntegration*` keep their original names and check its independent reports. Run
+`developer_integration <fixtures> <output> --session` directly to follow the shared window. Configure
+`-DWEBFRONT_TEST_SESSIONS=OFF` to compare the separate-process path.
+
+Run `developer_integration` with a fixtures directory and an output directory but no `--part=` for the older mode in
+which all parts share one project; `--part=app|scripts|typescript|jasmine|terminal|workspace` plays one in its own visible window.
 
 ```bash
 ```

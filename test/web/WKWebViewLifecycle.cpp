@@ -20,7 +20,7 @@ void checkWKWebViewHeader();
 
 namespace {
 using namespace webfront::frontend::detail::wkwebview;
-using Frontend = webfront::testdriver::QuietFrontend<webfront::frontend::WKWebViewFrontend>;
+using Frontend = webfront::testdriver::TestFrontend<webfront::frontend::WKWebViewFrontend>;
 using App      = webfront::WebFrontWithFrontend<Frontend>;
 
 void require(bool condition, const char* message) {

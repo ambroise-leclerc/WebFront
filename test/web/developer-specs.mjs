@@ -1475,5 +1475,8 @@ try {
 } finally {
     if (lastPhase) await webFront.cppFunction('test.progress')(
         `${profileNow().toFixed(3)}ms end ${lastPhase.name} durationMs=${(profileNow() - lastPhase.time).toFixed(3)}`);
-    setTimeout(() => globalThis.close(), 0);
+    if (location.search === '?developer-session' && parent !== self)
+        parent.postMessage('webfront-developer-finished', new URL(document.referrer).origin);
+    else
+        setTimeout(() => globalThis.close(), 0);
 }

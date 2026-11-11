@@ -84,7 +84,7 @@ template <typename Frontend>
 using DriverFrontend = std::conditional_t<std::is_same_v<Frontend, frontend::WebView2Frontend>,
                                           frontend::WebView2FrontendWithOptions<DriverWebView2Options>,
                                           std::conditional_t<std::is_same_v<Frontend, frontend::WKWebViewFrontend>,
-                                                             QuietFrontend<Frontend>,
+                                                             TestFrontend<Frontend>,
                                                              std::conditional_t<std::is_same_v<Frontend, frontend::CEFFrontend>, DriverCEFFrontend, Frontend>>>;
 using namespace std::chrono_literals;
 

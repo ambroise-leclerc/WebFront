@@ -194,9 +194,10 @@ Foundation type boundary, handler lifetime, origins and custom resource schemes.
 
 The per-opening options include `visible` (default `true`). Setting it to `false` creates the real native window and
 engine without presenting or focusing the window. This retains the native event loop and startup/navigation deadlines;
-it does not provide a sandbox or a headless engine. On macOS a WindowServer session is still required. The test driver
-uses this option and supports `WEBFRONT_TEST_VISIBLE=1` for interactive diagnostics.
-See [TEST_PERFORMANCE](TEST_PERFORMANCE.md) for the visible-window budget and retained lifecycle cases.
+it does not provide a sandbox or a headless engine. On macOS a WindowServer session is still required. Automated tests
+keep their windows visible by default and share compatible sessions to reduce repeated openings. Explicit tests of
+hidden-window behavior still use this option. See [TEST_PERFORMANCE](TEST_PERFORMANCE.md) for the shared sessions and
+retained lifecycle cases.
 
 Hidden sessions require macOS 14+ and use the public `WKPreferences::inactiveSchedulingPolicy` value `None` so
 asynchronous bridge and Worker work continues after the load event. Visible sessions retain macOS 13.3 support.

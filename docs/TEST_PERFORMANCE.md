@@ -21,6 +21,9 @@ shared within each group, in this order:
 | JourneyBuildSession | check, test, build, embed |
 | JourneyRestoreSession | missing offline cache, restore, verified offline cache |
 | SelfBuildSession | install, build, developer specs, repeat build, permissions refusal |
+| WebSuiteSession | install the browser suite, React adapter check and build |
+| PublicationSession | React package, services package, site build and repeat |
+| WfDriverManifestSession | initialize and install with the manifest in a subdirectory |
 
 The Journey file preparation and cache deletion remain CTest fixtures between sessions. Self-build reproducibility,
 refresh, publication and tampering checks retain their own dependencies. The driver writes a JSON result per command;
@@ -83,20 +86,30 @@ the functional owned/shared-window scenario.
 
 ## Visible windows and retained lifecycle contracts
 
-Driver, embedded-distribution and compatible lifecycle windows use `visible=false` on WebView2/WKWebView. They still
-create a native window, real engine/controller and native event loop. Window visibility is asserted in the native
-lifecycle tests. Failed navigation, close, startup failures, watchdogs and cancellation remain real process tests.
-The two macOS executable/dylib registration orders remain separate images and processes, with hidden native windows.
+Browser tests keep their windows visible by default on Windows and macOS. Their rendering is a daily visual check;
+`WEBFRONT_TEST_VISIBLE=1` is no longer needed. Reduce repeated openings by reusing a window, rather than hiding it.
+Linux's real windows remain on the suite's Xvfb display. Explicit tests of hidden-window behavior still use that option.
 
-Five of the six parts of the developer integration hide their window like the driver does: their terminal and Life
-preview are driven by the specs, not watched. The `workspace` part measures the layout of the page and needs the
-rendering frames of a displayed window (hidden, it timed out on macOS), so it shows its own. The macOS agent-application case keeps one visible window because its contract
-asserts visibility and the absence of a Dock icon. The automated direct transport contract harness retains one native
-window on each desktop, and `webfront-agent` shows the window it automates in the `Automation*` cases: automation
-stays visible to the person at the machine. Linux's real windows are confined to Xvfb. Apart from the agent's windows,
-this budgets **two visible openings on Windows and three on macOS** in the standard configuration; engine-specific manual
-benchmarks and diagnostic runs are outside this budget. Restore all diagnostic windows with
-`WEBFRONT_TEST_VISIBLE=1`. A hidden WKWebView requires macOS 14+ (public inactive scheduling preference) and a WindowServer session; this is not a headless-engine substitute.
+`DeveloperBrowserSession` opens **one visible native window for all six developer integration parts**, instead of six.
+It displays each part in a fresh, full-size iframe, with its own native application, temporary project, assigned loopback
+port and origin. The previous frame is removed before the next part loads; its Workers, listeners and bridge go away.
+All assertions run in their original single-part mode, including workspace's first-launch/failed-first-build checks.
+The familiar `DeveloperBrowserIntegration*` CTest names validate separate native reports. Closing the window early,
+a missing result or an expired per-part native deadline fails the session. A small fault-injection session verifies
+that an unsuccessful first part does not skip the later reports. Life's generated header and the terminal's cancellation
+check still come from their respective parts.
+
+The driver groups above each use one visible window. This change reduces the three WebSuite/React commands from three
+openings to one, publication's four commands from four to one, and manifest-directory init/install from two to one.
+With sessions disabled, the original individual commands and the six separate developer windows remain available.
+Developer parts now run sequentially within their window; this saves native startup/teardown and concurrent engine
+memory, but can take longer than six parallel windows. Compare full-suite wall time as well as openings before claiming
+a speedup. The session prints `nativeWindows=1 parts=6 durationMs=...` for timing comparisons.
+
+Failed navigation, native close, startup failures, watchdogs and cancellation remain real process tests. The two macOS
+executable/dylib registration orders remain separate images and processes. `ConsumerJasmine` modes and `Automation*`
+retain their own visible windows where they have not yet been grouped; no whole-suite budget of two or three visible
+openings is claimed. Hidden WKWebView tests require macOS 14+ and a WindowServer session.
 
 ## Profiling and interpreting the numbers
 

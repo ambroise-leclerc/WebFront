@@ -113,8 +113,10 @@ int startupCompletion(bool failed) {
     using namespace webfront::frontend::detail::webview2;
     Apartment apartment;
     auto      session = std::make_shared<Session>();
-    session->createWindow(webfront::testdriver::diagnosticWindows());
-    require(static_cast<bool>(IsWindowVisible(session->window)) == webfront::testdriver::diagnosticWindows(), "Window visibility option was ignored");
+    // Cover the explicit hidden-window option on this startup-failure probe; ordinary rendered sessions stay visible.
+    const bool visible = !failed;
+    session->createWindow(visible);
+    require(static_cast<bool>(IsWindowVisible(session->window)) == visible, "Window visibility option was ignored");
     session->start(L"unused-profile", DeferredEnvironment::create);
     require(DeferredEnvironment::completion.Get() != nullptr, "Creation request was not started");
     const auto timer = session->startupTimer;
@@ -409,7 +411,7 @@ int rejectMta() {
         return 1;
     bool rejected = false;
     try {
-        webfront::testdriver::QuietFrontend<webfront::frontend::WebView2Frontend>::open("9002", "index.html");
+        webfront::testdriver::TestFrontend<webfront::frontend::WebView2Frontend>::open("9002", "index.html");
     } catch (const std::exception& error) {
         rejected = std::string_view(error.what()).find("STA") != std::string_view::npos;
     }
@@ -490,7 +492,7 @@ int runtimeReadyBeforePageLoad() {
 
 int expectOpenFailure(std::string_view port, std::string_view diagnostic) {
     try {
-        webfront::testdriver::QuietFrontend<webfront::frontend::WebView2Frontend>::open(port, "index.html");
+        webfront::testdriver::TestFrontend<webfront::frontend::WebView2Frontend>::open(port, "index.html");
     } catch (const std::exception& error) {
         return std::string_view(error.what()).find(diagnostic) != std::string_view::npos ? 0 : 1;
     }

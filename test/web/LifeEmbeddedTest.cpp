@@ -61,7 +61,7 @@ int main() {
         using App = webfront::BasicWF<webfront::NetProvider,
                                       webfront::fs::DefaultFSWith<webfront::fs::LifeUI>,
                                       webfront::http::DefaultBuffersPolicy,
-                                      webfront::testdriver::QuietFrontend<WEBFRONT_TEST_FRONTEND>>;
+                                      webfront::testdriver::TestFrontend<WEBFRONT_TEST_FRONTEND>>;
         App               app;
         std::atomic<bool> passed{false};
         app.cppFunction("life.step", &webfront::demo::nextLife);

@@ -55,7 +55,7 @@ function(webfront_add_driver_suite group)
     add_test(NAME ${group} COMMAND ${_wf_run} ${options} -P ${PROJECT_SOURCE_DIR}/test/cmake/RunWfDriver.cmake)
     webfront_set_browser_test_properties(${group} "${CMAKE_CURRENT_SOURCE_DIR}" ${ctest_timeout})
     set(lock "${ARG_PROJECT}")
-    if(group STREQUAL "SelfBuildSession")
+    if(group STREQUAL "SelfBuildSession" OR group STREQUAL "PublicationSession")
         set(lock self-build-project)
     endif()
     set_tests_properties(${group} PROPERTIES FIXTURES_REQUIRED "${ARG_REQUIRES}" FIXTURES_SETUP ${group}
