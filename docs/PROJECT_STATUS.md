@@ -20,7 +20,7 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   dependencies, entries, providers, scripts and permissions. TypeScript/TSX compilation uses
   esbuild-wasm; type checking uses the project's locked TypeScript. Application commands use
   `webfront::Commands`. From environment 0.9.1 (sources; the pin is still 0.9.0), a project that has a preview opens
-  on its interface over the whole window, with the terminal in a floating window behind an icon. See the
+  on its interface over the whole window, with the terminal in a floating window behind a tab on the window's edge. See the
   [developer reference](DEVELOPER_ENVIRONMENT.md).
 - **Distribution.** `wf embed` generates the application's compressed C++ provider.
   `NativeAppWithAssets<Provider>` runs without project files, developer callbacks or tool cache.

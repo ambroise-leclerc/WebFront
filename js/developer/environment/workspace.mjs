@@ -1,5 +1,5 @@
 // The layout of the developer page: the terminal alone while the project has no interface, then the interface over the
-// whole window with the terminal in a floating, movable window that an icon opens and collapses. The terminal is mounted
+// whole window with the terminal in a floating, movable window that a tab on the right edge opens and collapses. The terminal is mounted
 // once in its window and never moves in the document afterwards: collapsing only hides it, so the session, a running
 // command, the line being typed and the scrollback are kept. The interface stays in the preview frame.
 import {call, readProject, publish} from './io.mjs';
@@ -92,6 +92,23 @@ export async function readShortcut(bridge) {
     catch { return defaultShortcut; }
 }
 
+// --- Status ----------------------------------------------------------------------------------------------------
+
+/**
+ * What the tab shows of the session behind it: `idle`, `running` (a command), or where wf dev is: `building`, `ready`
+ * (the interface is built and its inputs are watched) and `failed` (the last build).
+ */
+export const Status = {idle: 'idle', running: 'running', building: 'building', ready: 'ready', failed: 'failed'};
+const devStates = [Status.building, Status.ready, Status.failed];
+
+/** The status of a session: the state wf dev reports while it runs (anything else means it does not), else whether a command runs. */
+export const tabStatus = ({command = false, dev = null} = {}) => devStates.includes(dev) ? dev : command ? Status.running : Status.idle;
+
+const statusTexts = {[Status.idle]: '', [Status.running]: 'a command is running', [Status.building]: 'wf dev is building',
+    [Status.ready]: 'wf dev is watching', [Status.failed]: 'the last build failed'};
+/** The status in words, for the tab's name; empty when nothing runs. */
+export const statusText = status => Object.hasOwn(statusTexts, status) ? statusTexts[status] : '';
+
 // --- Remembered place ------------------------------------------------------------------------------------------
 
 /** The place of the window, kept in the project like the history: each project has its own. */
@@ -147,13 +164,12 @@ export function placeStore(bridge, delay = 300) {
 
 // --- Page ------------------------------------------------------------------------------------------------------
 
-// The WebFront swallow, shipped in the environment.
-const logo = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="28" height="28" aria-hidden="true" focusable="false">'
-    + '<g transform="translate(1 14) scale(.089)"><g transform="translate(-40 -150)">'
-    + '<path fill="#203b30" d="M236 168C378 177 488 216 565 296C609 267 645 274 679 296L710 309C672 307 650 327 630 359C578 451 442 514 295 541C367 485 444 416 476 385C488 372 447 373 406 380C274 406 172 456 63 493L253 381C244 365 164 340 60 320C237 342 377 355 433 320C449 308 364 237 236 168Z"/>'
-    + '<path fill="#ffffff" d="M540 294C594 302 621 349 597 393C590 405 581 414 568 423C592 379 585 327 540 294Z"/>'
-    + '<path fill="#d7fa85" d="M599 333C620 310 646 299 674 305C646 318 643 342 630 363C613 389 589 409 568 423C593 391 603 361 599 333Z"/>'
-    + '<path fill="#d7fa85" d="M132 336L322 373L135 465L285 375Z"/></g></g></svg>';
+// The WebFront swallow, shipped in the environment, in the colours of the tab.
+const logo = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 62 37" width="20" height="12" aria-hidden="true" focusable="false">'
+    + '<g transform="scale(.089)"><g transform="translate(-40 -150)">'
+    + '<path fill="currentColor" d="M236 168C378 177 488 216 565 296C609 267 645 274 679 296L710 309C672 307 650 327 630 359C578 451 442 514 295 541C367 485 444 416 476 385C488 372 447 373 406 380C274 406 172 456 63 493L253 381C244 365 164 340 60 320C237 342 377 355 433 320C449 308 364 237 236 168Z"/>'
+    + '<path fill="var(--webfront-accent)" d="M599 333C620 310 646 299 674 305C646 318 643 342 630 363C613 389 589 409 568 423C593 391 603 361 599 333Z"/>'
+    + '<path fill="var(--webfront-accent)" d="M132 336L322 373L135 465L285 375Z"/></g></g></svg>';
 
 const attribute = 'data-webfront-workspace';
 const floating = `:root:is([${attribute}=interface],[${attribute}=floating])`;
@@ -166,10 +182,23 @@ ${floating} .webfront-terminal-window{position:fixed;z-index:2147483646;border:1
 :root[${attribute}=interface] .webfront-terminal-window{visibility:hidden}
 .webfront-terminal-bar{display:none;flex:none;align-items:center;justify-content:space-between;padding:0 4px 0 12px;background:#202737;color:#e8edf4;font:13px system-ui;cursor:move;user-select:none;touch-action:none}
 ${floating} .webfront-terminal-bar{display:flex}
-.webfront-terminal-bar:focus-visible,.webfront-terminal-close:focus-visible,.webfront-terminal-toggle:focus-visible{outline:2px solid #d7fa85;outline-offset:-2px}
+.webfront-terminal-bar:focus-visible,.webfront-terminal-close:focus-visible{outline:2px solid #d7fa85;outline-offset:-2px}
 .webfront-terminal-close{margin:0;padding:0;width:32px;height:32px;border:0;background:none;color:inherit;font:20px/1 system-ui;cursor:pointer}
-.webfront-terminal-toggle{position:fixed;top:8px;right:8px;z-index:2147483647;margin:0;padding:0;width:44px;height:44px;display:grid;place-items:center;border:1px solid #46536a;border-radius:50%;background:#f6f7f2;box-shadow:0 2px 8px #0006;cursor:pointer;opacity:.9}
-.webfront-terminal-toggle:hover,.webfront-terminal-toggle[aria-expanded=true]{opacity:1}
+.webfront-terminal-toggle{position:fixed;top:max(0px,min(64px,100vh - 88px));right:0;z-index:2147483647;margin:0;padding:0;width:44px;height:88px;max-height:100vh;display:flex;justify-content:flex-end;border:0;background:none;cursor:pointer}
+.webfront-terminal-tab{box-sizing:border-box;width:30px;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;border-radius:12px 0 0 12px;background:#203b30;color:#f6f7f2;--webfront-accent:#d7fa85;box-shadow:0 2px 8px #0006;opacity:.92}
+.webfront-terminal-toggle:hover .webfront-terminal-tab,.webfront-terminal-toggle:focus-visible .webfront-terminal-tab{opacity:1}
+.webfront-terminal-toggle:focus-visible{outline:none}
+.webfront-terminal-toggle:focus-visible .webfront-terminal-tab{outline:2px solid #d7fa85;outline-offset:2px}
+.webfront-terminal-toggle[aria-expanded=true] .webfront-terminal-tab{background:#d7fa85;color:#203b30;--webfront-accent:#203b30;opacity:1}
+.webfront-terminal-toggle[aria-expanded=true]:focus-visible .webfront-terminal-tab{outline-color:#203b30}
+.webfront-terminal-status{box-sizing:border-box;width:10px;height:10px;color:var(--webfront-accent)}
+[data-status=idle] .webfront-terminal-status{height:2px;border-radius:1px;background:currentColor;box-shadow:0 -5px,0 5px}
+:is([data-status=running],[data-status=building]) .webfront-terminal-status{border:2px solid;border-radius:50%;animation:webfront-terminal-working 1.2s ease-in-out infinite alternate}
+[data-status=ready] .webfront-terminal-status{border-radius:50%;background:currentColor}
+[data-status=failed] .webfront-terminal-status{width:9px;height:9px;background:#ffbd2e;transform:rotate(45deg)}
+[data-status=failed][aria-expanded=true] .webfront-terminal-status{background:#8a3d00}
+@keyframes webfront-terminal-working{to{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.webfront-terminal-status{animation:none!important}}
 :root[${attribute}=terminal] .webfront-terminal-toggle,:root[${attribute}=terminal] .webfront-interface{display:none}
 `;
 
@@ -181,7 +210,7 @@ export const isManaged = frame => managed.has(frame);
  * Lays the page out around the terminal's `element` and the preview `frame`, which starts hidden. Call it before the
  * terminal opens in `element`, then attach({focus, fit}) with the functions that focus the terminal and fit it to `element`.
  * The result gives the `state`, `interfaceExists` (the page opened on an existing interface, to load in the frame),
- * toggle(), open({focus}) and close(), `button` and `panel`, the `shortcut` in use ("F9") and placeSaved().
+ * the `status` shown on the tab and command(running) to say that a command runs, toggle(), open({focus}) and close(), `button` and `panel`, the `shortcut` in use ("F9") and placeSaved().
  */
 export async function createWorkspace({bridge, element, frame}) {
     managed.add(frame);
@@ -193,6 +222,7 @@ export async function createWorkspace({bridge, element, frame}) {
     let state = initialState(interfaceExists);
     let place = remembered;  // as chosen; what is displayed is fitted to the viewport
     let focusTerminal = () => {}, fitTerminal = () => {};
+    const session = {command: false, dev: null};
 
     const style = page.createElement('style');
     style.textContent = styles;
@@ -227,7 +257,7 @@ export async function createWorkspace({bridge, element, frame}) {
     const button = page.createElement('button');
     button.type = 'button';
     button.className = 'webfront-terminal-toggle';
-    button.innerHTML = logo;
+    button.innerHTML = `<span class="webfront-terminal-tab">${logo}<span class="webfront-terminal-status"></span></span>`;
     button.setAttribute('aria-controls', panel.id);
     button.setAttribute('aria-keyshortcuts', keys.replace('Ctrl', 'Control'));
     page.body.append(button);
@@ -238,8 +268,10 @@ export async function createWorkspace({bridge, element, frame}) {
         root.setAttribute(attribute, state);
         const open = state === State.floating;
         button.setAttribute('aria-expanded', String(open));
-        button.setAttribute('aria-label', open ? 'Hide the WebFront terminal' : 'Show the WebFront terminal');
-        button.title = `${open ? 'Hide' : 'Show'} the terminal (${keys})`;
+        const status = tabStatus(session), words = statusText(status);
+        button.dataset.status = status;
+        button.setAttribute('aria-label', `${open ? 'Hide' : 'Show'} the WebFront terminal${words && `: ${words}`}`);
+        button.title = `${open ? 'Hide' : 'Show'} the terminal (${keys})${words && `: ${words}`}`;
         const rect = state === State.terminal ? null : shown();
         Object.assign(panel.style, rect ? {left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px`}
             : {left: '', top: '', width: '', height: ''});
@@ -266,6 +298,10 @@ export async function createWorkspace({bridge, element, frame}) {
     // of a failed build: before any preview, the frame stays out of the page and the terminal, which prints the
     // diagnostic too, keeps the window.
     frame.addEventListener('webfront-preview-navigating', () => apply('shown'));
+    frame.addEventListener('webfront-dev-status', event => {
+        session.dev = event.detail?.state ?? null;
+        render();
+    });
     new view.MutationObserver(() => { if (frame.hidden) apply('hidden'); }).observe(frame, {attributes: true, attributeFilter: ['hidden']});
 
     // The shortcut works wherever the focus is: in this page and in the interface, whose window changes at each load.
@@ -341,6 +377,12 @@ export async function createWorkspace({bridge, element, frame}) {
     render();
     return {
         get state() { return state; },
+        get status() { return tabStatus(session); },
+        /** Tells whether a command runs in the terminal. */
+        command(running) {
+            session.command = Boolean(running);
+            render();
+        },
         interfaceExists, button, panel, bar, shortcut: keys,
         attach({focus, fit = () => {}}) {
             focusTerminal = focus;

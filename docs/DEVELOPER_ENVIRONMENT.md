@@ -374,15 +374,15 @@ The page of `bootstrap("developer")` shows one thing at a time by default (envir
 environment's `mount`, not to the embedded bootstrap page):
 
 - **No interface yet** (first launch, or a project that never ran `wf dev` or `wf preview`): the terminal alone, under the
-  status line. No icon and no empty preview are shown, also when the first build of `wf dev` fails: its diagnostic is in
+  status line. No tab and no empty preview are shown, also when the first build of `wf dev` fails: its diagnostic is in
   the terminal.
 - **An interface exists**: the page opens on it, over the whole window, with the terminal collapsed. "Exists" means a
   published preview, `.webfront/developer/preview/index.html`. `wf dev` and `wf preview` publish it; `wf create` and
   `wf build` (which publishes under `build/`) do not. A publication replaces the directory in one step, so an interrupted
   `wf dev` or a failed build leaves the last successful interface, which the next launch shows as it was built: run `wf dev`
   to rebuild it.
-- **The icon** with the WebFront swallow, at the top right over the interface, opens the terminal in a **floating window**;
-  the icon again, the window's close button or **F9** (in the terminal or in the interface) collapses it. Collapsing only
+- **The tab** with the WebFront swallow, against the right edge of the window over the interface, opens the terminal in a
+  **floating window**; the tab again, the window's close button or **F9** (in the terminal or in the interface) collapses it. Collapsing only
   hides the terminal: the session, its scrollback, the line being typed and a running command (`wf dev`, `wf test`) are
   kept, and the keys go back to the interface. The first preview of a session leaves the terminal open over the interface,
   since it is in use. A notice of automation opens it, so that the notice is seen.
@@ -390,18 +390,21 @@ environment's `mount`, not to the embedded bootstrap page):
   bottom-right corner resizes with the pointer. The window stays inside the browser window, shrinks with it and returns to
   its place when there is room again; xterm.js is fitted to it. Its place and size are kept per project in
   `.webfront/developer/terminal-window.json`.
+- **The tab shows the session's state**, so that a collapsed terminal still tells what it does: three bars when nothing
+  runs, a ring while a command runs or `wf dev` builds, a full dot when `wf dev` has built the interface and watches its
+  inputs, an amber diamond when the last build failed. The tab's name and tooltip say it in words.
 - **The shortcut** is F9 by default. The developer page takes it before the interface does, so an application that uses
   F9 itself names another one in its manifest, and receives F9 as it does in its embedded form:
   `"developer": {"terminalShortcut": "Ctrl+Shift+F9"}`. A shortcut is a function key, F1 to F12, optionally after `Ctrl`,
   `Alt`, `Shift` or `Meta`, joined by `+`; anything else is a manifest error. The page reads it when it opens: relaunch
-  the application after changing it. The icon's tooltip names the shortcut in use.
+  the application after changing it. The tab's tooltip names the shortcut in use.
 - While the terminal is collapsed, `wf dev` keeps reloading the full-window interface, and a failed build still shows its
   diagnostic over it.
 
-The icon is a button (`aria-expanded`, 44 px target) and the window a non-modal dialog. The interface stays in the preview
+The tab is a button (`aria-expanded`, 44 px target) and the window a non-modal dialog. The interface stays in the preview
 frame, as before: the layout adds nothing to the application's documents except the shortcut's listener, installed in the interface
 and in the same-origin frames it embeds (not in a frame of another origin, nor one inside a shadow tree: click the interface
-or the icon first). This is a layout, not a
+or the tab first). This is a layout, not a
 sandbox (see [limitations](#dependencies-storage-and-limitations)). A page that mounts the terminal itself (`runtime.mount`) with a preview frame gets
 the same layout; `workspace: false` keeps the page as it is.
 

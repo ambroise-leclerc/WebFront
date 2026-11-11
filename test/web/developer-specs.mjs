@@ -900,8 +900,11 @@ try {
         const button = again.button(), icon = again.box('.webfront-terminal-toggle');
         assert(button.tagName === 'BUTTON' && button.getAttribute('aria-expanded') === 'false' && /terminal/i.test(button.getAttribute('aria-label'))
             && button.getAttribute('aria-controls') === again.panel().id, 'The icon must be a named button that controls the terminal window');
-        assert(button.querySelector('svg') && icon.width >= 44 && icon.height >= 44 && icon.top <= 16 && again.viewport().width - icon.right <= 16,
-            `The icon must be a large enough target at the top right: ${JSON.stringify(icon)}`);
+        const tab = again.box('.webfront-terminal-tab');
+        assert(button.querySelector('svg') && icon.width >= 44 && icon.height >= 44 && icon.top <= 96 && Math.round(icon.right) === again.viewport().width
+            && Math.round(tab.right) === again.viewport().width && tab.width < icon.width,
+            `The icon must be a large enough target against the right edge: ${JSON.stringify(icon)}`);
+        assert(button.dataset.status === 'idle' && again.style('.webfront-terminal-status').height === '2px', `The tab must show that nothing runs: ${button.dataset.status}`);
         assert(page.elementFromPoint(icon.left + icon.width / 2, icon.top + icon.height / 2)?.closest('button') === button, 'The icon must stay over the interface');
         assert(page.activeElement === pagePreview, 'The keys must go to the interface while the terminal is collapsed');
         const session = page.querySelector('#terminal .xterm');
@@ -1025,6 +1028,8 @@ try {
                 await poll();
                 await until(shows('layout-two'), 'wf dev must reload the full-window interface');
                 assert(again.state() === 'interface' && again.fills('#preview'), 'A reload must leave the terminal collapsed');
+                await until(() => button.dataset.status === 'ready', `The tab must show that wf dev watches: ${button.dataset.status}`);
+                assert(/wf dev is watching/.test(button.getAttribute('aria-label')), 'The tab must name the state of wf dev');
                 // The interface of a new document still gets the shortcut.
                 key(pagePreview.contentDocument.body, {key: 'F9'});
                 assert(again.state() === 'floating', 'F9 must work in a reloaded interface');
@@ -1032,6 +1037,8 @@ try {
                 await writeFile('layout/value.ts', 'export const value = ;\n');
                 await poll();
                 await until(() => pagePreview.contentDocument?.getElementById('webfront-build-diagnostics'), 'A failed build must show its diagnostic in the interface');
+                assert(button.dataset.status === 'failed' && /the last build failed/.test(button.getAttribute('aria-label')) && again.style('.webfront-terminal-status').transform !== 'none',
+                    `The tab must show a failed build while the terminal is collapsed: ${button.dataset.status}`);
                 assert(again.state() === 'interface' && shows('layout-two')() && /layout\/value.ts:1:/.test(pagePreview.contentDocument.getElementById('webfront-build-diagnostics').textContent),
                     'The diagnostic must cover the last interface built, with the terminal collapsed');
                 const overlay = pagePreview.contentDocument.getElementById('webfront-build-diagnostics').getBoundingClientRect();
@@ -1040,6 +1047,7 @@ try {
             } finally { devStop.abort(); }
             assert((await devResult)?.exitCode === 130, 'Ctrl+C must stop dev with exit code 130');
         });
+        assert(button.dataset.status === 'idle', `The tab must show that wf dev stopped: ${button.dataset.status}`);
         // A failed build keeps the last interface published: the next launch still opens on it.
         assert((await listed('.webfront/developer/preview')).includes('index.html'), 'A failed build must keep the published interface');
         relaunched.remove();
@@ -1119,12 +1127,15 @@ try {
         workspace.close();
         await delay(150);
         assert(there.state() === 'interface' && (await commandState('layout')) === 'running' && editor.busy, 'Collapsing must not interrupt a running command');
+        assert(toggleButton.dataset.status === 'running' && workspace.status === 'running' && /a command is running/.test(toggleButton.getAttribute('aria-label')),
+            `The tab must show a running command while the terminal is collapsed: ${toggleButton.dataset.status}`);
         workspace.open();
         assert((await commandState('layout')) === 'running', 'Opening must not interrupt a running command');
         terminal.input('\x03');
         await editor.whenIdle();
         await rendered();
         await until(async () => (await commandState('layout')) === 'cancelled', 'Ctrl+C must still reach the command');
+        assert(toggleButton.dataset.status === 'idle', `The tab must show that the command ended: ${toggleButton.dataset.status}`);
         assert(/waiting layout/.test(screen()) && /^layout kept$/m.test(screen()),
             'Ctrl+C must still reach the command, in the same session');
         await mounted.workspace.placeSaved();

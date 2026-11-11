@@ -1,7 +1,7 @@
 // Specs of the developer page's layout (workspace.mjs): what counts as an existing interface, the states of the display,
 // and the place of the floating terminal window. The page itself is checked in test/web/developer-specs.mjs.
 import {hasInterface, previewDirectory, State, initialState, nextState, clampRect, defaultRect, keyboardRect, minimumSize, step,
-    isToggleKey, defaultShortcut, shortcutText, readShortcut, parsePlace, formatPlace, readPlace, placeStore, placePath} from '../../../js/developer/environment/workspace.mjs';
+    isToggleKey, Status, tabStatus, statusText, defaultShortcut, shortcutText, readShortcut, parsePlace, formatPlace, readPlace, placeStore, placePath} from '../../../js/developer/environment/workspace.mjs';
 import {publish} from '../../../js/developer/environment/io.mjs';
 import {memoryBridge} from '../memory-bridge.mjs';
 
@@ -101,6 +101,18 @@ describe('The developer page layout', () => {
             expect(keyboardRect({...rect, x: 4}, {key: 'ArrowLeft'}, viewport).x).toBe(0);
             expect(keyboardRect({...rect, x: 600}, {key: 'ArrowRight'}, viewport).x).toBe(600);
             expect(keyboardRect(rect, {key: 'a'}, viewport)).toBeNull();
+        });
+
+        it('shows on its tab where wf dev is, else whether a command runs', () => {
+            expect(tabStatus()).toBe(Status.idle);
+            expect(tabStatus({command: true})).toBe(Status.running);
+            for (const dev of [Status.building, Status.ready, Status.failed]) expect(tabStatus({command: true, dev})).toBe(dev);
+            // wf dev stopped, or a state this page does not know: the command decides.
+            expect(tabStatus({command: true, dev: 'stopped'})).toBe(Status.running);
+            expect(tabStatus({command: false, dev: 'toString'})).toBe(Status.idle);
+            expect(statusText(Status.idle)).toBe('');
+            for (const status of [Status.running, Status.building, Status.ready, Status.failed]) expect(statusText(status)).not.toBe('');
+            expect(new Set(Object.values(Status).map(statusText)).size).toBe(5);
         });
 
         it('is toggled by F9 alone', () => {

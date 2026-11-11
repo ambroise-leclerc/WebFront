@@ -195,9 +195,12 @@ export async function dev(args, {bridge, signal, preview: frame, write = () => {
     let diagnostic = '';
     const loaded = () => previewDiagnostics(frame, diagnostic);
     frame?.addEventListener('load', loaded);
+    // The page shows where the loop is (workspace.mjs): building, ready, failed, then stopped.
+    const report = state => frame?.dispatchEvent?.(new CustomEvent('webfront-dev-status', {detail: {state}}));
     try {
         for (;;) {
             active.throwIfAborted();
+            report('building');
             const configReads = new Map(), budget = {bytes: 0};
             try {
                 await withBuild(async () => {
@@ -219,12 +222,14 @@ export async function dev(args, {bridge, signal, preview: frame, write = () => {
                     showPreview(frame);
                     // A successful build can drop dependencies that are no longer imported.
                     observed = new Map(session.observed);
+                    report('ready');
                     write(syncNotice(project) + 'Preview ready. Watching inputs (Ctrl+C to stop).\n');
                 });
             } catch (error) {
                 if (active.aborted) throw stopped();
                 if (error?.code === 'busy') { await waitForPoll(active); continue; }
                 diagnostic = diagnosticsText(error);
+                report('failed');
                 write(diagnostic + '\n');
                 previewDiagnostics(frame, diagnostic);
                 if (session?.observed.size) observed = new Map(session.observed);
@@ -238,7 +243,7 @@ export async function dev(args, {bridge, signal, preview: frame, write = () => {
                     if (active.aborted) throw stopped();
                     // A temporarily unreadable file or a bound violation cannot publish or reload anything.
                     const text = diagnosticsText(error);
-                    if (diagnostic !== text) { diagnostic = text; write(text + '\n'); previewDiagnostics(frame, text); }
+                    if (diagnostic !== text) { diagnostic = text; report('failed'); write(text + '\n'); previewDiagnostics(frame, text); }
                 }
             }
         }
@@ -254,5 +259,6 @@ export async function dev(args, {bridge, signal, preview: frame, write = () => {
         bridge.socket?.removeEventListener('close', disconnected);
         frame?.removeEventListener('load', loaded);
         previewDiagnostics(frame, '');
+        report('stopped');
     }
 }

@@ -576,7 +576,11 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
     const context = {bridge, config, preview, cppCommands, onExit};
     const editor = new LineEditor({write, columns: () => terminal.cols, rows: () => terminal.rows, prompt: '> ', history,
         remember: line => rememberLine(bridge, line),
-        run: (line, signal) => runLine(line, {...context, editor, signal, write: text => editor.write(text)}),
+        run: async (line, signal) => {
+            workspace?.command(true);  // the tab shows that a command runs, also while the terminal is collapsed
+            try { return await runLine(line, {...context, editor, signal, write: text => editor.write(text)}); }
+            finally { workspace?.command(false); }
+        },
         complete: line => complete(line, context)});
     terminal.onResize(() => editor.resized());
     // An element without a size is not laid out: fitting to it would shrink the terminal and reflow its lines.
