@@ -16,9 +16,13 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Changed
 
+- Declare GCC 13 as the best-effort S2 minimum for the library and examples, document the GCC 14 exit clause and qualified Clang scope, and add GCC 13 ASan/UBSan fast tests (#525, ADR-022).
+
 - Open the developer page on the interface, over the whole window, once the project has a preview; the terminal moves to a floating, movable window behind a tab on the right edge that shows the session's state, and keeps its session when collapsed. Its shortcut is F9, or the manifest's new optional `developer.terminalShortcut`. Environment sources 0.9.1, not published yet (#539, `docs/DEVELOPER_ENVIRONMENT.md`).
 
 ### Fixed
+
+- Run the commit attribution regression checks with older Git versions by dropping the unsupported `git log --no-graph` option (#525).
 
 - Build with `-DWEBFRONT_EMBED_CEF=ON` on Linux aarch64 instead of failing on `-m64`, and cross-compile CEF: WebFront pins CEF 156.0.28, whose package selects the archive and `PROJECT_ARCH` from the target (#523).
 

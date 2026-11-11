@@ -3,6 +3,16 @@
 Release history belongs in the [changelog](CHANGELOG.md)
 and Git; architecture decisions and their evidence are indexed in [the ADRs](adr/README.md).
 
+## Compiler support
+
+GCC 13 is the minimum for the library and examples, with best-effort S2 support: the
+weekly and `master` PR ARM64 job builds everything without `-Werror`, runs the fast tier,
+and repeats that tier under ASan/UBSan. Browser frontends are disabled in this job.
+GCC 16 remains the reference compiler. Clang 23 is qualified in the extended jobs;
+no older upstream Clang minimum is qualified. AppleClang and MSVC follow the native CI images.
+Optional C++26 reflection and mddlog retain their separate compiler requirements.
+The [support ADR](adr/ADR-022-profils-et-niveaux-de-support.md) defines the GCC 14 exit clause.
+
 ## Supported paths
 
 WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer environment.

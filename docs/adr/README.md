@@ -1,12 +1,14 @@
 # WebFront architecture decision records
 
 This directory describes WebFront’s architectural choices and the constraints to preserve
-when making changes or generating code. It contains **21 ADRs**, with unique numbers (18 accepted decisions and 3 proposals).
+when making changes or generating code. It contains **22 ADRs**, with unique numbers (19 accepted decisions and 3 proposals).
 The accepted baseline corresponds to commit `b031ab5` dated **2026-10-19**;
 the developer environment proposals are dated **2026-10-20**, the direct frontend access proposal **2026-10-24**,
 the DOM access proposal **2026-10-26**, the developer automation proposal **2026-10-28**, accepted **2026-10-29**, the system services proposal **2026-10-31**, and the developer environment publication proposal **2026-11-02**. Each ADR is versioned
 according to the decision’s creation and its significant changes in the Git history.
 The ADRs themselves are written in French.
+
+The compiler support policy was accepted on **2026-11-11** (ADR-022).
 
 ## Reading guide and scope
 
@@ -62,6 +64,7 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-019](ADR-019-developpement-automatisable-et-agents.md) | Automating the developer environment through shared operations and an optional local MCP adapter | Accepted | 2026-10-28 | 1.2 — 2026-10-29 |
 | [ADR-020](ADR-020-services-systeme.md) | System services (files, clipboard, shell, notifications…) through optional C++ portals with per-connection backends, granting handles rather than paths | Proposed | 2026-10-31 | 1.8 — 2026-11-09 |
 | [ADR-021](ADR-021-publication-de-l-environnement-developpeur.md) | Simplifying the publication of the developer environment: automate the release, keep pinned hashes, no dedicated server | Accepted (domain delivered; phase 1 to implement) | 2026-11-02 | 1.0 — 2026-11-02 |
+| [ADR-022](ADR-022-profils-et-niveaux-de-support.md) | Compiler profiles, GCC 13 S2 minimum and exit clause | Accepted | 2026-11-11 | 1.0 — 2026-11-11 |
 
 Numbering follows the reading topics; milestones and individual file histories provide
 the chronology, which does not follow the numerical order.
