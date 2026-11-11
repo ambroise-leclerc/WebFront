@@ -318,6 +318,11 @@ if(_browser_tests_available)
         set_tests_properties(${_name} PROPERTIES LABELS "web-integration" TIMEOUT 180
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" FIXTURES_REQUIRED DeveloperFixtures)
         webfront_use_own_profile(${_name} developer-${_part})
+        if(_part STREQUAL "workspace")
+            # The part measures the layout of the page and waits for rendering frames, which a hidden WKWebView does not
+            # deliver (it timed out on macOS): its window is shown, the only one of the developer integration.
+            set_property(TEST ${_name} APPEND PROPERTY ENVIRONMENT "WEBFRONT_TEST_VISIBLE=1")
+        endif()
         # DeveloperTest uses CEFFrontend's default profile beside the executable, as do the other native browser
         # tests holding this lock. CEF forwards concurrent launches with that profile to an existing process.
         if(WEBFRONT_WEBTEST_FRONTEND STREQUAL "CEF")
