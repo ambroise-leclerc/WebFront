@@ -112,7 +112,7 @@ int main() {
 
 ## Game of Life: from console to native application
 
-The example starts with a C++ simulation, adds a React interface, then embeds that interface in the executable. You need Git, CMake **3.31+** and a C++23 compiler (GCC **13+**; GCC 13 has best-effort S2 support). See the [compiler support policy](docs/adr/ADR-022-profils-et-niveaux-de-support.md) for the tested toolchains and limits. The initial CMake configuration, the first bootstrap and the first `wf install` need internet access; afterwards the downloaded environment and packages are cached and can be verified offline.
+The example starts with a C++ simulation, adds a React interface, then embeds that interface in the executable. You need Git, CMake **3.31+** and a C++23 compiler (GCC **13+**; GCC 13 has best-effort S2 support). See [build tools on LTS distributions](#build-tools-on-lts-distributions) when your distribution supplies an older CMake, and the [compiler support policy](docs/adr/ADR-022-profils-et-niveaux-de-support.md) for the tested toolchains and limits. The initial CMake configuration, the first bootstrap and the first `wf install` need internet access; afterwards the downloaded environment and packages are cached and can be verified offline.
 
 ```bash
 git clone https://github.com/ambroise-leclerc/WebFront.git
@@ -347,6 +347,22 @@ The [changelog](docs/CHANGELOG.md) lists every version with its breaking changes
 - **0.8.0.** Authorized native programs and private temporary files from [Jasmine specs](docs/CONSUMER_TESTING.md); PNG screenshots and image sequences of the web view (`webFrontCapture`); `webfront::embeddedFrontendAvailable` and `webfront::EmbeddedWebFront`; `init`, `create`, `install`, `restore` and `embed` available to automation.
 - **0.9.0.** The last minor revision before 1.0, with the developer environment at the same number. System services groundwork ([ADR-020](docs/adr/README.md)): writable storage confined to declared roots, typed access to the native window and an interface-thread executor for every frontend, dynamic and ranged HTTP routes, file inputs and downloads in the embedded frontends, automation of an application's own window, and the `@webfront/services` package skeleton. Developer environment 0.9.0 is the first published by the `release-developer` workflow.
 - **Developer distribution.** The developer environment is served from `dist.webfront.fr` ([ADR-021](docs/adr/README.md)). Libraries older than the sources' pin keep the former address, which no longer works for the developer bootstrap: rebuild against the current sources.
+
+## Build tools on LTS distributions
+
+WebFront requires CMake **3.31+** for both standalone builds and `add_subdirectory`/CPM consumers, including builds with tests disabled. Ubuntu 22.04 supplies CMake 3.22.1 and Ubuntu 24.04 supplies 3.28.3, so install a newer CMake before configuring. Git 2.34.1, as supplied by Ubuntu 22.04, works with the repository's commit checks. The [tooling decision and audit](docs/adr/ADR-022-profils-et-niveaux-de-support.md#outils-de-construction-distributions-lts-527) explain the common CMake floor; optional mddlog has [separate requirements](docs/mddlog-integration.md).
+
+One option is an isolated Python environment. On Ubuntu, install its prerequisite with `sudo apt-get install python3-venv` if needed, then run:
+
+```bash
+python3 -m venv "$HOME/.local/share/webfront-tools"
+"$HOME/.local/share/webfront-tools/bin/python" -m pip install 'cmake>=3.31,<4'
+export PATH="$HOME/.local/share/webfront-tools/bin:$PATH"
+cmake --version
+ctest --version
+```
+
+The CMake installation itself needs no root access. Run the `export PATH=...` line in each build shell (or add it to your shell profile); it selects the matching `cmake` and `ctest`. Then use the build commands below or the Game of Life walkthrough above. Alternatively, follow the [Kitware APT repository instructions](https://apt.kitware.com/) for your Ubuntu release. A newer CMake does not supply a newer C++ compiler: Ubuntu 22.04's default GCC 11 still needs replacing with a toolchain from the support policy.
 
 ## Use WebFront in your project
 

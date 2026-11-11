@@ -64,7 +64,7 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-019](ADR-019-developpement-automatisable-et-agents.md) | Automating the developer environment through shared operations and an optional local MCP adapter | Accepted | 2026-10-28 | 1.2 — 2026-10-29 |
 | [ADR-020](ADR-020-services-systeme.md) | System services (files, clipboard, shell, notifications…) through optional C++ portals with per-connection backends, granting handles rather than paths | Proposed | 2026-10-31 | 1.8 — 2026-11-09 |
 | [ADR-021](ADR-021-publication-de-l-environnement-developpeur.md) | Simplifying the publication of the developer environment: automate the release, keep pinned hashes, no dedicated server | Accepted (domain delivered; phase 1 to implement) | 2026-11-02 | 1.0 — 2026-11-02 |
-| [ADR-022](ADR-022-profils-et-niveaux-de-support.md) | Compiler profiles, GCC 13 S2 minimum and exit clause | Accepted | 2026-11-11 | 1.0 — 2026-11-11 |
+| [ADR-022](ADR-022-profils-et-niveaux-de-support.md) | Compiler profiles, GCC 13 S2 minimum, exit clause and LTS build tools | Accepted | 2026-11-11 | 1.1 — 2026-11-11 |
 
 Numbering follows the reading topics; milestones and individual file histories provide
 the chronology, which does not follow the numerical order.
