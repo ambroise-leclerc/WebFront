@@ -14,6 +14,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 
 # "644/687 Test #615: DeveloperBrowserIntegration-jasmine .....***Failed   18.97 sec", after the log's own prefix.
 # A repeated case (`--repeat until-fail:5`) has no "644/687" before its first attempts.
@@ -31,7 +32,13 @@ def failed_cases(log):
 
 
 def gh(*arguments):
-    result = subprocess.run(["gh", *arguments], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    # GitHub answers a read with a 502 now and then: three tries, ten seconds apart.
+    for attempt in range(3):
+        result = subprocess.run(["gh", *arguments], capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if result.returncode == 0 or "HTTP 50" not in result.stderr:
+            break
+        if attempt < 2:
+            time.sleep(10)
     if result.returncode != 0:
         raise RuntimeError(f"gh {' '.join(arguments)}: {result.stderr.strip()}")
     return result.stdout
