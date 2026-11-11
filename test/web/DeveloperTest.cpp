@@ -1,5 +1,6 @@
 #include "../../examples/life/Life.hpp"
 #include "../unit/TemporaryDirectory.hpp"
+#include "../driver/TestFrontend.hpp"
 #include <webfront/Commands.hpp>
 #include <webfront/WebFront.hpp>
 
@@ -258,7 +259,8 @@ int main(int argc, char** argv) {
         webfront::test::TemporaryDirectory project;
         std::filesystem::copy(argv[1], project.path() / "fixtures", std::filesystem::copy_options::recursive);
         const auto integrity = readIntegrity(project.path() / "fixtures/provision.json");
-        using App            = webfront::BasicDeveloperApp<WEBFRONT_TEST_FRONTEND, FixturesFS>;
+        // Hidden like the windows of the other suites; WEBFRONT_TEST_VISIBLE=1 shows them to follow a run.
+        using App            = webfront::BasicDeveloperApp<webfront::testdriver::QuietFrontend<WEBFRONT_TEST_FRONTEND>, FixturesFS>;
         // A part has no port of its own to keep: the parts run at the same time, each on the port the system gives it.
         webfront::WebFrontConfig config;
         if (mode.part != "all")

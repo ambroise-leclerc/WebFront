@@ -88,10 +88,12 @@ create a native window, real engine/controller and native event loop. Window vis
 lifecycle tests. Failed navigation, close, startup failures, watchdogs and cancellation remain real process tests.
 The two macOS executable/dylib registration orders remain separate images and processes, with hidden native windows.
 
-The developer integration keeps its visible interactive terminal and Life preview. The macOS agent-application case
-keeps one visible window because its contract asserts visibility and the absence of a Dock icon. The automated direct
-transport contract harness retains one native window on each desktop. Linux's real windows are confined to Xvfb. This
-budgets **two visible openings on Windows and three on macOS** in the standard configuration; engine-specific manual
+The six parts of the developer integration hide their window like the driver does: their terminal and Life preview
+are driven by the specs, not watched. The macOS agent-application case keeps one visible window because its contract
+asserts visibility and the absence of a Dock icon. The automated direct transport contract harness retains one native
+window on each desktop, and `webfront-agent` shows the window it automates in the `Automation*` cases: automation
+stays visible to the person at the machine. Linux's real windows are confined to Xvfb. Apart from the agent's windows,
+this budgets **one visible opening on Windows and two on macOS** in the standard configuration; engine-specific manual
 benchmarks and diagnostic runs are outside this budget. Restore all diagnostic windows with
 `WEBFRONT_TEST_VISIBLE=1`. A hidden WKWebView requires macOS 14+ (public inactive scheduling preference) and a WindowServer session; this is not a headless-engine substitute.
 
