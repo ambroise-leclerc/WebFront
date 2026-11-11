@@ -35,9 +35,10 @@ installed or required (see [Type checking](#type-checking-wf-check)).
 The generated `DeveloperReleaseData.hpp` selects the default environment and its integrity. Published
 versions stay immutable. Environment **0.6.3** adds automation API v1 and the shared human/agent execution
 lease; version 0.6.2 predates that API. Environment **0.6.4** adds the project setup operations of the automation
-runner (`init`, `create`, `install`, `restore`, `embed`). Environment **0.6.6** adds the `call` operation, the terminal and `wf help` notice of automation and the starter's `AGENTS.md`. The release pin selects 0.6.6, published under the dedicated
+runner (`init`, `create`, `install`, `restore`, `embed`). Environment **0.6.6** adds the `call` operation, the terminal and `wf help` notice of automation and the starter's `AGENTS.md`. It was published under the dedicated
 `developer-v0.6.6` tag and verified after deployment. The test bootstrap (`cmake/WebFrontBootstrap.cmake`) stays on the
-published 0.6.3 and advances in a separate pull request. Publication and pin changes follow
+published 0.6.3 and advances in a separate pull request. The sources advance to **0.9.1** (the page layout: full-window
+interface and floating terminal, #539), which is not published yet; the release pin stays on the published 0.9.0. Publication and pin changes follow
 [PUBLISHING](../js/developer/tools/PUBLISHING.md).
 
 ## Minimal C++ application
@@ -180,7 +181,8 @@ A project has one manifest, which every `wf` command reads:
   "entries": {"main": "ui/main.tsx"},
   "providers": {"LifeUI": {"entry": "main", "output": "generated/LifeUI.hpp"}},
   "test": {"specs": []},
-  "permissions": {}
+  "permissions": {},
+  "developer": {"terminalShortcut": "F9"}
 }
 ```
 
@@ -188,7 +190,8 @@ Only `format`, `name` and `version` are required. Validation is strict: an unkno
 newer than the environment reads, a path leaving the project, a non-HTTPS registry or origin and an
 unknown permission are errors printed in the terminal, never silently ignored. `scripts` and `permissions` are
 used by `wf run` and `wf exec` (below); `test.specs` lists the spec files of `wf test`. Permissions only frame
-the operations of the `context` API of scripts; they are not a sandbox.
+the operations of the `context` API of scripts; they are not a sandbox. `developer.terminalShortcut` (environment 0.9.1;
+an earlier environment refuses the key) is the shortcut of the [terminal window](#the-page-interface-and-floating-terminal).
 
 - `wf init [name]` writes `webfront.project.json` at the project root (or in the application's manifest directory, below),
   the manifest every `wf` command reads; it never replaces an existing one. When a lock already exists (a project installed before
@@ -364,6 +367,51 @@ wf check
   still loading its snapshot stops at its next read, and one compiling, which never returns to its event loop, is
   terminated with `worker.terminate()` after the two-second grace period. The exit code is 130 (Ctrl+C) or 124 (time
   limit), and the terminal stays usable.
+
+## The page: interface and floating terminal
+
+The page of `bootstrap("developer")` shows one thing at a time by default (environment 0.9.1, #539; the layout belongs to the
+environment's `mount`, not to the embedded bootstrap page):
+
+- **No interface yet** (first launch, or a project that never ran `wf dev` or `wf preview`): the terminal alone, under the
+  status line. No tab and no empty preview are shown, also when the first build of `wf dev` fails: its diagnostic is in
+  the terminal.
+- **An interface exists**: the page opens on it, over the whole window, with the terminal collapsed. "Exists" means a
+  published preview, `.webfront/developer/preview/index.html`. `wf dev` and `wf preview` publish it; `wf create` and
+  `wf build` (which publishes under `build/`) do not. A publication replaces the directory in one step, so an interrupted
+  `wf dev` or a failed build leaves the last successful interface, which the next launch shows as it was built: run `wf dev`
+  to rebuild it.
+- **The tab** with the WebFront swallow, against the right edge of the window over the interface, opens the terminal in a
+  **floating window**; the tab again, the window's close button or **F9** (in the terminal or in the interface) collapses it. Collapsing only
+  hides the terminal: the session, its scrollback, the line being typed and a running command (`wf dev`, `wf test`) are
+  kept, and the keys go back to the interface. The first preview of a session leaves the terminal open over the interface,
+  since it is in use. A notice of automation opens it, so that the notice is seen.
+- **Moving and resizing**: drag the title bar, or focus it and use the arrow keys (Shift with an arrow key resizes); the
+  bottom-right corner resizes with the pointer. The window stays inside the browser window, shrinks with it and returns to
+  its place when there is room again; xterm.js is fitted to it. Its place and size are kept per project in
+  `.webfront/developer/terminal-window.json`.
+- **The tab shows the session's state**, so that a collapsed terminal still tells what it does: three bars when nothing
+  runs, a ring while a command runs or `wf dev` builds, a full dot when `wf dev` has built the interface and watches its
+  inputs, an amber diamond when the last build failed. The tab's name and tooltip say it in words.
+- **The shortcut** is F9 by default. The developer page takes it before the interface does: the page of a preview
+  announces its window before its scripts run (one inline script, absent from `wf build` and from an embedded
+  application), so the page's listener is the first of that window and no listener of the application sees the shortcut.
+  A frame that the application embeds is covered once the page has seen it, after any listener its own document installs
+  while loading; so is a preview published by an environment before 0.9.1, until `wf dev` or `wf preview` rebuilds it.
+  An application that uses
+  F9 itself names another one in its manifest, and receives F9 as it does in its embedded form:
+  `"developer": {"terminalShortcut": "Ctrl+Shift+F9"}`. A shortcut is a function key, F1 to F12, optionally after `Ctrl`,
+  `Alt`, `Shift` or `Meta`, joined by `+`; anything else is a manifest error. The page reads it when it opens: relaunch
+  the application after changing it. The tab's tooltip names the shortcut in use.
+- While the terminal is collapsed, `wf dev` keeps reloading the full-window interface, and a failed build still shows its
+  diagnostic over it.
+
+The tab is a button (`aria-expanded`, 44 px target) and the window a non-modal dialog. The interface stays in the preview
+frame, as before: the layout adds nothing to the application's documents except the shortcut's listener and the preview page's announcement, installed in the interface
+and in the same-origin frames it embeds (not in a frame of another origin, nor one inside a shadow tree: click the interface
+or the tab first). This is a layout, not a
+sandbox (see [limitations](#dependencies-storage-and-limitations)). A page that mounts the terminal itself (`runtime.mount`) with a preview frame gets
+the same layout; `workspace: false` keeps the page as it is.
 
 ## The terminal and the application's commands
 
@@ -705,7 +753,7 @@ WKWebView and all 14 Linux CEF/Xvfb cases with both GCC and Clang in
 The packed 0.3.0 version passes WKWebView and all 14 GCC CEF/Xvfb cases in
 [run 39490581423](https://github.com/ambroise-leclerc/WebFront/actions/runs/39490581423).
 For Linux, select CEF and Xvfb instead; the same developer tests use the selected test frontend.
-`DeveloperBrowserIntegration` (the application part: starter, build, `wf dev`, Life preview, embedding) and `DeveloperBrowserIntegration-scripts`, `-typescript`, `-jasmine` and `-terminal` exercise, in parallel and each from its own project, the real WASM compiler, local registry, `wf test` under the locked jasmine-core (pass, fail, pending, asynchronous failures, pattern, time limit, Ctrl+C, non-interactive report to C++), build without navigation, incremental dev reload/error/recovery/Ctrl+C, the Life preview, C++ generation/animation and repeatable header generation. Its CTest fixtures then build that
+`DeveloperBrowserIntegration` (the application part: starter, build, `wf dev`, Life preview, embedding) and `DeveloperBrowserIntegration-scripts`, `-typescript`, `-jasmine`, `-terminal` and `-workspace` (the page layout: first launch, launch on an existing interface, floating terminal and its session) exercise, in parallel and each from its own project, the real WASM compiler, local registry, `wf test` under the locked jasmine-core (pass, fail, pending, asynchronous failures, pattern, time limit, Ctrl+C, non-interactive report to C++), build without navigation, incremental dev reload/error/recovery/Ctrl+C, the Life preview, C++ generation/animation and repeatable header generation. Its CTest fixtures then build that
 **browser-generated** header and run `LifeEmbeddedIntegration` from an empty working directory
 with no developer callbacks.
 Deadline and grace-period regressions advance a scoped clock instead of sleeping for seconds; Worker startup,

@@ -108,6 +108,16 @@ export function previewDiagnostics(frame, text) {
     document.body.append(overlay);
 }
 
+/**
+ * The one addition to the page of a preview, absent from a build and from an embedded application: before any script of
+ * the application runs, the page tells the frame that shows it that it has a new window, so that the developer page
+ * takes the terminal's shortcut before the application's listeners (workspace.mjs). It does nothing outside that frame.
+ */
+export const previewHook = "<script>try{frameElement?.dispatchEvent(new CustomEvent('webfront-preview-window'))}catch{}</script>";
+
+/** The page of a published preview. */
+export const previewPage = files => applicationPage(files, previewHook);
+
 let revision = 0;
 export function showPreview(frame, directory = 'preview') {
     if (!frame) throw new Error('No preview frame is available');
@@ -195,9 +205,12 @@ export async function dev(args, {bridge, signal, preview: frame, write = () => {
     let diagnostic = '';
     const loaded = () => previewDiagnostics(frame, diagnostic);
     frame?.addEventListener('load', loaded);
+    // The page shows where the loop is (workspace.mjs): building, ready, failed, then stopped.
+    const report = state => frame?.dispatchEvent?.(new CustomEvent('webfront-dev-status', {detail: {state}}));
     try {
         for (;;) {
             active.throwIfAborted();
+            report('building');
             const configReads = new Map(), budget = {bytes: 0};
             try {
                 await withBuild(async () => {
@@ -211,7 +224,7 @@ export async function dev(args, {bridge, signal, preview: frame, write = () => {
                     const entry = resolveEntry(project.manifest, args[0], 'wf dev <entry.tsx>');
                     if (!session || session.closed) session = compilerSession(bridge, active);
                     const files = await session.rebuild({entry, lock: project.lock ?? {format: 1, roots: {}, packages: {}}});
-                    files.set('index.html', applicationPage(files));
+                    files.set('index.html', previewPage(files));
                     await publish(bridge, '.webfront/developer/preview', files, {signal: active});
                     // Once commit succeeds, display its publication even if Ctrl+C arrived while awaiting it.
                     diagnostic = '';
@@ -219,12 +232,14 @@ export async function dev(args, {bridge, signal, preview: frame, write = () => {
                     showPreview(frame);
                     // A successful build can drop dependencies that are no longer imported.
                     observed = new Map(session.observed);
+                    report('ready');
                     write(syncNotice(project) + 'Preview ready. Watching inputs (Ctrl+C to stop).\n');
                 });
             } catch (error) {
                 if (active.aborted) throw stopped();
                 if (error?.code === 'busy') { await waitForPoll(active); continue; }
                 diagnostic = diagnosticsText(error);
+                report('failed');
                 write(diagnostic + '\n');
                 previewDiagnostics(frame, diagnostic);
                 if (session?.observed.size) observed = new Map(session.observed);
@@ -238,7 +253,7 @@ export async function dev(args, {bridge, signal, preview: frame, write = () => {
                     if (active.aborted) throw stopped();
                     // A temporarily unreadable file or a bound violation cannot publish or reload anything.
                     const text = diagnosticsText(error);
-                    if (diagnostic !== text) { diagnostic = text; write(text + '\n'); previewDiagnostics(frame, text); }
+                    if (diagnostic !== text) { diagnostic = text; report('failed'); write(text + '\n'); previewDiagnostics(frame, text); }
                 }
             }
         }
@@ -254,5 +269,6 @@ export async function dev(args, {bridge, signal, preview: frame, write = () => {
         bridge.socket?.removeEventListener('close', disconnected);
         frame?.removeEventListener('load', loaded);
         previewDiagnostics(frame, '');
+        report('stopped');
     }
 }

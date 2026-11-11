@@ -22,6 +22,7 @@
   "js/developer/environment/development.mjs",
   "js/developer/environment/testing.mjs",
   "js/developer/environment/terminal.mjs",
+  "js/developer/environment/workspace.mjs",
   "js/developer/environment/tarball.mjs",
   "js/developer/environment/commands.mjs",
   "js/developer/environment/compiler.mjs",

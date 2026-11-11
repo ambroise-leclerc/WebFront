@@ -62,8 +62,9 @@ ${declarations.join('\n')}
 `;
 }
 
-export function applicationPage(files) {
+/** The page of an application built into `files`; `head` is markup put before its stylesheet and its scripts. */
+export function applicationPage(files, head = '') {
     const encode = new TextEncoder();
     const stylesheet = files.has('app.css') ? '<link rel="stylesheet" href="./app.css">' : '';
-    return encode.encode(`<!doctype html>\n<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WebFront application</title>${stylesheet}<div id="root"></div><script src="/WebFront.js"></script><script type="module" src="./app.js"></script></html>\n`);
+    return encode.encode(`<!doctype html>\n<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WebFront application</title>${head}${stylesheet}<div id="root"></div><script src="/WebFront.js"></script><script type="module" src="./app.js"></script></html>\n`);
 }

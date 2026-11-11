@@ -1,6 +1,7 @@
 // Specs of wf dev's host side, which supplement the real-WASM browser regression in test/web/developer-specs.mjs.
 import {bundleContext} from '../../../js/developer/environment/bundler.mjs';
-import {observedRead, inputsChanged, compilerSession, waitForPoll, buildEntries, diagnosticsText, dev} from '../../../js/developer/environment/development.mjs';
+import {observedRead, inputsChanged, compilerSession, waitForPoll, buildEntries, diagnosticsText, dev, previewPage, previewHook} from '../../../js/developer/environment/development.mjs';
+import {applicationPage} from '../../../js/developer/environment/embed.mjs';
 import {memoryBridge} from '../memory-bridge.mjs';
 import {rejects, throws, esbuild} from '../support.mjs';
 
@@ -88,6 +89,17 @@ describe('wf dev', () => {
             callback({data: {type: 'error', error: 'syntax', diagnostics: [{text: 'bad', location: {file: 'project:two.ts', line: 4, column: 2}}]}});
             await rejects(second, error => diagnosticsText(error).startsWith('two.ts:4:3: bad'));
         } finally { session.close(); }
+    });
+
+    it('only the page of a preview announces its window, before the application\'s scripts', () => {
+        const decode = bytes => new TextDecoder().decode(bytes);
+        const files = new Map([['app.js', encode('')], ['app.css', encode('')]]);
+        const page = decode(previewPage(files));
+        expect(page.indexOf(previewHook)).toBeGreaterThan(0);
+        expect(page.indexOf(previewHook)).toBeLessThan(page.indexOf('<script src="/WebFront.js">'));
+        expect(page.indexOf(previewHook)).toBeLessThan(page.indexOf('<link rel="stylesheet"'));
+        expect(page.replace(previewHook, '')).toBe(decode(applicationPage(files)));
+        expect(decode(applicationPage(files))).not.toContain('webfront-preview-window');
     });
 
     it('build selects one explicit entry or every declared entry', () => {

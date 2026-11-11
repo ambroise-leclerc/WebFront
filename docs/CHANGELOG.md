@@ -10,6 +10,10 @@ these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
+### Changed
+
+- Open the developer page on the interface, over the whole window, once the project has a preview; the terminal moves to a floating, movable window behind a tab on the right edge that shows the session's state, and keeps its session when collapsed. Its shortcut is F9, or the manifest's new optional `developer.terminalShortcut`. Environment sources 0.9.1, not published yet (#539, `docs/DEVELOPER_ENVIRONMENT.md`).
+
 ### Fixed
 
 - Build with `-DWEBFRONT_EMBED_CEF=ON` on Linux aarch64 instead of failing on `-m64`, and cross-compile CEF: WebFront pins CEF 156.0.28, whose package selects the archive and `PROJECT_ARCH` from the target (#523).

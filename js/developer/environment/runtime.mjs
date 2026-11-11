@@ -12,11 +12,12 @@ import {install, initProject} from './installer.mjs';
 import {restore, describeRegistry} from './restore.mjs';
 import {loadProject, syncNotice, resolveEntry, embedTarget, lockPath, packageRoot, noManifest} from './project.mjs';
 import {parseRunOptions, scriptCommand, execTarget, scriptHost, runWorker, runResult, runDeadline, secondsLeft} from './scripts.mjs';
-import {build, dev, showPreview} from './development.mjs';
+import {build, dev, showPreview, previewPage} from './development.mjs';
 import {parseTestOptions, specFiles, jasmineCore, runnerFiles, runInFrame, reportResult, fitResult, stoppedRun, abortable, testDirectory} from './testing.mjs';
 import {generateProvider, applicationPage} from './embed.mjs';
 import {typescriptPackage, parseCheckOptions, checkHost} from './typecheck.mjs';
 import {pinnedStarters} from './bootstrap.mjs';
+import {createWorkspace, isManaged} from './workspace.mjs';
 import {connectAutomation as connectAgent, clipText, automationHelp, onAutomationNotice} from './automation.mjs';
 
 const encoder = new TextEncoder();
@@ -125,6 +126,7 @@ async function preview(args, {bridge, signal, preview: frame}) {
     const project = await loadProject(bridge);
     const entry = resolveEntry(project.manifest, args[0], 'wf preview <entry.tsx>');
     const result = await compile(bridge, entry, signal);
+    result.files.set('index.html', previewPage(result.files));
     await publish(bridge, '.webfront/developer/preview', result.files, {signal});
     showPreview(frame);
     return syncNotice(project) + 'Preview ready.';
@@ -539,8 +541,11 @@ export async function complete(line, {bridge, cppCommands = new Map()}) {
  * Mounts the terminal in `element`. Each page has its own session: its history comes from the project, its C++
  * commands run in this browser's session. `onExit(code)` ends the session after exit (by default, closes the window).
  * `fitToElement: false` keeps the terminal's size as set by terminal.resize() instead of following the element's.
+ * With a `preview` frame, the first terminal mounted lays the page out (workspace.mjs): the terminal alone while the
+ * project has no interface, then the interface over the whole window and the terminal in a floating window that an icon
+ * opens and collapses. `workspace: false` leaves the page as it is.
  */
-export async function mount({bridge, config, terminal: element, preview, onExit, fitToElement = true}) {
+export async function mount({bridge, config, terminal: element, preview, onExit, fitToElement = true, workspace: layout = true}) {
     setManifestDirectory(config?.manifestDirectory);
     const link = document.createElement('link');
     link.rel = 'stylesheet';
@@ -555,6 +560,7 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
     terminal.unicode.activeVersion = unicodeProvider.version;
     const fit = new FitAddon();
     terminal.loadAddon(fit);
+    const workspace = layout && preview && !isManaged(preview) ? await createWorkspace({bridge, element, frame: preview}) : null;
     terminal.open(element);
     fit.fit();
     const write = text => terminal.write(text);
@@ -571,18 +577,29 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
     const context = {bridge, config, preview, cppCommands, onExit};
     const editor = new LineEditor({write, columns: () => terminal.cols, rows: () => terminal.rows, prompt: '> ', history,
         remember: line => rememberLine(bridge, line),
-        run: (line, signal) => runLine(line, {...context, editor, signal, write: text => editor.write(text)}),
+        run: async (line, signal) => {
+            workspace?.command(true);  // the tab shows that a command runs, also while the terminal is collapsed
+            try { return await runLine(line, {...context, editor, signal, write: text => editor.write(text)}); }
+            finally { workspace?.command(false); }
+        },
         complete: line => complete(line, context)});
     terminal.onResize(() => editor.resized());
-    if (fitToElement) new ResizeObserver(() => fit.fit()).observe(element);
+    // An element without a size is not laid out: fitting to it would shrink the terminal and reflow its lines.
+    const fitTerminal = () => { if (element.clientWidth && element.clientHeight) fit.fit(); };
+    if (fitToElement) new ResizeObserver(fitTerminal).observe(element);
     terminal.onData(data => editor.handle(data));
     // Automation must be visible to the person using the terminal: say so once it is connected, grants and attach path included.
     onAutomationNotice(text => {
         write(`\r\x1b[K\x1b[33m${text}\x1b[0m\r\n`);
         if (!editor.busy) editor.showPrompt();
+        workspace?.open({focus: false});  // a collapsed terminal would hide the notice
     });
     editor.showPrompt();
     for (const data of early) editor.handle(data);
-    terminal.focus();
-    return {terminal, editor};
+    if (workspace) {
+        // The interface the project already has fills the window; the keys go to it while the terminal is collapsed.
+        if (workspace.interfaceExists) showPreview(preview);
+        workspace.attach({focus: () => terminal.focus(), fit: fitToElement ? fitTerminal : undefined});
+    } else terminal.focus();
+    return {terminal, editor, workspace};
 }
