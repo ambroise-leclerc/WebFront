@@ -3,8 +3,7 @@
 // once in its window and never moves in the document afterwards: collapsing only hides it, so the session, a running
 // command, the line being typed and the scrollback are kept. The interface stays in the preview frame.
 import {call, readProject, publish} from './io.mjs';
-import {loadProject} from './project.mjs';
-import {parseShortcut, defaultTerminalShortcut} from './manifest.mjs';
+import {parseShortcut, defaultTerminalShortcut, parseManifest, manifestPath} from './manifest.mjs';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -85,10 +84,11 @@ export const shortcutText = shortcut => [shortcut.ctrlKey && 'Ctrl', shortcut.al
 
 /**
  * The project's shortcut, `developer.terminalShortcut` of its manifest, read when the page opens. Without a manifest or
- * that key, and with a manifest that is not valid (the commands report it), the default one.
+ * that key, and with a manifest that is not valid (the commands report it), the default one. Only the manifest counts:
+ * a lock that cannot be read must not give F9 back to the page.
  */
 export async function readShortcut(bridge) {
-    try { return parseShortcut((await loadProject(bridge)).manifest?.developer?.terminalShortcut) ?? defaultShortcut; }
+    try { return parseShortcut(parseManifest(await readProject(bridge, manifestPath)).developer?.terminalShortcut) ?? defaultShortcut; }
     catch { return defaultShortcut; }
 }
 

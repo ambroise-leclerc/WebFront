@@ -131,6 +131,10 @@ describe('The developer page layout', () => {
             expect(isToggleKey({key: 'F9', ctrlKey: true}, shortcut)).toBeFalse();
             expect(isToggleKey({key: 'F9', ctrlKey: true, shiftKey: true, altKey: true}, shortcut)).toBeFalse();
             expect(isToggleKey({key: 'F9', ctrlKey: true, shiftKey: true}, shortcut)).toBeTrue();
+            // The manifest alone decides: a lock that is not valid, or not JSON, does not give F9 back to the page.
+            for (const lock of ['{"format":99}', '{'])
+                expect(shortcutText(await readShortcut(memoryBridge(new Map([['webfront.project.json', manifest({developer: {terminalShortcut: 'Ctrl+Shift+F9'}})],
+                    ['webfront-packages.lock.json', encode(lock)]])).bridge))).toBe('Ctrl+Shift+F9');
             // No manifest, no key, or a manifest that is not valid: F9.
             for (const files of [[], [['webfront.project.json', manifest({})]], [['webfront.project.json', manifest({developer: {terminalShortcut: 'Ctrl+C'}})]]])
                 expect(shortcutText(await readShortcut(memoryBridge(new Map(files)).bridge))).toBe('F9');
