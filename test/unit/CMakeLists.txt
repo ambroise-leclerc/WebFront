@@ -249,6 +249,9 @@ add_test(NAME RepositoryLayoutRejectsVendoredSources
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckRepositoryLayoutNegative.cmake)
 add_test(NAME NewcomerDocsMatchExamples
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckNewcomerDocs.cmake)
+add_test(NAME ChangelogFormat
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckChangelogFormat.cmake)
+set_tests_properties(ChangelogFormat PROPERTIES TIMEOUT 30 LABELS fast)
 add_test(NAME ModuleScanWarning
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/module-scan
         "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}" -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckModuleScan.cmake)
