@@ -145,6 +145,7 @@ jobs:
           sccache --version
       # ENABLE_CACHE controls automatic ccache discovery; the explicit sccache launcher stays enabled.
       # The heavy unit tests are compiled four to a file (docs/BUILD_TIME_STUDY.md); the portability and sanitizer jobs keep one object per test file.
+      # The unit tests run as four Catch2 shards instead of one process per scenario (docs/TEST_TIERS.md).
       - name: Configure
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
@@ -152,6 +153,7 @@ jobs:
           -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
           -DWEBFRONT_TEST_UNITY_BATCH=4
+          -DWEBFRONT_TEST_UNIT_SHARDS=4
           -DWEBFRONT_TEST_REPRODUCIBILITY=${{ env.WEBFRONT_REPRODUCIBILITY }}
           ${{ env.FULL_TIER == 'true' && '' || '-DWEBFRONT_MSVC_ANALYZE=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF' }}
           ${{ matrix.options }}
@@ -187,18 +189,21 @@ jobs:
       # The fast tier (docs/TEST_TIERS.md): unit tests only, so a plain regression is reported before the browser suite starts.
       - name: Fast tests
         shell: bash
-        run: ctest --test-dir build -C ${{ matrix.build_type }} -L fast --parallel 4 --output-on-failure --no-tests=error
+        run: >-
+          ctest --test-dir build -C ${{ matrix.build_type }} -L fast --parallel 4 --output-on-failure --no-tests=error
+          --output-junit "${{ github.workspace }}/build/fast-results.xml"
       - name: Capture CTest dependency graph
         shell: bash
         run: ctest --test-dir build --show-only=json-v1 > build/ctest-graph.json
       - name: Test C++ and native browser integration
+        # The fast tier has just run: a single pass does not run it again; the three passes of the complete tier do.
         # Only Linux trusted fixtures need the sandbox opt-out on hosted runners.
         env: ${{ matrix.test_env }}
         run: >-
           python3 test/tools/MeasureCommand.py --output build/suite-resources.json --
           cmake -DBUILD_DIR=build -DCONFIG=${{ matrix.build_type }}
           -DREPEAT=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && '3' || '1' }}
-          -DLABEL_EXCLUDE=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && 'none' || 'portability' }}
+          '-DLABEL_EXCLUDE=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && 'none' || '^(portability|fast)$' }}'
           -P test/cmake/RunTestSuite.cmake
       - name: Repeat WebKitGTK pointer tests with suite display sharing enabled
         if: runner.os == 'Linux'
@@ -281,6 +286,8 @@ jobs:
           name: test-log-${{ runner.os }}
           path: |
             build/test-results-*.xml
+            build/fast-results.xml
+            build/unit-results-*.xml
             build/ctest-graph.json
             build/embedded-cache-probe.txt
             build/test/unit/consumer-build/.ninja_log

@@ -16,8 +16,17 @@ ctest --test-dir build -L portability                      # the portability tie
 cmake -DBUILD_DIR=build -DLABEL_EXCLUDE=portability -P test/cmake/RunTestSuite.cmake
 ```
 
-`RunTestSuite.cmake` runs every test unless `LABEL_EXCLUDE` names a label; the CI standard tier passes
-`portability`. A local run before a change is declared complete (see `AGENTS.md`) runs everything.
+`RunTestSuite.cmake` runs every test unless `LABEL_EXCLUDE` gives a regular expression of labels to leave out. The CI
+standard tier passes `^(portability|fast)$`, because its fast step has just run the fast tier. A local run before a
+change is declared complete (see `AGENTS.md`) runs everything.
+
+By default every Catch2 scenario is a CTest case of its own, which `ctest -R` selects by name, and a process of its
+own: more than 500 of them. `-DWEBFRONT_TEST_UNIT_SHARDS=4`, which the desktop CI jobs pass, registers four cases
+`UnitTests-0` to `UnitTests-3` instead, each a Catch2 shard that runs a quarter of the scenarios in one process and
+writes the result of each to `unit-results-<shard>.xml` in the build directory. The shards run the scenarios in their
+declaration order, which is what makes four processes started separately split them without overlap. Scenarios then
+share a process: `test/unit/ScenarioIsolation.cpp` restores the process-wide state a scenario may change. Run directly,
+`tests` draws a random order and prints its seed, which `tests --rng-seed <seed>` replays.
 
 ## Following a browser test live
 
@@ -91,8 +100,8 @@ A pull request into `master` must pass all of: the desktop jobs, `portability` (
 leg), `gcc13-arm64`, `sanitizers` and `web-integration`. GitHub only enforces this once the checks are marked required in the branch
 protection rules of `master`; the workflow cannot set that itself.
 
-The fast tier does not replace the others: the unit tests are also part of the standard run, so a pull request still
-reports one complete result.
+The fast tier runs once on a pull request: the step that follows it runs everything else, and a failed fast step
+fails the job before the browser suite starts. The three passes of the complete tier run the fast tier again each time.
 
 The shared frontend lifecycle runner has a 45-second watchdog which reports the last observed stage and exits with a failure
 status when the interface thread cannot be unwound. Forced process exit does not itself terminate browser subprocesses; they
