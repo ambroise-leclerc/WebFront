@@ -55,10 +55,10 @@ add_dependencies(tests host_probe)
 target_compile_definitions(tests PRIVATE WEBFRONT_HOST_PROBE="$<TARGET_FILE:host_probe>")
 
 # The heavy units instantiate a full application, and compile four to a file in about half the time of four apart
-# (docs/BUILD_TIME_STUDY.md). The desktop CI jobs set the batch size; the default keeps one object per test file, which
-# keeps a rebuild after one edit small. The light units stay apart: grouping every unit does not compile, as their
+# (docs/BUILD_TIME_STUDY.md): that is the default. 0 keeps one object per test file, which the portability and
+# sanitizer jobs ask for. The light units stay apart: grouping every unit does not compile, as their
 # helpers share names.
-set(WEBFRONT_TEST_UNITY_BATCH 0 CACHE STRING "Compile the heavy unit tests this many to a file; 0 compiles each file alone")
+set(WEBFRONT_TEST_UNITY_BATCH 4 CACHE STRING "Compile the heavy unit tests this many to a file; 0 compiles each file alone")
 if(WEBFRONT_TEST_UNITY_BATCH GREATER 0)
   set(_heavy WebFrontTests ReadBindingTests ViewAssociationTests BroadcastTests CommandsTests ApplicationTaskTests DeferredCallTests StdnetShutdownTests FrontendContractTests JsFunctionSenderTests
       AutomationTests ReactStoreTests DeveloperTests CEFMacrosTests JasmineConsumerTests WfDriverTests)

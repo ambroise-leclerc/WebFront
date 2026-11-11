@@ -45,20 +45,29 @@ spec expected the refusal. A wait is labelled `timeout (expected)` only for a ti
 and `cancelled (expected)` only when the spec pressed Ctrl+C; any other time limit or cancellation appears as `timeout`
 or `cancelled`. This trace comes from the specs (`test/web/developer-specs.mjs`), not from the published environment.
 
+## A quick local build by default
+
+The defaults of the test options are those of the quickest useful build, and the project has no CMake preset to choose
+between: `-DWEBFRONT_ENABLE_TESTING=ON` alone compiles the heavy unit tests four to a file
+(`WEBFRONT_TEST_UNITY_BATCH=4`), leaves the MSVC code analysis out (`WEBFRONT_MSVC_ANALYZE=OFF`) and does not register
+the reproducibility proofs (`WEBFRONT_TEST_REPRODUCIBILITY=OFF`). The CI passes every one of these options explicitly,
+so a default can change without changing what a job checks. While working, `ctest -L fast` then the cases the change
+touches (`ctest -R <name>`) are enough; the complete suite runs before the work is declared complete.
+
 ## What the desktop jobs compile
 
 A pull request into `develop` builds the library, the tests and the test applications, with the MSVC code analysis (`/analyze`)
 off and without the examples (`WEBFRONT_MSVC_ANALYZE=OFF`, `WEBFRONT_BUILD_EXAMPLES=OFF`): about 22 % and 190 s of compiler
 time on Windows (docs/BUILD_TIME_STUDY.md). The advanced checks below turn both on again, so a warning that only the analysis
 reports, or an example that no longer compiles, is found by the weekly run, by the pull request into `master` or by a manual
-dispatch with `repeat_desktop_tests`, not by a pull request into `develop`. A local build has both by default.
+dispatch with `repeat_desktop_tests`, not by a pull request into `develop`.
 
 The proofs that the self-built environment is reproducible and equal to the checked-in bundles (`SelfBuildRepeat`,
 `SelfBuildReproducible`, `SelfBuildRefresh`, `SelfBuildRefreshMatchesSources`) build it twice more, about 45 s on a hosted
 runner. A pull request into `develop` runs them only when it changes one of their inputs (`js/`, `examples/life/ui/`,
 `test/developer/`, `test/web/registry/` and `test/web/CMakeLists.txt`, `include/webfront/system/`, the CMake scripts that
 prepare, compare and assemble the self-build project, `LICENSE` and the workflow itself); a push to `develop` and the advanced
-checks always run them. `-DWEBFRONT_TEST_REPRODUCIBILITY=OFF` leaves them out locally; the default is ON.
+checks always run them. They are off by default: `-DWEBFRONT_TEST_REPRODUCIBILITY=ON` adds them to a local build.
 
 ## Advanced checks
 

@@ -4,8 +4,9 @@
 
 function(set_project_warnings project_name)
   option(WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
-  # MSVC /analyze roughly doubles the front-end work of every unit (#435): OFF is for measuring that cost, not for CI.
-  option(WEBFRONT_MSVC_ANALYZE "Run the MSVC code analysis while compiling" ON)
+  # MSVC /analyze roughly doubles the front-end work of every unit (#435): a local build leaves it out, and the
+  # advanced CI tier turns it on (docs/TEST_TIERS.md).
+  option(WEBFRONT_MSVC_ANALYZE "Run the MSVC code analysis while compiling" OFF)
 
   set(MSVC_WARNINGS
       /W4 # Baseline reasonable warnings

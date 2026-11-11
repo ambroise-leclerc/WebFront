@@ -15,7 +15,7 @@ runs; Linux runs are steadier.
 | Change | Effect |
 |---|---|
 | `--parallel 4` on the desktop builds | Linux `tests` 280 -> 170 s cold, `all` 520 -> 255-375 s; Windows `tests` 820 -> 640 s, `all` 1240 -> 1080 s. Peak memory stays under 1 GB. |
-| The 13 heavy unit tests compile four to a file (`WEBFRONT_TEST_UNITY_BATCH=4` on the desktop jobs) | Windows cold 640 -> 355 s, `WebFront.hpp` changed 298 -> 111 s; Linux 202 -> 143 s and 88 -> 45 s. Less memory. |
+| The 13 heavy unit tests compile four to a file (`WEBFRONT_TEST_UNITY_BATCH=4`, the default) | Windows cold 640 -> 355 s, `WebFront.hpp` changed 298 -> 111 s; Linux 202 -> 143 s and 88 -> 45 s. Less memory. |
 | MSVC `/analyze` and the examples only in the master and weekly tier | `/analyze` is about 22 % of a Windows build (640 -> 497 s cold); the examples about 190 s of compiler time. |
 | The reproducibility builds only when a pull request changes their inputs | About 45 s of worker time per job (`SelfBuildRepeat`, `SelfBuildRefresh`). |
 | `JourneyEmbeddedBuild` and `LifeEmbeddedBuild` do not hold `webfront_port_9002` | They only compile; the lock had serialised 175 s (Linux) and 203 s (Windows) of tests. |

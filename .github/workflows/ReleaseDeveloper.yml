@@ -104,7 +104,7 @@ jobs:
           WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'
         run: |
           # The driver was configured before the version was set: CTest read the former version of distribution.json then.
-          cmake -S . -B build-driver
+          cmake -S . -B build-driver -DWEBFRONT_TEST_REPRODUCIBILITY=ON
           cmake --build build-driver --target webtest developer_integration webfront-wf --parallel 2
           xvfb-run -a ctest --test-dir build-driver -L web-integration --output-on-failure --no-tests=error --parallel 2
       - name: Collect the release files
