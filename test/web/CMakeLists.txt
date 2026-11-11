@@ -645,8 +645,8 @@ if(_browser_tests_available)
         webfront_add_self_build_test(DeveloperSpecs 0 "test|--timeout|240" OUTPUT "PASSED: [0-9]+ specs" TIMEOUT 300
             REQUIRES SelfBuildInstalled)
         # The reproducibility proofs build the environment again, the second time from a refreshed bootstrap: about 45 s on a
-        # hosted runner. A pull request that changes none of their inputs may leave them to the master tier (#435).
-        option(WEBFRONT_TEST_REPRODUCIBILITY "Build the self-built environment again, to prove it reproducible and equal to the checked-in bundles" ON)
+        # hosted runner. A pull request that changes none of their inputs may leave them to the master tier (#435), and a
+        # local build leaves them out unless it asks for them.
         if(WEBFRONT_TEST_REPRODUCIBILITY)
             webfront_add_self_build_test(SelfBuildRepeat 0 "run|build|build-distribution-repeat" OUTPUT "Script build completed"
                 REQUIRES SelfBuilt PROVIDES SelfBuiltTwice)

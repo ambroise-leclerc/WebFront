@@ -145,6 +145,7 @@ jobs:
           sccache --version
       # ENABLE_CACHE controls automatic ccache discovery; the explicit sccache launcher stays enabled.
       # The heavy unit tests are compiled four to a file (docs/BUILD_TIME_STUDY.md); the portability and sanitizer jobs keep one object per test file.
+      # No job relies on a default of the test options: the defaults are those of a quick local build (docs/TEST_TIERS.md).
       # The unit tests run as four Catch2 shards instead of one process per scenario (docs/TEST_TIERS.md).
       - name: Configure
         run: >-
@@ -155,7 +156,7 @@ jobs:
           -DWEBFRONT_TEST_UNITY_BATCH=4
           -DWEBFRONT_TEST_UNIT_SHARDS=4
           -DWEBFRONT_TEST_REPRODUCIBILITY=${{ env.WEBFRONT_REPRODUCIBILITY }}
-          ${{ env.FULL_TIER == 'true' && '' || '-DWEBFRONT_MSVC_ANALYZE=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF' }}
+          ${{ env.FULL_TIER == 'true' && '-DWEBFRONT_MSVC_ANALYZE=ON -DWEBFRONT_BUILD_EXAMPLES=ON' || '-DWEBFRONT_MSVC_ANALYZE=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF' }}
           ${{ matrix.options }}
       - name: Build
         run: python3 test/tools/MeasureCommand.py --output build/build-resources.json -- cmake --build build --config ${{ matrix.build_type }} --parallel 4
@@ -370,7 +371,7 @@ jobs:
       # No compiler cache: a new user compiles everything.
       - name: Configure
         shell: bash
-        run: cmake -S . -B build -G "${{ matrix.generator }}" -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_ENABLE_TESTING=ON -DENABLE_CACHE=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+        run: cmake -S . -B build -G "${{ matrix.generator }}" -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_ENABLE_TESTING=ON -DENABLE_CACHE=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DWEBFRONT_TEST_UNITY_BATCH=0 -DWEBFRONT_MSVC_ANALYZE=ON -DWEBFRONT_TEST_REPRODUCIBILITY=ON
       - name: Portability tests
         shell: bash
         run: ctest --test-dir build -C Release -L portability --output-on-failure --no-tests=error
@@ -489,6 +490,7 @@ jobs:
           cmake -S . -B build-sanitizers -DCMAKE_BUILD_TYPE=RelWithDebInfo
           -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF -DWEBFRONT_ENABLE_TESTING=ON -DENABLE_CACHE=OFF
           -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+          -DWEBFRONT_TEST_UNITY_BATCH=0 -DWEBFRONT_TEST_REPRODUCIBILITY=ON
           ${{ matrix.sanitizer == 'thread' && '-DCMAKE_CXX_FLAGS=-stdlib=libc++ -DWEBFRONT_ENABLE_SANITIZER_THREAD=ON' || '-DWEBFRONT_ENABLE_SANITIZER_ADDRESS=ON -DWEBFRONT_ENABLE_SANITIZER_UNDEFINED_BEHAVIOR=ON -DWEBFRONT_ENABLE_FUZZING=ON -DWEBFRONT_GZIP_DIFFERENTIAL=ON' }}
       - name: Build
         run: cmake --build build-sanitizers --parallel 2
@@ -571,7 +573,7 @@ jobs:
 
       # The registry packages and the pinned bootstrap environment are downloaded and verified here; wf then builds the rest.
       - name: Configure CEF integration build
-        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DWEBFRONT_BUILD_EXAMPLES=OFF -DWEBFRONT_ENABLE_TESTING=ON -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DWEBFRONT_BUILD_EXAMPLES=OFF -DWEBFRONT_ENABLE_TESTING=ON -DWEBFRONT_TEST_REPRODUCIBILITY=ON -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
 
       - name: Build browser test
         run: cmake --build ${{github.workspace}}/build-cef --target webtest developer_integration webfront-wf --parallel 2

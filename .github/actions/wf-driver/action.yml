@@ -37,7 +37,7 @@ runs:
       shell: bash
       run: |
         cmake -S . -B build-driver -G Ninja -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_ENABLE_TESTING=ON \
-          -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK \
+          -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK -DWEBFRONT_TEST_REPRODUCIBILITY=ON \
           -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
         cmake --build build-driver --target webfront-wf --parallel 2
     - name: Install the wf command
