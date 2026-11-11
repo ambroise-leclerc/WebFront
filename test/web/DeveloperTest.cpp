@@ -388,9 +388,10 @@ iframe{display:block;border:0;width:100%;height:calc(100% - 28px)}</style><body>
 const urls = )HTML"
          << urls << R"HTML(;
 const names = ['application', 'scripts', 'TypeScript', 'Jasmine', 'terminal', 'workspace'];
-let cursor = 0, completed = 0;
+let cursor = 0, completed = 0, booting = null;
 const frames = new Map();
 function launch(index) {
+    booting = index;
     const pane = document.createElement('section'), title = document.createElement('header'), frame = document.createElement('iframe');
     title.textContent = `Developer integration: ${names[index]}`;
     // Give the embedded page the focus a standalone native page had, before its asynchronous bootstrap mounts the preview.
@@ -400,7 +401,7 @@ function launch(index) {
 }
 function advance() {
     // All running pages remain displayed. Workspace's layout/rendering checks get the entire window afterwards.
-    while (cursor < 5 && frames.size < 4) launch(cursor++);
+    if (cursor < 5 && frames.size < 4 && booting === null) launch(cursor++);
     if (completed === 5 && !frames.size) {
         // Keep the same native view, but give workspace its original top-level focus chain on WebKit.
         const workspace = new URL(urls[5]);
@@ -410,7 +411,13 @@ function advance() {
 }
 addEventListener('message', event => {
     for (const [index, {pane, frame}] of frames) {
-        if (event.source !== frame.contentWindow || event.origin !== new URL(urls[index]).origin || event.data !== 'webfront-developer-finished') continue;
+        if (event.source !== frame.contentWindow || event.origin !== new URL(urls[index]).origin) continue;
+        if (event.data === 'webfront-developer-ready') {
+            if (booting === index) { booting = null; advance(); }
+            break;
+        }
+        if (event.data !== 'webfront-developer-finished') continue;
+        if (booting === index) booting = null;
         pane.remove(); frames.delete(index); ++completed; advance(); break;
     }
 });

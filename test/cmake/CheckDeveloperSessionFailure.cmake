@@ -6,6 +6,10 @@ await webFront.ready;
 const part = await webFront.cppFunction('test.part')();
 // Every concurrent pane must receive rendering frames; a hidden iframe must not stand in for a shared visible window.
 await new Promise(requestAnimationFrame);
+if (parent !== self) {
+    parent.postMessage('webfront-developer-ready', new URL(document.referrer).origin);
+    await new Promise(resolve => setTimeout(resolve, 100));
+}
 // The first case fails. Later cases must still run; terminal deliberately reports failure too, without starting a command.
 await webFront.cppFunction('test.report')(part !== 'app' && part !== 'terminal', `session-failure ${part}`);
 if (parent === self) window.close();

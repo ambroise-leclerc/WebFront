@@ -92,7 +92,9 @@ Linux's real windows remain on the suite's Xvfb display. Explicit tests of hidde
 
 `DeveloperBrowserSession` opens **one visible native window for all six developer integration parts**, instead of six.
 It displays up to four parts concurrently in visible iframe panes, each with its own native application, temporary
-project, assigned loopback port and origin. A completed frame is removed and its slot reused; its Workers, listeners
+project, assigned loopback port and origin. Bootstraps are staggered until their environment is ready so four archive
+unpackers do not compete on WebKit's shared JavaScript thread; the ready pages' commands run in parallel.
+A completed frame is removed and its slot reused; its Workers, listeners
 and bridge go away. The same native view then navigates to workspace as a top-level page for its layout/rendering and
 keyboard-focus checks; this retains WebKit's original focus ancestry. No active pane is hidden.
 All assertions run in their original single-part mode, including workspace's first-launch/failed-first-build checks.
@@ -109,7 +111,7 @@ native 180-second deadline, even while other parts finish. Compare full-suite wa
 claiming a speedup. The session prints `nativeWindows=1 parts=6 durationMs=...` for timing comparisons.
 
 A local Windows/MSVC Release/WebView2 comparison used the same executable and fixtures, with four workers and no
-concurrent compiler: six separate visible windows took 27.38 s; the shared visible window took 27.26 s (26.91 s inside
+concurrent compiler: six separate visible windows took 26.89 s; the shared visible window took 28.69 s (28.34 s inside
 the native session). All six parts passed in both runs. This single pair demonstrates comparable elapsed time and five
 fewer native openings; it does not establish a whole-suite speedup.
 

@@ -90,6 +90,10 @@ try {
         await delay(100);
     }
     await progress('bootstrap ready');
+    // Unpacking four environments on one WebKit JavaScript thread can exhaust the unchanged readiness budget.
+    // Start the next bootstrap now; this part's commands can still run alongside it in their own visible pane.
+    if (location.search === '?developer-session' && parent !== self)
+        parent.postMessage('webfront-developer-ready', new URL(document.referrer).origin);
     // `all` (no part given) runs every part in one session; a part starts from a fresh project and runs alone, in parallel
     // with the others.
     const part = await webFront.cppFunction('test.part')();
