@@ -37,8 +37,8 @@ versions stay immutable. Environment **0.6.3** adds automation API v1 and the sh
 lease; version 0.6.2 predates that API. Environment **0.6.4** adds the project setup operations of the automation
 runner (`init`, `create`, `install`, `restore`, `embed`). Environment **0.6.6** adds the `call` operation, the terminal and `wf help` notice of automation and the starter's `AGENTS.md`. It was published under the dedicated
 `developer-v0.6.6` tag and verified after deployment. The test bootstrap (`cmake/WebFrontBootstrap.cmake`) stays on the
-published 0.6.3 and advances in a separate pull request. The sources advance to **0.9.1** (the page layout: full-window
-interface and floating terminal, #539), which is not published yet; the release pin stays on the published 0.9.0. Publication and pin changes follow
+published 0.6.3 and advances in a separate pull request. Environment **0.9.1** adds the page layout (full-window
+interface and floating terminal, #539); it is published and the release pin selects it. Publication and pin changes follow
 [PUBLISHING](../js/developer/tools/PUBLISHING.md).
 
 ## Minimal C++ application
