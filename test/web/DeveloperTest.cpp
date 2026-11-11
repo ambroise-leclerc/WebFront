@@ -423,6 +423,10 @@ int main(int argc, char** argv) {
     try {
         // CEF child processes must dispatch before interpreting application arguments or creating files.
         webfront::detail::ensureFrontendInitialized<WEBFRONT_TEST_FRONTEND>();
+        // CTest shows the output of a failed case only: it then names every request and the status it was answered,
+        // which is what tells a resource the page could not load from one the server refused (#542).
+        webfront::log::setLogLevel(webfront::log::Info);
+        [[maybe_unused]] const auto requestLog = webfront::log::addSinks(webfront::log::clogSink);
         if (argc != 3 && argc != 4)
             throw std::invalid_argument("Expected fixture directory, header output directory and optional --session, --public or --part=<name>");
         if (argc == 4 && std::string_view(argv[3]) == "--session")

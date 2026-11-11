@@ -365,10 +365,10 @@ std::uint64_t peakResidentBytes() {
 }  // namespace
 
 SCENARIO("A large body is streamed without being held") {
-    Fixture fixture;
-    Router  server("127.0.0.1", "0");
-    constexpr std::uint64_t size = 128ull * 1024 * 1024;
-    std::size_t             largestChunk = 0;
+    Fixture                        fixture;
+    Router                         server("127.0.0.1", "0");
+    static constexpr std::uint64_t size         = 128ull * 1024 * 1024;
+    std::size_t                    largestChunk = 0;
     auto route = server.addRoute("/webfront/services/files/", [&](const RouteRequest&) {
         RouteReply reply;
         reply.contentLength = size;

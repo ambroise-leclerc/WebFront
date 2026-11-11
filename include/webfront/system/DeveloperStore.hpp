@@ -297,7 +297,7 @@ private:
             try {
                 for (std::size_t i = 0; i < group.size(); ++i) {
                     const auto owned = directory / (number + ".d") / std::to_string(i);
-                    std::filesystem::rename(stagedSource(*group[i]), owned);
+                    renameSettled(stagedSource(*group[i]), owned);
                     syncFile(owned);
                 }
                 syncDirectory(directory / (number + ".d"));
@@ -326,7 +326,7 @@ private:
                 throw std::runtime_error("Cannot write the publication journal");
         }
         syncFile(temporary);
-        std::filesystem::rename(temporary, directory / (number + ".journal"));
+        renameSettled(temporary, directory / (number + ".journal"));
         syncDirectory(directory);
         step("after-journal");
     }

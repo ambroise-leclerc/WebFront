@@ -3,6 +3,16 @@
 Release history belongs in the [changelog](CHANGELOG.md)
 and Git; architecture decisions and their evidence are indexed in [the ADRs](adr/README.md).
 
+## Compiler support
+
+GCC 13 is the minimum for the library and examples, with best-effort S2 support: the
+weekly and `master` PR ARM64 job builds everything without `-Werror`, runs the fast tier,
+and repeats that tier under ASan/UBSan. Browser frontends are disabled in this job.
+GCC 16 remains the reference compiler. Clang 23 is qualified in the extended jobs;
+no older upstream Clang minimum is qualified. AppleClang and MSVC follow the native CI images.
+Optional C++26 reflection and mddlog retain their separate compiler requirements.
+The [support ADR](adr/ADR-022-profils-et-niveaux-de-support.md) defines the GCC 14 exit clause.
+
 ## Supported paths
 
 WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer environment.
@@ -19,7 +29,7 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   `install`, `restore`, `run`, `exec`, `check`, `test`, `build`, `dev`, `preview`, `embed`, `list` and `help`. The manifest and lock describe
   dependencies, entries, providers, scripts and permissions. TypeScript/TSX compilation uses
   esbuild-wasm; type checking uses the project's locked TypeScript. Application commands use
-  `webfront::Commands`. From environment 0.9.1 (sources; the pin is still 0.9.0), a project that has a preview opens
+  `webfront::Commands`. From environment 0.9.1 (published and pinned), a project that has a preview opens
   on its interface over the whole window, with the terminal in a floating window behind a tab on the window's edge. See the
   [developer reference](DEVELOPER_ENVIRONMENT.md).
 - **Distribution.** `wf embed` generates the application's compressed C++ provider.
@@ -34,7 +44,7 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   native attachment. This does not discover arbitrary processes or isolate untrusted project code.
   An application opts in to being driven with `automation::enableAutomation` (its own window and callbacks), shared sessions are
   listed by `webfront-agent --list`, and `--print-mcp-config` generates the client configuration. The owner may allow-list application callbacks that an agent reaches through the `call` operation, and the terminal, `wf help` and
-  the starter's `AGENTS.md` announce automation (environment 0.6.6). Environment 0.6.6 is published; the release pin selects 0.9.0.
+  the starter's `AGENTS.md` announce automation (environment 0.6.6). Environment 0.6.6 is published; the release pin selects 0.9.1.
 - **Maintaining WebFront.** The repository is itself a `wf` project, selected with
   `--manifest-dir js/developer`. Build and publish its environment using
   [PUBLISHING](../js/developer/tools/PUBLISHING.md). Regenerate the core's versioned headers
@@ -61,7 +71,7 @@ asset freshness checks and, with an enabled engine, real-browser Jasmine and lif
 `Journey*` builds a UI with the rebuilt environment and local registry, then compiles and runs
 its generated provider from an empty directory. Configured tests need no public network.
 
-[Tiers](TEST_TIERS.md) defines the desktop and extended CI scope.
+[Tiers](TEST_TIERS.md) defines the desktop and extended CI scope, including the GCC 13 Linux aarch64 job (#548).
 [Test execution and profiling](TEST_PERFORMANCE.md) documents session isolation, fixture locks,
 resource limits and complete-suite repetition. Sessions retain individual CTest assertions;
 independent driver processes use OS-assigned loopback ports. Manual transport measurements

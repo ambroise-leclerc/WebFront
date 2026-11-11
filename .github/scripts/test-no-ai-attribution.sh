@@ -64,6 +64,7 @@ chmod +x "$work/verify-signature"
 git config gpg.program "$work/verify-signature"
 git config log.showSignature true
 git config log.decorate full
+git config log.graphColors red,green
 git config log.showNotes true
 git config format.pretty oneline
 signed_clean="$(signed "$clean" 'Ordinary signed change')"
@@ -80,6 +81,7 @@ fi
 git config --unset gpg.program
 git config --unset log.showSignature
 git config --unset log.decorate
+git config --unset log.graphColors
 git config --unset log.showNotes
 git config --unset format.pretty
 

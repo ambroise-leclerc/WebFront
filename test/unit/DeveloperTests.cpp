@@ -8,6 +8,7 @@
 #include <future>
 #include <fstream>
 #include <limits>
+#include <thread>
 #include <utility>
 
 using namespace webfront;
@@ -55,6 +56,31 @@ SCENARIO("Developer publication preserves the installed files until commit") {
                 REQUIRE(read(store, "generated/LifeUI.hpp") == "new");
             }
         }
+    }
+}
+
+SCENARIO("A publication waits for a file that another reader is about to release") {
+    TemporaryDirectory project;
+    developer::Store   store{project.path()};
+    GIVEN("a published directory with a file held open, as a scan of what was just written holds it on Windows") {
+        auto first = store.begin("packages/library", true);
+        store.write(first, "index.js", 0, bytes("old"));
+        store.commit(first);
+        std::ifstream held(project.path() / "packages/library/index.js", std::ios::binary);
+        REQUIRE(held.is_open());
+        auto released = std::async(std::launch::async, [&held] {
+            std::this_thread::sleep_for(std::chrono::milliseconds{100});
+            held.close();
+        });
+        WHEN("the directory is replaced before the reader closes the file") {
+            auto second = store.begin("packages/library", true);
+            store.write(second, "index.js", 0, bytes("new"));
+            store.commit(second);
+            THEN("the publication is completed once the file is released") {
+                REQUIRE(read(store, "packages/library/index.js") == "new");
+            }
+        }
+        released.get();
     }
 }
 

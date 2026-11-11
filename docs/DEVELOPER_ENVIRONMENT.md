@@ -37,8 +37,8 @@ versions stay immutable. Environment **0.6.3** adds automation API v1 and the sh
 lease; version 0.6.2 predates that API. Environment **0.6.4** adds the project setup operations of the automation
 runner (`init`, `create`, `install`, `restore`, `embed`). Environment **0.6.6** adds the `call` operation, the terminal and `wf help` notice of automation and the starter's `AGENTS.md`. It was published under the dedicated
 `developer-v0.6.6` tag and verified after deployment. The test bootstrap (`cmake/WebFrontBootstrap.cmake`) stays on the
-published 0.6.3 and advances in a separate pull request. The sources advance to **0.9.1** (the page layout: full-window
-interface and floating terminal, #539), which is not published yet; the release pin stays on the published 0.9.0. Publication and pin changes follow
+published 0.6.3 and advances in a separate pull request. Environment **0.9.1** adds the page layout (full-window
+interface and floating terminal, #539); it is published and the release pin selects it. Publication and pin changes follow
 [PUBLISHING](../js/developer/tools/PUBLISHING.md).
 
 ## Minimal C++ application
@@ -67,8 +67,8 @@ Each published version is immutable: 0.3.0 introduced the packed-bitset Life sta
 manifest, `wf restore`, `wf run`, `wf exec`, `wf check` and the complete terminal, and 0.6.0 `wf build`, `wf dev` and `wf test`.
 
 The default configuration is generated in `include/webfront/system/DeveloperReleaseData.hpp`; it contains
-an exact versioned environment URL and the trusted digest. The 0.9.0 release pin selects
-`https://dist.webfront.fr/developer/0.9.0/environment.tgz` (ADR-021). The deployed archive, CORS headers and public
+an exact versioned environment URL and the trusted digest. The 0.9.1 release pin selects
+`https://dist.webfront.fr/developer/0.9.1/environment.tgz` (ADR-021). The deployed archive, CORS headers and public
 smoke test were verified before the pin was merged. Earlier publication gates are recorded for
 [0.6.6](validation/developer-0.6.6-release.md), [0.6.4](validation/developer-0.6.4-release.md) and [0.6.3](validation/developer-0.6.3-release.md).
 Published 0.6.2 introduced installation of the archives of `@types` packages and the manifest directory;
@@ -644,7 +644,7 @@ above). Rows before 0.9 were reconstructed from the header of each tag; 0.4.0 pr
 <!-- compatibility-table:begin -->
 | Library | Environment | Minimum api |
 | --- | --- | --- |
-| unreleased | 0.9.0 | 1 |
+| unreleased | 0.9.1 | 1 |
 | 0.9.0 | 0.9.0 | 1 |
 | 0.8.0 | 0.6.3 | 1 |
 | 0.7.0 | 0.6.3 | 1 |
