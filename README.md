@@ -360,6 +360,8 @@ target_link_libraries(MyApp PRIVATE WebFront::WebFront)
 
 As a subproject, examples and tests are off by default and compiler settings do not leak into your targets. `WEBFRONT_BUILD_EXAMPLES=OFF` disables examples in a standalone build too.
 
+With GCC 13, building WebFront's tests in Release mode can produce false positive `-Wnull-dereference` warnings in libstdc++. Configure with `-DWARNINGS_AS_ERRORS=OFF` to build the tests; GCC 13 is not currently covered by a dedicated test job.
+
 GCC 16 crashes inside stdexec (`internal compiler error: Segmentation fault` in `__query.hpp`) when CMake scans C++ modules and adds `-fmodules-ts`, which happens by default for C++20 and later targets (CMP0155, Ninja). WebFront is header-only and needs no module scan. Turn it off for the targets that link WebFront and use no C++ modules, after creating them:
 
 ```cmake
