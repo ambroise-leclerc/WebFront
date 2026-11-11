@@ -72,7 +72,7 @@ dispatch with `repeat_desktop_tests`:
   2026 generator. There is no compiler cache: a new user compiles everything;
 - the `gcc13-arm64` job (#548): GCC 13 on a hosted Linux aarch64 runner (`ubuntu-24.04-arm`), compiling the library, the examples and
   the tests with warnings that are not errors (libstdc++ 13 reports false `-Wnull-dereference` positives, #526), then running
-  the fast tier. It has no browser frontend. A compile error or a failing fast test under GCC 13 on aarch64 turns it red;
+  the fast tier, then rebuilding the tests under GCC 13 ASan/UBSan and repeating the fast tier (#525, S2 support). It has no browser frontend. A compile error or a failing fast test under GCC 13 on aarch64 turns it red;
 - the address/undefined and thread sanitizers, the five fuzzers, and the GCC and Clang CEF browser integration.
 
 The portability matrix does not vary the CMake version: `setup-cmake` pins the SHA-256 of each archive it installs, so

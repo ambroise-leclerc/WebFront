@@ -112,7 +112,7 @@ int main() {
 
 ## Game of Life: from console to native application
 
-The example starts with a C++ simulation, adds a React interface, then embeds that interface in the executable. You need Git, CMake **3.31+** and a C++23 compiler. The initial CMake configuration, the first bootstrap and the first `wf install` need internet access; afterwards the downloaded environment and packages are cached and can be verified offline.
+The example starts with a C++ simulation, adds a React interface, then embeds that interface in the executable. You need Git, CMake **3.31+** and a C++23 compiler (GCC **13+**; GCC 13 has best-effort S2 support). See the [compiler support policy](docs/adr/ADR-022-profils-et-niveaux-de-support.md) for the tested toolchains and limits. The initial CMake configuration, the first bootstrap and the first `wf install` need internet access; afterwards the downloaded environment and packages are cached and can be verified offline.
 
 ```bash
 git clone https://github.com/ambroise-leclerc/WebFront.git

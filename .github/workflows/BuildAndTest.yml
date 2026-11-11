@@ -352,6 +352,10 @@ jobs:
           sudo apt-get install -y clang-23 lld-23
           echo "CC=clang-23" >> "$GITHUB_ENV"
           echo "CXX=clang++-23" >> "$GITHUB_ENV"
+      - name: Report the selected compiler
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then cl 2>&1 || true; else "${CXX:-c++}" --version; fi
       # No compiler cache: a new user compiles everything.
       - name: Configure
         shell: bash
@@ -367,10 +371,12 @@ jobs:
   gcc13-arm64:
     if: github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       CC: gcc-13
       CXX: g++-13
+      ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/remove-node
@@ -401,6 +407,27 @@ jobs:
         run: cmake --build build --parallel 4
       - name: Fast tests
         run: ctest --test-dir build -L fast --output-on-failure --no-tests=error --parallel 4
+      # Exercise coroutine lifetimes with the oldest supported compiler as well (#525).
+      - name: Configure GCC 13 ASan and UBSan
+        run: >-
+          cmake -S . -B build-sanitizers -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=OFF -DWEBFRONT_ENABLE_TESTING=ON
+          -DWEBFRONT_BUILD_EXAMPLES=OFF -DWARNINGS_AS_ERRORS=OFF -DENABLE_CACHE=OFF
+          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+          -DWEBFRONT_ENABLE_SANITIZER_ADDRESS=ON -DWEBFRONT_ENABLE_SANITIZER_UNDEFINED_BEHAVIOR=ON
+      - name: Build GCC 13 sanitizer tests
+        run: cmake --build build-sanitizers --parallel 2
+      - name: GCC 13 sanitizer fast tests
+        run: ctest --test-dir build-sanitizers -L fast --output-on-failure --no-tests=error --parallel 4
+      - name: Retain GCC 13 test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log-gcc13-arm64
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build-sanitizers/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
 
   sanitizers:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'master')
