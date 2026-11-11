@@ -75,6 +75,13 @@ dispatch with `repeat_desktop_tests`:
   the fast tier, then rebuilding the tests under GCC 13 ASan/UBSan and repeating the fast tier (#525, S2 support). It has no browser frontend. A compile error or a failing fast test under GCC 13 on aarch64 turns it red;
 - the address/undefined and thread sanitizers, the five fuzzers, and the GCC and Clang CEF browser integration.
 
+Manual dispatch with `gcc13_arm64=true` adds the GCC 13 ARM64 job and its sanitizer pass
+to the extended checks without enabling the repeated desktop matrix. For example:
+
+```bash
+gh workflow run BuildAndTest.yml --ref <branch> -f gcc13_arm64=true
+```
+
 The portability matrix does not vary the CMake version: `setup-cmake` pins the SHA-256 of each archive it installs, so
 another version needs its checksum added first.
 

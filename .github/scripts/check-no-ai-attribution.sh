@@ -27,7 +27,7 @@ if [ -n "$base" ]; then
 fi
 # One Git process supplies all records. Bash matches each line directly, avoiding four grep
 # processes and two git-show processes per regression case (especially costly on macOS).
-if ! git log --no-show-signature --no-notes --no-decorate --no-patch --no-color --no-graph -z --format='%H%x00%an <%ae>%n%cn <%ce>%x00%B' "$revision" >"$commits"; then
+if ! git log --no-show-signature --no-notes --no-decorate --no-patch --no-color -z --format='%H%x00%an <%ae>%n%cn <%ce>%x00%B' "$revision" >"$commits"; then
     echo "::error::unable to list the commits in $revision"
     exit 1
 fi

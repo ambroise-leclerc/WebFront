@@ -9,6 +9,10 @@ on:
     - cron: '23 4 * * 1'
   workflow_dispatch:
     inputs:
+      gcc13_arm64:
+        description: 'Also run GCC 13 ARM64 and its ASan/UBSan fast tests'
+        type: boolean
+        default: false
       repeat_desktop_tests:
         description: 'Also run the desktop matrix, repeating the complete CTest suite three times'
         type: boolean
@@ -369,7 +373,7 @@ jobs:
   # tier. Warnings are not errors here: libstdc++ 13 reports false -Wnull-dereference positives (#526), so -Werror stays with the
   # reference compiler (#525). A browser frontend needs a display and CEF has no aarch64 job yet, so both are off.
   gcc13-arm64:
-    if: github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)
+    if: github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && (inputs.repeat_desktop_tests || inputs.gcc13_arm64))
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     env:
