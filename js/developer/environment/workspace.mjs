@@ -252,12 +252,35 @@ export async function createWorkspace({bridge, element, frame}) {
         apply('toggle');
     };
     view.addEventListener('keydown', onKey, true);
-    const watchInterface = () => {
-        try { frame.contentWindow?.addEventListener('keydown', onKey, true); }
-        catch { /* a page of another origin keeps its keys */ }
-    };
-    frame.addEventListener('load', watchInterface);
-    watchInterface();
+    // Keys do not leave the document that has the focus: the interface and the frames it embeds, present or added
+    // later, each get the listener, again after each of their loads. A document of another origin keeps its keys.
+    const observed = new WeakSet(), framed = new WeakSet();
+    const isFrame = node => node.localName === 'iframe' || node.localName === 'frame';
+    function watchFrame(element) {
+        if (!framed.has(element)) {
+            framed.add(element);
+            element.addEventListener('load', () => watchWindow(element.contentWindow));
+        }
+        watchWindow(element.contentWindow);
+    }
+    function watchWindow(target) {
+        let content;
+        try {
+            target.addEventListener('keydown', onKey, true);
+            content = target.document;
+        } catch { return; }  // no window yet, or another origin
+        if (observed.has(content)) return;
+        observed.add(content);
+        content.querySelectorAll('iframe,frame').forEach(watchFrame);
+        new target.MutationObserver(records => {
+            for (const {addedNodes} of records) for (const node of addedNodes) {
+                if (node.nodeType !== 1) continue;
+                if (isFrame(node)) watchFrame(node);
+                node.querySelectorAll('iframe,frame').forEach(watchFrame);
+            }
+        }).observe(content, {childList: true, subtree: true});
+    }
+    watchFrame(frame);
 
     // Moving: the pointer is captured, so that the interface under the window does not take the moves.
     let grip = null;

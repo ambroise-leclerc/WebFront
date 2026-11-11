@@ -980,6 +980,33 @@ try {
         assert(again.state() === 'interface', 'F9 in the terminal must collapse it');
         key(pagePreview.contentDocument.body, {key: 'F9', ctrlKey: true});
         assert(again.state() === 'interface', 'Another key combination must be left to the interface');
+        // The focus may be in a frame that the interface embeds, at any depth, added after its load: keys do not leave
+        // the document that has it.
+        const embed = async parent => {
+            const inner = parent.createElement('iframe');
+            const loaded = new Promise(resolve => inner.addEventListener('load', resolve, {once: true}));
+            inner.srcdoc = '<!doctype html><body><input>';
+            parent.body.append(inner);
+            await loaded;
+            return inner;
+        };
+        const inner = await embed(pagePreview.contentDocument);
+        const innermost = await embed(inner.contentDocument);
+        await delay(0);  // the observers of added frames have run
+        inner.contentDocument.querySelector('input').focus();
+        key(inner.contentDocument.querySelector('input'), {key: 'F9'});
+        assert(again.state() === 'floating', 'F9 in a frame of the interface must open the terminal');
+        key(innermost.contentDocument.querySelector('input'), {key: 'F9'});
+        assert(again.state() === 'interface', 'F9 in a nested frame of the interface must collapse the terminal');
+        // A frame that loads another document keeps the shortcut.
+        const reloaded = new Promise(resolve => inner.addEventListener('load', resolve, {once: true}));
+        inner.srcdoc = '<!doctype html><body><button>again</button>';
+        await reloaded;
+        key(inner.contentDocument.querySelector('button'), {key: 'F9'});
+        assert(again.state() === 'floating', 'F9 must work in a frame of the interface that loaded another document');
+        key(pagePreview.contentDocument.body, {key: 'F9'});
+        assert(again.state() === 'interface', 'F9 in the interface must collapse the terminal again');
+        inner.remove();
 
         // wf dev with the terminal collapsed: the full-window interface reloads and shows the build diagnostics.
         const devStop = new AbortController();

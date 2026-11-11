@@ -392,7 +392,9 @@ environment's `mount`, not to the embedded bootstrap page):
   diagnostic over it.
 
 The icon is a button (`aria-expanded`, 44 px target) and the window a non-modal dialog. The interface stays in the preview
-frame, as before: the layout adds nothing to the application's document except the F9 listener. This is a layout, not a
+frame, as before: the layout adds nothing to the application's documents except the F9 listener, installed in the interface
+and in the same-origin frames it embeds (not in a frame of another origin, nor one inside a shadow tree: click the interface
+or the icon first). This is a layout, not a
 sandbox (see [limitations](#dependencies-storage-and-limitations)). An application that uses F9 itself does not receive it in
 the developer page; it does in its embedded form. A page that mounts the terminal itself (`runtime.mount`) with a preview frame gets
 the same layout; `workspace: false` keeps the page as it is.
