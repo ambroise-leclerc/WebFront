@@ -108,6 +108,20 @@ jobs:
           fi
           echo "Reproducibility builds: $reproducibility"
           echo "WEBFRONT_REPRODUCIBILITY=$reproducibility" >> "$GITHUB_ENV"
+      # The cases that configure a CMake project (label `configuration`, about 75 s of worker time on Windows) test the build
+      # system: a pull request into develop runs them only when it changes the build system or this workflow. A push to
+      # develop and the full tier always run them.
+      - name: Decide whether the configuration checks run
+        shell: bash
+        run: |
+          configuration=true
+          if [ "$FULL_TIER" != true ] && [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            if ! git diff --name-only HEAD^1 HEAD | grep -qE '^(cmake/|CMakeLists\.txt|js/core/[^/]*\.cmake|test/cmake/|test/unit/CMakeLists\.txt|\.github/actions/|\.github/workflows/BuildAndTest\.yml)'; then
+              configuration=false
+            fi
+          fi
+          echo "Configuration checks: $configuration"
+          echo "WEBFRONT_CONFIGURATION=$configuration" >> "$GITHUB_ENV"
       # No step of a build or of its tests needs a JavaScript runtime or package manager: the runner has none from here on.
       - uses: ./.github/actions/remove-node
       - uses: ./.github/actions/setup-cmake
@@ -191,8 +205,8 @@ jobs:
       - name: Fast tests
         shell: bash
         run: >-
-          ctest --test-dir build -C ${{ matrix.build_type }} -L fast --parallel 4 --output-on-failure --no-tests=error
-          --output-junit "${{ github.workspace }}/build/fast-results.xml"
+          ctest --test-dir build -C ${{ matrix.build_type }} -L fast ${{ env.WEBFRONT_CONFIGURATION != 'true' && '-LE configuration' || '' }}
+          --parallel 4 --output-on-failure --no-tests=error --output-junit "${{ github.workspace }}/build/fast-results.xml"
       - name: Capture CTest dependency graph
         shell: bash
         run: ctest --test-dir build --show-only=json-v1 > build/ctest-graph.json
@@ -204,7 +218,7 @@ jobs:
           python3 test/tools/MeasureCommand.py --output build/suite-resources.json --
           cmake -DBUILD_DIR=build -DCONFIG=${{ matrix.build_type }}
           -DREPEAT=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && '3' || '1' }}
-          '-DLABEL_EXCLUDE=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && 'none' || '^(portability|fast)$' }}'
+          '-DLABEL_EXCLUDE=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && 'none' || (env.WEBFRONT_CONFIGURATION == 'true' && '^(portability|fast)$' || '^(portability|fast|configuration)$') }}'
           -P test/cmake/RunTestSuite.cmake
       - name: Repeat WebKitGTK pointer tests with suite display sharing enabled
         if: runner.os == 'Linux'
@@ -218,31 +232,10 @@ jobs:
         if: always()
         shell: bash
         run: python3 test/tools/ProfileTests.py build/ctest-graph.json build/test-results-*.xml --workers 4 --log build/Testing/Temporary/LastTest.log --ninja-log build/.ninja_log --output build/test-profile.txt
-      - name: Probe compiler cache on the embedded builds
-        # Diagnostic (#388): do the Life embedded translation units hit the compiler cache once the suite has warmed it?
-        if: ${{ !cancelled() }}
-        continue-on-error: true
-        shell: bash
-        run: |
-          {
-            echo "Before the probe (whole run):"
-            sccache --show-stats | grep -E '^(Compile requests|Cache hits|Cache misses) '
-            for target in life_embedded life_journey; do
-              sccache --zero-stats > /dev/null
-              start=$(date +%s)
-              cmake --build build --config ${{ matrix.build_type }} --target "$target" --clean-first > "build/probe-$target.log" 2>&1 || tail -n 20 "build/probe-$target.log"
-              echo "$target clean rebuild: $(( $(date +%s) - start )) s"
-              sccache --show-stats | grep -E '^(Compile requests|Cache hits|Cache misses) '
-            done
-            # The consumer project of AddSubdirectoryConsumer: its single translation unit against the warm cache.
-            sccache --zero-stats > /dev/null
-            start=$(date +%s)
-            cmake --build build/test/unit/consumer-build --config ${{ matrix.build_type }} --clean-first > build/probe-consumer.log 2>&1 || tail -n 20 build/probe-consumer.log
-            echo "consumer clean rebuild: $(( $(date +%s) - start )) s"
-            sccache --show-stats | grep -E '^(Compile requests|Cache hits|Cache misses) '
-          } 2>&1 | tee build/embedded-cache-probe.txt
+      # Nothing consumes the capture of a pull request, which only lists it in its log: it runs on a push to develop or master
+      # and in the full tier. The pull request still builds and runs the instrumented tests.
       - name: Collect coverage
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && (github.event_name == 'push' || env.FULL_TIER == 'true')
         shell: bash
         working-directory: build
         env:
@@ -290,7 +283,6 @@ jobs:
             build/fast-results.xml
             build/unit-results-*.xml
             build/ctest-graph.json
-            build/embedded-cache-probe.txt
             build/test/unit/consumer-build/.ninja_log
             build/test-profile*
             build/*-resources.json

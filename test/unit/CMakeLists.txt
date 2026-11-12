@@ -395,6 +395,17 @@ if(_consumer_native_enabled)
     set_tests_properties(AddSubdirectoryNativeConsumer PROPERTIES TIMEOUT 600)
 endif()
 
+# The cases that configure a CMake project test the build system, not the C++ of the library: a pull request runs them only
+# when the build system changes (docs/TEST_TIERS.md). None of them compiles library code, which is why
+# AddSubdirectoryNativeConsumer is not among them. `configuration` comes in addition to a tier label.
+foreach(_case IN ITEMS ModuleScanWarning TestOptionsConfiguration NativeAutodetectReconfiguration FrontendSelection
+        FrontendSelectionMultiConfig CEFTestingState CEFCopyDestinations WebView2UnsupportedToolchain WebView2LoaderArchitecture
+        WKWebViewConfiguration FrontendConsumerConfiguration TestSuiteRepetition)
+    if(TEST ${_case})
+        set_property(TEST ${_case} APPEND PROPERTY LABELS configuration)
+    endif()
+endforeach()
+
 # Manual timing evidence for gzip cache/cold-decode work; never a timing-based test.
 add_executable(gzip_cache_benchmark EXCLUDE_FROM_ALL GzipCacheBenchmark.cpp)
 target_link_libraries(gzip_cache_benchmark PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
