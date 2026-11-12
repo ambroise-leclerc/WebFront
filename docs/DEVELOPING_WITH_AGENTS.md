@@ -40,6 +40,9 @@ cross the bridge.
 
 `wf create <starter>` takes the name of a **starter**, not the name of your project: `app` is a minimal TypeScript
 interface without dependency that calls one C++ callback, `life` is the React interface of the Game of Life example.
+The `app` starter is in environment **0.9.2 or later**; a library that still pins 0.9.1 only has `life`. With 0.9.1, write
+`ui/main.ts` yourself (any TypeScript that calls `webFront.cppFunction`), run `wf init` and declare `"entries": {"main": "ui/main.ts"}`;
+the rest of the loop is the same.
 
 ```text
 wf create app            # writes ui/main.ts, ui/style.css and ui/AGENTS.md; never replaces an existing ui/
@@ -82,14 +85,16 @@ webfront::NativeApp app{"my-project"};
 app.cppFunction("app.greet", greet);
 app.bootstrap("developer");
 auto automation = webfront::automation::enableAutomation(app,
-    {.grants = {"create", "init", "install", "check", "build", "test", "preview", "inspect", "interact"},
+    {.grants = {"create", "init", "install", "check", "build", "test", "preview", "embed", "inspect", "interact"},
      .listen = privateDirectory});                  // a new directory outside the project
 app.show(automation->launchPage());
 automation->close();
 app.shutdown();
 ```
 
-The application prints the grants and the attach command on stderr and in its terminal.
+Each operation needs its own grant, and only the owner of the application grants it: without `embed` in the list, `embed` is refused
+with `not_authorized`, and an agent asks the owner instead of widening the list. `embed` replaces its output header; grant it
+for a project whose output you accept to regenerate. The application prints the grants and the attach command on stderr and in its terminal.
 
 **3. Attach.**
 
@@ -148,7 +153,7 @@ security boundary. Project code runs with the user's rights; this is not a sandb
 | The README, before the tutorial | The model, the three steps above and a `.mcp.json` |
 | `AGENTS.md` in the project | `wf create` writes it beside the starter's sources; `webfront_write_agent_guide()` writes it at the root of a CMake project, and never replaces an existing file |
 | The CMake configuration output | One `WebFront for agents:` line: the model, whether `webfront-agent` is built, and this page |
-| The terminal | The ready line and `wf help` name `wf help agents`; a missing manifest, a missing entry and an unknown starter answer with the next steps and the starters |
+| The terminal | The ready line names this page, `wf help` names `wf help agents` (environment 0.9.2); a missing manifest, a missing entry and an unknown starter answer with the next steps and the starters |
 | stderr of the application | One line when a document root is served without the developer environment |
 | `webfront-agent --agent-help` | The rules of the contract, starting with the model |
 

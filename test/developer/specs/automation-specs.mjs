@@ -336,6 +336,27 @@ describe('Developer automation', () => {
         }
     });
 
+    it('previews and embeds a project that has no dependency, so no lock (#561)', async () => {
+        setManifestDirectory();
+        const {bridge,storage}=memoryBridge(new Map([
+            ['webfront.project.json',new TextEncoder().encode(JSON.stringify({format:1,name:'app',version:'0.1.0',entries:{main:'ui/main.ts'}}))],
+            ['ui/main.ts',new TextEncoder().encode('export {};')]]));
+        expect(storage.has('webfront-packages.lock.json')).toBeFalse();
+        const previousWorker=globalThis.Worker;
+        globalThis.Worker=class {
+            postMessage() { queueMicrotask(() => this.onmessage({data:{type:'result',files:new Map([['app.js',new TextEncoder().encode('')]])}})); }
+            terminate() {}
+        };
+        try {
+            const embedded=await runNonInteractive(['embed','ui/main.ts','--output','generated/AppUI.hpp'],{bridge,onExit:() => {}});
+            expect(embedded.output).not.toMatch(/Cannot read project file/);
+            expect(embedded.exitCode).withContext(embedded.output).toBe(0);
+            expect(storage.has('generated/AppUI.hpp')).toBeTrue();
+        } finally {
+            if(previousWorker===undefined) delete globalThis.Worker; else globalThis.Worker=previousWorker;
+        }
+    });
+
     it('refuses absent previews instead of inspecting the developer terminal', () => {
         const inspector=createPreviewInspector(null);
         expect(() => inspector.inspect()).toThrowError(/No ready application preview/);

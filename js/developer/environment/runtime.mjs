@@ -92,7 +92,8 @@ function dependencyNotices(lock, packages) {
 }
 
 export async function compile(bridge, entry, signal) {
-    const lock = await readLock(bridge);
+    // Without dependency there is no lock: wf init writes the manifest only, and wf dev and wf build already accept that.
+    const lock = await readLock(bridge, true);
     const packages = await readPackages(bridge, lock, signal);
     const files = await buildInWorker(bridge, {type: 'build', entry, lock, packages}, signal);
     files.set('index.html', applicationPage(files));

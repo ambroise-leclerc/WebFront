@@ -13,7 +13,7 @@ if (typeof document !== 'undefined' && document.getElementById('retry')) {
             const environment = await import(url);
             await environment.mount({bridge: webFront, config, terminal: document.getElementById('terminal'), preview: document.getElementById('preview')});
             // Agents read this line first: it must say that they can run wf themselves, and where the sequence is.
-            status.textContent = 'Developer environment ready. Type wf help. Agents: wf help agents (wf runs in JSON or MCP with webfront-agent).';
+            status.textContent = 'Developer environment ready. Type wf help. Agents: docs/DEVELOPING_WITH_AGENTS.md (wf runs in JSON or MCP with webfront-agent).';
         } catch (error) {
             status.textContent = `Bootstrap failed: ${error.message}`;
             retry.hidden = false;

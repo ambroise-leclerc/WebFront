@@ -436,7 +436,7 @@ open, Enter starts a new session. No system shell is exposed.
 `wf help --agents`) the model, the sequence for a new interface and the `webfront-agent` commands that run it in JSON or
 MCP (environment 0.9.2). The errors a newcomer meets first carry the next steps: a missing manifest names `wf init`, then
 `wf dev <entry.tsx>` and `wf create app`; a missing entry gives `ui/main.tsx` as an example; `wf create` without or with an
-unknown starter lists the starters. The line under the terminal that reports the bootstrap ends with `Agents: wf help agents`;
+unknown starter lists the starters. The line under the terminal that reports the bootstrap ends with `Agents: docs/DEVELOPING_WITH_AGENTS.md`;
 it comes from the library's embedded loader, not from the environment.
 
 - **Editing:** left/right, Home/End (Ctrl+A/Ctrl+E), Backspace/Delete, Ctrl+U/Ctrl+K, Ctrl+L, up/down through the

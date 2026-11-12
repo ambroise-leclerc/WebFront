@@ -54,8 +54,13 @@ endforeach()
 file(REMOVE_RECURSE "${WORK}")
 file(MAKE_DIRECTORY "${WORK}/fresh" "${WORK}/owned")
 file(WRITE "${WORK}/owned/AGENTS.md" "the project's own instructions\n")
+# Included by a scope that ends, called from another one, as add_subdirectory(WebFront) and a call in the parent do: the
+# functions outlive the variables of the including scope.
 file(WRITE "${WORK}/run.cmake" "
-include(\"${ROOT}/cmake/WebFrontAgentGuide.cmake\")
+function(load_webfront)
+    include(\"${ROOT}/cmake/WebFrontAgentGuide.cmake\")
+endfunction()
+load_webfront()
 webfront_write_agent_guide(DIRECTORY \"${WORK}/fresh\")
 webfront_write_agent_guide(DIRECTORY \"${WORK}/fresh\")
 webfront_write_agent_guide(DIRECTORY \"${WORK}/fresh\" NAME CLAUDE.md)

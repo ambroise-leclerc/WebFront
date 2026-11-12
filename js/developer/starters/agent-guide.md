@@ -28,8 +28,8 @@ int main() {
 
 ## The development loop
 
-`wf create <starter>` takes the name of a **starter** (`app`: a minimal TypeScript interface; `life`: the React example), not
-the name of your project. In the application's terminal:
+`wf create <starter>` takes the name of a **starter** (`app`: a minimal TypeScript interface, environment 0.9.2 or later;
+`life`: the React example), not the name of your project. With an older environment, write `ui/main.ts` yourself. In the application's terminal:
 
 ```text
 wf create app            # writes ui/main.ts and ui/style.css; never replaces an existing ui/
@@ -54,7 +54,7 @@ answers in JSON, as a command line or as an MCP server on stdio.
    #include <webfront/automation/Enable.hpp>
 
    auto automation = webfront::automation::enableAutomation(app,
-       {.grants = {"create", "init", "install", "check", "build", "test", "preview", "inspect", "interact"},
+       {.grants = {"create", "init", "install", "check", "build", "test", "preview", "embed", "inspect", "interact"},
         .listen = privateDirectory});               // a new directory outside the project
    app.show(automation->launchPage());
    automation->close();

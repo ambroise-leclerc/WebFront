@@ -1,8 +1,8 @@
 # Public helpers that tell an agent, from the first configuration, how a WebFront application is developed.
 include_guard(GLOBAL)
 
-set(WEBFRONT_AGENT_GUIDE_SOURCE "${CMAKE_CURRENT_LIST_DIR}/../js/developer/starters/agent-guide.md")
-set(WEBFRONT_AGENT_GUIDE_DOCUMENT "${CMAKE_CURRENT_LIST_DIR}/../docs/DEVELOPING_WITH_AGENTS.md")
+# The paths are computed inside the functions, from CMAKE_CURRENT_FUNCTION_LIST_DIR: a variable set here would belong to the
+# scope that included this file, and the functions are called from its parent (add_subdirectory, FetchContent).
 
 # webfront_write_agent_guide([DIRECTORY dir] [NAME file])
 #
@@ -34,7 +34,9 @@ function(webfront_write_agent_guide)
     if(NOT IS_DIRECTORY "${ARG_DIRECTORY}")
         message(FATAL_ERROR "webfront_write_agent_guide: ${ARG_DIRECTORY} is not a directory")
     endif()
-    cmake_path(NORMAL_PATH WEBFRONT_AGENT_GUIDE_SOURCE OUTPUT_VARIABLE source)
+    cmake_path(NORMAL_PATH CMAKE_CURRENT_FUNCTION_LIST_DIR OUTPUT_VARIABLE here)
+    set(source "${here}/../js/developer/starters/agent-guide.md")
+    cmake_path(NORMAL_PATH source)
     set(destination "${ARG_DIRECTORY}/${ARG_NAME}")
     # EXISTS follows links: a dangling link is a file somebody placed there too.
     if(EXISTS "${destination}" OR IS_SYMLINK "${destination}")
@@ -53,7 +55,8 @@ function(webfront_announce_agent_support)
         return()
     endif()
     set_property(GLOBAL PROPERTY WEBFRONT_AGENT_SUPPORT_ANNOUNCED ON)
-    cmake_path(NORMAL_PATH WEBFRONT_AGENT_GUIDE_DOCUMENT OUTPUT_VARIABLE guide)
+    set(guide "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../docs/DEVELOPING_WITH_AGENTS.md")
+    cmake_path(NORMAL_PATH guide)
     if(TARGET webfront-agent)
         set(launcher "the webfront-agent target runs wf for an agent in JSON or MCP (webfront-agent --agent-help)")
     else()
