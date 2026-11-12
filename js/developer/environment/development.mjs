@@ -220,8 +220,11 @@ export async function dev(args, {bridge, signal, preview: frame, write = () => {
                         catch (error) { if (configReads.get(path) !== 'missing') throw error; }
                     }
                     const project = await loadProject(bridge);
-                    if (!project.manifest && args[0] === undefined) throw new Error(noManifest);
-                    const entry = resolveEntry(project.manifest, args[0], 'wf dev <entry.tsx>');
+                    let entry;
+                    try {
+                        if (!project.manifest && args[0] === undefined) throw new Error(noManifest);
+                        entry = resolveEntry(project.manifest, args[0], 'wf dev <entry.tsx>');
+                    } catch (error) { error.invalidStart = true; throw error; }
                     if (!session || session.closed) session = compilerSession(bridge, active);
                     const files = await session.rebuild({entry, lock: project.lock ?? {format: 1, roots: {}, packages: {}}});
                     files.set('index.html', previewPage(files));
@@ -238,9 +241,9 @@ export async function dev(args, {bridge, signal, preview: frame, write = () => {
             } catch (error) {
                 if (active.aborted) throw stopped();
                 if (error?.code === 'busy') { await waitForPoll(active); continue; }
-                // Watching starts with the compiler. Invalid initial configuration must finish the command;
-                // compilation errors (including the first build) and later configuration edits remain recoverable.
-                if (!session) throw error;
+                // A missing project or an omitted entry at startup finishes the command; every other failure
+                // (unreadable or malformed files, compilation errors, later edits) stays recoverable.
+                if (!session && error?.invalidStart) throw error;
                 diagnostic = diagnosticsText(error);
                 report('failed');
                 write(diagnostic + '\n');

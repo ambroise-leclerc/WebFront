@@ -33,6 +33,26 @@ describe('wf dev', () => {
         } finally { clearTimeout(timer); controller.abort(); }
     });
 
+    it('keeps watching when the manifest is malformed at startup', async () => {
+        const {bridge} = memoryBridge(new Map([['webfront.project.json', encode('{not json')]]));
+        const controller = new AbortController();
+        const states = [], output = [];
+        const frame = new EventTarget();
+        frame.addEventListener('webfront-dev-status', event => {
+            states.push(event.detail.state);
+            if (event.detail.state === 'failed') controller.abort();
+        });
+        const worker = spyOn(globalThis, 'Worker').and.throwError('The compiler must not start');
+        const timer = setTimeout(() => controller.abort(), 5000);
+        try {
+            await dev([], {bridge, signal: controller.signal, preview: frame, write: text => output.push(text)}).then(
+                () => fail('dev must not resolve'), () => {});
+            expect(states).toContain('failed');
+            expect(output.join('')).not.toBe('');
+            expect(worker).not.toHaveBeenCalled();
+        } finally { clearTimeout(timer); controller.abort(); }
+    });
+
     it('one esbuild context reads changed imports, reports syntax errors and recovers', async () => {
         const files = new Map([['main.ts', encode("import {value} from './value'; console.log(value)")], ['value.ts', encode('export const value = 1')]]);
         const context = await bundleContext(await esbuild(), {entry: 'main.ts', lock, readProject: async path => {
