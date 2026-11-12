@@ -161,8 +161,10 @@ try {
     const scriptOutput = [];
     const runContext = (signal = new AbortController().signal) => ({...context, signal, write: text => { scriptOutput.push(text); console.log(text); }});
     const printed = async text => {
-        for (let attempt = 0; !scriptOutput.some(line => line.includes(text)); ++attempt) {
-            if (attempt === 200) throw new Error(`The script did not print ${text}`);
+        // Starting a real Worker and compiling WASM can take more than five seconds while the other panes build.
+        const deadline = performance.now() + 30000;
+        while (!scriptOutput.some(line => line.includes(text))) {
+            if (performance.now() >= deadline) throw new Error(`The script did not print ${text} within 30 seconds`);
             await delay(25);
         }
     };
