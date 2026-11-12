@@ -98,10 +98,14 @@ A completed frame is removed and its slot reused; its Workers, listeners
 and bridge go away. The same native view then navigates to workspace as a top-level page for its layout/rendering and
 keyboard-focus checks; this retains WebKit's original focus ancestry. No active pane is hidden.
 All assertions run in their original single-part mode, including workspace's first-launch/failed-first-build checks.
-The familiar `DeveloperBrowserIntegration*` CTest names validate separate native reports. Closing the window early,
-a missing result or an expired per-part native deadline fails the session. A small fault-injection session verifies
-that an unsuccessful first part does not skip the later reports. Life's generated header and the terminal's cancellation
-check still come from their respective parts.
+The familiar `DeveloperBrowserIntegration*` CTest names validate separate native reports. The producer fixture succeeds
+when all six reports are complete and agree with the process status, even if some parts failed; each report reader
+decides its own result and unlocks only its own dependent tests. A crash, missing/invalid report, inconsistent process
+status or expired native deadline fails the producer. The `--session` command itself still exits with 1 when any part fails.
+A nested CTest regression verifies failed and successful readers as well as their downstream fixtures, using the same
+registration helper as the real suite. Each report retains the part's diagnostic. Life's generated header and the terminal's
+cancellation check still come from their respective parts. Browser deadlines start after file preparation. An explicit hidden WKWebView
+case checks both native invisibility and `inactiveSchedulingPolicy == None`; ordinary windows remain visible.
 
 The driver groups above each use one visible window. This change reduces the three WebSuite/React commands from three
 openings to one, publication's four commands from four to one, and manifest-directory init/install from two to one.

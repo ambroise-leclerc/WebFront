@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <thread>
 #include <utility>
@@ -59,7 +60,7 @@ std::string readIntegrity(const std::filesystem::path& config) {
 }
 
 template <typename App>
-void registerCallbacks(App& app, const std::filesystem::path& project, std::atomic<bool>& passed, std::function<void()> reported = {}) {
+void registerCallbacks(App& app, const std::filesystem::path& project, std::atomic<bool>& passed, std::function<void(std::string)> reported = {}) {
     app.cppFunction("life.step", &webfront::demo::nextLife);
     app.cppFunction("test.header", [project](std::string name) {
         if (name != "LifeUI")
@@ -87,9 +88,9 @@ void registerCallbacks(App& app, const std::filesystem::path& project, std::atom
     });
     app.cppFunction("test.report", [&passed, reported = std::move(reported)](bool success, std::string message) {
         std::cout << message << std::endl;
-        passed.store(success);
         if (reported)
-            reported();
+            reported(std::move(message));
+        passed.store(success);
     });
 }
 
@@ -258,15 +259,17 @@ class Part {
     using App = webfront::BasicDeveloperApp<WEBFRONT_TEST_FRONTEND, FixturesFS>;
 
 public:
-    Part(const std::filesystem::path& fixtures, Mode selected, webfront::testdriver::DriverDeadline* deadline = nullptr)
+    Part(const std::filesystem::path& fixtures, Mode selected, std::function<void()> onReported = {})
         : app(project.path(), {.port = "0"}), mode(std::move(selected)), states(std::make_shared<CommandStates>()), commands(app) {
         std::filesystem::copy(fixtures, project.path() / "fixtures", std::filesystem::copy_options::recursive);
-        registerCallbacks(app, project.path(), passed, [this, deadline] {
+        registerCallbacks(app, project.path(), passed, [this, onReported = std::move(onReported)](std::string message) {
             if (reported.exchange(true))
                 throw std::runtime_error("A developer part reported twice");
-            if (deadline)
-                deadline->beginCase(180s);
-            caseDeadline.endCase();
+            reportMessage = std::move(message);
+            if (onReported)
+                onReported();
+            if (caseDeadline)
+                caseDeadline->endCase();
         });
         registerCommands(commands, states);
         app.cppFunction("test.command", [owned = states](std::string tag) {
@@ -284,7 +287,8 @@ public:
         bootstrapApp(app, mode, readIntegrity(project.path() / "fixtures/provision.json"));
         subscription = app.subscribeUIStarted([this, injected = false](App::UI ui) mutable {
             if (!std::exchange(injected, true)) {
-                caseDeadline.beginCase(180s);
+                if (caseDeadline)
+                    caseDeadline->beginCase(180s);
                 ui.addScript(runScript);
             }
         });
@@ -305,8 +309,10 @@ public:
     }
 
     void start() {
+        // Fixture copies and page preparation must not consume a browser's deadline.
+        caseDeadline.emplace(540s);
         watchdog = std::jthread([this](std::stop_token stop) {
-            if (caseDeadline.expired(stop)) {
+            if (caseDeadline->expired(stop)) {
                 std::cerr << "Developer part exceeded its native deadline: " << mode.part << '\n';
                 std::cerr.flush();
                 std::_Exit(1);
@@ -328,6 +334,9 @@ public:
     const std::filesystem::path& directory() const {
         return project.path();
     }
+    std::string_view message() const {
+        return reportMessage;
+    }
 
     bool finish(const std::filesystem::path& output) {
         watchdog.request_stop();
@@ -337,26 +346,37 @@ public:
             server.join();
         app.shutdown();
         bool success = reported.load() && passed.load();
+        if (!reported.load())
+            reportMessage = "Developer part " + mode.part + " closed without reporting a result";
         if (success && mode.runs("terminal") && !mode.publicDistribution && states->get("final") != "cancelled") {
-            std::cerr << "The command running at shutdown was not drained: " << states->get("final") << '\n';
+            reportMessage = "The command running at shutdown was not drained: " + states->get("final");
+            std::cerr << reportMessage << '\n';
             success = false;
         }
-        if (success && mode.runs("app"))
-            copyHeaders(project.path(), output);
+        if (success && mode.runs("app")) {
+            try {
+                copyHeaders(project.path(), output);
+            } catch (const std::exception& error) {
+                reportMessage = error.what();
+                std::cerr << reportMessage << '\n';
+                success = false;
+            }
+        }
         return success;
     }
 
 private:
-    webfront::test::TemporaryDirectory   project;
-    App                                  app;
-    Mode                                 mode;
-    std::atomic<bool>                    passed{false}, reported{false};
-    std::shared_ptr<CommandStates>       states;
-    webfront::Commands<App>              commands;
-    webfront::UISubscription             subscription;
-    webfront::testdriver::DriverDeadline caseDeadline{540s};
-    std::jthread                         watchdog;
-    std::jthread                         server;
+    webfront::test::TemporaryDirectory                  project;
+    App                                                 app;
+    Mode                                                mode;
+    std::atomic<bool>                                   passed{false}, reported{false};
+    std::shared_ptr<CommandStates>                      states;
+    webfront::Commands<App>                             commands;
+    webfront::UISubscription                            subscription;
+    std::string                                         reportMessage;
+    std::optional<webfront::testdriver::DriverDeadline> caseDeadline;
+    std::jthread                                        watchdog;
+    std::jthread                                        server;
 };
 
 int runSession(const std::filesystem::path& fixtures, const std::filesystem::path& output) {
@@ -366,13 +386,14 @@ int runSession(const std::filesystem::path& fixtures, const std::filesystem::pat
     // Remove only this invocation's own reports, so a crash cannot leave a previous success behind.
     for (const auto name : names)
         std::filesystem::remove(output / "results" / (std::string(name) + ".json"));
-    webfront::testdriver::DriverDeadline deadlines(540s);
-    deadlines.beginCase(180s);
-    std::vector<std::unique_ptr<Part>> parts;
-    webfront::ContentPolicy            policy;
-    std::string                        urls = "[";
+    std::optional<webfront::testdriver::DriverDeadline> deadlines;
+    std::vector<std::unique_ptr<Part>>                  parts;
+    webfront::ContentPolicy                             policy;
+    std::string                                         urls = "[";
     for (const auto name : names) {
-        auto part = std::make_unique<Part>(fixtures, Mode{false, std::string(name)}, &deadlines);
+        auto part = std::make_unique<Part>(fixtures, Mode{false, std::string(name)}, [&deadlines] {
+            deadlines->beginCase(180s);
+        });
         policy.navigationAllowedOrigins.push_back(part->origin());
         urls += (urls.size() > 1 ? "," : "") + webfront::json::quote(part->origin() + "/webfront-bootstrap.html?developer-session");
         parts.push_back(std::move(part));
@@ -426,11 +447,13 @@ advance();
     html.close();
     if (!html)
         throw std::runtime_error("Cannot write developer session page");
+    deadlines.emplace(540s);
+    deadlines->beginCase(180s);
     for (auto& part : parts)
         part->start();
     // The native bound applies even when a renderer blocks its JavaScript timers.
     std::jthread watchdog([&](std::stop_token stop) {
-        if (deadlines.expired(stop)) {
+        if (deadlines->expired(stop)) {
             std::cerr << "Developer session exceeded its per-part deadline\n";
             std::cerr.flush();
             std::_Exit(1);
@@ -443,7 +466,7 @@ advance();
     for (std::size_t i = 0; i < parts.size(); ++i) {
         const bool    success = parts[i]->finish(output);
         std::ofstream report(output / "results" / (std::string(names[i]) + ".json"));
-        report << "{\"exitCode\":" << (success ? 0 : 1) << ",\"output\":\"Developer part " << names[i] << "\"}";
+        report << "{\"exitCode\":" << (success ? 0 : 1) << ",\"output\":" << webfront::json::quote(parts[i]->message()) << "}";
         report.close();
         if (!report)
             throw std::runtime_error("Cannot write developer part report");

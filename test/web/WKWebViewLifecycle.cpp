@@ -84,9 +84,6 @@ void nativeClose(bool quit) {
         session.create();
         require(static_cast<bool>(send<BOOL>(session.window, "isVisible")) == webfront::testdriver::diagnosticWindows(),
                 "Window visibility option was ignored");
-        if (!webfront::testdriver::diagnosticWindows())
-            require(send<long>(send(send(session.view, "configuration"), "preferences"), "inactiveSchedulingPolicy") == 2L,
-                    "Hidden web content would suspend before asynchronous work finishes");
         // Exercise the real native entry points before any WebKit/bridge callback.
         if (quit)
             send<void>(app, "terminate:", static_cast<id>(nullptr));
@@ -212,9 +209,6 @@ void settings() {
         session.create();
         require(static_cast<bool>(send<BOOL>(session.window, "isVisible")) == webfront::testdriver::diagnosticWindows(),
                 "Window visibility option was ignored");
-        if (!webfront::testdriver::diagnosticWindows())
-            require(send<long>(send(send(session.view, "configuration"), "preferences"), "inactiveSchedulingPolicy") == 2L,
-                    "Hidden web content would suspend before asynchronous work finishes");
         require(static_cast<bool>(send<BOOL>(session.view, "isInspectable")) == enabled, "Inspector policy was ignored");
         require(!send<BOOL>(send(send(session.view, "configuration"), "websiteDataStore"), "isPersistent"), "Website data was persistent");
         Object menu(send(type("NSMenu"), "new"));
@@ -225,6 +219,17 @@ void settings() {
         require(utf8(send(send(send(session.app, "mainMenu"), "itemAtIndex:", 1L), "title")) == "Edit", "Edit menu has no visible title");
     }
 }
+void hiddenScheduling() {
+    Object  pool(send(type("NSAutoreleasePool"), "new"));
+    Session session("http://127.0.0.1:0/", {.visible = false});
+    session.create();
+    require(!send<BOOL>(session.window, "isVisible"), "An explicitly hidden window was shown");
+    require(send<long>(send(send(session.view, "configuration"), "preferences"), "inactiveSchedulingPolicy") == 2L,
+            "Hidden web content would suspend before asynchronous work finishes");
+    session.close();
+    session.run();
+}
+
 void missingResponse() {
     Object  pool(send(type("NSAutoreleasePool"), "new"));
     Session session("http://127.0.0.1:0/", {.visible = webfront::testdriver::diagnosticWindows()});
@@ -596,6 +601,7 @@ int main(int argc, char** argv) {
             {      "startup-timeout",       startupTimeout},
             {      "redirect-policy",       redirectPolicy},
             {             "settings",             settings},
+            {    "hidden-scheduling",     hiddenScheduling},
             {"navigation-diagnostic", navigationDiagnostic},
             {     "missing-response",      missingResponse},
             { "committed-navigation",  committedNavigation},

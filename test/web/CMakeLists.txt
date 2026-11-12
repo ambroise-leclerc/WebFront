@@ -311,16 +311,15 @@ if(_browser_tests_available)
     # One visible native window hosts fresh pages/projects/origins for all six parts. The original CTest names check
     # independent reports; sessions OFF retains the separate-process path for diagnosis and timing comparisons.
     if(WEBFRONT_TEST_SESSIONS)
-        add_test(NAME DeveloperBrowserSession COMMAND ${_developer_command}
-            "${_fixtures}" "${CMAKE_CURRENT_BINARY_DIR}/developer-generated" --session)
-        set_tests_properties(DeveloperBrowserSession PROPERTIES LABELS "web-integration" TIMEOUT 570 PROCESSORS 4
-            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" FIXTURES_REQUIRED DeveloperFixtures
-            FIXTURES_SETUP DeveloperBrowserSession)
-        webfront_use_own_profile(DeveloperBrowserSession developer-session)
         set(_developer_session_prefix "")
         if(_developer_xvfb)
             set(_developer_session_prefix "${_developer_xvfb};-a")
         endif()
+        include("${PROJECT_SOURCE_DIR}/test/cmake/DeveloperSessionTests.cmake")
+        webfront_add_developer_session_tests(PROGRAM "$<TARGET_FILE:developer_integration>"
+            FIXTURES "${_fixtures}" OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/developer-generated"
+            PREFIX ${_developer_session_prefix} REQUIRES DeveloperFixtures WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+        webfront_use_own_profile(DeveloperBrowserSession developer-session)
         add_test(NAME DeveloperBrowserSessionFailure COMMAND ${CMAKE_COMMAND}
             -DPROGRAM=$<TARGET_FILE:developer_integration> "-DPREFIX=${_developer_session_prefix}"
             -DWORK=${CMAKE_CURRENT_BINARY_DIR}/developer-session-failure
@@ -332,33 +331,23 @@ if(_browser_tests_available)
             set_tests_properties(DeveloperBrowserSessionFailure PROPERTIES RESOURCE_LOCK webfront_port_9002)
         endif()
     endif()
-    foreach(_part app scripts typescript jasmine terminal workspace)
-        set(_name DeveloperBrowserIntegration)
-        if(NOT _part STREQUAL "app")
-            set(_name DeveloperBrowserIntegration-${_part})
-        endif()
-        if(WEBFRONT_TEST_SESSIONS)
-            add_test(NAME ${_name} COMMAND "${CMAKE_COMMAND}"
-                "-DCASE_REPORT=${CMAKE_CURRENT_BINARY_DIR}/developer-generated/results/${_part}.json"
-                -DEXPECT_STATUS=0 -P "${PROJECT_SOURCE_DIR}/test/cmake/RunWfDriver.cmake")
-        else()
+    if(NOT WEBFRONT_TEST_SESSIONS)
+        foreach(_part app scripts typescript jasmine terminal workspace)
+            set(_name DeveloperBrowserIntegration)
+            if(NOT _part STREQUAL "app")
+                set(_name DeveloperBrowserIntegration-${_part})
+            endif()
             add_test(NAME ${_name} COMMAND ${_developer_command}
                 "${_fixtures}" "${CMAKE_CURRENT_BINARY_DIR}/developer-generated" --part=${_part})
-        endif()
-        set_tests_properties(${_name} PROPERTIES LABELS "web-integration" TIMEOUT 180
-            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" FIXTURES_REQUIRED DeveloperFixtures)
-        if(WEBFRONT_TEST_SESSIONS)
-            set_property(TEST ${_name} APPEND PROPERTY FIXTURES_REQUIRED DeveloperBrowserSession)
-        else()
+            set_tests_properties(${_name} PROPERTIES LABELS "web-integration" TIMEOUT 180
+                WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" FIXTURES_REQUIRED DeveloperFixtures)
             webfront_use_own_profile(${_name} developer-${_part})
-        endif()
-        # DeveloperTest uses CEFFrontend's default profile beside the executable, as do the other native browser
-        # tests holding this lock. CEF forwards concurrent launches with that profile to an existing process.
-        if(WEBFRONT_WEBTEST_FRONTEND STREQUAL "CEF")
-            set_tests_properties(${_name} PROPERTIES RESOURCE_LOCK webfront_port_9002)
-        endif()
-    endforeach()
-    set_tests_properties(DeveloperBrowserIntegration PROPERTIES FIXTURES_SETUP DeveloperGenerated)
+            if(WEBFRONT_WEBTEST_FRONTEND STREQUAL "CEF")
+                set_tests_properties(${_name} PROPERTIES RESOURCE_LOCK webfront_port_9002)
+            endif()
+        endforeach()
+        set_tests_properties(DeveloperBrowserIntegration PROPERTIES FIXTURES_SETUP DeveloperGenerated)
+    endif()
     # The driver on the environment built from the current sources: statuses, output and reports reach CTest.
     if(TARGET webfront-wf)
         set(_wf_project "${CMAKE_CURRENT_BINARY_DIR}/wf-driver-project")
