@@ -108,7 +108,7 @@ jobs:
           fi
           echo "Reproducibility builds: $reproducibility"
           echo "WEBFRONT_REPRODUCIBILITY=$reproducibility" >> "$GITHUB_ENV"
-      # The cases that configure a CMake project (label `configuration`, about 100 s of worker time on Windows) test the build
+      # The cases that configure a CMake project (label `configuration`, about 75 s of worker time on Windows) test the build
       # system: a pull request into develop runs them only when it changes the build system or this workflow. A push to
       # develop and the full tier always run them.
       - name: Decide whether the configuration checks run
