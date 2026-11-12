@@ -54,10 +54,10 @@ A literal `+` in the path is automatically encoded as `%2B`: `show("a+b.html")` 
 
 The shared `path-encoding` lifecycle case opens `encoded path %23.html` under every frontend and checks the query and fragment (reaching the page proves the decoded filename); the Jasmine suite, which runs in a frame of the developer environment, serves `a+b.html` through the C++ URL builder. Catch2 also checks this path at the system-browser launcher boundary and verifies shell quoting. On Windows the system browser is opened directly with `ShellExecute`, without a command shell; POSIX launches quote the URL as one argument.
 
-## Quiet automated sessions
+## Window visibility
 
 The per-opening options include `visible` (default `true`). Setting it to `false` creates the real native window and
 engine without presenting or focusing the window. This retains the native event loop and startup/navigation deadlines;
-it does not provide a sandbox or a headless engine. On macOS a WindowServer session is still required. The test driver
-uses this option and supports `WEBFRONT_TEST_VISIBLE=1` for interactive diagnostics.
-See [TEST_PERFORMANCE](TEST_PERFORMANCE.md) for the visible-window budget and retained lifecycle cases.
+it does not provide a sandbox or a headless engine. Automated tests keep their windows visible by default and share
+compatible sessions to reduce repeated openings. Explicit tests of hidden-window behavior still use this option.
+See [TEST_PERFORMANCE](TEST_PERFORMANCE.md) for the shared sessions and retained lifecycle cases.

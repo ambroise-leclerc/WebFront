@@ -3,24 +3,15 @@
 
 #include <cstdlib>
 #include <memory>
+#include <string_view>
+#include <type_traits>
 
 namespace webfront::testdriver {
-inline bool diagnosticWindows() {
-#ifdef _MSC_VER
-    char*       raw  = nullptr;
-    std::size_t size = 0;
-    if (_dupenv_s(&raw, &size, "WEBFRONT_TEST_VISIBLE") != 0)
-        throw std::runtime_error("Cannot read WEBFRONT_TEST_VISIBLE");
-    const std::unique_ptr<char, decltype(&std::free)> value(raw, std::free);
-    return value && std::string_view(value.get()) == "1";
-#else
-    const auto* value = std::getenv("WEBFRONT_TEST_VISIBLE");
-    return value && std::string_view(value) == "1";
-#endif
-}
+// Rendering stays visible in daily runs; repeated openings are reduced by sharing sessions, not by hiding windows.
+inline constexpr bool visibleWindows = true;
 
 template <typename Frontend>
-struct QuietFrontend : Frontend {
+struct TestFrontend : Frontend {
     using Frontend::open;
     static void open(std::string_view port, std::string_view page) {
         open("127.0.0.1", port, page, ContentPolicy{});
@@ -39,13 +30,13 @@ struct QuietFrontend : Frontend {
             options.contentPolicy = policy;
             options.window        = window;
             options.launch        = launch;
-            options.visible       = diagnosticWindows();
+            options.visible       = visibleWindows;
             Frontend::open(address, port, page, options);
         } else if constexpr (std::is_same_v<Frontend, frontend::WebView2Frontend>) {
             frontend::WebView2Options options;
             options.contentPolicy = policy;
             options.window        = window;
-            options.visible       = diagnosticWindows();
+            options.visible       = visibleWindows;
             options.launch        = launch;
             Frontend::open(address, port, page, options);
         } else {

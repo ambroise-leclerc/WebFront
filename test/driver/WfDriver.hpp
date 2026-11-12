@@ -49,7 +49,7 @@ struct DriverWebView2Options {
     }
     static frontend::WebView2Options get(const char* profile) {
         frontend::WebView2Options options;
-        options.visible = diagnosticWindows();
+        options.visible = visibleWindows;
         if (profile && *profile)
             options.userDataFolder = std::filesystem::path(profile);
         return options;
@@ -84,7 +84,7 @@ template <typename Frontend>
 using DriverFrontend = std::conditional_t<std::is_same_v<Frontend, frontend::WebView2Frontend>,
                                           frontend::WebView2FrontendWithOptions<DriverWebView2Options>,
                                           std::conditional_t<std::is_same_v<Frontend, frontend::WKWebViewFrontend>,
-                                                             QuietFrontend<Frontend>,
+                                                             TestFrontend<Frontend>,
                                                              std::conditional_t<std::is_same_v<Frontend, frontend::CEFFrontend>, DriverCEFFrontend, Frontend>>>;
 using namespace std::chrono_literals;
 

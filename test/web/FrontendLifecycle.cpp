@@ -25,7 +25,7 @@
 namespace {
 using Frontend = WEBFRONT_TEST_FRONTEND;
 using TestFS   = webfront::fs::Multi<webfront::fs::IndexFS, webfront::fs::NativeDebugFS>;
-using App      = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, webfront::testdriver::QuietFrontend<Frontend>>;
+using App      = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, webfront::testdriver::TestFrontend<Frontend>>;
 static_assert(Frontend::action == webfront::frontend::Action::closeServerAfterOpen);
 
 // Values reported by the lifecycle pages; keep their named constants in sync with this enum.
@@ -347,7 +347,7 @@ struct SecondOpener {
     void set_value() && noexcept {
         SecondOpenOutcome outcome;
         try {
-            webfront::testdriver::QuietFrontend<Frontend>::open("0", "no-bridge.html");
+            webfront::testdriver::TestFrontend<Frontend>::open("0", "no-bridge.html");
         } catch (const std::exception&) {
             outcome.refused = true;
         } catch (...) {
@@ -421,7 +421,7 @@ int checkSecondOpen() {
 
 int expectNavigationFailure() {
     try {
-        webfront::testdriver::QuietFrontend<Frontend>::open("0", "index.html");
+        webfront::testdriver::TestFrontend<Frontend>::open("0", "index.html");
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 0;  // The contract requires an exception, without prescribing its wording.
@@ -495,7 +495,7 @@ struct PolicyLifecycleFrontend {
                 if (auto live = weak.lock())
                     check(live->view->ExecuteScript(utf16(cancellationScript).c_str(), nullptr), "reporting native navigation cancellation");
             };
-            session->createWindow(webfront::testdriver::diagnosticWindows());
+            session->createWindow(webfront::testdriver::visibleWindows);
             session->start(userDataFolder());
             session->run();
         } else
@@ -506,7 +506,7 @@ struct PolicyLifecycleFrontend {
             initialize();
             Object  pool(send(type("NSAutoreleasePool"), "new"));
             Session session(webfront::frontend::detail::applicationUrl(address, port, page),
-                            {.contentPolicy = policy, .visible = webfront::testdriver::diagnosticWindows()});
+                            {.contentPolicy = policy, .visible = webfront::testdriver::visibleWindows});
             session.navigationCancelled = [&] {
                 Object script(text(cancellationScript));
                 send<void>(session.view, "evaluateJavaScript:completionHandler:", script.get(), static_cast<id>(nullptr));

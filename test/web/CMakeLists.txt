@@ -224,6 +224,8 @@ if(_browser_tests_available)
             FRONTEND "${WEBFRONT_WEBTEST_FRONTEND}" TIMEOUT 30
             SPECS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer/capture.spec.js"
             ARGS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer")
+        # With visible windows, another test can occlude this view and throttle its timed image sequence on WebKit.
+        set_tests_properties(ConsumerJasmine-capture PROPERTIES PROCESSORS 4)
         # File services of the engine (issue #451), shared by every embedded frontend.
         webfront_add_jasmine_test(NAME ConsumerJasmine-file-services TARGET jasmine_consumer
             FRONTEND "${WEBFRONT_WEBTEST_FRONTEND}" TIMEOUT 60
@@ -306,26 +308,46 @@ if(_browser_tests_available)
         endif()
         set(_developer_command "${_developer_xvfb}" -a ${_developer_command})
     endif()
-    # One long script (developer-specs.mjs) would run for two minutes on its own: it is cut into parts that start from their
-    # own project and run in parallel (#435). `app` also generates the header that LifeEmbeddedBuild compiles. Each part
-    # listens on a port the system picks, so none of them holds webfront_port_9002.
-    foreach(_part app scripts typescript jasmine terminal workspace)
-        set(_name DeveloperBrowserIntegration)
-        if(NOT _part STREQUAL "app")
-            set(_name DeveloperBrowserIntegration-${_part})
+    # One visible native window hosts fresh pages/projects/origins for all six parts. The original CTest names check
+    # independent reports; sessions OFF retains the separate-process path for diagnosis and timing comparisons.
+    if(WEBFRONT_TEST_SESSIONS)
+        set(_developer_session_prefix "")
+        if(_developer_xvfb)
+            set(_developer_session_prefix "${_developer_xvfb};-a")
         endif()
-        add_test(NAME ${_name} COMMAND ${_developer_command}
-            "${_fixtures}" "${CMAKE_CURRENT_BINARY_DIR}/developer-generated" --part=${_part})
-        set_tests_properties(${_name} PROPERTIES LABELS "web-integration" TIMEOUT 180
-            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" FIXTURES_REQUIRED DeveloperFixtures)
-        webfront_use_own_profile(${_name} developer-${_part})
-        # DeveloperTest uses CEFFrontend's default profile beside the executable, as do the other native browser
-        # tests holding this lock. CEF forwards concurrent launches with that profile to an existing process.
+        include("${PROJECT_SOURCE_DIR}/test/cmake/DeveloperSessionTests.cmake")
+        webfront_add_developer_session_tests(PROGRAM "$<TARGET_FILE:developer_integration>"
+            FIXTURES "${_fixtures}" OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/developer-generated"
+            PREFIX ${_developer_session_prefix} REQUIRES DeveloperFixtures WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+        webfront_use_own_profile(DeveloperBrowserSession developer-session)
+        add_test(NAME DeveloperBrowserSessionFailure COMMAND ${CMAKE_COMMAND}
+            -DPROGRAM=$<TARGET_FILE:developer_integration> "-DPREFIX=${_developer_session_prefix}" -DCONFIG=$<CONFIG>
+            -DWORK=${CMAKE_CURRENT_BINARY_DIR}/developer-session-failure
+            -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckDeveloperSessionFailure.cmake)
+        set_tests_properties(DeveloperBrowserSessionFailure PROPERTIES LABELS "web-integration" TIMEOUT 240 PROCESSORS 4)
+        webfront_use_own_profile(DeveloperBrowserSessionFailure developer-session-failure)
         if(WEBFRONT_WEBTEST_FRONTEND STREQUAL "CEF")
-            set_tests_properties(${_name} PROPERTIES RESOURCE_LOCK webfront_port_9002)
+            set_tests_properties(DeveloperBrowserSession PROPERTIES RESOURCE_LOCK webfront_port_9002)
+            set_tests_properties(DeveloperBrowserSessionFailure PROPERTIES RESOURCE_LOCK webfront_port_9002)
         endif()
-    endforeach()
-    set_tests_properties(DeveloperBrowserIntegration PROPERTIES FIXTURES_SETUP DeveloperGenerated)
+    endif()
+    if(NOT WEBFRONT_TEST_SESSIONS)
+        foreach(_part app scripts typescript jasmine terminal workspace)
+            set(_name DeveloperBrowserIntegration)
+            if(NOT _part STREQUAL "app")
+                set(_name DeveloperBrowserIntegration-${_part})
+            endif()
+            add_test(NAME ${_name} COMMAND ${_developer_command}
+                "${_fixtures}" "${CMAKE_CURRENT_BINARY_DIR}/developer-generated" --part=${_part})
+            set_tests_properties(${_name} PROPERTIES LABELS "web-integration" TIMEOUT 180
+                WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" FIXTURES_REQUIRED DeveloperFixtures)
+            webfront_use_own_profile(${_name} developer-${_part})
+            if(WEBFRONT_WEBTEST_FRONTEND STREQUAL "CEF")
+                set_tests_properties(${_name} PROPERTIES RESOURCE_LOCK webfront_port_9002)
+            endif()
+        endforeach()
+        set_tests_properties(DeveloperBrowserIntegration PROPERTIES FIXTURES_SETUP DeveloperGenerated)
+    endif()
     # The driver on the environment built from the current sources: statuses, output and reports reach CTest.
     if(TARGET webfront-wf)
         set(_wf_project "${CMAKE_CURRENT_BINARY_DIR}/wf-driver-project")
@@ -383,6 +405,8 @@ if(_browser_tests_available)
                     set(group JourneyBuildSession)
                 elseif(name MATCHES "^Journey(OfflineMissing|Restore|OfflineVerified)$")
                     set(group JourneyRestoreSession)
+                elseif(name MATCHES "^WfDriverManifestDirectory(Install)?$")
+                    set(group WfDriverManifestSession)
                 endif()
             endif()
             if(group)
@@ -392,6 +416,9 @@ if(_browser_tests_available)
                 endif()
                 webfront_record_suite_case(${group} ${name} ${status} "${command}" ${case_timeout})
                 list(APPEND options -DCASE_REPORT=${CMAKE_CURRENT_BINARY_DIR}/driver-sessions/${group}/${name}.json)
+                if(ARG_FRESH_PROJECT)
+                    list(APPEND options -DPROJECT=${ARG_FRESH_PROJECT})
+                endif()
             endif()
             add_test(NAME ${name} COMMAND ${_wf_run} ${options} -P ${PROJECT_SOURCE_DIR}/test/cmake/RunWfDriver.cmake)
             webfront_set_browser_test_properties(${name} "${CMAKE_CURRENT_SOURCE_DIR}" 120)
@@ -544,24 +571,41 @@ if(_browser_tests_available)
                     -DLIFE_REACT=${PROJECT_SOURCE_DIR}/examples/life/react/main.tsx
                     -P ${PROJECT_SOURCE_DIR}/test/cmake/PrepareWfProject.cmake)
             set_tests_properties(WebSuiteProject PROPERTIES FIXTURES_SETUP WebSuiteProject LABELS "web-integration" TIMEOUT 30)
+            set(_suite_install_report)
+            if(WEBFRONT_TEST_SESSIONS)
+                webfront_record_suite_case(WebSuiteSession WebSuiteInstall 0 install 100)
+                set(_suite_install_report -DCASE_REPORT=${CMAKE_CURRENT_BINARY_DIR}/driver-sessions/WebSuiteSession/WebSuiteInstall.json)
+            endif()
             add_test(NAME WebSuiteInstall
                 COMMAND ${_developer_xvfb_prefix} ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DDRIVER=$<TARGET_FILE:webfront-wf>
                     -DPROJECT=${_suite_project} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/wf-driver-work -DENVIRONMENT= -DINTEGRITY=
                     -DREGISTRY=${_registry} -DPROFILE=${CMAKE_CURRENT_BINARY_DIR}/wf-profiles/WebSuiteInstall -DEXPECT_STATUS=0 -DCOMMAND=install "-DEXPECT_OUTPUT=Installed [0-9]+ packages"
-                    -P ${PROJECT_SOURCE_DIR}/test/cmake/RunWfDriver.cmake)
+                    ${_suite_install_report} -P ${PROJECT_SOURCE_DIR}/test/cmake/RunWfDriver.cmake)
             webfront_set_browser_test_properties(WebSuiteInstall "${CMAKE_CURRENT_SOURCE_DIR}" 120)
             set_tests_properties(WebSuiteInstall PROPERTIES FIXTURES_REQUIRED "WebSuiteProject;TestRegistry" FIXTURES_SETUP WebSuiteInstalled
                 RESOURCE_LOCK "${_suite_project}")
             foreach(action Check Build)
                 string(TOLOWER "${action}" command)
+                set(_suite_action_report)
+                if(WEBFRONT_TEST_SESSIONS)
+                    webfront_record_suite_case(WebSuiteSession ReactAdapter${action} 0 "${command}" 100)
+                    set(_suite_action_report -DCASE_REPORT=${CMAKE_CURRENT_BINARY_DIR}/driver-sessions/WebSuiteSession/ReactAdapter${action}.json)
+                endif()
                 add_test(NAME ReactAdapter${action}
                     COMMAND ${_developer_xvfb_prefix} ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DDRIVER=$<TARGET_FILE:webfront-wf>
                         -DPROJECT=${_suite_project} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/wf-driver-work -DENVIRONMENT= -DINTEGRITY=
                         -DREGISTRY=${_registry} -DPROFILE=${CMAKE_CURRENT_BINARY_DIR}/wf-profiles/ReactAdapter${action}
-                        -DEXPECT_STATUS=0 -DCOMMAND=${command} -P ${PROJECT_SOURCE_DIR}/test/cmake/RunWfDriver.cmake)
+                        -DEXPECT_STATUS=0 -DCOMMAND=${command} ${_suite_action_report} -P ${PROJECT_SOURCE_DIR}/test/cmake/RunWfDriver.cmake)
                 webfront_set_browser_test_properties(ReactAdapter${action} "${CMAKE_CURRENT_SOURCE_DIR}" 120)
                 set_tests_properties(ReactAdapter${action} PROPERTIES FIXTURES_REQUIRED WebSuiteInstalled RESOURCE_LOCK "${_suite_project}")
             endforeach()
+            if(WEBFRONT_TEST_SESSIONS)
+                foreach(name WebSuiteInstall ReactAdapterCheck ReactAdapterBuild)
+                    set_property(TEST ${name} APPEND PROPERTY FIXTURES_REQUIRED WebSuiteSession)
+                endforeach()
+                webfront_add_driver_suite(WebSuiteSession PROJECT "${_suite_project}" PINNED
+                    REQUIRES WebSuiteProject TestRegistry)
+            endif()
             set_tests_properties(ReactAdapterBuild PROPERTIES FIXTURES_SETUP ReactAdapterBuilt)
             add_test(NAME ReactAdapterPages COMMAND ${CMAKE_COMMAND}
                 -DBUILD=${_suite_project}/.webfront/developer/build -DOUTPUT=${_suite_project}/pages/react-example
@@ -599,6 +643,10 @@ if(_browser_tests_available)
             set(group "")
             if(WEBFRONT_TEST_SESSIONS AND name MATCHES "^(SelfBuildInstall|SelfBuild|DeveloperSpecs|SelfBuildRepeat|SelfBuildOutsidePermissions)$")
                 set(group SelfBuildSession)
+            elseif(WEBFRONT_TEST_SESSIONS AND name MATCHES "^(ReactAdapterPackage|ServicesPackage|SelfBuildSite|SelfBuildSiteRepeat)$")
+                set(group PublicationSession)
+            endif()
+            if(group)
                 webfront_record_suite_case(${group} ${name} ${status} "${command}" ${driver_timeout})
                 list(APPEND options -DCASE_REPORT=${CMAKE_CURRENT_BINARY_DIR}/driver-sessions/${group}/${name}.json)
             endif()
@@ -696,6 +744,15 @@ if(_browser_tests_available)
         webfront_add_driver_suite(JourneyRestoreSession PROJECT "${_journey}" REQUIRES JourneyCacheEmptied DeveloperFixtures)
         webfront_add_driver_suite(SelfBuildSession PROJECT "${_self_project}" MANIFEST_DIR js/developer PINNED
             REQUIRES SelfBuildProject TestRegistry)
+        webfront_add_driver_suite(PublicationSession PROJECT "${_self_project}" MANIFEST_DIR js/developer PINNED
+            REQUIRES SelfBuilt)
+        add_test(NAME WfDriverManifestSessionProject COMMAND ${CMAKE_COMMAND}
+            -DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/wf-driver-manifest-dir
+            -P ${PROJECT_SOURCE_DIR}/test/cmake/PrepareEmptyProject.cmake)
+        set_tests_properties(WfDriverManifestSessionProject PROPERTIES FIXTURES_SETUP WfDriverManifestSessionProject
+            LABELS "web-integration" TIMEOUT 30)
+        webfront_add_driver_suite(WfDriverManifestSession PROJECT "${CMAKE_CURRENT_BINARY_DIR}/wf-driver-manifest-dir"
+            MANIFEST_DIR config/wf REQUIRES WfDriverManifestSessionProject DeveloperFixtures)
     endif()
     # Compile the maintained application's actual browser-generated header, then run it without a project root.
     add_executable(life_embedded EXCLUDE_FROM_ALL LifeEmbeddedTest.cpp)

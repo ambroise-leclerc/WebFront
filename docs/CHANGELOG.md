@@ -16,6 +16,7 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Changed
 
+- Keep automated browser windows visible and reuse one window for the six developer integration parts and additional compatible wf commands (#544, #556, `docs/TEST_PERFORMANCE.md`).
 - Declare GCC 13 as the best-effort S2 minimum for the library and examples, document the GCC 14 exit clause and qualified Clang scope, and add GCC 13 ASan/UBSan fast tests (#525, ADR-022).
 
 - Open the developer page on the interface, over the whole window, once the project has a preview; the terminal moves to a floating, movable window behind a tab on the right edge that shows the session's state, and keeps its session when collapsed. Its shortcut is F9, or the manifest's new optional `developer.terminalShortcut`. Environment sources 0.9.1, not published yet (#539, `docs/DEVELOPER_ENVIRONMENT.md`).
@@ -24,6 +25,7 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Fixed
 
+- Read all six developer integration reports in CTest after a part fails, and keep the successful parts' dependent tests runnable, also when the session's native deadline ends it (#556).
 - On Windows, `wf install`, `wf build` and `wf test` no longer fail with `rename: Access is denied` while another process, such as an antivirus scan, still reads the files just written: the developer store tries the rename again for up to 635 ms; `wf test` also empties the directory of an interrupted run (#542).
 - Run the commit attribution regression checks with older Git versions by dropping the unsupported `git log --no-graph` option (#525).
 
