@@ -495,6 +495,9 @@ files; the developer HTTP provider serves only the environment and preview direc
 
 `wf dev [entry.tsx|name]` selects `entries.main` or the sole entry when omitted, builds, opens the preview
 and keeps running until Ctrl+C. It reuses one compiler Worker and esbuild context across rebuilds.
+An initial configuration error, such as a missing project or an omitted entry that cannot be selected,
+ends the command with exit code 1 and restores the terminal prompt. Once compilation starts, errors
+keep the watcher running so that editing the inputs can recover, including after a failed first build.
 Changing the selected entry or locked graph recreates the context. It uses the installed lock, without
 resolving packages or downloading dependencies; `wf install`/`wf restore` remain explicit actions.
 

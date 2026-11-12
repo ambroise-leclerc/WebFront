@@ -238,6 +238,9 @@ export async function dev(args, {bridge, signal, preview: frame, write = () => {
             } catch (error) {
                 if (active.aborted) throw stopped();
                 if (error?.code === 'busy') { await waitForPoll(active); continue; }
+                // Watching starts with the compiler. Invalid initial configuration must finish the command;
+                // compilation errors (including the first build) and later configuration edits remain recoverable.
+                if (!session) throw error;
                 diagnostic = diagnosticsText(error);
                 report('failed');
                 write(diagnostic + '\n');

@@ -12,6 +12,27 @@ describe('wf dev', () => {
     const encode = text => new TextEncoder().encode(text);
 
     const lock = {format: 1, roots: {}, packages: {}};
+    for (const [label, manifest, message] of [
+        ['without a project', null, /No webfront.project.json: run wf init/],
+        ['without an entry', {format: 1, name: 'empty', version: '0.1.0'}, /Usage: wf dev <entry.tsx>/],
+    ]) it(`rejects ${label} without waiting for Ctrl+C or starting a compiler`, async () => {
+        const {bridge} = memoryBridge(new Map(manifest ? [['webfront.project.json', encode(JSON.stringify(manifest))]] : []));
+        const controller = new AbortController();
+        // Bound the regression: the broken command stays in its polling loop until this aborts it.
+        const timer = setTimeout(() => controller.abort(), 1000);
+        const states = [], output = [];
+        const frame = new EventTarget();
+        frame.addEventListener('webfront-dev-status', event => states.push(event.detail.state));
+        const worker = spyOn(globalThis, 'Worker').and.throwError('The compiler must not start');
+        try {
+            await rejects(dev([], {bridge, signal: controller.signal, preview: frame, write: text => output.push(text)}), message);
+            expect(controller.signal.aborted).toBe(false);
+            expect(worker).not.toHaveBeenCalled();
+            expect(states.at(-1)).toBe('stopped');
+            expect(output).toEqual([]);
+        } finally { clearTimeout(timer); controller.abort(); }
+    });
+
     it('one esbuild context reads changed imports, reports syntax errors and recovers', async () => {
         const files = new Map([['main.ts', encode("import {value} from './value'; console.log(value)")], ['value.ts', encode('export const value = 1')]]);
         const context = await bundleContext(await esbuild(), {entry: 'main.ts', lock, readProject: async path => {
