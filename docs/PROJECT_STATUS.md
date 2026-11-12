@@ -72,6 +72,8 @@ asset freshness checks and, with an enabled engine, real-browser Jasmine and lif
 its generated provider from an empty directory. Configured tests need no public network.
 
 [Tiers](TEST_TIERS.md) defines the desktop and extended CI scope, including the GCC 13 Linux aarch64 job (#548).
+[Jetson Orin Nano validation](validation/jetson-528.md) records a partial JetPack 6 pass with WebKitGTK
+under Xvfb; hardware-accelerated display, kiosk use and JetPack 7.2 remain unqualified.
 [Test execution and profiling](TEST_PERFORMANCE.md) documents session isolation, fixture locks,
 resource limits and complete-suite repetition. Sessions retain individual CTest assertions;
 independent driver processes use OS-assigned loopback ports. Manual transport measurements
