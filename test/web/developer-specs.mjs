@@ -161,8 +161,10 @@ try {
     const scriptOutput = [];
     const runContext = (signal = new AbortController().signal) => ({...context, signal, write: text => { scriptOutput.push(text); console.log(text); }});
     const printed = async text => {
-        for (let attempt = 0; !scriptOutput.some(line => line.includes(text)); ++attempt) {
-            if (attempt === 200) throw new Error(`The script did not print ${text}`);
+        // Starting a real Worker and compiling WASM can take more than five seconds while the other panes build.
+        const deadline = performance.now() + 30000;
+        while (!scriptOutput.some(line => line.includes(text))) {
+            if (performance.now() >= deadline) throw new Error(`The script did not print ${text} within 30 seconds`);
             await delay(25);
         }
     };
@@ -1240,8 +1242,16 @@ try {
         host.style.cssText = 'width:640px;height:240px';
         document.body.append(host);
         let exitedWith = null;
+        let startupFiles;
+        const terminalBridge = {socket: webFront.socket, cppFunction: name => name !== 'webfront.developer.read' ? webFront.cppFunction(name) :
+            async (path, offset) => {
+                if (!startupFiles || !['webfront.project.json', 'webfront-packages.lock.json'].includes(path))
+                    return webFront.cppFunction(name)(path, offset);
+                if (!startupFiles.has(path)) throw new Error('Cannot read project file: ' + path);
+                return startupFiles.get(path).subarray(offset, offset + 256 * 1024);
+            }};
         // The test sets the terminal's size itself: an observer following the element would race with it.
-        const mounted = async () => runtime.mount({bridge: webFront, config, terminal: host, preview: context.preview, onExit: code => { exitedWith = code; }, fitToElement: false});
+        const mounted = async () => runtime.mount({bridge: terminalBridge, config, terminal: host, preview: context.preview, onExit: code => { exitedWith = code; }, fitToElement: false});
         const {terminal, editor} = await mounted();
         terminal.resize(80, 12);
         const buffer = () => terminal.buffer.active;
@@ -1263,6 +1273,26 @@ try {
         const lastRows = count => rows().slice(cursorRow() - count + 1, cursorRow() + 1);
         await type('echo hello\r');
         assert(JSON.stringify(lastRows(3)) === JSON.stringify(['> echo hello', 'hello', '> ']), `A C++ command must run from the terminal: ${lastRows(3)}`);
+        // Initial dev errors must finish the session command, without requiring Ctrl+C (#560).
+        for (const [manifest, message] of [[null, 'No webfront.project.json: run wf init'],
+            [{format: 1, name: 'empty', version: '0.1.0'}, 'Usage: wf dev <entry.tsx>']]) {
+            startupFiles = new Map(manifest ? [['webfront.project.json', new TextEncoder().encode(JSON.stringify(manifest))]] : []);
+            try {
+                terminal.input('wf dev\r');
+                await delay(10);
+                for (let attempt = 0; attempt < 200 && editor.busy; ++attempt) await delay(10);
+                assert(!editor.busy, 'An invalid wf dev invocation must finish without Ctrl+C');
+                await editor.whenIdle();
+                await rendered();
+                assert(editor.status === 1 && rows().some(row => row.includes(message)) && lastRows(1)[0] === '> ',
+                    `wf dev must report its error and restore the prompt: ${lastRows(4)}`);
+                await type('echo recovered\r');
+                assert(editor.status === 0 && lastRows(2)[0] === 'recovered', 'The next command must run after the startup error');
+            } finally {
+                startupFiles = undefined;
+                if (editor.busy) await type('\x03');
+            }
+        }
         // Cell widths: CJK, emoji, a flag, a ZWJ sequence and a combining mark.
         await type('漢字😀🇫🇷👨‍👩‍👧éx');
         assert(buffer().cursorX === 2 + 2 + 2 + 2 + 2 + 2 + 1 + 1, `Wide characters must take two cells: ${buffer().cursorX}`);
