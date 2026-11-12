@@ -78,6 +78,20 @@ runner. A pull request into `develop` runs them only when it changes one of thei
 prepare, compare and assemble the self-build project, `LICENSE` and the workflow itself); a push to `develop` and the advanced
 checks always run them. They are off by default: `-DWEBFRONT_TEST_REPRODUCIBILITY=ON` adds them to a local build.
 
+## Configuration checks
+
+The cases that configure a CMake project carry the label `configuration` in addition to their tier: the options, the
+frontend selection, the module scan, the CEF and WebView2 support, the parent project that adds WebFront as a
+subdirectory, and the repetition of the suite itself (`ctest -N -L configuration` lists them). They test the build system, not
+the library, and take about 75 s of worker time on a hosted runner. A pull request into `develop` runs them only when it
+changes `cmake/`, `CMakeLists.txt`, the CMake modules of `js/core/`, `test/cmake/`, `test/unit/CMakeLists.txt`, the actions
+of `.github/actions/` or the workflow itself; a push to `develop`, the weekly run and the full tier always run them.
+`AddSubdirectoryNativeConsumer` is not one of them: it compiles the native frontend from a consuming project, so any change
+of the headers can break it. Locally, `ctest -LE configuration` leaves them out.
+
+The coverage capture (`lcov`) runs on a push to `develop` or `master` and in the full tier. A pull request still builds and
+runs the instrumented Linux tests, but nothing reads a pull request's capture.
+
 ## Advanced checks
 
 These run on the weekly schedule (Monday 04:23 UTC), on every pull request whose base is `master`, and on a manual
