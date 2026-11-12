@@ -106,6 +106,7 @@ A nested CTest regression verifies failed and successful readers as well as thei
 registration helper as the real suite. Each report retains the part's diagnostic. Life's generated header and the terminal's
 cancellation check still come from their respective parts. Browser deadlines start after file preparation. An explicit hidden WKWebView
 case checks both native invisibility and `inactiveSchedulingPolicy == None`; ordinary windows remain visible.
+When the runtime lacks this preference (macOS 13.3), that case checks the documented rejection of hidden sessions.
 
 The driver groups above each use one visible window. This change reduces the three WebSuite/React commands from three
 openings to one, publication's four commands from four to one, and manifest-directory init/install from two to one.

@@ -221,7 +221,14 @@ void settings() {
 }
 void hiddenScheduling() {
     Object  pool(send(type("NSAutoreleasePool"), "new"));
+    Object configuration(send(type("WKWebViewConfiguration"), "new"));
+    const auto preferences = send(configuration.get(), "preferences");
     Session session("http://127.0.0.1:0/", {.visible = false});
+    // Check the runtime capability: a test binary built on macOS 14 can also run on macOS 13.3.
+    if (!send<BOOL>(preferences, "respondsToSelector:", sel_registerName("setInactiveSchedulingPolicy:"))) {
+        expectFailure([&] { session.create(); }, "hidden sessions require macOS 14 or later");
+        return;
+    }
     session.create();
     require(!send<BOOL>(session.window, "isVisible"), "An explicitly hidden window was shown");
     require(send<long>(send(send(session.view, "configuration"), "preferences"), "inactiveSchedulingPolicy") == 2L,
