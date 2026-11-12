@@ -465,11 +465,14 @@ inline constexpr std::string_view developmentPathNote =
 /// Set once the process has written developmentPathNote.
 inline std::atomic_flag developmentPathNoted;
 
-/// Writes developmentPathNote unless `noted` says it was written already. @return whether this call wrote it
-inline bool noteDevelopmentPath(std::ostream& out = std::cerr, std::atomic_flag& noted = developmentPathNoted) {
-    if (noted.test_and_set())
+/// Where the note goes: std::cerr when null. Tests point it at a stream of their own.
+inline std::ostream* developmentPathOutput = nullptr;
+
+/// Writes developmentPathNote unless it was written already. @return whether this call wrote it
+inline bool noteDevelopmentPath() {
+    if (developmentPathNoted.test_and_set())
         return false;
-    out << developmentPathNote << '\n';
+    (developmentPathOutput ? *developmentPathOutput : std::cerr) << developmentPathNote << '\n';
     return true;
 }
 }  // namespace detail

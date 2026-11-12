@@ -605,8 +605,13 @@ SCENARIO("Registered C++ function handlers own and invoke their callable") {
 SCENARIO("An application that serves a document root is told the development path once") {
     using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, ClosingFrontend>;
     std::ostringstream captured;
-    auto*              previous = std::cerr.rdbuf(captured.rdbuf());
-    detail::developmentPathNoted.clear();
+    struct Redirect {
+        explicit Redirect(std::ostream& out) {
+            detail::developmentPathOutput = &out;
+            detail::developmentPathNoted.clear();
+        }
+        ~Redirect() { detail::developmentPathOutput = nullptr; }
+    } const redirect{captured};
     const auto notes = [&captured] {
         std::size_t count = 0;
         const auto  text  = captured.str();
@@ -619,7 +624,6 @@ SCENARIO("An application that serves a document root is told the development pat
         WHEN("it is shown") {
             webFront.show();
             THEN("nothing is said") {
-                std::cerr.rdbuf(previous);
                 REQUIRE(captured.str().empty());
             }
         }
@@ -632,7 +636,6 @@ SCENARIO("An application that serves a document root is told the development pat
             first.show();
             second.show();
             THEN("the process names ui/, wf dev and the agent guide exactly once") {
-                std::cerr.rdbuf(previous);
                 REQUIRE(notes() == 1);
                 REQUIRE_THAT(captured.str(), Catch::Matchers::ContainsSubstring("TypeScript/TSX interface in ui/"));
                 REQUIRE_THAT(captured.str(), Catch::Matchers::ContainsSubstring("`wf dev`"));
@@ -640,7 +643,6 @@ SCENARIO("An application that serves a document root is told the development pat
             }
         }
     }
-    std::cerr.rdbuf(previous);
 }
 
 SCENARIO("show opens the default page and returns when the window session ends") {
