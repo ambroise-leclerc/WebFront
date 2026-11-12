@@ -80,9 +80,9 @@ void nativeClose(bool quit) {
     const auto previousMenu     = send(app, "mainMenu");
     const auto previousDelegate = send(app, "delegate");
     {
-        Session session("http://127.0.0.1:0/", {.visible = webfront::testdriver::diagnosticWindows()});
+        Session session("http://127.0.0.1:0/", {.visible = webfront::testdriver::visibleWindows});
         session.create();
-        require(static_cast<bool>(send<BOOL>(session.window, "isVisible")) == webfront::testdriver::diagnosticWindows(),
+        require(static_cast<bool>(send<BOOL>(session.window, "isVisible")) == webfront::testdriver::visibleWindows,
                 "Window visibility option was ignored");
         // Exercise the real native entry points before any WebKit/bridge callback.
         if (quit)
@@ -130,7 +130,7 @@ struct Listener {
 void startupTimeout() {
     // No accept/response: navigation stalls without relying on public networking.
     Listener                             listener;
-    webfront::frontend::WKWebViewOptions options{.startupTimeout = std::chrono::milliseconds(200), .visible = webfront::testdriver::diagnosticWindows()};
+    webfront::frontend::WKWebViewOptions options{.startupTimeout = std::chrono::milliseconds(200), .visible = webfront::testdriver::visibleWindows};
     expectFailure(
         [&] {
             Frontend::open("127.0.0.1", listener.port, "index.html", options);
@@ -204,10 +204,10 @@ void settings() {
         Session session("http://127.0.0.1:9002/",
                         {
                             .contentPolicy = {.devToolsEnabled = enabled, .contextMenusEnabled = enabled},
-                            .visible       = webfront::testdriver::diagnosticWindows()
+                            .visible       = webfront::testdriver::visibleWindows
         });
         session.create();
-        require(static_cast<bool>(send<BOOL>(session.window, "isVisible")) == webfront::testdriver::diagnosticWindows(),
+        require(static_cast<bool>(send<BOOL>(session.window, "isVisible")) == webfront::testdriver::visibleWindows,
                 "Window visibility option was ignored");
         require(static_cast<bool>(send<BOOL>(session.view, "isInspectable")) == enabled, "Inspector policy was ignored");
         require(!send<BOOL>(send(send(session.view, "configuration"), "websiteDataStore"), "isPersistent"), "Website data was persistent");
@@ -239,7 +239,7 @@ void hiddenScheduling() {
 
 void missingResponse() {
     Object  pool(send(type("NSAutoreleasePool"), "new"));
-    Session session("http://127.0.0.1:0/", {.visible = webfront::testdriver::diagnosticWindows()});
+    Session session("http://127.0.0.1:0/", {.visible = webfront::testdriver::visibleWindows});
     session.create();
     send<void>(session.delegate, "webView:didFinishNavigation:", session.view, static_cast<id>(nullptr));
     require(session.closed && !session.loaded, "An internal error document was treated as a successful HTTP load");
@@ -252,7 +252,7 @@ void missingResponse() {
 
 void committedNavigation() {
     Object  pool(send(type("NSAutoreleasePool"), "new"));
-    Session session("http://127.0.0.1:9002/", {.visible = webfront::testdriver::diagnosticWindows()});
+    Session session("http://127.0.0.1:9002/", {.visible = webfront::testdriver::visibleWindows});
     session.create();
     bool notified               = false;
     session.navigationCancelled = [&] {
@@ -298,7 +298,7 @@ struct ScenarioFrontend : Frontend {
     static void open(std::string_view port, std::string_view page) {
         initialize();
         Object                               pool(send(type("NSAutoreleasePool"), "new"));
-        webfront::frontend::WKWebViewOptions options{.visible = webfront::testdriver::diagnosticWindows()};
+        webfront::frontend::WKWebViewOptions options{.visible = webfront::testdriver::visibleWindows};
         if (configure)
             configure(options);
         Session session(webfront::frontend::detail::applicationUrl("127.0.0.1", port, page), options);

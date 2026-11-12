@@ -92,8 +92,9 @@ try {
     await progress('bootstrap ready');
     // Unpacking four environments on one WebKit JavaScript thread can exhaust the unchanged readiness budget.
     // Start the next bootstrap now; this part's commands can still run alongside it in their own visible pane.
-    if (location.search === '?developer-session' && parent !== self)
-        parent.postMessage('webfront-developer-ready', new URL(document.referrer).origin);
+    const sessionHost = new URLSearchParams(location.search).get('developer-session');
+    if (sessionHost && parent !== self)
+        parent.postMessage('webfront-developer-ready', sessionHost);
     // `all` (no part given) runs every part in one session; a part starts from a fresh project and runs alone, in parallel
     // with the others.
     const part = await webFront.cppFunction('test.part')();
@@ -1479,8 +1480,9 @@ try {
 } finally {
     if (lastPhase) await webFront.cppFunction('test.progress')(
         `${profileNow().toFixed(3)}ms end ${lastPhase.name} durationMs=${(profileNow() - lastPhase.time).toFixed(3)}`);
-    if (location.search === '?developer-session' && parent !== self)
-        parent.postMessage('webfront-developer-finished', new URL(document.referrer).origin);
+    const finishedHost = new URLSearchParams(location.search).get('developer-session');
+    if (finishedHost && parent !== self)
+        parent.postMessage('webfront-developer-finished', finishedHost);
     else
         setTimeout(() => globalThis.close(), 0);
 }

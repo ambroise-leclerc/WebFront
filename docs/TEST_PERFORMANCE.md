@@ -91,19 +91,24 @@ Browser tests keep their windows visible by default on Windows and macOS. Their 
 Linux's real windows remain on the suite's Xvfb display. Explicit tests of hidden-window behavior still use that option.
 
 `DeveloperBrowserSession` opens **one visible native window for all six developer integration parts**, instead of six.
-It displays up to four parts concurrently in visible iframe panes, each with its own native application, temporary
-project, assigned loopback port and origin. Bootstraps are staggered until their environment is ready so four archive
-unpackers do not compete on WebKit's shared JavaScript thread; the ready pages' commands run in parallel.
+It displays up to five parts concurrently in visible iframe panes (all but workspace), each with its own native
+application, temporary project, assigned loopback port and origin, the longest part (TypeScript) first. Bootstraps are
+staggered until their environment is ready so the archive unpackers do not compete on WebKit's shared JavaScript thread;
+the ready pages' commands run in parallel. Each page learns its host's origin from its `?developer-session=<origin>`
+query, not from its referrer.
 A completed frame is removed and its slot reused; its Workers, listeners
 and bridge go away. The same native view then navigates to workspace as a top-level page for its layout/rendering and
 keyboard-focus checks; this retains WebKit's original focus ancestry. No active pane is hidden.
 All assertions run in their original single-part mode, including workspace's first-launch/failed-first-build checks.
 The familiar `DeveloperBrowserIntegration*` CTest names validate separate native reports. The producer fixture succeeds
 when all six reports are complete and agree with the process status, even if some parts failed; each report reader
-decides its own result and unlocks only its own dependent tests. A crash, missing/invalid report, inconsistent process
-status or expired native deadline fails the producer. The `--session` command itself still exits with 1 when any part fails.
-A nested CTest regression verifies failed and successful readers as well as their downstream fixtures, using the same
-registration helper as the real suite. Each report retains the part's diagnostic. Life's generated header and the terminal's
+decides its own result and unlocks only its own dependent tests. A crash, missing/invalid report or inconsistent
+process status fails the producer. An expired native deadline writes the reports of the parts first (a part that never
+reported fails with the deadline as its diagnostic; the application and terminal parts, whose shutdown checks cannot
+have run, are reported failed) and then exits with 1, so the parts that finished keep their results. The `--session`
+command itself still exits with 1 when any part fails. A nested CTest regression verifies failed and successful readers
+as well as their downstream fixtures, and a session ended by a shortened deadline (`WEBFRONT_TEST_DEVELOPER_DEADLINE`,
+in seconds, 180 by default), using the same registration helper as the real suite. Each report retains the part's diagnostic. Life's generated header and the terminal's
 cancellation check still come from their respective parts. Browser deadlines start after file preparation. An explicit hidden WKWebView
 case checks both native invisibility and `inactiveSchedulingPolicy == None`; ordinary windows remain visible.
 When the runtime lacks this preference (macOS 13.3), that case checks the documented rejection of hidden sessions.
@@ -113,7 +118,16 @@ openings to one, publication's four commands from four to one, and manifest-dire
 With sessions disabled, the original individual commands and the six separate developer windows remain available.
 The session reserves four CTest processors to account for its bounded internal parallelism. Each part retains its own
 native 180-second deadline, even while other parts finish. Compare full-suite wall time as well as openings before
-claiming a speedup. The session prints `nativeWindows=1 parts=6 durationMs=...` for timing comparisons.
+claiming a speedup. The session prints each part's `connectedMs` and `reportedMs` and the final
+`nativeWindows=1 parts=6 durationMs=...` for timing comparisons.
+
+Where the time goes, on macOS 27 with WKWebView (warm caches, 8 cores): the parts take 1.9 to 4.7 s alone, 19.5 s in all,
+and 10.8 to 11.4 s run as six separate processes with four workers or as the shared window. In the shared window the five
+concurrent parts end after 7 to 9 s (TypeScript, slowed from 4.7 s by the others, is last) and workspace then needs its own
+1.9 s at the top level: it is the sequential tail, of the order of the 1.8 s gap of the Windows comparison below (not measured on Windows). Starting TypeScript first and
+admitting the fifth pane moved the total from 11.1 s to 10.8 s on this machine; the five parts' total is bound by the shared
+page's JavaScript and Worker work, not by the number of windows. A part's environment is unpacked on every page load,
+so a pane cannot warm workspace's bootstrap for its later top-level page.
 
 A local Windows/MSVC Release/WebView2 comparison used the same executable and fixtures, with four workers and no
 concurrent compiler: six separate visible windows took 26.89 s; the shared visible window took 28.69 s (28.34 s inside

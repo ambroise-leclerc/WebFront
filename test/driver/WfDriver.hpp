@@ -49,7 +49,7 @@ struct DriverWebView2Options {
     }
     static frontend::WebView2Options get(const char* profile) {
         frontend::WebView2Options options;
-        options.visible = diagnosticWindows();
+        options.visible = visibleWindows;
         if (profile && *profile)
             options.userDataFolder = std::filesystem::path(profile);
         return options;

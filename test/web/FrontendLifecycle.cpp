@@ -495,7 +495,7 @@ struct PolicyLifecycleFrontend {
                 if (auto live = weak.lock())
                     check(live->view->ExecuteScript(utf16(cancellationScript).c_str(), nullptr), "reporting native navigation cancellation");
             };
-            session->createWindow(webfront::testdriver::diagnosticWindows());
+            session->createWindow(webfront::testdriver::visibleWindows);
             session->start(userDataFolder());
             session->run();
         } else
@@ -506,7 +506,7 @@ struct PolicyLifecycleFrontend {
             initialize();
             Object  pool(send(type("NSAutoreleasePool"), "new"));
             Session session(webfront::frontend::detail::applicationUrl(address, port, page),
-                            {.contentPolicy = policy, .visible = webfront::testdriver::diagnosticWindows()});
+                            {.contentPolicy = policy, .visible = webfront::testdriver::visibleWindows});
             session.navigationCancelled = [&] {
                 Object script(text(cancellationScript));
                 send<void>(session.view, "evaluateJavaScript:completionHandler:", script.get(), static_cast<id>(nullptr));
