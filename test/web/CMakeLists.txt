@@ -705,7 +705,7 @@ if(_browser_tests_available)
         if(WEBFRONT_TEST_REPRODUCIBILITY)
             # Reproducible: two builds give the very same bytes.
             set(_self_outputs environment.tgz environment.json provision.json DeveloperReleaseData.hpp runtime.mjs compiler.mjs
-                script-worker.mjs typecheck-worker.mjs esbuild.wasm xterm.css LICENSES.txt package.json life-starter.tgz)
+                script-worker.mjs typecheck-worker.mjs esbuild.wasm xterm.css LICENSES.txt package.json app-starter.tgz life-starter.tgz)
             webfront_add_self_build_check(SelfBuildReproducible CompareFiles.cmake SelfBuiltTwice
                 -DLEFT=${_self_project}/build-distribution -DRIGHT=${_self_project}/build-distribution-repeat "-DFILES=${_self_outputs}")
             set_tests_properties(SelfBuildReproducible PROPERTIES FIXTURES_SETUP SelfReproducible)

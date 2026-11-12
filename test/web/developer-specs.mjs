@@ -119,7 +119,7 @@ try {
     showTrace();
     const environment = await (await fetch('/webfront/developer/environment/environment.json')).json();
     const currentDistribution = !config.environment.startsWith('https:');
-    if (currentDistribution) assert(JSON.stringify(Object.keys(environment.starters)) === JSON.stringify(['life']), 'Only the Life starter must be shipped');
+    if (currentDistribution) assert(JSON.stringify(Object.keys(environment.starters)) === JSON.stringify(['app', 'life']), 'Only the application and Life starters must be shipped');
     config.starters = Object.fromEntries(Object.entries(environment.starters).map(([name, value]) => [name, {url: new URL(value.archive, new URL(config.environment, location.href)).href, integrity: value.integrity}]));
     const context = {bridge: webFront, config, preview: document.getElementById('preview'), signal: new AbortController().signal,
         write: text => console.log(text)};

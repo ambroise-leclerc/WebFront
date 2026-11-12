@@ -268,6 +268,11 @@ add_test(NAME RepositoryLayoutRejectsVendoredSources
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckRepositoryLayoutNegative.cmake)
 add_test(NAME NewcomerDocsMatchExamples
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckNewcomerDocs.cmake)
+# What an agent reads first states the development model and how it runs wf itself (#561).
+add_test(NAME AgentGuidance
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/agent-guidance
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckAgentGuide.cmake)
+set_tests_properties(AgentGuidance PROPERTIES TIMEOUT 30 LABELS fast)
 add_test(NAME BuildToolRequirements
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/build-tool-requirements
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckBuildToolRequirements.cmake)

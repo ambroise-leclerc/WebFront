@@ -7,7 +7,9 @@
 #include <chrono>
 #include <future>
 #include <fstream>
+#include <iostream>
 #include <limits>
+#include <sstream>
 #include <thread>
 #include <utility>
 
@@ -17,6 +19,14 @@ using webfront::test::TemporaryDirectory;
 namespace {
 struct QuietFrontend {
     static constexpr frontend::Action action{frontend::Action::keepServerRunning};
+
+    static void initialize() {}
+
+    static void open(std::string_view, std::string_view) {}
+};
+
+struct ClosingQuietFrontend {
+    static constexpr frontend::Action action{frontend::Action::closeServerAfterOpen};
 
     static void initialize() {}
 
@@ -338,6 +348,36 @@ SCENARIO("The developer store refuses malformed requests without changing the pr
             REQUIRE_THROWS_AS(developer::Store{project.path() / "file"}, std::invalid_argument);
         }
     }
+}
+
+SCENARIO("A developer application is not told to use the developer environment") {
+    using App = BasicDeveloperApp<ClosingQuietFrontend>;
+    TemporaryDirectory project;
+    std::ostringstream captured;
+    auto*              previous = std::cerr.rdbuf(captured.rdbuf());
+    detail::developmentPathNoted.clear();
+    GIVEN("a project whose developer environment is bootstrapped") {
+        App app(project.path(), WebFrontConfig{.port = "0"});
+        app.bootstrap("developer", {.environment = "https://example.test/env.tgz", .integrity = "sha512-abc"});
+        WHEN("it is shown") {
+            app.show();
+            THEN("its document root, the project that wf builds, raises no note") {
+                std::cerr.rdbuf(previous);
+                REQUIRE(captured.str().find(detail::developmentPathNote) == std::string::npos);
+            }
+        }
+    }
+    GIVEN("the same application without its developer environment") {
+        App app(project.path(), WebFrontConfig{.port = "0"});
+        WHEN("it is shown") {
+            app.show();
+            THEN("it serves a plain document root and is told the development path") {
+                std::cerr.rdbuf(previous);
+                REQUIRE(captured.str().find(detail::developmentPathNote) != std::string::npos);
+            }
+        }
+    }
+    std::cerr.rdbuf(previous);
 }
 
 SCENARIO("The developer application needs an explicit project and a trusted environment") {

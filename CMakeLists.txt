@@ -154,6 +154,9 @@ if(WEBFRONT_BUILD_AUTOMATION OR (WEBFRONT_ENABLE_TESTING AND
 endif()
 # Public helper for a parent project: checks the launcher target and optionally installs it.
 include(WebFrontAgent)
+# What an agent configuring a project must learn at once: the development model, and how it runs wf itself.
+include(WebFrontAgentGuide)
+webfront_announce_agent_support()
 
 if(WEBFRONT_ENABLE_TESTING OR WEBFRONT_ENABLE_FUZZING)
   include(TestHardening)

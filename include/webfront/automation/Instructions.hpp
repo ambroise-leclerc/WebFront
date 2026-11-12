@@ -3,6 +3,9 @@
 #include <string_view>
 namespace webfront::automation {
 inline constexpr std::string_view agentInstructions = R"(WebFront developer automation, contract v1
+A WebFront application is C++ with a TypeScript/TSX interface in ui/ of its project, developed with wf: not pages served
+from documentRoot. New interface: create (--starter app; a starter, not the project's name), init, install (--package NAME,
+only for imported npm packages), then preview --entry ui/main.ts after each edit (wf dev is the person's watch), check, test.
 1. Read `webfront-agent --schema` once. It is the trusted operation contract.
 2. Run `webfront-agent --list` to see the sessions their owners shared (project, grants, endpoint directory; no secret),
    or ask the owner to launch a window with --serve --listen DIRECTORY and explicit --allow grants (an application can

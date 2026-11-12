@@ -7,6 +7,12 @@ import {memoryBridge} from '../memory-bridge.mjs';
 import {rejects, throws, integrity} from '../support.mjs';
 
 describe('The project manifest', () => {
+    it('answers a missing manifest or entry with the next steps, not only the first one', async () => {
+        // #561: an agent that had never seen a WebFront project was told "run wf init", then "Usage: wf dev <entry.tsx>".
+        await rejects(install(memoryBridge().bridge, ['a'], {}), /No webfront\.project\.json: run wf init, then wf dev <entry\.tsx> \(the interface is TypeScript\/TSX in ui\/; wf create app writes a first one; wf help agents gives the sequence\)/);
+        throws(() => resolveEntry({entries: {}}, undefined, 'wf dev <entry.tsx>'), /Usage: wf dev <entry\.tsx>, for example ui\/main\.tsx \(declare entries\.main in webfront\.project\.json to omit the entry; wf create app writes a first ui\/main\.ts\)/);
+    });
+
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
     const encode = value => encoder.encode(typeof value === 'string' ? value : JSON.stringify(value));
