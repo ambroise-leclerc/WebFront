@@ -56,8 +56,11 @@ set_tests_properties(FailedConsumer PROPERTIES FIXTURES_REQUIRED DeveloperGenera
     if(CONFIG)
         set(config -C "${CONFIG}")
     endif()
-    if(scenario STREQUAL "expired")
-        set(ENV{WEBFRONT_TEST_DEVELOPER_DEADLINE} 10)
+    # The parts of this fixture answer at once: a session that waits longer is stuck, and its deadline names the parts
+    # that never reported instead of leaving a bare CTest timeout.
+    set(ENV{WEBFRONT_TEST_DEVELOPER_DEADLINE} 10)
+    if(scenario STREQUAL "failed")
+        set(ENV{WEBFRONT_TEST_DEVELOPER_DEADLINE} 40)
     endif()
     execute_process(COMMAND "${CTEST_EXECUTABLE}" --test-dir "${dir}/build" ${config} --parallel 4 -V
         --output-junit "${dir}/results.xml" -R "DeveloperBrowserIntegration|SuccessfulConsumer|FailedConsumer"

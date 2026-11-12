@@ -454,7 +454,7 @@ void writeReport(const std::filesystem::path& output, std::string_view name, boo
 
 int runSession(const std::filesystem::path& fixtures, const std::filesystem::path& output) {
     const auto                 started = std::chrono::steady_clock::now();
-    constexpr std::string_view names[]{"typescript", "app", "jasmine", "scripts", "terminal", "workspace"};
+    constexpr std::string_view names[]{"app", "scripts", "typescript", "jasmine", "terminal", "workspace"};
     std::filesystem::create_directories(output / "results");
     // Remove only this invocation's own reports, so a crash cannot leave a previous success behind.
     for (const auto name : names)
@@ -510,7 +510,7 @@ section{min-width:0;min-height:0}header{height:28px;line-height:28px;padding:0 1
 iframe{display:block;border:0;width:100%;height:calc(100% - 28px)}</style><body><script>
 const urls = )HTML"
          << urls << R"HTML(;
-const names = ['TypeScript', 'application', 'Jasmine', 'scripts', 'terminal', 'workspace'];
+const names = ['application', 'scripts', 'TypeScript', 'Jasmine', 'terminal', 'workspace'];
 let cursor = 0, completed = 0, booting = null;
 const frames = new Map();
 function launch(index) {
@@ -524,7 +524,7 @@ function launch(index) {
 }
 function advance() {
     // All running pages remain displayed. Workspace's layout/rendering checks get the entire window afterwards.
-    if (cursor < 5 && frames.size < 5 && booting === null) launch(cursor++);
+    if (cursor < 5 && frames.size < 4 && booting === null) launch(cursor++);
     if (completed === 5 && !frames.size) {
         // Keep the same native view, but give workspace its original top-level focus chain on WebKit.
         const workspace = new URL(urls[5]);
