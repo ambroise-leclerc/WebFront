@@ -1,5 +1,6 @@
 #include "../../examples/life/Life.hpp"
 #include "../driver/DriverSuite.hpp"
+#include "../driver/RequestLog.hpp"
 #include "../unit/TemporaryDirectory.hpp"
 #include <webfront/Commands.hpp>
 #include <webfront/WebFront.hpp>
@@ -17,6 +18,9 @@
 #include <utility>
 
 namespace {
+// The parts have independent server threads. A phase marker must not splice its duration into another part's line.
+std::mutex transcript;
+
 std::string readFixtureText(const std::filesystem::path& path) {
     const auto size = std::filesystem::file_size(path);
     if (size > 16 * 1024 * 1024)
@@ -85,10 +89,14 @@ void registerCallbacks(App& app, const std::filesystem::path& project, std::atom
         return result->json;
     });
     app.cppFunction("test.progress", [](std::string message) {
+        const std::scoped_lock lock{transcript};
         std::cout << "Developer integration: " << message << std::endl;
     });
     app.cppFunction("test.report", [&passed, reported = std::move(reported)](bool success, std::string message) {
-        std::cout << message << std::endl;
+        {
+            const std::scoped_lock lock{transcript};
+            std::cout << message << std::endl;
+        }
         passed.store(success);
         if (reported)
             reported(std::move(message));
@@ -589,8 +597,7 @@ int main(int argc, char** argv) {
         webfront::detail::ensureFrontendInitialized<WEBFRONT_TEST_FRONTEND>();
         // CTest shows the output of a failed case only: it then names every request and the status it was answered,
         // which is what tells a resource the page could not load from one the server refused (#542).
-        webfront::log::setLogLevel(webfront::log::Info);
-        [[maybe_unused]] const auto requestLog = webfront::log::addSinks(webfront::log::clogSink);
+        [[maybe_unused]] const auto requestLog = webfront::testdriver::logRequests();
         if (argc != 3 && argc != 4)
             throw std::invalid_argument("Expected fixture directory, header output directory and optional --session, --public or --part=<name>");
         if (argc == 4 && std::string_view(argv[3]) == "--session")

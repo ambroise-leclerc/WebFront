@@ -1,6 +1,8 @@
 #include "../driver/WfDriver.hpp"
 #include <catch2/catch_test_macros.hpp>
 
+#include <sstream>
+
 namespace {
 struct DriverUI {
     std::vector<std::string>* scripts;
@@ -17,6 +19,29 @@ webfront::testdriver::Options parseDriver(std::initializer_list<std::string> ext
     return webfront::testdriver::parse(static_cast<int>(argv.size()), argv.data());
 }
 }  // namespace
+
+SCENARIO("Browser test diagnostics retain HTTP failures without filling the transcript with bridge traffic") {
+    std::ostringstream output;
+    auto*              previous = std::clog.rdbuf(output.rdbuf());
+    const auto         sink     = webfront::testdriver::logRequests();
+    webfront::log::info("Received request GET on /scripts.js");
+    webfront::log::info("  responding http 404");
+    webfront::log::info("onMessage(binary): bridge traffic");
+    webfront::log::warn("HTTP asset request failed: denied");
+    webfront::log::warn("File response ended its response early: short read");
+    webfront::log::warn("WebSocket disconnected unexpectedly");
+    webfront::log::removeSinks(sink);
+    std::clog.rdbuf(previous);
+    webfront::log::setLogLevel(webfront::log::Disabled);
+    THEN("the resource, status and failures remain, but ordinary bridge messages do not") {
+        CHECK(output.str().find("GET on /scripts.js") != std::string::npos);
+        CHECK(output.str().find("responding http 404") != std::string::npos);
+        CHECK(output.str().find("request failed: denied") != std::string::npos);
+        CHECK(output.str().find("response early: short read") != std::string::npos);
+        CHECK(output.str().find("WebSocket disconnected unexpectedly") != std::string::npos);
+        CHECK(output.str().find("bridge traffic") == std::string::npos);
+    }
+}
 
 SCENARIO("The driver deadline closes both connected and late browsers without losing the request") {
     std::vector<std::string>                      scripts;

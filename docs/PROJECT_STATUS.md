@@ -77,6 +77,12 @@ resource limits and complete-suite repetition. Sessions retain individual CTest 
 independent driver processes use OS-assigned loopback ports. Manual transport measurements
 remain separate from the short native transport contract tests.
 
+Intermittent CI failures in session resource loading, workspace reloading and native browser lifecycle tests remain
+under investigation in [#542](https://github.com/ambroise-leclerc/WebFront/issues/542); the Windows early-close COM
+lifetime failure is tracked separately in [#564](https://github.com/ambroise-leclerc/WebFront/issues/564).
+The [diagnostic workflow](TEST_PERFORMANCE.md#investigating-intermittent-failures) preserves failed attempts and HTTP
+transcripts; successful local repetitions do not establish that these platform-specific defects are fixed.
+
 [Local-model qualification](validation/automation-models-2026-10-29.md) records five installed
 models driving the real MCP window through an external LM Studio measurement adapter. It distinguishes
 final source correctness (30/30 host-verified tasks) from completed verification observed by the model

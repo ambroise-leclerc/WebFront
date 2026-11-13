@@ -8,6 +8,7 @@
 
 #include "../unit/TemporaryDirectory.hpp"
 #include "DriverSuite.hpp"
+#include "RequestLog.hpp"
 #include "TestFrontend.hpp"
 #include <webfront/system/SafePath.hpp>
 #include <webfront/WebFront.hpp>
@@ -623,6 +624,7 @@ int main(int argc, char** argv, std::string_view program, Setup&& setup = {}) {
     try {
         // CEF child processes must dispatch before interpreting application arguments or creating files.
         webfront::detail::ensureFrontendInitialized<Frontend>();
+        [[maybe_unused]] const auto requestLog = logRequests();
 #if defined(WEBFRONT_EMBED_CEF) && defined(__linux__)
         std::optional<webfront::test::TemporaryDirectory> temporaryProfile;
         if constexpr (std::is_same_v<Frontend, frontend::CEFFrontend>) {

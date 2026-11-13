@@ -88,6 +88,8 @@ set(_self_project "${CMAKE_CURRENT_BINARY_DIR}/self-build-project")
 set(_registry "${_self_project}/build-registry")
 set(_fixtures "${CMAKE_CURRENT_BINARY_DIR}/developer-fixtures")
 if(_browser_tests_available AND TARGET webfront-agent)
+    # Only the test build logs HTTP to stderr; stdout remains the JSON/MCP protocol.
+    target_compile_definitions(webfront-agent PRIVATE WEBFRONT_TEST_REQUEST_LOG=1)
     webfront_optional_window_test_runner(_window_test_prefix _automation_windows_available)
     add_dependencies(webtest webfront-agent)
     find_package(Python3 COMPONENTS Interpreter QUIET)

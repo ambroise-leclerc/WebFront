@@ -174,6 +174,11 @@ runner raises the CTest output cap to 2 MiB per case so JUnit retains these deta
 phase/spec durations. WASM compilation/initialization, command preparation, publication, navigation and execution can be
 located by the enclosing command and spec; these spans include waits and bridge traffic, not just CPU time.
 
+Malformed `durationMs` values (for example two numbers interleaved by concurrent output) are reported on stderr and
+omitted from the phase ranking. Other phases and the CTest result remain available; no numeric prefix is used as an
+invented duration. This tolerance applies only to optional phase timings, not to malformed JUnit or dependency graphs.
+The developer session serializes progress and result lines from its independent server threads.
+
 The esbuild helper used by developer specs initializes its WASM compiler in a Worker, matching
 the developer environment and avoiding off-screen frame timer throttling. Its rebuild spec changes
 an imported file, checks a syntax error and checks recovery.
@@ -202,6 +207,27 @@ reports on failure and uploads CTest profiles, dependency graphs, sampled resour
 statistics. Qualification dispatches `BuildAndTest.yml` with `repeat_desktop_tests=true` for three complete desktop
 passes plus GCC/Clang CEF and sanitizers. First-pass fixtures/profiles are fresh; later passes reset them too but may
 benefit from OS/filesystem and compiler caches. They are not measurements of a physically cold OS page cache.
+
+## Investigating intermittent failures
+
+Read the failures of recent workflow runs, including earlier attempts of a run that later passed:
+
+```sh
+python3 test/tools/FlakeReport.py --limit 60
+```
+
+This read-only tool requires authenticated `gh`. Correlate the case, platform and revision before treating a failure as
+intermittent. Repeat the complete fixture graph with `RunTestSuite.cmake` as above; repeating an individual stateful
+command does not reset its inputs. Do not add automatic CI retries.
+
+The developer integration executable, `webfront-wf`, the browser suite driver and the automation consumer log HTTP
+requests, response statuses and streaming failures to stderr. The agent does so only in a browser test build.
+These logs retain warnings and errors and filter out ordinary bridge traffic to keep resource diagnostics within CTest's output cap; service
+tokens and request queries retain the HTTP server's redaction. JSON/MCP stdout stays separate.
+For grouped sessions, read `DeveloperBrowserSession` or the corresponding `*Session` transcript in the uploaded
+`Testing/Temporary/LastTest-<pass>.log` even when that aggregate case passes: the individual report reader may fail later.
+The workspace reloading assertion also reports the preview URL, document readiness, displayed root, tab status and
+`wf dev` output. A 200 response alone does not prove that a frame executed its script.
 
 ## Recording a run
 

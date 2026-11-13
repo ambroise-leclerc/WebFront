@@ -28,6 +28,8 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Fixed
 
+- Serialize the developer session's phase logs and keep CI timing analysis running if a duration is malformed: report and omit that timing while retaining the other phases and test results (#542).
+
 - Restore the terminal prompt with exit code 1 when `wf dev` starts without a project or a selectable entry; compilation errors still keep watching for edits. Environment 0.9.2 (#560).
 - Read all six developer integration reports in CTest after a part fails, and keep the successful parts' dependent tests runnable, also when the session's native deadline ends it (#556).
 - On Windows, `wf install`, `wf build` and `wf test` no longer fail with `rename: Access is denied` while another process, such as an antivirus scan, still reads the files just written: the developer store tries the rename again for up to 635 ms; `wf test` also empties the directory of an interrupted run (#542).

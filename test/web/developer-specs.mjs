@@ -1040,7 +1040,13 @@ try {
                 await until(() => /Preview ready/.test(devOutput) && shows('layout-one')(), 'wf dev did not start');
                 await writeFile('layout/value.ts', "export const value: string = 'layout-two';\n");
                 await poll();
-                await until(shows('layout-two'), 'wf dev must reload the full-window interface');
+                try {
+                    await until(shows('layout-two'), 'wf dev must reload the full-window interface');
+                } catch (error) {
+                    throw new Error(`${error.message}; preview=${pagePreview.contentWindow.location.href}; `
+                        + `readyState=${pagePreview.contentDocument?.readyState}; root=${pagePreview.contentDocument?.getElementById('root')?.textContent}; `
+                        + `status=${button.dataset.status}; wf dev output:\n${devOutput}`);
+                }
                 assert(again.state() === 'interface' && again.fills('#preview'), 'A reload must leave the terminal collapsed');
                 await until(() => button.dataset.status === 'ready', `The tab must show that wf dev watches: ${button.dataset.status}`);
                 assert(/wf dev is watching/.test(button.getAttribute('aria-label')), 'The tab must name the state of wf dev');
