@@ -462,7 +462,7 @@ SCENARIO("The Linux interface loop refuses a default GLib context that another t
             UILoopStop     stop;
             THEN("it throws before it attaches, instead of letting that thread run its wake callback") {
                 CHECK_THROWS_AS(detail::uiloop::run(host, stop), std::runtime_error);
-                CHECK_FALSE(host.running());
+                CHECK_FALSE(host.executor().onUIThread());
             }
         }
         release.set_value();
