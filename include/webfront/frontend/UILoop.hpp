@@ -12,6 +12,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -25,7 +26,10 @@
     #include <dlfcn.h>
     #include <pthread.h>
 #elif defined(__linux__)
+    #include <cerrno>
     #include <dlfcn.h>
+    #include <sys/eventfd.h>
+    #include <unistd.h>
 #endif
 
 namespace webfront::frontend {
@@ -354,18 +358,45 @@ inline void run(UIExecutorHost& host, UILoopStop& stop) {
 
 #elif defined(__linux__)
 
+// One kernel counter per loop. Waking from another thread allocates no GLib source and cannot leave a callback
+// referring to this session in the default context after run() returns. A full counter is already readable.
+class WakeEvent {
+    int descriptor;
+
+public:
+    WakeEvent() : descriptor(::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC)) {
+        if (descriptor < 0)
+            throw std::runtime_error("UI loop: cannot create the wake event");
+    }
+    WakeEvent(const WakeEvent&) = delete;
+    ~WakeEvent() {
+        ::close(descriptor);
+    }
+    int handle() const noexcept {
+        return descriptor;
+    }
+    void signal() const noexcept {
+        const std::uint64_t one = 1;
+        while (::write(descriptor, &one, sizeof(one)) < 0 && errno == EINTR) { }
+    }
+    std::uint64_t consume() const noexcept {
+        std::uint64_t count = 0;
+        while (::read(descriptor, &count, sizeof(count)) < 0 && errno == EINTR) { }
+        return count;
+    }
+};
+
 // GLib is loaded at run time, like the WebKitGTK adapter loads its toolkit.
 class GLib {
 public:
-    using Object = void*;
-    Object (*contextDefault)()                                           = nullptr;
-    Object (*loopNew)(Object, int)                                       = nullptr;
-    void (*loopRun)(Object)                                              = nullptr;
-    void (*loopQuit)(Object)                                             = nullptr;
-    void (*loopUnref)(Object)                                            = nullptr;
-    Object (*loopRef)(Object)                                            = nullptr;
-    unsigned (*idleAddFull)(int, int (*)(void*), void*, void (*)(void*)) = nullptr;
-    void (*contextWakeup)(Object)                                        = nullptr;
+    using Object                                                                                     = void*;
+    Object (*contextDefault)()                                                                       = nullptr;
+    Object (*loopNew)(Object, int)                                                                   = nullptr;
+    void (*loopRun)(Object)                                                                          = nullptr;
+    void (*loopQuit)(Object)                                                                         = nullptr;
+    void (*loopUnref)(Object)                                                                        = nullptr;
+    unsigned (*fdAddFull)(int, int, unsigned, int (*)(int, unsigned, void*), void*, void (*)(void*)) = nullptr;
+    int (*sourceRemove)(unsigned)                                                                    = nullptr;
 
     static const GLib& get() {
         static const GLib instance;
@@ -388,9 +419,8 @@ private:
         bind(module, loopRun, "g_main_loop_run");
         bind(module, loopQuit, "g_main_loop_quit");
         bind(module, loopUnref, "g_main_loop_unref");
-        bind(module, loopRef, "g_main_loop_ref");
-        bind(module, idleAddFull, "g_idle_add_full");
-        bind(module, contextWakeup, "g_main_context_wakeup");
+        bind(module, fdAddFull, "g_unix_fd_add_full");
+        bind(module, sourceRemove, "g_source_remove");
     }
 };
 
@@ -406,27 +436,49 @@ inline void run(UIExecutorHost& host, UILoopStop& stop) {
             glib.loopUnref(loop);
         }
     } unref{glib, loop};
+    struct Dispatch {
+        const GLib&     glib;
+        GLib::Object    loop;
+        UIExecutorHost& host;
+        UILoopStop&     stop;
+        WakeEvent       wake;
+    } dispatch{glib, loop, host, stop, {}};
+    // The watch is created, invoked and removed on the interface thread. Producers only signal the eventfd;
+    // the C++ host/stop locks publish the queued work, including when GLib itself is not instrumented by TSan.
     constexpr int defaultIdle = 200;  // G_PRIORITY_DEFAULT_IDLE
-    host.attach([&glib, &host] {
-        glib.idleAddFull(
-            defaultIdle,
-            +[](void* data) -> int {
-                static_cast<UIExecutorHost*>(data)->drain();
-                return 0;  // G_SOURCE_REMOVE
-            },
-            &host,
-            nullptr);
+    const auto    source      = glib.fdAddFull(
+        defaultIdle,
+        dispatch.wake.handle(),
+        1 /* G_IO_IN */,
+        +[](int, unsigned, void* data) -> int {
+            auto& state = *static_cast<Dispatch*>(data);
+            state.wake.consume();
+            if (state.stop.requestedStop())
+                state.glib.loopQuit(state.loop);
+            else
+                state.host.drain();
+            return 1;  // G_SOURCE_CONTINUE
+        },
+        &dispatch,
+        nullptr);
+    if (!source)
+        throw std::runtime_error("UI loop: cannot watch the wake event");
+    struct Remove {
+        const GLib& glib;
+        unsigned    source;
+        ~Remove() {
+            glib.sourceRemove(source);
+        }
+    } remove{glib, source};
+    host.attach([&dispatch] {
+        dispatch.wake.signal();
     });
     CloseGuard guard{host, stop};
-    // Quitting from an idle callback happens inside the loop: a request before g_main_loop_run is not lost. Each pending
-    // source owns a reference to the loop (released when the source is destroyed, run or not), so one that is still queued
-    // when run() returns, from a second request during the exit, never reaches a freed loop.
-    static const auto quitLoop = +[](void* data) -> int {
-        GLib::get().loopQuit(data);
-        return 0;
-    };
-    static const auto releaseLoop = +[](void* data) { GLib::get().loopUnref(data); };
-    if (stop.arm([&glib, loop] { glib.idleAddFull(defaultIdle, quitLoop, glib.loopRef(loop), releaseLoop); }))
+    // CloseGuard waits for producers before removing the watch and closing the descriptor. A stop already pending
+    // at arm() needs no loop turn; a later one leaves the descriptor readable until the loop observes it.
+    if (stop.arm([&dispatch] {
+            dispatch.wake.signal();
+        }))
         return;
     glib.loopRun(loop);
 }

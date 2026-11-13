@@ -77,6 +77,14 @@ resource limits and complete-suite repetition. Sessions retain individual CTest 
 independent driver processes use OS-assigned loopback ports. Manual transport measurements
 remain separate from the short native transport contract tests.
 
+The [#542 investigation](validation/ci-flakes-542.md) reproduces and fixes Windows developer publication held open by
+an HTTP reader and concurrent fallback logger delivery. Its qualification passes 20 selected browser graphs on each
+native engine and 1,000 repetitions of each Linux closure case. The historical Linux internal stall was not reproduced;
+the report distinguishes that evidence from proven causes. The Windows early-close COM lifetime failure remains in
+[#564](https://github.com/ambroise-leclerc/WebFront/issues/564), and still makes the complete Windows qualification red.
+The [diagnostic workflow](TEST_PERFORMANCE.md#investigating-intermittent-failures) preserves failed attempts and HTTP
+transcripts without automatic retries.
+
 [Local-model qualification](validation/automation-models-2026-10-29.md) records five installed
 models driving the real MCP window through an external LM Studio measurement adapter. It distinguishes
 final source correctness (30/30 host-verified tasks) from completed verification observed by the model

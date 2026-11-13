@@ -1,4 +1,6 @@
 from pathlib import Path
+from contextlib import redirect_stderr
+import io
 import tempfile
 import unittest
 from ProfileTests import analyze, write_report
@@ -55,6 +57,24 @@ class ProfileTests(unittest.TestCase):
             log = Path(directory) / 'ninja-log'
             log.write_text('# ninja log v5\n0\t2000\t0\ta.cpp.o\t123\n500\t1500\t0\tapp\t234\n')
             self.assertEqual(compile_profile(log), [(2, 'a.cpp.o'), (1, 'app')])
+
+    def test_malformed_phase_durations_are_reported_without_losing_other_phases(self):
+        from ProfileTests import phase_durations
+        lines = ('end valid durationMs=1.250\n'
+                 'Developer integration: Developer integration: 20868.300ms end command embed ui/main.tsx --output '
+                 'durationMs=4723.50020276.900ms begin command run unawaited\n'
+                 'end truncated durationMs=\n'
+                 'end invalid durationMs=nan\n'
+                 'end suffix durationMs=12.500garbled\n'
+                 'end negative durationMs=-3\n'
+                 'end overflow durationMs=' + '9' * 400 + '\n'
+                 'end next status=passed durationMs=2.000\n')
+        diagnostics = io.StringIO()
+        with redirect_stderr(diagnostics):
+            self.assertEqual(phase_durations([lines]),
+                             [(1.25, 'pass 1: valid'), (2, 'pass 1: next')])
+        self.assertIn('4723.50020276.900', diagnostics.getvalue())
+        self.assertEqual(diagnostics.getvalue().count('Ignoring malformed phase duration'), 6)
 
 
 if __name__ == '__main__':

@@ -1,9 +1,11 @@
 """Combine CTest's JSON dependency/lock graph and JUnit timings without summing parallel wall times."""
 import argparse
 import json
+import math
 from pathlib import Path
 import statistics
 import re
+import sys
 import xml.etree.ElementTree as ET
 
 
@@ -84,7 +86,7 @@ def write_report(result, output):
     output.with_suffix('.dot').write_text('\n'.join(dot + ['}']) + '\n', encoding='utf-8')
 
 
-PHASE = re.compile(r'(?:wf spec: |Developer integration: )?(?:[\d.]+ms )?end (.*?)(?: status=\S+)? durationMs=([\d.]+)')
+PHASE = re.compile(r'(?:wf spec: |Developer integration: )?(?:[\d.]+ms )?end (.*?)(?: status=\S+)? durationMs=(\S*)')
 
 
 def phase_durations(transcripts):
@@ -94,6 +96,12 @@ def phase_durations(transcripts):
         for line in transcript.splitlines():
             match = PHASE.search(line)
             if match:
+                # Parallel native/browser output can interleave. Do not turn a corrupt timing into a failed CI job,
+                # or silently accept its numeric prefix and publish a fabricated measurement.
+                # An absurdly long digit string passes the pattern and overflows to infinity: both checks are needed.
+                if not re.fullmatch(r'\d+(?:\.\d+)?', match[2]) or not math.isfinite(float(match[2])):
+                    print(f'Ignoring malformed phase duration in pass {index}: {line}', file=sys.stderr)
+                    continue
                 phases.append((float(match[2]), f'pass {index}: {match[1]}'))
     return phases
 

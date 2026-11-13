@@ -10,27 +10,121 @@
 #include "HexDump.hpp"
 
 #include <array>
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <functional>
 #include <iostream>
 #include <limits>
 #include <list>
+#include <memory>
+#include <mutex>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace webfront::log {
 using LogType = const uint8_t;
 constinit LogType Disabled = 0, Error = 1, Warn = 2, Info = 3, Debug = 4;
 const auto clogSink = [](std::string_view t) { std::clog << t << "\n"; };
-inline bool logTypeEnabled[Debug + 1];
+inline std::array<std::atomic<bool>, Debug + 1> logTypeEnabled{};
 inline struct Sinks {
     void operator()(std::string_view t) const {
-        // A sink may remove itself or add sinks while running (a transport detached on a failed
-        // write): index the vector and call a copy, so no running callback is destroyed.
-        for (size_t i = 0; i < sinks.size(); ++i)
-            if (auto s = sinks[i]) s(t);
+        // The registry lock only copies a pointer: the snapshot is rebuilt when a sink is added or removed, never per line.
+        std::shared_ptr<const Snapshot> snapshot;
+        {
+            const std::lock_guard lock(mutex);
+            snapshot = published;
+        }
+        // Never invoke a callback under the registry lock: it may log or change registrations.
+        if (snapshot)
+            for (const auto& entry : *snapshot)
+                entry->invoke(t);
     }
-    inline static std::vector<std::function<void(std::string_view)>> sinks;
+
+    auto add(auto&&... callbacks) {
+        const std::lock_guard lock(mutex);
+        ((sinks.push_back(std::make_shared<Entry>(std::forward<decltype(callbacks)>(callbacks))), retired.emplace_back()), ...);
+        publish();
+        return sinks.size() - 1;
+    }
+
+    void remove(std::size_t index) {
+        std::shared_ptr<Entry> entry;
+        {
+            const std::lock_guard lock(mutex);
+            if (index >= sinks.size())
+                return;
+            entry = std::exchange(sinks[index], nullptr);
+            if (entry) {
+                retired[index] = entry;  // weak: it never keeps the callback's captured state alive
+                publish();
+            } else {
+                // A second removal outside a callback still waits for a delivery that the first one is waiting for. The
+                // weak reference is expired once no thread runs the callback: then there is nothing to wait for.
+                entry = retired[index].lock();
+            }
+        }
+        if (entry)
+            entry->retire(dispatchDepth == 0);
+    }
+
+private:
+    struct Entry;
+    using Snapshot = std::vector<std::shared_ptr<Entry>>;
+    // Removing from a callback cannot wait for callbacks on other logging threads: two callbacks can detach each
+    // other. Outside delivery, removal is a quiescence barrier before the caller releases captured state.
+    // Contract: never remove a sink while holding a lock that the sink's callback takes (the removal would wait for a
+    // callback that waits for that lock). WebLink removes its transport after releasing transportMutex.
+    inline static thread_local unsigned dispatchDepth = 0;
+    struct Entry {
+        explicit Entry(std::function<void(std::string_view)> function) : callback(std::move(function)) { }
+        void invoke(std::string_view line) {
+            {
+                const std::lock_guard lock(mutex);
+                if (!alive || !callback)
+                    return;
+                ++active;
+            }
+            struct Exit {
+                Entry& entry;
+                ~Exit() {
+                    --dispatchDepth;
+                    const std::lock_guard lock(entry.mutex);
+                    --entry.active;
+                    entry.idle.notify_all();
+                }
+            } exit{*this};
+            ++dispatchDepth;
+            callback(line);
+        }
+        void retire(bool wait) {
+            std::unique_lock lock(mutex);
+            alive = false;
+            if (wait)
+                idle.wait(lock, [&] {
+                    return active == 0;
+                });
+        }
+        std::mutex                                  mutex;
+        std::condition_variable                     idle;
+        bool                                        alive  = true;
+        std::size_t                                 active = 0;
+        const std::function<void(std::string_view)> callback;
+    };
+    // Called with the registry lock held.
+    static void publish() {
+        auto live = std::make_shared<Snapshot>();
+        for (const auto& entry : sinks)
+            if (entry)
+                live->push_back(entry);
+        published = std::move(live);
+    }
+    inline static std::mutex                        mutex;
+    inline static std::vector<std::shared_ptr<Entry>> sinks;
+    inline static std::vector<std::weak_ptr<Entry>>   retired;  // parallel to sinks
+    inline static std::shared_ptr<const Snapshot>     published;
 } out;
 
 
@@ -59,8 +153,8 @@ namespace {
 #endif
     }
 
-    inline static void set(LogType logType, bool enabled) { logTypeEnabled[logType] = enabled; }
-    inline static bool is(LogType logType) { return logTypeEnabled[logType]; }
+    inline static void set(LogType logType, bool enabled) { logTypeEnabled[logType].store(enabled, std::memory_order_relaxed); }
+    inline static bool is(LogType logType) { return logTypeEnabled[logType].load(std::memory_order_relaxed); }
     inline static void setLogLevel(LogType l) { set(Error, l >= Error); set(Warn, l >= Warn); set(Info, l >= Info); set(Debug, l >= Debug);}
 }
 
@@ -73,8 +167,8 @@ template<typename... Ts> void error(string_view fmt, Ts&&... ts) { if (is(Error)
 template<typename... Ts> void warn(string_view fmt, Ts&&... ts) { if (is(Warn)) log(Warn, fmt, std::forward<Ts>(ts)...); }
 template<typename... Ts> void info(string_view fmt, Ts&&... ts) { if (is(Info)) log(Info, fmt, std::forward<Ts>(ts)...); }
 void infoHex(string_view text, auto container) { if (is(Info)) { log(Info, text); out(utils::hexDump(container)); }}
-auto addSinks(auto&&... ts) { (out.sinks.push_back(std::forward<decltype(ts)>(ts)), ...); return out.sinks.size() - 1; }
-void removeSinks(auto&&... sinkIds) { ((out.sinks[sinkIds] = nullptr), ...); }
+auto addSinks(auto&&... ts) { return out.add(std::forward<decltype(ts)>(ts)...); }
+void removeSinks(auto&&... sinkIds) { (out.remove(sinkIds), ...); }
 
 // Without mddlog no context is captured; the scope keeps call sites identical in both builds.
 enum class CallDirection : uint8_t { None, CppToJs, JsToCpp };
@@ -91,7 +185,7 @@ struct TransportHandle { size_t index = numeric_limits<size_t>::max(); };
 inline TransportHandle addTransport(function<void(const TransportRecord&)> write) {
     return {addSinks([write = std::move(write)](string_view t) { write(TransportRecord{t}); })};
 }
-inline void removeTransport(TransportHandle handle) { if (handle.index < out.sinks.size()) out.sinks[handle.index] = nullptr; }
+inline void removeTransport(TransportHandle handle) { out.remove(handle.index); }
 inline void reportTransportFailure(TransportHandle handle) { removeTransport(handle); }
 inline void reportTransportOverflow() noexcept {}
 } //namespace webfront::log

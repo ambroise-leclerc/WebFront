@@ -210,6 +210,12 @@ public:
         deferring = defer;
     }
 
+    /// A deferred send has registered cancellation and handed its completion to the test.
+    static bool hasDeferredWrites() {
+        std::lock_guard lock(mutex);
+        return !deferred.empty();
+    }
+
     /// Run queued completions on the calling thread, outside the write that queued them.
     static std::size_t completeDeferredWrites() {
         std::vector<std::function<void()>> pending;

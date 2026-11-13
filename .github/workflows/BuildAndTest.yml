@@ -73,7 +73,7 @@ jobs:
     # Only Linux waits for its image. Native desktops below start immediately and reuse these steps.
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.repeat_desktop_tests) }}
     # No `name:` expression: a skipped matrix job would display it unevaluated.
-    timeout-minutes: 25
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && 90 || 25 }}
     strategy:
       fail-fast: false
       matrix:
@@ -206,11 +206,12 @@ jobs:
         shell: bash
         run: >-
           ctest --test-dir build -C ${{ matrix.build_type }} -L fast ${{ env.WEBFRONT_CONFIGURATION != 'true' && '-LE configuration' || '' }}
-          --parallel 4 --output-on-failure --no-tests=error --output-junit "${{ github.workspace }}/build/fast-results.xml"
+          --parallel 4 --output-on-failure --no-tests=error --output-junit "$PWD/build/fast-results.xml"
       - name: Capture CTest dependency graph
         shell: bash
         run: ctest --test-dir build --show-only=json-v1 > build/ctest-graph.json
       - name: Test C++ and native browser integration
+        id: desktop_suite
         # The fast tier has just run: a single pass does not run it again; the three passes of the complete tier do.
         # Only Linux trusted fixtures need the sandbox opt-out on hosted runners.
         env: ${{ matrix.test_env }}
@@ -220,6 +221,26 @@ jobs:
           -DREPEAT=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && '3' || '1' }}
           '-DLABEL_EXCLUDE=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && 'none' || (env.WEBFRONT_CONFIGURATION == 'true' && '^(portability|fast)$' || '^(portability|fast|configuration)$') }}'
           -P test/cmake/RunTestSuite.cmake
+      - name: Qualify intermittent browser cases
+        if: always() && !cancelled() && github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && steps.desktop_suite.outcome != 'skipped'
+        shell: bash
+        env: ${{ matrix.test_env }}
+        # Installed fixtures are retained. Repeat a whole selected graph so every developer report is checked on
+        # every pass: repeating its producer alone could hide a failed part behind a subsequent successful report.
+        # A session only records its commands and expected codes: its consumers (WfDriver*, Journey*) hold the OUTPUT and
+        # REPORT assertions, so they run in the same selection, after their session, on the retained fixtures.
+        run: |
+          set -euo pipefail
+          for pass in {1..20}; do
+            status=0
+            ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure --no-tests=error --parallel 4 \
+              --test-output-size-passed 2097152 --test-output-size-failed 2097152 \
+              --fixture-exclude-any '.*' \
+              -R '^(ConsumerJasmine-file-services|WebFront(WebKitGTK|WKWebView|WebView2)Integration|WebKitGTKLifecycle-navigation-allow-list|JourneyEmbeddedRun|WfDriverSession|WfDriver(Install|TestPasses|TestFails|UnknownCommand|ScriptOutput|SessionWriteStorage|SessionReadStorage)|JourneyBuildSession|Journey(Check|Test|Build|Embed)|AutomationConsumerWindow|DeveloperBrowserSession|DeveloperBrowserIntegration(-.*)?)$' \
+              --output-junit "$PWD/build/browser-stress-results-$pass.xml" || status=$?
+            cp build/Testing/Temporary/LastTest.log "build/Testing/Temporary/LastTest-stress-$pass.log"
+            if [ "$status" -ne 0 ]; then exit "$status"; fi
+          done
       - name: Repeat WebKitGTK pointer tests with suite display sharing enabled
         if: runner.os == 'Linux'
         env: ${{ matrix.test_env }}
@@ -281,6 +302,7 @@ jobs:
           path: |
             build/test-results-*.xml
             build/fast-results.xml
+            build/browser-stress-results-*.xml
             build/unit-results-*.xml
             build/ctest-graph.json
             build/test/unit/consumer-build/.ninja_log
@@ -296,7 +318,8 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.repeat_desktop_tests
     permissions:
       contents: read
-    timeout-minutes: 25
+    # The explicit qualification includes a cold analysis build, three complete graphs and twenty browser graphs.
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && 90 || 25 }}
     strategy:
       fail-fast: false
       matrix:
@@ -490,6 +513,11 @@ jobs:
         run: >-
           ctest --test-dir build-sanitizers --output-on-failure --no-tests=error --parallel 4
           --output-junit "${{ github.workspace }}/build-sanitizers/test-results.xml"
+      - name: Stress interface loop shutdown under ThreadSanitizer
+        if: matrix.sanitizer == 'thread' && github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests
+        run: >-
+          ctest --test-dir build-sanitizers --output-on-failure --no-tests=error
+          -R 'Scenario: The system browser can run an interface-thread loop' --repeat until-fail:100
       - name: Compare generated gzip streams against zlib
         timeout-minutes: 5
         if: matrix.sanitizer == 'address-undefined'

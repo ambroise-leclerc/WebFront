@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -1056,25 +1057,55 @@ SCENARIO("A commit takes the rights of the file it replaces at that moment") {
 SCENARIO("Running out of descriptors does not mark the root as moved") {
     Sandbox           sandbox;
     fs::NativeStorage storage(sandbox.root);
-    struct ::rlimit   previous{};
+    // GCC 13's UBSan vptr check opens a pipe. Exercise the error types before denying it the descriptors for its
+    // first check; checks stay enabled, and an invalid vptr still misses that valid-type cache entry.
+    REQUIRE(errorOf([&] {
+                storage.openRead("missing-before-exhaustion");
+            })
+            == fs::StorageErrc::notFound);
+    struct ::rlimit previous{};
     REQUIRE(::getrlimit(RLIMIT_NOFILE, &previous) == 0);
+    struct Pressure {
+        ::rlimit    previous;
+        vector<int> held;
+        int         release() {
+            for (const int descriptor : held)
+                ::close(descriptor);
+            held.clear();
+            return ::setrlimit(RLIMIT_NOFILE, &previous);
+        }
+        ~Pressure() {
+            release();
+        }
+    } pressure{previous, {}};
     auto lowered     = previous;
     lowered.rlim_cur = std::min<rlim_t>(previous.rlim_cur, 256);
     REQUIRE(::setrlimit(RLIMIT_NOFILE, &lowered) == 0);
-    vector<int> held;
+    auto& held = pressure.held;
     for (int descriptor = ::dup(0); descriptor >= 0; descriptor = ::dup(0))
         held.push_back(descriptor);
     // One descriptor left: `/` opens, the next component of the declared location does not.
-    REQUIRE_FALSE(held.empty());
-    ::close(held.back());
-    held.pop_back();
-    const auto exhausted = errorOf([&] {
-        storage.createDirectory("dir");
-    });
-    for (const int descriptor : held)
-        ::close(descriptor);
-    REQUIRE(::setrlimit(RLIMIT_NOFILE, &previous) == 0);
-    REQUIRE(exhausted != fs::StorageErrc::rootMoved);
+    const bool         hadDescriptors = !held.empty();
+    std::exception_ptr exhausted;
+    if (hadDescriptors) {
+        ::close(held.back());
+        held.pop_back();
+        try {
+            storage.createDirectory("dir");
+        } catch (...) {
+            exhausted = std::current_exception();
+        }
+    }
+    // Catch2 and sanitizer diagnostics may themselves open files. Do not assert under descriptor exhaustion.
+    const int restored = pressure.release();
+    REQUIRE(restored == 0);
+    REQUIRE(hadDescriptors);
+    REQUIRE(exhausted);
+    try {
+        std::rethrow_exception(exhausted);
+    } catch (const fs::StorageError& error) {
+        REQUIRE(error.errc() != fs::StorageErrc::rootMoved);
+    }
     storage.createDirectory("dir");
     REQUIRE(stdfs::is_directory(sandbox.root / "dir"));
 }

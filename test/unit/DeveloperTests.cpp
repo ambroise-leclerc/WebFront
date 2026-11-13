@@ -5,6 +5,8 @@
 #include <webfront/http/MimeType.hpp>
 
 #include <chrono>
+#include <array>
+#include <span>
 #include <future>
 #include <fstream>
 #include <iostream>
@@ -92,6 +94,51 @@ SCENARIO("A publication waits for a file that another reader is about to release
         }
         released.get();
     }
+}
+
+SCENARIO("A published HTTP source remains readable across directory replacement") {
+    TemporaryDirectory project;
+    developer::Store   store{project.path()};
+    fs::DeveloperFS    filesystem{project.path()};
+    std::string        previous = "old-body";
+    while (previous.size() < 200000)
+        previous += static_cast<char>('a' + previous.size() % 26);
+    auto first = store.begin(".webfront/developer/preview", true);
+    store.write(first, "app.js", 0, bytes(previous));
+    store.commit(first);
+    auto held = filesystem.open("/webfront/developer/preview/app.js");
+    REQUIRE(held);
+    REQUIRE(held->knownSize() == previous.size());
+    auto second = store.begin(".webfront/developer/preview", true);
+    store.write(second, "app.js", 0, bytes("new-body"));
+    REQUIRE_NOTHROW(store.commit(second));
+    std::array<char, 8> content{};
+    REQUIRE(held->read(content) == content.size());
+    REQUIRE(std::string_view(content.data(), content.size()) == "old-body");
+    REQUIRE(held->seek(4));
+    REQUIRE(held->read(std::span(content).first(4)) == 4);
+    REQUIRE(std::string_view(content.data(), 4) == "body");
+    REQUIRE(held->seek(65531));
+    REQUIRE(held->read(content) == content.size());
+    REQUIRE(std::string_view(content.data(), content.size()) == std::string_view(previous).substr(65531, content.size()));
+    REQUIRE(held->seek(previous.size() - 3));
+    REQUIRE(held->read(content) == 3);
+    REQUIRE(std::string_view(content.data(), 3) == std::string_view(previous).substr(previous.size() - 3));
+    REQUIRE(held->read(content) == 0);
+    auto current = filesystem.open("/webfront/developer/preview/app.js");
+    REQUIRE(current);
+    REQUIRE(current->read(content) == content.size());
+    REQUIRE(std::string_view(content.data(), content.size()) == "new-body");
+    auto third = store.begin(".webfront/developer/preview", true);
+    store.write(third, "app.js", 0, {});
+    REQUIRE_NOTHROW(store.commit(third));
+    auto empty = filesystem.open("/webfront/developer/preview/app.js");
+    REQUIRE(empty);
+    REQUIRE(empty->knownSize() == 0);
+    REQUIRE(empty->read(content) == 0);
+    REQUIRE(current->seek(0));
+    REQUIRE(current->read(content) == content.size());
+    REQUIRE(std::string_view(content.data(), content.size()) == "new-body");
 }
 
 SCENARIO("Developer writes are bounded and paths stay inside the explicit project") {

@@ -64,7 +64,7 @@ struct FakeLoop {
     bool                    woken{false};
     bool                    quit{false};
     std::thread::id         uiThread;
-    std::atomic<bool>       attached{false};
+    bool                    attached{false};
     std::thread             thread;
 
     void start() {
@@ -75,11 +75,17 @@ struct FakeLoop {
                 woken = true;
                 changed.notify_all();
             });
-            attached = true;
+            {
+                std::lock_guard lock(mutex);
+                attached = true;
+                changed.notify_all();
+            }
             for (;;) {
                 {
                     std::unique_lock lock(mutex);
-                    changed.wait(lock, [&] { return woken || quit; });
+                    changed.wait(lock, [&] {
+                        return woken || quit;
+                    });
                     if (quit)
                         break;
                     woken = false;
@@ -88,8 +94,10 @@ struct FakeLoop {
             }
             host.close();
         });
-        while (!attached)
-            std::this_thread::sleep_for(1ms);
+        std::unique_lock lock(mutex);
+        REQUIRE(changed.wait_for(lock, 30s, [&] {
+            return attached;
+        }));
     }
     void stop() {
         {
@@ -411,6 +419,30 @@ SCENARIO("Shutdown while operations are racing stops or runs each exactly once")
 
 #include <webfront/frontend/Frontend.hpp>
 
+#if defined(__linux__)
+SCENARIO("The Linux interface loop coalesces wake-ups without creating deferred sources") {
+    webfront::frontend::detail::uiloop::WakeEvent wake;
+    GIVEN("a wake event shared by several producers") {
+        REQUIRE(wake.consume() == 0);
+        constexpr int             producers = 4, signals = 10000;
+        std::vector<std::jthread> threads;
+        for (int i = 0; i < producers; ++i)
+            threads.emplace_back([&] {
+                for (int n = 0; n < signals; ++n)
+                    wake.signal();
+            });
+        for (auto& thread : threads)
+            thread.join();
+        THEN("all signals occupy one bounded event and consumption resets it") {
+            CHECK(wake.consume() == producers * signals);
+            CHECK(wake.consume() == 0);
+            wake.signal();
+            CHECK(wake.consume() == 1);
+        }
+    }
+}
+#endif
+
 namespace {
 struct LoopOutcome {
     std::atomic<int>  completions{0};
@@ -486,6 +518,33 @@ SCENARIO("The system browser can run an interface-thread loop on the calling thr
             CHECK_FALSE(Browser::uiExecutor().available());
         }
     }
+    GIVEN("an operation queued just before the stop request") {
+        launches = 0;
+        LoopOutcome       outcome;
+        std::atomic<bool> clientOk{false};
+        std::jthread      client([&] {
+            const auto executor = Browser::uiExecutor();
+            if (waitFor([&] { return executor.available(); })) {
+                struct Holder {
+                    decltype(ex::connect(std::declval<decltype(Browser::uiExecutor().schedule())>(), std::declval<LoopReceiver>())) op;
+                    Holder(const UIExecutor& e, LoopOutcome& o) : op(ex::connect(e.schedule(), LoopReceiver{o})) { }
+                } holder(executor, outcome);
+                ex::start(holder.op);
+                Browser::requestStop();  // the loop may run the job first or close with it still queued
+                clientOk = waitFor([&] { return outcome.completions >= 1; });
+            } else {
+                Browser::requestStop();
+            }
+        });
+        THEN("it completes exactly once, run or stopped, and is never left waiting") {
+            Browser::loop("127.0.0.1", "9002", "index.html", fakeLaunch);
+            client.join();
+            CHECK(clientOk);
+            CHECK(outcome.completions == 1);
+            CHECK_FALSE(outcome.unavailable);
+            CHECK_FALSE(Browser::uiExecutor().available());
+        }
+    }
     GIVEN("several stop requests arriving while the loop exits") {
         launches = 0;
         std::atomic<bool> finished{false};
@@ -558,7 +617,7 @@ SCENARIO("Closing waits for the wake-ups in flight, which may use what the loop 
             closed = true;
         });
         WHEN("the loop closes meanwhile") {
-            std::this_thread::sleep_for(50ms);
+            CHECK(waitFor([&] { return !host.executor().available(); }));
             THEN("close() does not return before the wake-up is over") {
                 CHECK_FALSE(closed);
                 {

@@ -28,6 +28,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <type_traits>
 
 namespace webfront::automation {
 struct AutomationOptions {
@@ -57,8 +58,13 @@ struct AutomationOptions {
     bool announce = true;
 };
 
-template <typename App>
+// Clock is a time source returning steady_clock::time_point; tests advance it without sleeping through deadlines.
+template <typename App, typename Clock = std::chrono::steady_clock>
 class Automation {
+    // Session keeps its deadlines in steady_clock::time_point: an injected clock must return that type.
+    static_assert(std::is_same_v<decltype(Clock::now()), std::chrono::steady_clock::time_point>,
+                  "Automation's Clock must return std::chrono::steady_clock::time_point");
+
 public:
     /// @throws std::invalid_argument for an unknown grant, an empty `listen` path, or a `listen` directory inside the project
     /// @throws std::runtime_error (including std::filesystem::filesystem_error) when the endpoint or the discovery directory cannot be
@@ -72,7 +78,7 @@ public:
           endpointDirectory(channel.directory()),
           grace(options.closeGrace),
           unresponsive(std::move(options.onUnresponsive)),
-          launched(std::chrono::steady_clock::now()),
+          launched(Clock::now()),
           startup(options.startupTimeout),
           // Last of the fallible steps: the binding registers callbacks in the application and cannot take them back, so
           // everything that can refuse the activation (grants, endpoint, record) has been validated before it.
@@ -81,10 +87,11 @@ public:
         // A renderer in a loop never runs that request: after the grace the window is declared unresponsive.
         supervisor = std::jthread([this](std::stop_token stop) {
             while (!stop.stop_requested()) {
-                const bool starting = !session->wasReady() && !session->isClosed();
-                if (session->expire() || (starting && std::chrono::steady_clock::now() - launched > startup))
+                if (session->expire(Clock::now()) || session->expireStartup(launched + startup, Clock::now()))
                     session->close("Native automation deadline exceeded");
                 if (session->isClosed()) {
+                    // The grace starts when the window is asked to close, so a closeBrowser() that blocks does not extend it.
+                    const auto deadline = Clock::now() + grace;
                     binding.closeBrowser();
                     // Whatever revoked the session (a deadline, a signal, an attached client's --shutdown, the page's own failure
                     // report, a lost WebSocket), the window was only asked to close: a stuck renderer ignores it, and a lost
@@ -92,8 +99,7 @@ public:
                     // native window is gone, so the grace always runs.
                     if (Object(session->describe()).string("failure") == "Developer window disconnected")
                         revoke();  // the connection is gone: no endpoint nor running record may remain meanwhile
-                    const auto deadline = std::chrono::steady_clock::now() + grace;
-                    while (!stop.stop_requested() && std::chrono::steady_clock::now() < deadline)
+                    while (!stop.stop_requested() && Clock::now() < deadline)
                         std::this_thread::sleep_for(std::chrono::milliseconds{20});
                     if (!stop.stop_requested()) {
                         revoke();

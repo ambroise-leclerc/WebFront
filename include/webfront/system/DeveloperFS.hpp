@@ -5,13 +5,20 @@
 #include "DeveloperIndexHtmlData.hpp"
 #include "DeveloperStore.hpp"
 #include "IndexFS.hpp"
+#ifdef _WIN32
+    #include "WindowsCompat.hpp"
+#endif
 
+#include <algorithm>
+#include <cstring>
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 
 namespace webfront::fs {
@@ -40,6 +47,75 @@ public:
     }
 
 private:
+#ifdef _WIN32
+    // Windows refuses to rename a directory with an open child file, even with FILE_SHARE_DELETE. Retain a section
+    // instead of the file handle and map only the read window: slow HTTP clients neither lock publication nor pin
+    // the whole asset in process memory. The original section keeps serving the old publication after replacement.
+    //
+    // Contract: a published file is immutable. A publication replaces its directory; it never truncates or rewrites a
+    // file in place. A page error while copying (see copyMapped) fails that read with std::system_error and so ends
+    // only the response. Each read maps one window, so the HTTP layer should ask for large blocks: the cost of a
+    // read is a map/unmap pair, not a per-byte price.
+    class PublishedSource final : public ByteSource {
+    public:
+        // A mapped view whose backing storage disappears (a network share dropped, a removable medium ejected) raises
+        // EXCEPTION_IN_PAGE_ERROR, a structured exception that `catch (std::exception&)` does not see. The copy is
+        // isolated here, with no C++ object to unwind (MSVC rejects __try otherwise), and reports failure by value.
+        static bool copyMapped(void* destination, const void* source, std::size_t count) noexcept {
+    #ifdef _MSC_VER
+            __try {
+                std::memcpy(destination, source, count);
+                return true;
+            } __except (GetExceptionCode() == EXCEPTION_IN_PAGE_ERROR ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
+                return false;
+            }
+    #else
+            std::memcpy(destination, source, count);
+            return true;
+    #endif
+        }
+
+        PublishedSource(HANDLE opened, std::uint64_t length) : handle(opened), total(length) {
+            SYSTEM_INFO info{};
+            ::GetSystemInfo(&info);
+            granularity = info.dwAllocationGranularity;
+        }
+        PublishedSource(const PublishedSource&) = delete;
+        ~PublishedSource() override {
+            if (handle)
+                ::CloseHandle(handle);
+        }
+        std::size_t read(std::span<char> buffer) override {
+            const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), total - position));
+            if (count == 0)
+                return 0;
+            const auto offset = position / granularity * granularity;
+            const auto skip   = static_cast<std::size_t>(position - offset);
+            auto       view   = ::MapViewOfFile(handle, FILE_MAP_READ, static_cast<DWORD>(offset >> 32), static_cast<DWORD>(offset), count + skip);
+            if (!view)
+                throw std::system_error(static_cast<int>(::GetLastError()), std::system_category(), "Cannot map published resource");
+            const bool copied = copyMapped(buffer.data(), static_cast<const char*>(view) + skip, count);
+            ::UnmapViewOfFile(view);  // on every path, a failed copy included
+            if (!copied)
+                throw std::system_error(static_cast<int>(ERROR_READ_FAULT), std::system_category(), "Cannot read published resource");
+            position += count;
+            return count;
+        }
+        std::optional<std::uint64_t> size() const override {
+            return total;
+        }
+        bool seek(std::uint64_t offset) override {
+            position = std::min(offset, total);
+            return true;
+        }
+
+    private:
+        HANDLE        handle;
+        std::uint64_t total;
+        std::uint64_t position    = 0;
+        std::uint64_t granularity = 0;
+    };
+#endif
     static std::optional<File> embeddedResource(const std::string& path) {
         if (path == "WebFront.js")
             return File{IndexFS::WebFrontJs{}};
@@ -52,10 +128,36 @@ private:
 
     std::optional<File> openPublished(std::string_view relative) const {
         try {
-            const auto    target = developer::projectPath(root, ".webfront/developer/" + std::string(relative));
+            const auto target = developer::projectPath(root, ".webfront/developer/" + std::string(relative));
+#ifdef _WIN32
+            const auto handle = ::CreateFileW(target.c_str(),
+                                              GENERIC_READ,
+                                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                              nullptr,
+                                              OPEN_EXISTING,
+                                              FILE_ATTRIBUTE_NORMAL,
+                                              nullptr);
+            if (handle == INVALID_HANDLE_VALUE)
+                return std::nullopt;
+            auto close = [](void* value) {
+                ::CloseHandle(value);
+            };
+            std::unique_ptr<void, decltype(close)> opened(handle, close);
+            LARGE_INTEGER                          length{};
+            if (!::GetFileSizeEx(handle, &length) || length.QuadPart < 0)
+                return std::nullopt;
+            const auto mapping = length.QuadPart == 0 ? nullptr : ::CreateFileMappingW(handle, nullptr, PAGE_READONLY, 0, 0, nullptr);
+            if (length.QuadPart != 0 && !mapping)
+                return std::nullopt;
+            std::unique_ptr<void, decltype(close)> section(mapping, close);
+            auto                                   source = std::make_unique<PublishedSource>(mapping, static_cast<std::uint64_t>(length.QuadPart));
+            section.release();
+            return File{std::move(source)};
+#else
             std::ifstream stream(target, std::ios::binary);
             if (stream)
                 return File{std::move(stream)};
+#endif
         } catch (const std::exception&) { }
         return std::nullopt;
     }

@@ -121,7 +121,13 @@ try {
     const currentDistribution = !config.environment.startsWith('https:');
     if (currentDistribution) assert(JSON.stringify(Object.keys(environment.starters)) === JSON.stringify(['app', 'life']), 'Only the application and Life starters must be shipped');
     config.starters = Object.fromEntries(Object.entries(environment.starters).map(([name, value]) => [name, {url: new URL(value.archive, new URL(config.environment, location.href)).href, integrity: value.integrity}]));
-    const context = {bridge: webFront, config, preview: document.getElementById('preview'), signal: new AbortController().signal,
+    const createFrame = () => {
+        const frame = document.createElement('iframe');
+        frame.title = 'WebFront tests';
+        frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483647;background:white';
+        return frame;
+    };
+    const context = {bridge: webFront, config, createFrame, preview: document.getElementById('preview'), signal: new AbortController().signal,
         write: text => console.log(text)};
     if (wants('app') && currentDistribution) assert(await execute(['create', 'pi'], context).then(() => false, error => /Unknown pinned starter/.test(error.message)),
         'The retired PI starter must not be offered');
@@ -1040,7 +1046,13 @@ try {
                 await until(() => /Preview ready/.test(devOutput) && shows('layout-one')(), 'wf dev did not start');
                 await writeFile('layout/value.ts', "export const value: string = 'layout-two';\n");
                 await poll();
-                await until(shows('layout-two'), 'wf dev must reload the full-window interface');
+                try {
+                    await until(shows('layout-two'), 'wf dev must reload the full-window interface');
+                } catch (error) {
+                    throw new Error(`${error.message}; preview=${pagePreview.contentWindow.location.href}; `
+                        + `readyState=${pagePreview.contentDocument?.readyState}; root=${pagePreview.contentDocument?.getElementById('root')?.textContent}; `
+                        + `status=${button.dataset.status}; wf dev output:\n${devOutput}`);
+                }
                 assert(again.state() === 'interface' && again.fills('#preview'), 'A reload must leave the terminal collapsed');
                 await until(() => button.dataset.status === 'ready', `The tab must show that wf dev watches: ${button.dataset.status}`);
                 assert(/wf dev is watching/.test(button.getAttribute('aria-label')), 'The tab must name the state of wf dev');

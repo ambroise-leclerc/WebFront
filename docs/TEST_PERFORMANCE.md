@@ -35,6 +35,11 @@ Each new realm owns its bridge connection, imports, timers, Workers, listeners a
 those resources. Local/session storage and enumerated IndexedDB databases are reset before the next command. The native project Store survives intentionally. Pinned and rebuilt environments retain different
 profiles and URLs/ports. The normal suite resets both; never point the two revisions at a shared persistent profile.
 
+Driver session frames fill the native window while their command runs. A case verifies its viewport before starting
+work; it does not wait for `requestAnimationFrame`, which an engine may suspend when its window is inactive. Nested
+Jasmine runners use the same visible layout and retain the `WebFront tests` title used by the readiness handshake.
+Like the developer session, each driver session reserves four CTest processors to avoid competing native windows.
+
 Filter the familiar CTest names with `ctest --test-dir build -R WfDriverTestFails --output-on-failure`. CTest includes the
 session fixture and its prerequisite project setup. For a truly isolated process per case, configure
 `-DWEBFRONT_TEST_SESSIONS=OFF` and use the same filter. A case that blocks consumes its session's remaining budget and the later cases then report "No result for the suite case": rerun with sessions off to find the cause. Repetition must repeat the complete fixture graph, rather than
@@ -174,6 +179,11 @@ runner raises the CTest output cap to 2 MiB per case so JUnit retains these deta
 phase/spec durations. WASM compilation/initialization, command preparation, publication, navigation and execution can be
 located by the enclosing command and spec; these spans include waits and bridge traffic, not just CPU time.
 
+Malformed `durationMs` values (for example two numbers interleaved by concurrent output) are reported on stderr and
+omitted from the phase ranking. Other phases and the CTest result remain available; no numeric prefix is used as an
+invented duration. This tolerance applies only to optional phase timings, not to malformed JUnit or dependency graphs.
+The developer session serializes progress and result lines from its independent server threads.
+
 The esbuild helper used by developer specs initializes its WASM compiler in a Worker, matching
 the developer environment and avoiding off-screen frame timer throttling. Its rebuild spec changes
 an imported file, checks a syntax error and checks recovery.
@@ -202,6 +212,45 @@ reports on failure and uploads CTest profiles, dependency graphs, sampled resour
 statistics. Qualification dispatches `BuildAndTest.yml` with `repeat_desktop_tests=true` for three complete desktop
 passes plus GCC/Clang CEF and sanitizers. First-pass fixtures/profiles are fresh; later passes reset them too but may
 benefit from OS/filesystem and compiler caches. They are not measurements of a physically cold OS page cache.
+
+## Investigating intermittent failures
+
+Read the failures of recent workflow runs, including earlier attempts of a run that later passed:
+
+```sh
+python3 test/tools/FlakeReport.py --limit 60
+```
+
+This read-only tool requires authenticated `gh`. Correlate the case, platform and revision before treating a failure as
+intermittent. Repeat the complete fixture graph with `RunTestSuite.cmake` as above; repeating an individual stateful
+command does not reset its inputs. Do not add automatic CI retries.
+
+The developer integration executable, `webfront-wf`, the browser suite driver and the automation consumer log HTTP
+requests, response statuses and streaming failures to stderr. The agent does so only in a browser test build.
+These logs retain warnings and errors and filter out ordinary bridge traffic to keep resource diagnostics within CTest's output cap; service
+tokens and request queries retain the HTTP server's redaction. JSON/MCP stdout stays separate.
+For grouped sessions, read `DeveloperBrowserSession` or the corresponding `*Session` transcript in the uploaded
+`Testing/Temporary/LastTest-<pass>.log` even when that aggregate case passes: the individual report reader may fail later.
+The workspace reloading assertion also reports the preview URL, document readiness, displayed root, tab status and
+`wf dev` output. A 200 response alone does not prove that a frame executed its script.
+
+The native automation supervisor's unit tests advance a steady-clock time source to check the operation/startup
+boundary and the close grace separately. They wait for the supervisor to observe each advance, rather than sleeping
+through a 1.1-second deadline. A separate case retains the default real clock. Startup readiness and expiry are checked
+under one session lock; time spent sending the browser close request counts toward its grace.
+
+Asynchronous unit-test guards use predicates with early exit: capture tests wait for their published file or collected
+result, executor tests wait for attachment/closure, and streamed-reply shutdown waits for a registered deferred send.
+A scheduling guard does not change a product deadline. Sleeps that deliberately hold a mock operation, exercise a
+process timeout or check that a disarm remains blocked are separate from these readiness waits.
+
+Manual dispatch with `repeat_desktop_tests=true` runs three complete desktop graphs, then 20 repetitions of file-services,
+the browser suite, embedded Life, Linux's navigation allow-list, repeatable driver sessions, the automation consumer and
+the developer session with every report reader, retaining the already installed fixtures. It also
+runs 100 interface-loop repetitions under ThreadSanitizer. These qualifications stop at the first failure. They also run
+after a failed complete graph, preserving that failure, so an unrelated case cannot hide the targeted results.
+The explicit desktop qualification has a 90-minute job budget for the cold analysis build, three complete graphs and
+twenty browser graphs; ordinary jobs and individual case deadlines retain their existing bounds.
 
 ## Recording a run
 

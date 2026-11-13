@@ -45,11 +45,12 @@ using Router = Server<RouteNet, Files>;
 
 template <typename Condition>
 bool waitFor(Condition condition, std::chrono::milliseconds limit = 10s) {
-    for (auto waited = 0ms; waited < limit; waited += 1ms) {
-        if (condition()) return true;
+    const auto deadline = std::chrono::steady_clock::now() + limit;
+    while (!condition()) {
+        if (std::chrono::steady_clock::now() >= deadline) return false;
         std::this_thread::sleep_for(1ms);
     }
-    return false;
+    return true;
 }
 
 void send(std::string_view request) {
@@ -362,20 +363,24 @@ std::uint64_t peakResidentBytes() {
     #endif
 #endif
 }
+struct StreamingPolicy : DefaultBuffersPolicy {
+    // Keep the 128 MiB memory proof without 16384 worker round trips on instrumented ARM64 builds.
+    static constexpr std::size_t emissionBufferSize = 64 * 1024;
+};
 }  // namespace
 
 SCENARIO("A large body is streamed without being held") {
-    Fixture                        fixture;
-    Router                         server("127.0.0.1", "0");
-    static constexpr std::uint64_t size         = 128ull * 1024 * 1024;
-    std::size_t                    largestChunk = 0;
-    auto route = server.addRoute("/webfront/services/files/", [&](const RouteRequest&) {
+    Fixture                                  fixture;
+    Server<RouteNet, Files, StreamingPolicy> server("127.0.0.1", "0");
+    static constexpr std::uint64_t           size         = 128ull * 1024 * 1024;
+    std::size_t                              largestChunk = 0;
+    auto                                     route        = server.addRoute("/webfront/services/files/", [&](const RouteRequest&) {
         RouteReply reply;
         reply.contentLength = size;
         reply.body          = [&largestChunk, produced = std::uint64_t{0}](std::span<char> out) mutable {
             largestChunk     = std::max(largestChunk, out.size());
             const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(out.size(), size - produced));
-            produced += count;
+            produced        += count;
             return count;
         };
         return reply;
@@ -383,16 +388,21 @@ SCENARIO("A large body is streamed without being held") {
     InjectableSocket::discardWrites();
     const auto before = peakResidentBytes();
     send(get("/webfront/services/files/big"));
-    // 16384 chunks, each crossing to the worker thread: slow under Debug, coverage and sanitizers. The limit stays below
+    // Each chunk crosses to the worker thread. The limit stays below
     // the 60 s CTest timeout of the scenarios, so that a stall is reported by the test rather than by a kill.
-    REQUIRE(waitFor([] { return InjectableSocket::shutdownCount() > 0; }, 45s));
+    REQUIRE(waitFor(
+        [] {
+            return InjectableSocket::shutdownCount() > 0;
+        },
+        45s));
     THEN("the peak memory of the process did not grow with the size sent") {
         // Holding the body would add its 128 MiB to the peak; ctest runs each scenario in its own process.
-        if (const auto after = peakResidentBytes()) REQUIRE(after - before < 48ull * 1024 * 1024);
+        if (const auto after = peakResidentBytes())
+            REQUIRE(after - before < 48ull * 1024 * 1024);
     }
     THEN("every byte was sent through a buffer of the emission size") {
         REQUIRE(InjectableSocket::discardedBytes() > size);
-        REQUIRE(largestChunk == DefaultBuffersPolicy::emissionBufferSize);
+        REQUIRE(largestChunk == StreamingPolicy::emissionBufferSize);
     }
 }
 
@@ -428,7 +438,7 @@ SCENARIO("Stopping the server ends a reply being streamed") {
     });
     InjectableSocket::deferWrites();
     send(get("/webfront/services/files/endless"));
-    REQUIRE(waitFor([] { return InjectableSocket::hasWrittenData(); }));
+    REQUIRE(waitFor([] { return InjectableSocket::hasDeferredWrites(); }));
     WHEN("the server is stopped and drained while a send is pending") {
         server.stop();
         THEN("the drain returns") { REQUIRE_NOTHROW(server.drain()); }

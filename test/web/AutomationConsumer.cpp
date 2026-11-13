@@ -23,6 +23,7 @@ int main(int argc, char** argv) {
     using Frontend = WEBFRONT_DRIVER_FRONTEND;
     try {
         webfront::detail::ensureFrontendInitialized<Frontend>();
+        [[maybe_unused]] const auto requestLog = webfront::testdriver::logRequests();
 #if defined(WEBFRONT_EMBED_CEF) && defined(__linux__)
         std::optional<webfront::test::TemporaryDirectory> temporaryProfile;
         if constexpr (std::is_same_v<Frontend, webfront::frontend::CEFFrontend>) {
