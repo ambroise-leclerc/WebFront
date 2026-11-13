@@ -17,6 +17,7 @@ jobs:
           hash=$(sha256sum .github/docker/linux-ci.Dockerfile | cut -c1-16)
           echo "image=ghcr.io/${GITHUB_REPOSITORY,,}/linux-ci:$hash" >> "$GITHUB_OUTPUT"
   probe:
+    if: "!contains(github.event.head_commit.message, 'Windows')"
     needs: image
     runs-on: ubuntu-26.04
     timeout-minutes: 60
@@ -77,3 +78,15 @@ jobs:
             build/preparation.log
             build/Testing/Temporary/LastTest.log
           if-no-files-found: ignore
+  windows-publication:
+    if: contains(github.event.head_commit.message, 'Windows')
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756
+      - name: Compile held-publication regression
+        shell: cmd
+        run: cl /nologo /EHsc /std:c++latest /DNOMINMAX /Iinclude test/cmake/HeldPublicationProbe.cpp /Fe:held-publication.exe
+      - name: Publish while an HTTP source stays open
+        run: .\held-publication.exe
