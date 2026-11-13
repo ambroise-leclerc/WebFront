@@ -5,6 +5,9 @@
 #include <webfront/http/MimeType.hpp>
 
 #include <chrono>
+#include <cstring>
+#include <string>
+#include <vector>
 #include <array>
 #include <span>
 #include <future>
@@ -1019,3 +1022,51 @@ SCENARIO("A project whose own directory exceeds the 260 characters of Windows ca
         }
     }
 }
+
+#ifdef _WIN32
+SCENARIO("Published files are copied from memory that may fault, reporting a failed read by value") {
+    GIVEN("a committed page, a page that cannot be read and a guard page") {
+        SYSTEM_INFO info{};
+        ::GetSystemInfo(&info);
+        const auto page   = static_cast<std::size_t>(info.dwPageSize);
+        auto*      region = static_cast<char*>(::VirtualAlloc(nullptr, 3 * page, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+        REQUIRE(region != nullptr);
+        std::memset(region, 'x', page);
+        DWORD previous = 0;
+        REQUIRE(::VirtualProtect(region + page, page, PAGE_NOACCESS, &previous));
+        REQUIRE(::VirtualProtect(region + 2 * page, page, PAGE_READWRITE | PAGE_GUARD, &previous));
+        std::vector<char> out(2 * page);
+        THEN("a readable range is copied") {
+            CHECK(fs::detail::copyReadable(out.data(), region, page));
+            CHECK(out[0] == 'x');
+            CHECK(out[page - 1] == 'x');
+        }
+        THEN("a range that reaches an unreadable page fails without an exception") {
+            CHECK_FALSE(fs::detail::copyReadable(out.data(), region, 2 * page));
+            CHECK_FALSE(fs::detail::copyReadable(out.data(), region + page, 1));
+        }
+        THEN("a guard page does not raise a structured exception either") {
+            CHECK_FALSE(fs::detail::copyReadable(out.data(), region + 2 * page, 1));
+        }
+        ::VirtualFree(region, 0, MEM_RELEASE);
+    }
+    GIVEN("a published file") {
+        TemporaryDirectory project;
+        developer::Store   store{project.path()};
+        const auto         id = store.begin(".webfront/developer/preview", true);
+        const std::string  content(200000, 'p');
+        store.write(id, "big.bin", 0, bytes(content));
+        store.commit(id);
+        fs::DeveloperFS filesystem{project.path()};
+        THEN("it is read whole through its mapped windows, whatever the block size") {
+            auto file = filesystem.open("/webfront/developer/preview/big.bin");
+            REQUIRE(file);
+            std::string        got;
+            std::vector<char>  block(70001);
+            for (std::size_t n; (n = file->read(block)) != 0;)
+                got.append(block.data(), n);
+            CHECK(got == content);
+        }
+    }
+}
+#endif

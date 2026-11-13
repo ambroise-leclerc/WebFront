@@ -198,6 +198,145 @@ SCENARIO("The request log keeps what the HTTP layer says about a request (#542)"
     GIVEN("bridge traffic logged at the information level") {
         THEN("it is left out") {
             CHECK_FALSE(isRequestLine("[I] Call 12 to cppFunction x"));
+            CHECK_FALSE(isRequestLine("[I] Call 12 to cppFunction [W]"));
+        }
+    }
+    GIVEN("a warning whose message spans several lines") {
+        THEN("it is kept whole, its continuation included, as the sink receives it in one call") {
+            CHECK(isRequestLine("[W] 12:00:00 | Route /api failed: first line\nsecond line\nthird line"));
+        }
+    }
+    GIVEN("the rows of a hex dump, which carry no level tag") {
+        THEN("they are left out") {
+            CHECK_FALSE(isRequestLine("00000010  5b 57 5d 20 20 20 20 20  20 20 20 20 20 20 20 20  |[W]             |"));
+            CHECK_FALSE(isRequestLine("00000000  47 45 54 20 2f 20 48 54  54 50 2f 31 2e 31 0d 0a  |GET / HTTP/1.1..|"));
         }
     }
 }
+
+#if !defined(WEBFRONT_USE_MDDLOG) || !WEBFRONT_USE_MDDLOG
+SCENARIO("Fallback sinks reuse their slots and a stale id cannot remove another sink") {
+    log::setLogLevel(log::Info);
+    GIVEN("a sink that was removed and a new one that took its slot") {
+        std::atomic<unsigned> first{0}, second{0};
+        const auto            stale = log::addSinks([&](std::string_view) { ++first; });
+        log::removeSinks(stale);
+        const auto live = log::addSinks([&](std::string_view) { ++second; });
+        THEN("the slot is reused with another generation") {
+            CHECK(live.index == stale.index);
+            CHECK(live.generation != stale.generation);
+        }
+        WHEN("the stale id is removed again") {
+            log::removeSinks(stale);
+            log::info("still delivered");
+            THEN("the new sink keeps receiving lines") {
+                CHECK(second == 1);
+                CHECK(first == 0);
+            }
+        }
+        log::removeSinks(live);
+    }
+    GIVEN("a hundred thousand transient sinks") {
+        const auto before = log::addSinks([](std::string_view) {});
+        std::size_t highest = 0;
+        for (int i = 0; i < 100000; ++i) {
+            const auto id = log::addSinks([](std::string_view) {});
+            highest       = std::max(highest, id.index);
+            log::removeSinks(id);
+        }
+        THEN("the table stays as small as the sinks alive") {
+            CHECK(highest < 16);
+        }
+        log::removeSinks(before);
+    }
+    GIVEN("two callbacks registered at once") {
+        std::atomic<unsigned> a{0}, b{0};
+        const auto            ids = log::addSinks([&](std::string_view) { ++a; }, [&](std::string_view) { ++b; });
+        THEN("both can be removed") {
+            log::removeSinks(ids[0]);
+            log::info("one left");
+            CHECK(a == 0);
+            CHECK(b == 1);
+            log::removeSinks(ids[1]);
+            log::info("none left");
+            CHECK(b == 1);
+        }
+    }
+    log::setLogLevel(log::Error);
+}
+
+SCENARIO("A sink removed from another sink's callback waits for that sink's delivery on another thread") {
+    using namespace std::chrono_literals;
+    log::setLogLevel(log::Info);
+    std::promise<void>    entered, release;
+    auto                  ready = entered.get_future();
+    const auto            gate  = release.get_future().share();
+    std::atomic<bool>     finished{false}, victimGone{false};
+    const auto            victim = log::addSinks([&](std::string_view line) {
+        if (line.find("victim") == std::string_view::npos)
+            return;
+        entered.set_value();
+        gate.wait();
+        std::this_thread::sleep_for(20ms);
+        finished = true;
+    });
+    std::promise<void>    removed;
+    const auto            remover = log::addSinks([&](std::string_view line) {
+        if (line.find("remove") == std::string_view::npos)
+            return;
+        log::removeSinks(victim);
+        victimGone = finished.load();  // the other thread's delivery is over when the removal returns
+        removed.set_value();
+    });
+    std::thread           slow([] { log::info("victim"); });
+    const bool            running = ready.wait_for(30s) == std::future_status::ready;
+    REQUIRE(running);
+    std::thread           removing([] { log::info("remove"); });
+    CHECK(removed.get_future().wait_for(50ms) == std::future_status::timeout);
+    release.set_value();
+    slow.join();
+    removing.join();
+    CHECK(victimGone);
+    log::removeSinks(remover);
+    log::setLogLevel(log::Error);
+}
+
+SCENARIO("Two sinks that remove each other from their callbacks do not deadlock") {
+    using namespace std::chrono_literals;
+    log::setLogLevel(log::Info);
+    std::promise<void> aIn, bIn;
+    auto               aReady = aIn.get_future();
+    auto               bReady = bIn.get_future();
+    std::promise<void> go;
+    const auto         start = go.get_future().share();
+    log::SinkId        a, b;
+    std::atomic<int>   returned{0};
+    std::atomic<bool>  idA{false}, idB{false};
+    a = log::addSinks([&](std::string_view line) {
+        if (line.find("both") == std::string_view::npos || idA.exchange(true))
+            return;
+        aIn.set_value();
+        start.wait();
+        log::removeSinks(b);
+        ++returned;
+    });
+    b = log::addSinks([&](std::string_view line) {
+        if (line.find("both") == std::string_view::npos || idB.exchange(true))
+            return;
+        bIn.set_value();
+        start.wait();
+        log::removeSinks(a);
+        ++returned;
+    });
+    std::thread one([] { log::info("both"); });
+    std::thread two([] { log::info("both"); });
+    const bool  running = aReady.wait_for(30s) == std::future_status::ready && bReady.wait_for(30s) == std::future_status::ready;
+    go.set_value();
+    one.join();
+    two.join();
+    CHECK(running);
+    CHECK(returned == 2);
+    log::removeSinks(a, b);
+    log::setLogLevel(log::Error);
+}
+#endif

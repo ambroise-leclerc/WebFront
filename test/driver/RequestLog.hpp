@@ -16,9 +16,12 @@ inline constexpr std::array<std::string_view, 5> requestMarkers{
     "Received request ", "responding http ", "HTTP asset request ", "ended its response early", "Route "};
 
 inline bool isRequestLine(std::string_view line) {
-    // Warnings and errors are always kept; Info lines only when they describe a request.
-    if (line.find("[I]") == std::string_view::npos)
+    // An allow-list: a tagged warning or error is kept, and an Info line only when it describes a request. A line with
+    // no tag (the rows of a hex dump that infoHex writes) is never kept: it would recreate the output cap of #542.
+    if (line.starts_with("[W]") || line.starts_with("[E]"))
         return true;
+    if (!line.starts_with("[I]"))
+        return false;
     for (const auto marker : requestMarkers)
         if (line.find(marker) != std::string_view::npos)
             return true;

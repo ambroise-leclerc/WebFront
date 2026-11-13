@@ -5,6 +5,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <functional>
+#include <future>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -439,6 +440,33 @@ SCENARIO("The Linux interface loop coalesces wake-ups without creating deferred 
             wake.signal();
             CHECK(wake.consume() == 1);
         }
+    }
+}
+
+SCENARIO("The Linux interface loop refuses a default GLib context that another thread iterates") {
+    using namespace webfront::frontend;
+    GIVEN("another thread that owns the default context") {
+        const auto&        glib = detail::uiloop::GLib::get();
+        std::promise<void> owned, release;
+        auto               ownedReady = owned.get_future();
+        const auto         released   = release.get_future().share();
+        std::thread        owner([&] {
+            glib.contextAcquire(glib.contextDefault());
+            owned.set_value();
+            released.wait();
+            glib.contextRelease(glib.contextDefault());
+        });
+        REQUIRE(ownedReady.wait_for(30s) == std::future_status::ready);
+        WHEN("the loop is run") {
+            UIExecutorHost host;
+            UILoopStop     stop;
+            THEN("it throws before it attaches, instead of letting that thread run its wake callback") {
+                CHECK_THROWS_AS(detail::uiloop::run(host, stop), std::runtime_error);
+                CHECK_FALSE(host.executor().onUIThread());
+            }
+        }
+        release.set_value();
+        owner.join();
     }
 }
 #endif

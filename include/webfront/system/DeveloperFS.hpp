@@ -23,6 +23,20 @@
 
 namespace webfront::fs {
 
+#ifdef _WIN32
+namespace detail {
+/// Copies `count` bytes that may sit in a mapped view whose backing storage can disappear (a network share dropped, a
+/// removable medium ejected, a file truncated in place). Touching such a page raises EXCEPTION_IN_PAGE_ERROR, a
+/// structured exception that C++ handlers do not see and that only MSVC can catch with __try. ReadProcessMemory on this
+/// process copies with the kernel's own fault handling instead: it reports the failure by value on every Windows toolchain,
+/// with no exception to catch. Returns false when any byte could not be read.
+[[nodiscard]] inline bool copyReadable(void* destination, const void* source, std::size_t count) noexcept {
+    SIZE_T copied = 0;
+    return ::ReadProcessMemory(::GetCurrentProcess(), source, destination, count, &copied) != 0 && copied == count;
+}
+}  // namespace detail
+#endif
+
 class DeveloperFS {
 public:
     explicit DeveloperFS(std::filesystem::path project) {
@@ -54,25 +68,12 @@ private:
     //
     // Contract: a published file is immutable. A publication replaces its directory; it never truncates or rewrites a
     // file in place. A page error while copying (see copyMapped) fails that read with std::system_error and so ends
-    // only the response. Each read maps one window, so the HTTP layer should ask for large blocks: the cost of a
+    // only the response, on every toolchain. Each read maps one window, so the HTTP layer should ask for large blocks: the cost of a
     // read is a map/unmap pair, not a per-byte price.
     class PublishedSource final : public ByteSource {
     public:
-        // A mapped view whose backing storage disappears (a network share dropped, a removable medium ejected) raises
-        // EXCEPTION_IN_PAGE_ERROR, a structured exception that `catch (std::exception&)` does not see. The copy is
-        // isolated here, with no C++ object to unwind (MSVC rejects __try otherwise), and reports failure by value.
         static bool copyMapped(void* destination, const void* source, std::size_t count) noexcept {
-    #ifdef _MSC_VER
-            __try {
-                std::memcpy(destination, source, count);
-                return true;
-            } __except (GetExceptionCode() == EXCEPTION_IN_PAGE_ERROR ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
-                return false;
-            }
-    #else
-            std::memcpy(destination, source, count);
-            return true;
-    #endif
+            return detail::copyReadable(destination, source, count);
         }
 
         PublishedSource(HANDLE opened, std::uint64_t length) : handle(opened), total(length) {
