@@ -458,18 +458,25 @@ SCENARIO("WebLink captures the link and call context of a C++ function call", "[
     websocket::Frame<InjectableNetworking> frame{span(reinterpret_cast<const byte*>(call.header().data()), call.header().size())};
     const string                           functionName{"registered"};  // The frame borrows it until freeze() copies it.
     call.encodeParameter(functionName, frame);
+    const string payload{"never-log-this-payload"};
+    call.encodeParameter(payload, frame);
     frame.freeze();
     InjectableSocket::receive(clientFrame(messagePayload(frame)));
     REQUIRE(log::flushTransports());
 
-    // Received message and dump, then the call itself.
+    // Only the message summary and the call: binary payloads must not become diagnostic records.
     const auto records = observer.snapshot();
+    REQUIRE(records.size() == 2);
     CHECK(identities(records)
           == vector<Identity>{
               {    "weblink",          "", "21"},
-              {    "weblink",          "", "21"},
               {"cppFunction", "js-cpp:37", "21"}
     });
+    CHECK(records.front().message.starts_with("onMessage(binary) : "));
+    for (const auto& record : records) {
+        CHECK(record.message.find(payload) == string::npos);
+        CHECK(record.text.find(payload) == string::npos);
+    }
     CHECK(deliveredMessages(records).back() == "Function called !");
     CHECK(InjectableSocket::wrote("Function called !"));
 }

@@ -66,6 +66,11 @@ virtual-type checks while their own pipe can be allocated. The isolated native A
 [43428433115](https://github.com/ambroise-leclerc/WebFront/actions/runs/43428433115) reproduces the cold constructor's
 invalid-vptr report and then passes error/recovery with that preparation, with ASan and UBSan still enabled.
 
+The optional mddlog qualification also exposed an outdated context assertion: it still expected a binary dump,
+although `onBinaryMessage` has intentionally omitted payload bytes since `70c585c1` (2026-11-04). Keep that redaction:
+the regression now requires the message summary and call context, and verifies the test payload is absent from both
+the structured message and rendered text. No payload logging is restored to satisfy the old assertion.
+
 ## Validation record
 
 Local platform: macOS arm64, AppleClang 21, Release, CEF off, WKWebView on, four CTest workers. The diagnostics-only
