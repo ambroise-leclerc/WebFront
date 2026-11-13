@@ -395,6 +395,8 @@ public:
     void (*loopRun)(Object)                                                                          = nullptr;
     void (*loopQuit)(Object)                                                                         = nullptr;
     void (*loopUnref)(Object)                                                                        = nullptr;
+    int (*contextAcquire)(Object)                                                                    = nullptr;
+    void (*contextRelease)(Object)                                                                   = nullptr;
     unsigned (*fdAddFull)(int, int, unsigned, int (*)(int, unsigned, void*), void*, void (*)(void*)) = nullptr;
     int (*sourceRemove)(unsigned)                                                                    = nullptr;
 
@@ -419,14 +421,29 @@ private:
         bind(module, loopRun, "g_main_loop_run");
         bind(module, loopQuit, "g_main_loop_quit");
         bind(module, loopUnref, "g_main_loop_unref");
+        bind(module, contextAcquire, "g_main_context_acquire");
+        bind(module, contextRelease, "g_main_context_release");
         bind(module, fdAddFull, "g_unix_fd_add_full");
         bind(module, sourceRemove, "g_source_remove");
     }
 };
 
 inline void run(UIExecutorHost& host, UILoopStop& stop) {
-    const auto& glib = GLib::get();
-    const auto  loop = glib.loopNew(glib.contextDefault(), 0);
+    const auto& glib    = GLib::get();
+    const auto  context = glib.contextDefault();
+    // The wake watch lives in the default context, which the calling thread must own while the loop runs: no other thread
+    // can then dispatch it, and the callback below always runs on the interface thread. A host that already iterates this
+    // context on another thread is refused here instead of running our callback there.
+    if (!glib.contextAcquire(context))
+        throw std::runtime_error("UI loop: the default GLib context is owned by another thread; run the loop on the thread that iterates it");
+    struct Release {
+        const GLib&  glib;
+        GLib::Object context;
+        ~Release() {
+            glib.contextRelease(context);
+        }
+    } release{glib, context};
+    const auto loop = glib.loopNew(context, 0);
     if (!loop)
         throw std::runtime_error("UI loop: cannot create the GLib main loop");
     struct Unref {
@@ -453,6 +470,7 @@ inline void run(UIExecutorHost& host, UILoopStop& stop) {
         +[](int, unsigned, void* data) -> int {
             auto& state = *static_cast<Dispatch*>(data);
             state.wake.consume();
+            // A stop does not drain: the guard closes the host, and the operations still queued complete stopped.
             if (state.stop.requestedStop())
                 state.glib.loopQuit(state.loop);
             else
