@@ -74,12 +74,12 @@ inline struct Sinks {
             auto& slot = slots[id.index];
             entry      = std::exchange(slot.entry, nullptr);
             if (entry) {
-                slot.retired = entry;  // weak: it never keeps the callback's captured state alive
+                slot.retired = entry;  // the entry drops its callback as soon as no thread runs it (Entry::releaseIfQuiet)
                 publish();
             } else {
-                // A second removal still waits for a delivery that the first one is waiting for. The weak reference is
-                // expired once no thread runs the callback: then there is nothing to wait for.
-                entry = slot.retired.lock();
+                // A second removal still waits for a delivery that the first one is waiting for; once no thread runs the
+                // callback there is nothing to wait for.
+                entry = slot.retired;
             }
         }
         if (entry)
@@ -91,7 +91,7 @@ private:
     using Snapshot = std::vector<std::shared_ptr<Entry>>;
     struct Slot {
         std::shared_ptr<Entry> entry;
-        std::weak_ptr<Entry>   retired;
+        std::shared_ptr<Entry> retired;  // strong, but its callback is released once nothing runs it
         std::size_t            generation = 0;
     };
     // The callbacks being run by this thread, innermost last.
@@ -112,18 +112,22 @@ private:
                 Entry& entry;
                 ~Exit() {
                     dispatchStack.pop_back();
+                    std::function<void(std::string_view)> released;  // destroyed after the lock is dropped
                     const std::lock_guard lock(entry.mutex);
                     entry.runners.erase(std::find(entry.runners.begin(), entry.runners.end(), std::this_thread::get_id()));
                     entry.idle.notify_all();
+                    released = entry.takeCallbackIfQuiet();
                 }
             } exit{*this};
             callback(line);
         }
         void retire() {
             const auto self = std::this_thread::get_id();
+            std::function<void(std::string_view)> released;  // destroyed after the lock is dropped
             {
                 const std::lock_guard lock(mutex);
-                alive = false;
+                alive    = false;
+                released = takeCallbackIfQuiet();
             }
             // This thread's own deliveries of the sink (it removes itself) cannot end before this call returns.
             WaitRegistry::Waiting waiting{self, this->weak_from_this()};
@@ -137,6 +141,18 @@ private:
                 idle.wait_for(lock, std::chrono::milliseconds{5});
             }
         }
+        // Once the sink is removed and no thread runs it, the callback and what it captured are no longer needed: giving
+        // them up here lets a retired slot be kept without keeping them alive. Called with `mutex` held; the caller
+        // destroys the result after releasing it.
+        std::function<void(std::string_view)> takeCallbackIfQuiet() {
+            if (alive || !runners.empty())
+                return {};
+            return std::move(callback);
+        }
+        bool quiet() {
+            const std::lock_guard lock(mutex);
+            return !alive && runners.empty();
+        }
         std::vector<std::thread::id> runnersOtherThan(std::thread::id self) {
             const std::lock_guard lock(mutex);
             std::vector<std::thread::id> others;
@@ -149,7 +165,7 @@ private:
         std::condition_variable                     idle;
         bool                                        alive = true;
         std::vector<std::thread::id>                runners;  // one item per callback running now
-        const std::function<void(std::string_view)> callback;
+        std::function<void(std::string_view)>       callback;
     };
     // Which sink each thread is waiting to see finish. A removal that would wait for a thread that is itself (directly or
     // through others) waiting for a callback of the remover is a deadlock, and gives up instead.
@@ -207,12 +223,12 @@ private:
         // A slot is free once its sink was removed and no thread still runs the callback; a bounded table keeps the
         // snapshot and the search proportional to the sinks alive, not to every sink ever added.
         std::size_t index = 0;
-        while (index < slots.size() && (slots[index].entry || !slots[index].retired.expired()))
+        while (index < slots.size() && (slots[index].entry || (slots[index].retired && !slots[index].retired->quiet())))
             ++index;
         if (index == slots.size())
             slots.emplace_back();
         slots[index].entry      = std::move(entry);
-        slots[index].retired.reset();
+        slots[index].retired = nullptr;
         const auto generation   = ++slots[index].generation;
         publish();
         return {index, generation};
