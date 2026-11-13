@@ -35,6 +35,10 @@ does not close, a runner deadline and an infrastructure failure; a successful re
 - The optional manual qualification repeats the complete fixture graph three times, then the independent browser
   cases 20 times and the TSan interface-loop case 100 times. `until-fail` stops on a failure; there is no pass-on-retry.
   Installed fixtures are retained for independent-process stress tests; stateful setup is not repeated alone.
+- GCC 13 ARM64's sanitizer pass also exposes an assertion made while the descriptor-exhaustion test has no descriptors
+  available, and the 128 MiB stream test's 16384 worker round trips exceed its guard. Restore descriptors before any
+  Catch2 assertion (also on an exception), and use a 64 KiB test buffer for the same 128 MiB/48 MiB memory proof,
+  reducing the handoffs to 2048. Neither the transmitted size nor the memory-growth bound is reduced.
 
 ## Validation record
 

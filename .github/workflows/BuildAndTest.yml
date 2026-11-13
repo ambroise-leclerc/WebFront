@@ -231,6 +231,7 @@ jobs:
           for pass in {1..20}; do
             status=0
             ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure --no-tests=error --parallel 4 \
+              --test-output-size-passed 2097152 --test-output-size-failed 2097152 \
               --fixture-exclude-any '.*' \
               -R '^(ConsumerJasmine-file-services|WebFront(WebKitGTK|WKWebView|WebView2)Integration|WebKitGTKLifecycle-navigation-allow-list|JourneyEmbeddedRun|WfDriverSession|JourneyBuildSession|AutomationConsumerWindow|DeveloperBrowserSession|DeveloperBrowserIntegration(-.*)?)$' \
               --output-junit "${{ github.workspace }}/build/browser-stress-results-$pass.xml" || status=$?

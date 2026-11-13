@@ -15,6 +15,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -1058,23 +1059,43 @@ SCENARIO("Running out of descriptors does not mark the root as moved") {
     fs::NativeStorage storage(sandbox.root);
     struct ::rlimit   previous{};
     REQUIRE(::getrlimit(RLIMIT_NOFILE, &previous) == 0);
+    struct Pressure {
+        ::rlimit    previous;
+        vector<int> held;
+        int         release() {
+            for (const int descriptor : held)
+                ::close(descriptor);
+            held.clear();
+            return ::setrlimit(RLIMIT_NOFILE, &previous);
+        }
+        ~Pressure() {
+            release();
+        }
+    } pressure{previous, {}};
     auto lowered     = previous;
     lowered.rlim_cur = std::min<rlim_t>(previous.rlim_cur, 256);
     REQUIRE(::setrlimit(RLIMIT_NOFILE, &lowered) == 0);
-    vector<int> held;
+    auto& held = pressure.held;
     for (int descriptor = ::dup(0); descriptor >= 0; descriptor = ::dup(0))
         held.push_back(descriptor);
     // One descriptor left: `/` opens, the next component of the declared location does not.
-    REQUIRE_FALSE(held.empty());
-    ::close(held.back());
-    held.pop_back();
-    const auto exhausted = errorOf([&] {
-        storage.createDirectory("dir");
-    });
-    for (const int descriptor : held)
-        ::close(descriptor);
-    REQUIRE(::setrlimit(RLIMIT_NOFILE, &previous) == 0);
-    REQUIRE(exhausted != fs::StorageErrc::rootMoved);
+    const bool                     hadDescriptors = !held.empty();
+    std::optional<fs::StorageErrc> exhausted;
+    if (hadDescriptors) {
+        ::close(held.back());
+        held.pop_back();
+        try {
+            storage.createDirectory("dir");
+        } catch (const fs::StorageError& error) {
+            exhausted = error.errc();
+        }
+    }
+    // Catch2 and sanitizer diagnostics may themselves open files. Do not assert under descriptor exhaustion.
+    const int restored = pressure.release();
+    REQUIRE(restored == 0);
+    REQUIRE(hadDescriptors);
+    REQUIRE(exhausted.has_value());
+    REQUIRE(*exhausted != fs::StorageErrc::rootMoved);
     storage.createDirectory("dir");
     REQUIRE(stdfs::is_directory(sandbox.root / "dir"));
 }
