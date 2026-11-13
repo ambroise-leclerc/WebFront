@@ -121,7 +121,13 @@ try {
     const currentDistribution = !config.environment.startsWith('https:');
     if (currentDistribution) assert(JSON.stringify(Object.keys(environment.starters)) === JSON.stringify(['app', 'life']), 'Only the application and Life starters must be shipped');
     config.starters = Object.fromEntries(Object.entries(environment.starters).map(([name, value]) => [name, {url: new URL(value.archive, new URL(config.environment, location.href)).href, integrity: value.integrity}]));
-    const context = {bridge: webFront, config, preview: document.getElementById('preview'), signal: new AbortController().signal,
+    const createFrame = () => {
+        const frame = document.createElement('iframe');
+        frame.title = 'Developer integration Jasmine runner';
+        frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483647;background:white';
+        return frame;
+    };
+    const context = {bridge: webFront, config, createFrame, preview: document.getElementById('preview'), signal: new AbortController().signal,
         write: text => console.log(text)};
     if (wants('app') && currentDistribution) assert(await execute(['create', 'pi'], context).then(() => false, error => /Unknown pinned starter/.test(error.message)),
         'The retired PI starter must not be offered');

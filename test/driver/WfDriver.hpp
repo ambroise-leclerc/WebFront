@@ -206,6 +206,11 @@ inline Sources& sources() {
 // Real HTTP page: WebFront.js derives its WebSocket URL from location.host (srcdoc has no host).
 inline constexpr std::string_view suitePage = R"HTML(<!doctype html><div id="preview"></div><script src="/WebFront.js"></script><script type="module">
                     Promise.resolve().then(async () => {
+                        const box = frameElement.getBoundingClientRect();
+                        if (box.width <= 0 || box.height <= 0 || box.right <= 0 || box.bottom <= 0
+                            || box.left >= parent.innerWidth || box.top >= parent.innerHeight)
+                            throw new Error('A driver session case must be displayed in the native window');
+                        await new Promise(requestAnimationFrame);
                         localStorage.clear();
                         sessionStorage.clear();
                         // No environment command uses IndexedDB today, but discard databases created by a spec when supported.
@@ -220,9 +225,9 @@ inline constexpr std::string_view suitePage = R"HTML(<!doctype html><div id="pre
                         return import('/webfront/developer/environment/' + parent.webfrontDriverCase.entry);
                     }).then(async runtime => {
                         await webFront.ready;
-                        const {index, item, config} = parent.webfrontDriverCase;
+                        const {index, item, config, createFrame} = parent.webfrontDriverCase;
                         let result;
-                        await runtime.runNonInteractive(item.command, {bridge: webFront, config,
+                        await runtime.runNonInteractive(item.command, {bridge: webFront, config, createFrame,
                             preview: document.getElementById('preview'), signal: new AbortController().signal,
                             write: () => {}, onExit: () => {}, reporter: async json => {
                                 result = JSON.parse(json);
@@ -341,6 +346,13 @@ inline constexpr auto driverScript = R"JS(
 (async () => {
     const report = (name, ...args) => webFront.cppFunction(name)(...args);
     const stop = () => window.close();
+    // Tests that own a DOM must stay in the viewport, including the nested wf test runner.
+    const createFrame = () => {
+        const frame = document.createElement('iframe');
+        frame.title = 'WebFront test runner';
+        frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483647;background:white';
+        return frame;
+    };
     try {
         await webFront.ready;
         // Observe the bootstrap status rather than polling the DOM every 50 ms.
@@ -370,7 +382,8 @@ inline constexpr auto driverScript = R"JS(
                 const item = suite[index];
                 await report('wf.caseStarted', index);
                 const frame = document.createElement('iframe');
-                frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:1024px;height:768px';
+                frame.title = item.name;
+                frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483647;background:#141821';
                 const finished = new Promise((resolve, reject) => {
                     const receive = event => {
                         if (event.source !== frame.contentWindow || event.data?.driverCase !== index) return;
@@ -379,7 +392,7 @@ inline constexpr auto driverScript = R"JS(
                     };
                     addEventListener('message', receive);
                 });
-                window.webfrontDriverCase = {index, item, config, entry: environment.entry};
+                window.webfrontDriverCase = {index, item, config, entry: environment.entry, createFrame};
                 frame.src = '/driver/case.html?case=' + index;
                 document.body.append(frame);
                 try { failed = (await finished !== item.expect) || failed; }
@@ -389,7 +402,7 @@ inline constexpr auto driverScript = R"JS(
         } else {
             const argv = JSON.parse(await report('wf.arguments'));
             await report('wf.commandStarted');
-            await runtime.runNonInteractive(argv, {bridge: webFront, config, preview: document.getElementById('preview'),
+            await runtime.runNonInteractive(argv, {bridge: webFront, config, createFrame, preview: document.getElementById('preview'),
                 signal: new AbortController().signal, write: () => {}, onExit: () => {},
                 reporter: json => report('wf.result', JSON.parse(json).exitCode, json)});
         }

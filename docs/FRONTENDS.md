@@ -237,7 +237,7 @@ frontends without a loop). An operation that started is never interrupted, and `
 | WebView2 | window message `WM_APP + 0x4C3` |
 | WebKitGTK | `g_idle_add_full` on the default context |
 | CEF | `CefPostTask(TID_UI, ...)` |
-| `BrowserWithUILoopFrontend` | message-only window (Windows), run loop source (macOS), GLib idle (Linux) |
+| `BrowserWithUILoopFrontend` | message-only window (Windows), run loop source (macOS), GLib eventfd watch (Linux, GLib 2.36+) |
 
 The plain `DefaultBrowserFrontend` runs no loop and has no executor. `BrowserWithUILoopFrontend` launches the page in the system
 browser and runs the minimal loop on the calling thread until `BrowserWithUILoopFrontend::requestStop()` (any thread); the server

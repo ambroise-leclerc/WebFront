@@ -296,7 +296,8 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.repeat_desktop_tests
     permissions:
       contents: read
-    timeout-minutes: 25
+    # The explicit three-pass qualification also enables MSVC /analyze; a cold build can consume 21 minutes alone.
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && 60 || 25 }}
     strategy:
       fail-fast: false
       matrix:
@@ -490,6 +491,11 @@ jobs:
         run: >-
           ctest --test-dir build-sanitizers --output-on-failure --no-tests=error --parallel 4
           --output-junit "${{ github.workspace }}/build-sanitizers/test-results.xml"
+      - name: Stress interface loop shutdown under ThreadSanitizer
+        if: matrix.sanitizer == 'thread' && github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests
+        run: >-
+          ctest --test-dir build-sanitizers --output-on-failure --no-tests=error
+          -R 'Scenario: The system browser can run an interface-thread loop' --repeat until-fail:100
       - name: Compare generated gzip streams against zlib
         timeout-minutes: 5
         if: matrix.sanitizer == 'address-undefined'

@@ -59,5 +59,5 @@ function(webfront_add_driver_suite group)
         set(lock self-build-project)
     endif()
     set_tests_properties(${group} PROPERTIES FIXTURES_REQUIRED "${ARG_REQUIRES}" FIXTURES_SETUP ${group}
-        RESOURCE_LOCK "${lock}")
+        RESOURCE_LOCK "${lock}" PROCESSORS 4)
 endfunction()

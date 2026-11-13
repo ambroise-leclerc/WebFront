@@ -411,6 +411,30 @@ SCENARIO("Shutdown while operations are racing stops or runs each exactly once")
 
 #include <webfront/frontend/Frontend.hpp>
 
+#if defined(__linux__)
+SCENARIO("The Linux interface loop coalesces wake-ups without creating deferred sources") {
+    webfront::frontend::detail::uiloop::WakeEvent wake;
+    GIVEN("a wake event shared by several producers") {
+        REQUIRE(wake.consume() == 0);
+        constexpr int             producers = 4, signals = 10000;
+        std::vector<std::jthread> threads;
+        for (int i = 0; i < producers; ++i)
+            threads.emplace_back([&] {
+                for (int n = 0; n < signals; ++n)
+                    wake.signal();
+            });
+        for (auto& thread : threads)
+            thread.join();
+        THEN("all signals occupy one bounded event and consumption resets it") {
+            CHECK(wake.consume() == producers * signals);
+            CHECK(wake.consume() == 0);
+            wake.signal();
+            CHECK(wake.consume() == 1);
+        }
+    }
+}
+#endif
+
 namespace {
 struct LoopOutcome {
     std::atomic<int>  completions{0};

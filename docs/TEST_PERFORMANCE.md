@@ -35,6 +35,11 @@ Each new realm owns its bridge connection, imports, timers, Workers, listeners a
 those resources. Local/session storage and enumerated IndexedDB databases are reset before the next command. The native project Store survives intentionally. Pinned and rebuilt environments retain different
 profiles and URLs/ports. The normal suite resets both; never point the two revisions at a shared persistent profile.
 
+Driver session frames fill the native window while their command runs. A case verifies its viewport and receives a
+rendering frame before starting work; off-screen frames can have their scripts, messages and Workers suspended by the
+engine. Like the developer session, each driver session reserves four CTest processors, so another browser test does
+not cover its window while it waits for rendering.
+
 Filter the familiar CTest names with `ctest --test-dir build -R WfDriverTestFails --output-on-failure`. CTest includes the
 session fixture and its prerequisite project setup. For a truly isolated process per case, configure
 `-DWEBFRONT_TEST_SESSIONS=OFF` and use the same filter. A case that blocks consumes its session's remaining budget and the later cases then report "No result for the suite case": rerun with sessions off to find the cause. Repetition must repeat the complete fixture graph, rather than
