@@ -526,3 +526,15 @@ SCENARIO("The default automation clock supervises a renderer that never becomes 
     REQUIRE(automation->controller()->isClosed());
     REQUIRE(discovery::list(root.path() / "sessions").empty());
 }
+
+SCENARIO("A startup timeout too large for the clock never expires") {
+    using namespace std::chrono;
+    const auto launched = steady_clock::now();
+    GIVEN("an ordinary timeout") {
+        CHECK(webfront::automation::startupDeadline(launched, seconds{30}) == launched + seconds{30});
+    }
+    GIVEN("the largest representable timeout") {
+        CHECK(webfront::automation::startupDeadline(launched, seconds::max()) == steady_clock::time_point::max());
+        CHECK(webfront::automation::startupDeadline(launched, seconds::max()) > launched);
+    }
+}

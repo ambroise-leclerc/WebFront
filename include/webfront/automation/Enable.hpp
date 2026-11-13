@@ -31,6 +31,17 @@
 #include <type_traits>
 
 namespace webfront::automation {
+/// The end of the startup window, saturated: a very large timeout (duration::max() to disable the delay) must not overflow
+/// the clock's tick count, which is undefined behavior and would yield a deadline already past.
+[[nodiscard]] constexpr std::chrono::steady_clock::time_point startupDeadline(std::chrono::steady_clock::time_point launched,
+                                                                              std::chrono::seconds startup) noexcept {
+    using Clock = std::chrono::steady_clock;
+    const auto remaining = Clock::time_point::max() - launched;
+    if (startup >= std::chrono::duration_cast<std::chrono::seconds>(remaining))
+        return Clock::time_point::max();
+    return launched + startup;
+}
+
 struct AutomationOptions {
     /// Granted operations (`check`, `build`, `test`, `preview`, `inspect`, `interact`, and the setup grants). None
     /// leaves only session discovery.
@@ -87,7 +98,7 @@ public:
         // A renderer in a loop never runs that request: after the grace the window is declared unresponsive.
         supervisor = std::jthread([this](std::stop_token stop) {
             while (!stop.stop_requested()) {
-                if (session->expire(Clock::now()) || session->expireStartup(launched + startup, Clock::now()))
+                if (session->expire(Clock::now()) || session->expireStartup(startupDeadline(launched, startup), Clock::now()))
                     session->close("Native automation deadline exceeded");
                 if (session->isClosed()) {
                     // The grace starts when the window is asked to close, so a closeBrowser() that blocks does not extend it.
