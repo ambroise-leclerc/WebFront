@@ -17,7 +17,7 @@ jobs:
           hash=$(sha256sum .github/docker/linux-ci.Dockerfile | cut -c1-16)
           echo "image=ghcr.io/${GITHUB_REPOSITORY,,}/linux-ci:$hash" >> "$GITHUB_OUTPUT"
   probe:
-    if: "!contains(github.event.head_commit.message, 'Windows')"
+    if: "!contains(github.event.head_commit.message, 'Windows') && !contains(github.event.head_commit.message, 'GCC13')"
     needs: image
     runs-on: ubuntu-26.04
     timeout-minutes: 60
@@ -90,3 +90,24 @@ jobs:
         run: cl /nologo /EHsc /std:c++latest /DNOMINMAX /Iinclude test/cmake/HeldPublicationProbe.cpp /Fe:held-publication.exe
       - name: Publish while an HTTP source stays open
         run: .\held-publication.exe
+  gcc13-descriptors:
+    if: contains(github.event.head_commit.message, 'GCC13')
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    env:
+      ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+    steps:
+      - uses: actions/checkout@v7
+      - run: sudo apt-get update && sudo apt-get install -y g++-13
+      - name: Compile the isolated descriptor probe
+        run: g++-13 -std=c++23 -O2 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -Iinclude test/cmake/DescriptorPressureProbe.cpp -o descriptor-probe
+      - name: Check the cold control and prepared error path
+        shell: bash
+        run: |
+          status=0
+          ./descriptor-probe cold > cold.log 2>&1 || status=$?
+          cat cold.log
+          test "$status" -ne 0
+          grep 'invalid vptr' cold.log
+          ./descriptor-probe warm
