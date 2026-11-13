@@ -109,6 +109,49 @@ SCENARIO("Fallback logger removal waits for active delivery") {
     log::setLogLevel(log::Error);
 }
 
+SCENARIO("A second removal of the same fallback sink also waits for the active delivery (#542)") {
+    using namespace std::chrono_literals;
+    log::setLogLevel(log::Info);
+    std::promise<void> entered, release;
+    auto               ready = entered.get_future();
+    const auto         gate  = release.get_future().share();
+    const auto         sink  = log::addSinks([&](std::string_view) {
+        entered.set_value();
+        gate.wait();
+    });
+    std::thread        producer([] {
+        log::info("blocked delivery");
+    });
+    const bool         running = ready.wait_for(30s) == std::future_status::ready;
+    CHECK(running);
+    std::promise<void> firstRemoved, secondRemoved;
+    auto               firstDone  = firstRemoved.get_future();
+    auto               secondDone = secondRemoved.get_future();
+    std::thread        first([&] {
+        log::removeSinks(sink);
+        firstRemoved.set_value();
+    });
+    // The slot is emptied at once, while the first removal keeps waiting for the delivery.
+    if (running)
+        CHECK(firstDone.wait_for(50ms) == std::future_status::timeout);
+    std::thread second([&] {
+        log::removeSinks(sink);
+        secondRemoved.set_value();
+    });
+    // A negative observation of a deliberately blocked call, not a readiness deadline.
+    if (running)
+        CHECK(secondDone.wait_for(50ms) == std::future_status::timeout);
+    release.set_value();
+    producer.join();
+    first.join();
+    second.join();
+    CHECK(firstDone.wait_for(0ms) == std::future_status::ready);
+    CHECK(secondDone.wait_for(0ms) == std::future_status::ready);
+    // Once nothing runs the callback, a further removal returns at once.
+    log::removeSinks(sink);
+    log::setLogLevel(log::Error);
+}
+
 SCENARIO("Fallback logger registration and delivery may run on different threads") {
     log::setLogLevel(log::Info);
     std::atomic<unsigned> seen{0};

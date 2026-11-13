@@ -28,11 +28,11 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Fixed
 
-- Keep Windows developer publication independent of a slow HTTP reader: retain the old resource through a section with bounded read mappings, closing the file handle before the directory is replaced. Concurrent fallback logging now protects registrations, waits for delivery on removal outside callbacks, and guards browser-transport lifetime (#542).
+- On Windows, a slow HTTP client no longer blocks the publication of developer resources, and removing a log sink no longer returns while one of its callbacks is still running (#542, `docs/validation/ci-flakes-542.md`).
 - Serialize the developer session's phase logs and keep CI timing analysis running if a duration is malformed: report and omit that timing while retaining the other phases and test results (#542).
-- Use one eventfd-backed GLib source per Linux interface loop, avoiding producer-side source allocation and the broad GLib ThreadSanitizer suppression. Exercise automation deadline boundaries with a controlled clock, check startup readiness atomically with expiry, and count browser-close dispatch time toward the close grace (#542).
-- Keep driver command frames and their Jasmine runners in the native viewport, and avoid waiting for an animation callback before a command can start. Wait for observable capture/executor/send states in asynchronous unit tests (#542).
-- Publish the logger's sinks as an immutable snapshot (no allocation per line), pin the request-log filter of the native test processes with a unit test, add a regression for work queued at the moment the interface loop is asked to stop, and name the apartment left behind when `WebView2Lifecycle-native-early-close` fails (#542, #564).
+- The Linux interface loop shuts down without leaving work behind, and the automation deadlines are decided consistently when a window is ready at the moment its startup expires. The ThreadSanitizer job no longer needs its GLib suppression (#542, `docs/validation/ci-flakes-542.md`).
+- Driver commands and their Jasmine runners are displayed in the native window, and asynchronous unit tests wait for observable states instead of fixed delays (#542).
+- Logging delivers to its sinks without allocating per line. A failed `WebView2Lifecycle-native-early-close` now reports the COM state it found (#542, #564).
 
 - Restore the terminal prompt with exit code 1 when `wf dev` starts without a project or a selectable entry; compilation errors still keep watching for edits. Environment 0.9.2 (#560).
 - Read all six developer integration reports in CTest after a part fails, and keep the successful parts' dependent tests runnable, also when the session's native deadline ends it (#556).

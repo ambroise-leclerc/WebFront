@@ -53,11 +53,28 @@ private:
     // the whole asset in process memory. The original section keeps serving the old publication after replacement.
     //
     // Contract: a published file is immutable. A publication replaces its directory; it never truncates or rewrites a
-    // file in place. Touching the pages of a mapped file would raise a structured exception (EXCEPTION_IN_PAGE_ERROR),
-    // which `catch (std::exception&)` does not see. Each read maps one window, so the HTTP layer should ask for
-    // large blocks: the cost of a read is a map/unmap pair, not a per-byte price.
+    // file in place. A page error while copying (see copyMapped) fails that read with std::system_error and so ends
+    // only the response. Each read maps one window, so the HTTP layer should ask for large blocks: the cost of a
+    // read is a map/unmap pair, not a per-byte price.
     class PublishedSource final : public ByteSource {
     public:
+        // A mapped view whose backing storage disappears (a network share dropped, a removable medium ejected) raises
+        // EXCEPTION_IN_PAGE_ERROR, a structured exception that `catch (std::exception&)` does not see. The copy is
+        // isolated here, with no C++ object to unwind (MSVC rejects __try otherwise), and reports failure by value.
+        static bool copyMapped(void* destination, const void* source, std::size_t count) noexcept {
+    #ifdef _MSC_VER
+            __try {
+                std::memcpy(destination, source, count);
+                return true;
+            } __except (GetExceptionCode() == EXCEPTION_IN_PAGE_ERROR ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
+                return false;
+            }
+    #else
+            std::memcpy(destination, source, count);
+            return true;
+    #endif
+        }
+
         PublishedSource(HANDLE opened, std::uint64_t length) : handle(opened), total(length) {
             SYSTEM_INFO info{};
             ::GetSystemInfo(&info);
@@ -77,8 +94,10 @@ private:
             auto       view   = ::MapViewOfFile(handle, FILE_MAP_READ, static_cast<DWORD>(offset >> 32), static_cast<DWORD>(offset), count + skip);
             if (!view)
                 throw std::system_error(static_cast<int>(::GetLastError()), std::system_category(), "Cannot map published resource");
-            std::memcpy(buffer.data(), static_cast<const char*>(view) + skip, count);
-            ::UnmapViewOfFile(view);
+            const bool copied = copyMapped(buffer.data(), static_cast<const char*>(view) + skip, count);
+            ::UnmapViewOfFile(view);  // on every path, a failed copy included
+            if (!copied)
+                throw std::system_error(static_cast<int>(ERROR_READ_FAULT), std::system_category(), "Cannot read published resource");
             position += count;
             return count;
         }

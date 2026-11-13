@@ -45,7 +45,7 @@ inline struct Sinks {
 
     auto add(auto&&... callbacks) {
         const std::lock_guard lock(mutex);
-        (sinks.push_back(std::make_shared<Entry>(std::forward<decltype(callbacks)>(callbacks))), ...);
+        ((sinks.push_back(std::make_shared<Entry>(std::forward<decltype(callbacks)>(callbacks))), retired.emplace_back()), ...);
         publish();
         return sinks.size() - 1;
     }
@@ -57,7 +57,14 @@ inline struct Sinks {
             if (index >= sinks.size())
                 return;
             entry = std::exchange(sinks[index], nullptr);
-            publish();
+            if (entry) {
+                retired[index] = entry;  // weak: it never keeps the callback's captured state alive
+                publish();
+            } else {
+                // A second removal outside a callback still waits for a delivery that the first one is waiting for. The
+                // weak reference is expired once no thread runs the callback: then there is nothing to wait for.
+                entry = retired[index].lock();
+            }
         }
         if (entry)
             entry->retire(dispatchDepth == 0);
@@ -116,6 +123,7 @@ private:
     }
     inline static std::mutex                        mutex;
     inline static std::vector<std::shared_ptr<Entry>> sinks;
+    inline static std::vector<std::weak_ptr<Entry>>   retired;  // parallel to sinks
     inline static std::shared_ptr<const Snapshot>     published;
 } out;
 

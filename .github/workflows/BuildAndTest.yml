@@ -227,6 +227,8 @@ jobs:
         env: ${{ matrix.test_env }}
         # Installed fixtures are retained. Repeat a whole selected graph so every developer report is checked on
         # every pass: repeating its producer alone could hide a failed part behind a subsequent successful report.
+        # A session only records its commands and expected codes: its consumers (WfDriver*, Journey*) hold the OUTPUT and
+        # REPORT assertions, so they run in the same selection, after their session, on the retained fixtures.
         run: |
           set -euo pipefail
           for pass in {1..20}; do
@@ -234,7 +236,7 @@ jobs:
             ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure --no-tests=error --parallel 4 \
               --test-output-size-passed 2097152 --test-output-size-failed 2097152 \
               --fixture-exclude-any '.*' \
-              -R '^(ConsumerJasmine-file-services|WebFront(WebKitGTK|WKWebView|WebView2)Integration|WebKitGTKLifecycle-navigation-allow-list|JourneyEmbeddedRun|WfDriverSession|JourneyBuildSession|AutomationConsumerWindow|DeveloperBrowserSession|DeveloperBrowserIntegration(-.*)?)$' \
+              -R '^(ConsumerJasmine-file-services|WebFront(WebKitGTK|WKWebView|WebView2)Integration|WebKitGTKLifecycle-navigation-allow-list|JourneyEmbeddedRun|WfDriverSession|WfDriver(Install|TestPasses|TestFails|UnknownCommand|ScriptOutput|SessionWriteStorage|SessionReadStorage)|JourneyBuildSession|Journey(Check|Test|Build|Embed)|AutomationConsumerWindow|DeveloperBrowserSession|DeveloperBrowserIntegration(-.*)?)$' \
               --output-junit "$PWD/build/browser-stress-results-$pass.xml" || status=$?
             cp build/Testing/Temporary/LastTest.log "build/Testing/Temporary/LastTest-stress-$pass.log"
             if [ "$status" -ne 0 ]; then exit "$status"; fi
