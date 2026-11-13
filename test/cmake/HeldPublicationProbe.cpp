@@ -19,6 +19,16 @@ int main() {
         if(held->read(content)!=3 || std::string_view(content,3)!="old") return 3;
         auto latest=fs.open("webfront/developer/preview/app.js");
         if(!latest || latest->read(content)!=3 || std::string_view(content,3)!="new") return 4;
+        const auto staging = project.path()/".webfront/developer/staging";
+        if (std::filesystem::directory_iterator(staging) != std::filesystem::directory_iterator{}) {
+            std::cerr << "Publication left a backup while a section was retained\n";
+            return 5;
+        }
+        auto third=store.begin(".webfront/developer/preview",true);
+        store.write(third,"app.js",0,{});
+        store.commit(third);
+        auto empty=fs.open("webfront/developer/preview/app.js");
+        if(!empty || empty->knownSize()!=0 || empty->read(content)!=0) return 6;
         std::cout << "Publication replaced the directory while its previous HTTP source remained readable\n";
         return 0;
     } catch(const std::exception& error) {
