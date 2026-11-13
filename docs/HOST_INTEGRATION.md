@@ -28,10 +28,11 @@ The blocking of `show()` comes from the interface, never from the server: the se
 | `WKWebViewFrontend` | no | refused: AppKit belongs to the main thread | **yes** |
 | `WebKitGTKFrontend` | no | refused: GTK belongs to the main thread | **yes** |
 | `CEFFrontend` | no | refused: not a qualified configuration | **yes** |
-| `NativeOrBrowserFrontend` | no | as its native engine | yes for the native window; its browser fallback waits for Enter |
+| `NativeOrBrowserFrontend` | no | refused: its browser fallback waits for Enter and cannot be closed | yes for the native window; its browser fallback waits for Enter |
 
 "Refused" is a compile-time diagnostic that names this page: `start()` on a frontend without `launch()`, and
-`UIThread` on a frontend whose `requiresMainThread` is true or that has no `requestClose()`. An adapter also checks its
+`UIThread` on a frontend whose `requiresMainThread` is true or whose sessions cannot all be ended by `requestClose()`
+(`frontend::endsOnRequest`). An adapter also checks its
 toolkit at run time: WKWebView and WebKitGTK throw a `std::runtime_error` that says "main thread" when constructed or
 opened elsewhere, and WebView2 refuses a thread that already uses MTA COM. CEF makes no such check; do not move it.
 
@@ -66,7 +67,11 @@ app.shutdown();                              // stops and joins the server
 - **Failure.** If the launch throws, the server is stopped and joined before the exception reaches the caller.
 - **Stop.** `app.shutdown()` or the destructor, from a host thread, outside any WebFront callback. `app.stop()` only
   requests it and may be called from anywhere.
-- Register callbacks and `onUIStarted` before `start()`. Call it once per application.
+- Register callbacks and `onUIStarted` before `start()`. Call it once per application, on the thread that owns it,
+  instead of `show()`: a second `start()`, or mixing it with `show()`, throws `std::logic_error` and leaves the
+  running server untouched.
+- The launched browser gets the address, the port and the page (and the content policy, if the frontend's `launch()`
+  takes it). Like `show()` with the system browser, it gets no window options and no view-association proof.
 
 ## 2. A thread for the interface: `UIThread`
 
@@ -92,13 +97,16 @@ ui.stop();                                    // closes the window, joins the th
 - **Readiness and failure.** The constructor returns when the application is constructed and `setup` has run, and
   rethrows on the host thread what either threw (a missing runtime, an engine that is not compiled in). A failure of
   the opening itself comes later: `running()` turns false, `failure()` holds the exception and `stop()` rethrows it.
-- **Exchanges.** `ui.app()` is the application; use the calls callable from any thread. Callbacks run on the server
+- **Exchanges.** `ui.app()` is the application; use the calls callable from any thread. The `UIThread` object itself
+  belongs to one host thread: `app()`, `requestClose()` and `stop()` are not synchronized with one another. Callbacks run on the server
   thread, which is neither the host's nor the interface thread.
 - **The user closes the window.** `show()` returns and stops the server; `running()` is false and `waitFor()`
   returns true. The application object stays alive until `stop()` or destruction, so references the host kept
   (a `UI`, a broadcast function) remain valid: their calls are dropped, typed calls fail.
 - **Stop.** `stop()` asks the window to close, repeating the request while the window is still opening, joins the
-  thread and destroys the application. The destructor does the same and drops a failure. No thread is detached and
+  thread and destroys the application. If the window has not closed after its `patience` (30 s by default) it throws
+  `webfront::UIThreadStalled` and changes nothing: the session still runs and `stop()` can be called again. The
+  destructor does the same as `stop()` but cannot leave its thread behind: it waits without bound and drops a failure. No thread is detached and
   none outlives the object. Do not call `stop()` or destroy the object from a WebFront callback or from `setup`:
   both would wait for the thread they run on.
 
@@ -145,9 +153,10 @@ host.request_stop();                          // the user closed the window firs
 
 ## Tests
 
-`test/unit/FrontendContractTests.cpp` covers `start()` (launch on the calling thread, running server, failed launch),
-`requestClose()` across threads and `UIThread` (start, set-up and opening failures, a stop while the window is still
-opening, a window closed by the user) with mock frontends and no GUI. The shared lifecycle suite adds
+`test/unit/FrontendContractTests.cpp` covers `start()` (launch on the calling thread, running server, failed launch,
+a second call and a call mixed with `show()`), `requestClose()` across threads, the release of a close request in each
+outcome of the executor, and `UIThread` (start, set-up and opening failures, a stop while the window is still
+opening, a window that never closes, a window closed by the user) with mock frontends and no GUI. The shared lifecycle suite adds
 `<Frontend>Lifecycle-host-close` (a host thread exchanges with the page, then closes the real window) and
 `<Frontend>Lifecycle-host-thread` (`UIThread` with a real window where the frontend allows it; elsewhere the
 main-thread diagnostic of a window opened on a secondary thread). CEF has no `host-thread` case.

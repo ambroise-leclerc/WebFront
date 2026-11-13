@@ -25,9 +25,24 @@ inline constexpr bool requiresMainThread = [] {
         return false;
 }();
 
+/// @brief True when `Frontend::requestClose()` exists and can end every session the frontend opens. A frontend whose
+/// session cannot always be ended that way (a fallback that waits for the console) declares
+/// `static constexpr bool endsOnRequest = false`; webfront::UIThread, which must join its thread, refuses it.
+template <typename Frontend>
+inline constexpr bool endsOnRequest = [] {
+    if constexpr (!requires { { Frontend::requestClose() } -> std::same_as<bool>; })
+        return false;
+    else if constexpr (requires { { Frontend::endsOnRequest } -> std::convertible_to<bool>; })
+        return static_cast<bool>(Frontend::endsOnRequest);
+    else
+        return true;
+}();
+
 namespace detail {
 
 /// One close request: owns its operation on the executor and deletes itself when it completes, whatever the outcome.
+/// The executor completes every started operation exactly once (run, stopped when the loop closes with it pending,
+/// error when no loop is attached), so the request is always freed; the unit tests check it for each outcome.
 template <typename Close>
 struct WindowCloseRequest {
     struct Receiver {

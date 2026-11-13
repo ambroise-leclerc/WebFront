@@ -13,11 +13,12 @@
 // LCOV_EXCL_START - interactive example; start(), broadcast and shutdown are covered by the unit tests.
 int main() {
     using namespace std::chrono_literals;
+    // Declared before the application, hence destroyed after it: its callbacks refer to this flag.
+    std::atomic<bool>  stopRequested = false;
     webfront::WebFront app;
 
     // Callbacks run on WebFront's server thread: they only leave a word for the host's loop.
-    std::atomic<bool> stopRequested = false;
-    app.cppFunction("stopHost", [&] {
+    app.cppFunction("stopHost", [&stopRequested] {
         stopRequested = true;
     });
     app.onUIStarted([](webfront::WebFront::UI ui) {
@@ -25,8 +26,14 @@ int main() {
             const state = document.body.appendChild(document.createElement("p"));
             const stop = document.body.appendChild(document.createElement("button"));
             stop.textContent = "Stop the host application";
-            stop.onclick = () => webFront.cppFunction("stopHost")().then(() => { state.textContent = "Host stopped."; }, console.error);
-            globalThis.hostLoop = {onTick: tick => { state.textContent = `Host loop iteration ${tick}`; }};
+            let stopping = false;
+            // The host may end before the answer arrives: say it now, and let a lost connection pass.
+            stop.onclick = () => {
+                stopping = true;
+                state.textContent = "Stop requested: the host application ends its loop.";
+                webFront.cppFunction("stopHost")().catch(() => {});
+            };
+            globalThis.hostLoop = {onTick: tick => { if (!stopping) state.textContent = `Host loop iteration ${tick}`; }};
         )js");
     });
 

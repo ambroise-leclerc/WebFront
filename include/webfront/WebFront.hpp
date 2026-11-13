@@ -1027,6 +1027,8 @@ public:
     // Starts the server in a background thread and opens the frontend. An embedded window's close
     // or a frontend exception stops and joins the server. An external browser keeps it running.
     void openAndRun(std::string_view htmlFilename) {
+        if (launched)
+            throw std::logic_error("webfront::BasicWF::show(): this application was started with start(); it has no window loop to run");
         startServerThread();
         WindowAction action;
         try {
@@ -1061,9 +1063,14 @@ public:
      *
      * Only for a frontend that can open without running a loop, which it declares with `launch()`: the system browser
      * (the default `webfront::WebFront`). An embedded window lives in the loop of `show()`; such a frontend is refused at
-     * compile time. Callable from any thread, once per application. If the opening throws, the server is stopped and
-     * joined before the exception propagates, as for show(). The server then runs until stop(), shutdown() or
-     * destruction; register callbacks and handlers before the call.
+     * compile time. Call it once per application, on the thread that owns it, instead of show(): a second start(), or
+     * a start() or show() after the other, throws std::logic_error and leaves the running server untouched. If the
+     * opening throws, the server is stopped and joined before the exception propagates, as for show(). The server then
+     * runs until stop(), shutdown() or destruction; register callbacks and handlers before the call.
+     *
+     * The frontend receives the address, the port, the page and, when its launch() takes it, the content policy. It gets
+     * no WindowOptions and no view-association proof: an interface that is launched and left is an external browser,
+     * which show() does not give them either (ADR-020).
      */
     void start(std::string_view page = "index.html") {
         static_assert(requires { Frontend::launch(std::string_view{}, std::string_view{}, std::string_view{}); },
@@ -1072,11 +1079,16 @@ public:
                       "application in a webfront::UIThread when the frontend allows a secondary thread "
                       "(docs/HOST_INTEGRATION.md).");
         if constexpr (requires { Frontend::launch(std::string_view{}, std::string_view{}, std::string_view{}); }) {
+            if (serverThread.joinable() || launched.exchange(true))
+                throw std::logic_error("webfront::BasicWF::start(): the application is already started; call start() once, instead of show()");
             if (!httpDocRoot.empty() && !developerEnvironment)
                 detail::noteDevelopmentPath();
             startServerThread();
             try {
-                Frontend::launch(httpAddress, httpPort, page);
+                if constexpr (requires { Frontend::launch(httpAddress, httpPort, page, contentPolicy); })
+                    Frontend::launch(httpAddress, httpPort, page, contentPolicy);
+                else
+                    Frontend::launch(httpAddress, httpPort, page);
             } catch (...) {
                 stopAndJoinServer();
                 throw;
@@ -1292,6 +1304,7 @@ private:
     const std::string                                                        viewSecret = detail::newViewSecret();  // this launch's proof of an embedded view
     const bool                                                               trustLoopbackClients;
     bool                                                                     developerEnvironment = false;
+    std::atomic<bool>                                                        launched{false};  // start() was called
     mutable std::mutex                                                       linksMutex;  // guards webLinks, read from any thread
     struct Connection {
         std::shared_ptr<WebLink<Net, Policy>> link;

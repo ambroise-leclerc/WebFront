@@ -15,7 +15,8 @@ A frontend is a type with:
 | `static void open(address, port, page, const ContentPolicy&)` (optional) | Preferred overload receiving the per-application [content policy](CONTENT_POLICY.md). |
 | `static void open(address, port, page, const ContentPolicy&, const WindowOptions&, const ViewLaunch&)` (optional) | Richest overload: also receives the [view association](#view-association) proof of this launch. |
 | `static constexpr Action action` | What `BasicWF` does once `open()` returns. |
-| `static void launch(address, port, page)` (optional) | Opens the interface and returns without waiting for it. `BasicWF::start()` requires it; only a frontend without a window loop offers it (the system browser). |
+| `static void launch(address, port, page)` (optional) | Opens the interface and returns without waiting for it. `BasicWF::start()` requires it; only a frontend without a window loop offers it (the system browser). A `launch(address, port, page, const ContentPolicy&)` overload is preferred when present; neither receives window options or the view-association proof. |
+| `static constexpr bool endsOnRequest` (optional) | `false` when `requestClose()` cannot end every session (`NativeOrBrowserFrontend` with the plain system browser as fallback); `webfront::UIThread` then refuses the frontend. |
 | `static bool requestClose()` (optional) | Asks, from any thread, the session that `open()` runs to end as if the user had closed the window; false when nothing is open. `BasicWF::requestClose()` forwards it. |
 | `static constexpr bool requiresMainThread` (optional) | `open()` belongs to the process main thread; `webfront::UIThread` refuses the frontend at compile time. Undeclared means any thread. |
 

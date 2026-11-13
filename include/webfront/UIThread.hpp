@@ -14,11 +14,18 @@
 #include <exception>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
 
 namespace webfront {
+
+/// @brief UIThread::stop() gave up: the window did not close in the time allowed, and its thread still runs show().
+class UIThreadStalled : public std::runtime_error {
+public:
+    UIThreadStalled() : std::runtime_error("webfront::UIThread::stop(): the interface did not close when asked; its thread is still running") { }
+};
 
 /**
  * @brief Owns the thread on which an application is constructed, shown and closed.
@@ -40,7 +47,11 @@ namespace webfront {
  * CEF) is refused at compile time: call `show()` on the main thread and move the host's work instead. The plain system
  * browser needs no thread at all: use `App::start()`.
  *
- * One object is used by one host thread. Do not call stop() or destroy it from a WebFront callback or from `setup`.
+ * One object is used by one host thread: app(), requestClose() and stop() are not synchronized with one another, and the
+ * mutex inside only orders what the interface thread writes (the end of show() and its failure) with what the host
+ * reads. Do not call stop() or destroy it from a WebFront callback or from `setup`.
+ *
+ * stop() is bounded and reports a window that does not close; the destructor has to wait for its thread and is not.
  */
 template <typename App>
 class UIThread {
@@ -50,9 +61,10 @@ class UIThread {
                   "webfront::UIThread: this frontend's window belongs to the process main thread. Construct the application and "
                   "call show() there, run the host's own work on other threads and end the session with requestClose() "
                   "(docs/HOST_INTEGRATION.md).");
-    static_assert(requires { { Frontend::requestClose() } -> std::same_as<bool>; },
-                  "webfront::UIThread: this frontend cannot be asked to close, so its thread could never be joined. With the "
-                  "system browser no thread is needed: call start() on the application (docs/HOST_INTEGRATION.md).");
+    static_assert(frontend::endsOnRequest<Frontend>,
+                  "webfront::UIThread: this frontend cannot always be asked to close (the system browser waits for the console, "
+                  "also as the fallback of NativeOrBrowserFrontend), so its thread could never be joined. With the system "
+                  "browser no thread is needed: call start() on the application (docs/HOST_INTEGRATION.md).");
 
 public:
     /// Constructs `App{config}` on a new thread, calls `setup(app)` there, then `app.show(page)`. See the class comment.
@@ -93,10 +105,12 @@ public:
     UIThread(const UIThread&)            = delete;
     UIThread& operator=(const UIThread&) = delete;
 
-    /// Closes the window, joins the thread and destroys the application; a failure of show() is dropped.
+    /// Closes the window, joins the thread and destroys the application; a failure of show() is dropped. A destructor
+    /// cannot leave its thread behind: it waits as long as the window takes to close (ADR-006). Call stop() first to be
+    /// told about a window that does not.
     ~UIThread() {
         try {
-            stop();
+            stop(std::chrono::milliseconds::max());
         } catch (...) {  // observed through failure() or an explicit stop(), or not at all
         }
     }
@@ -133,15 +147,22 @@ public:
     /** @brief Ends the session and waits for it: asks the window to close until show() has returned (a window that is
      * still opening receives the request once it exists), joins the thread and destroys the application. Rethrows what
      * show() threw. Safe to repeat; afterwards app() is no longer valid.
+     *
+     * If show() has not returned within `patience`, throws UIThreadStalled and changes nothing: the session still runs,
+     * app() stays valid and stop() can be called again.
      */
-    void stop() {
+    void stop(std::chrono::milliseconds patience = defaultPatience) {
         if (worker.joinable()) {
+            const auto       start = std::chrono::steady_clock::now();
             std::unique_lock lock(mutex);
             while (!finished) {
                 lock.unlock();
                 application->requestClose();
                 lock.lock();
-                changed.wait_for(lock, closeRetry, [&] { return finished; });
+                if (changed.wait_for(lock, closeRetry, [&] { return finished; }))
+                    break;
+                if (std::chrono::steady_clock::now() - start >= patience)
+                    throw UIThreadStalled();
             }
             lock.unlock();
             worker.join();
@@ -155,6 +176,9 @@ public:
         if (error)
             std::rethrow_exception(error);
     }
+
+    /// How long stop() waits for the window to close before reporting it.
+    static constexpr std::chrono::milliseconds defaultPatience{std::chrono::seconds(30)};
 
 private:
     // A request made before the window exists is not kept by the frontends: stop() repeats it at this period.

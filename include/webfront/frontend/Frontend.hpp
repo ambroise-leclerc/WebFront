@@ -15,6 +15,7 @@
 #include "WKWebView.hpp"
 #include "WebKitGTK.hpp"
 
+#include <atomic>
 #include <concepts>
 #include <cstdlib>
 #include <exception>
@@ -50,7 +51,11 @@ namespace webfront::frontend {
  * open() runs the frontend's loop, and BasicWF::uiExecutor() forwards it.
  * An optional static bool closeServerAfterOpen() overrides `action` at run time (NativeOrBrowserFrontend).
  * An optional static void launch(address, port, file) opens the interface and returns without waiting for it: BasicWF::start()
- * needs it, and a frontend whose window lives in open()'s loop does not offer it.
+ * needs it, and a frontend whose window lives in open()'s loop does not offer it. A launch(address, port, file, policy)
+ * overload is preferred when present. A launched interface is an external one: it receives neither WindowOptions nor the
+ * ViewLaunch proof (the system browser never does, ADR-020), so start() and show() treat such a frontend alike.
+ * An optional static constexpr bool endsOnRequest = false tells that requestClose() cannot end every session
+ * (frontend::endsOnRequest<Frontend>).
  * An optional static bool requestClose() asks, from any thread, the session that open() runs to end as if the user had
  * closed the window; it returns false when nothing is open to receive the request. BasicWF::requestClose() forwards it.
  * An optional static constexpr bool requiresMainThread tells that open() belongs to the process main thread
@@ -261,8 +266,11 @@ template <FrontendType Native, FrontendType Browser>
 struct NativeOrBrowserFrontendFor {
     static constexpr Action action{Native::action};
     static constexpr bool   requiresMainThread = frontend::requiresMainThread<Native> || frontend::requiresMainThread<Browser>;
+    /// Whichever is used at run time must be closable on request: the plain system browser, which waits for Enter, is not.
+    static constexpr bool   endsOnRequest = frontend::endsOnRequest<Native> && frontend::endsOnRequest<Browser>;
 
     /// Asks the one in use to end its session; false when it has nothing to close (the plain system browser never has).
+    /// Callable from any thread: the decision of initialize() is read atomically.
     static bool requestClose() noexcept {
         if (usesNativeWindow()) {
             if constexpr (requires { { Native::requestClose() } -> std::same_as<bool>; })
@@ -279,7 +287,7 @@ struct NativeOrBrowserFrontendFor {
         return state().reason;
     }
     [[nodiscard]] static bool usesNativeWindow() {
-        return !state().reason.has_value();
+        return state().native.load();
     }
     /// Whether the server stops once open() returns: true for a native window, false for the browser.
     [[nodiscard]] static bool closeServerAfterOpen() {
@@ -323,6 +331,7 @@ struct NativeOrBrowserFrontendFor {
         } catch (const std::exception& e) {
             s.reason = e.what();
         }
+        s.native = !s.reason.has_value();
         if (s.reason) {
             std::cerr << "WebFront: opening the system browser instead of a native window: " << *s.reason << '\n';
             Browser::initialize();
@@ -355,7 +364,8 @@ struct NativeOrBrowserFrontendFor {
 
 private:
     struct State {
-        std::optional<std::string> reason;
+        std::optional<std::string> reason;        // written by initialize() only
+        std::atomic<bool>          native{true};  // the decision, readable from any thread (requestClose)
     };
     static State& state() {
         static State instance;

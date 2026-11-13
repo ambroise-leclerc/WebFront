@@ -375,6 +375,23 @@ struct HostFrontend : ContractFrontend<frontend::Action::closeServerAfterOpen, f
     }
 };
 
+// A window that ignores every close request, until the test closes it.
+struct DeafFrontend : ContractFrontend<frontend::Action::closeServerAfterOpen> {
+    static bool requestClose() {
+        return false;
+    }
+};
+
+// A launching frontend that also takes the content policy.
+struct PolicyLaunchRecorder : LaunchRecorder {
+    static inline bool receivedPolicy = false;
+    using LaunchRecorder::launch;
+    static void launch(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy&) {
+        receivedPolicy = true;
+        LaunchRecorder::launch(address, port, file);
+    }
+};
+
 struct UninitializableFrontend : HostFrontend<> {
     static void initialize() {
         throw std::runtime_error("no display");
@@ -398,6 +415,12 @@ static_assert(frontend::requiresMainThread<frontend::WebKitGTKFrontend>);
 static_assert(frontend::requiresMainThread<frontend::CEFFrontend>);
 static_assert(frontend::requiresMainThread<frontend::NativeOrBrowserFrontendFor<frontend::WKWebViewFrontend, frontend::DefaultBrowserFrontend>>);
 static_assert(!frontend::requiresMainThread<LaunchRecorder>);  // undeclared: any thread
+// A thread can be joined only when every session of the frontend ends on request.
+static_assert(frontend::endsOnRequest<frontend::WebView2Frontend>);
+static_assert(frontend::endsOnRequest<HostFrontend<>>);
+static_assert(!frontend::endsOnRequest<frontend::DefaultBrowserFrontend>);
+static_assert(!frontend::endsOnRequest<frontend::NativeOrBrowserFrontendFor<frontend::WebView2Frontend, frontend::DefaultBrowserFrontend>>);
+static_assert(frontend::endsOnRequest<frontend::NativeOrBrowserFrontendFor<frontend::WebView2Frontend, frontend::BrowserWithUILoopFrontend>>);
 }  // namespace
 
 SCENARIO("start() opens the interface and returns to the host with the server running") {
@@ -557,6 +580,128 @@ SCENARIO("UIThread reports start and opening failures to the host") {
                 CHECK(state->stopped);
                 CHECK(state->exited);
             }
+        }
+    }
+}
+
+SCENARIO("start() is called once and replaces show()") {
+    GIVEN("an application already started") {
+        LaunchRecorder::fail = false;
+        HostApp<LaunchRecorder> app;
+        const auto              state = ContractIoContext::current;
+        app.start();
+        LaunchRecorder::url.clear();
+        WHEN("start is called again") {
+            THEN("it is refused before any launch and the server keeps running") {
+                REQUIRE_THROWS_AS(app.start(), std::logic_error);
+                CHECK(LaunchRecorder::url.empty());
+                std::unique_lock lock(state->mutex);
+                CHECK(state->changed.wait_for(lock, coordinationTimeout, [&] { return state->running; }));
+                CHECK_FALSE(state->stopped);
+            }
+        }
+        WHEN("show is called") {
+            THEN("it is refused without opening or stopping anything") {
+                REQUIRE_THROWS_AS(app.show(), std::logic_error);
+                std::lock_guard lock(state->mutex);
+                CHECK_FALSE(state->stopped);
+            }
+        }
+    }
+    GIVEN("a frontend that was shown and can also launch") {
+        struct Both : LaunchRecorder {
+            static void open(std::string_view, std::string_view) { }
+        };
+        LaunchRecorder::url.clear();
+        HostApp<Both> app;
+        const auto    state = ContractIoContext::current;
+        app.show();
+        THEN("a later start is refused and leaves the server of show running") {
+            REQUIRE_THROWS_AS(app.start(), std::logic_error);
+            CHECK(LaunchRecorder::url.empty());
+            std::lock_guard lock(state->mutex);
+            CHECK_FALSE(state->stopped);
+        }
+    }
+    GIVEN("a frontend whose launch takes the content policy") {
+        PolicyLaunchRecorder::receivedPolicy = false;
+        HostApp<PolicyLaunchRecorder> app;
+        app.start();
+        THEN("start gives it the application's policy") {
+            CHECK(PolicyLaunchRecorder::receivedPolicy);
+        }
+    }
+}
+
+SCENARIO("UIThread::stop reports a window that does not close") {
+    GIVEN("a window that ignores close requests") {
+        UIThread<HostApp<DeafFrontend>> ui(WebFrontConfig{}, [](auto&) { });
+        const auto                      state = ContractIoContext::current;
+        REQUIRE(waitForWindow(state));
+        WHEN("the host stops it with a bounded patience") {
+            THEN("stop throws, and the session is still running and usable") {
+                REQUIRE_THROWS_AS(ui.stop(20ms), UIThreadStalled);
+                CHECK(ui.running());
+                CHECK(ui.app().port() == "9002");
+            }
+        }
+        // The window closes at last (here: the user): stop, and the destructor after it, then return.
+        {
+            std::lock_guard lock(state->mutex);
+            state->closeWindow = true;
+            state->changed.notify_all();
+        }
+        REQUIRE_NOTHROW(ui.stop());
+    }
+}
+
+SCENARIO("A window close request is always released by the executor") {
+    GIVEN("a close function that holds a resource") {
+        frontend::UIExecutorHost   host;
+        frontend::NativeWindowHost windowHost{host.executor()};
+        const auto                 resource = std::make_shared<int>(0);
+        const auto                 request  = [&] {
+            return frontend::detail::requestWindowClose(host.executor(), windowHost.window(), [resource](const frontend::NativeWindowHandle&) {
+                ++*resource;
+            });
+        };
+        WHEN("no loop is attached") {
+            THEN("the request is refused and nothing is kept") {
+                CHECK_FALSE(request());
+                CHECK(resource.use_count() == 1);
+            }
+        }
+        WHEN("the loop closes with the request pending") {
+            host.attach([] { });
+            REQUIRE(request());
+            CHECK(resource.use_count() == 2);
+            host.close();
+            THEN("it completes stopped: the window is not closed and the request is freed") {
+                CHECK(*resource == 0);
+                CHECK(resource.use_count() == 1);
+            }
+        }
+        WHEN("the loop runs the request") {
+            host.attach([] { });
+            AND_WHEN("the window is published") {
+                int window = 0;
+                windowHost.publish({.kind = frontend::NativeWindowKind::gtk, .pointer = &window, .portalParent = {}});
+                REQUIRE(request());
+                host.drain();
+                THEN("the close function ran once and the request is freed") {
+                    CHECK(*resource == 1);
+                    CHECK(resource.use_count() == 1);
+                }
+            }
+            AND_WHEN("no window is published") {
+                REQUIRE(request());
+                host.drain();
+                THEN("nothing is closed and the request is freed") {
+                    CHECK(*resource == 0);
+                    CHECK(resource.use_count() == 1);
+                }
+            }
+            host.close();
         }
     }
 }

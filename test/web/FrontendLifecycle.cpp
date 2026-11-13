@@ -649,6 +649,9 @@ template <typename Application>
 int checkHostThread() {
     lifecycleStage = LifecycleStage::startingInstrumented;
     const webfront::WebFrontConfig config{.documentRoot = std::filesystem::current_path()};
+    // Only WKWebView and WebKitGTK reach this branch (CEF has no host-thread case, cmake/Frontends.cmake): both check their
+    // thread before touching the toolkit and say "main thread". A future frontend that declares requiresMainThread
+    // without such a check would open here; the watchdog then fails the case instead of letting it hang.
     if constexpr (webfront::frontend::requiresMainThread<typename Application::FrontendProvider>) {
         std::string diagnostic;
         std::thread secondary([&] {
