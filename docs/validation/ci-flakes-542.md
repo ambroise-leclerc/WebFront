@@ -48,6 +48,10 @@ does not close, a runner deadline and an infrastructure failure; a successful re
 - Capture and executor tests wait for observable file/result/attachment/closure states. The streamed-reply shutdown
   test waits until its deferred send registers cancellation, rather than merely observing bytes prepared before
   sender start. TSan exposed that race in run 43411600509; it is independent of the GLib report.
+  The remaining unit sleeps were reviewed: polling helpers return as soon as their predicate holds; delayed release
+  threads deliberately keep a resource busy; logger/loop/body negative observations check that blocked work has not
+  completed; host descendant checks allow the child enough time to create its forbidden marker. These are distinct
+  from sleeping and then assuming an asynchronous startup or capture has completed.
 - Embedded Life explicitly shuts down before its callback-captured result state and empty working directory leave
   scope. Its two phase messages distinguish a frontend that did not return from a stalled native shutdown; they do
   not claim that the historical timeout's internal cause has been reproduced.
@@ -79,14 +83,47 @@ the structured message and rendered text. No payload logging is restored to sati
 Local platform: macOS arm64, AppleClang 21, Release, CEF off, WKWebView on, four CTest workers. The diagnostics-only
 revision passes 724/724 cases in three complete fixture graphs. File-services also passes 60 independent repetitions.
 The revised clock/frame/send changes pass another complete three-pass invocation: 726/726 in each pass,
-130.88/119.03/119.64 seconds. The selected stress graph also passes locally (13 cases, 31.29 seconds).
+130.88/119.03/119.64 seconds. With the publication and logger regressions, three complete passes succeed at
+729/729 (176.14/172.60/120.85 seconds); after the explicit Life shutdown, all 729 pass again in 122.10 seconds.
+The selected browser graph also passes 20 consecutive local invocations (13 cases per invocation).
 
 The first manual workflow, [43404654087](https://github.com/ambroise-leclerc/WebFront/actions/runs/43404654087), passes
 the Linux/macOS three-pass suites, GCC/Clang CEF and both sanitizers on the diagnostics revision. Windows reaches its
-25-minute job limit after a 21-minute cold MSVC analysis build; the explicit manual three-pass job now has 60 minutes.
+25-minute job limit after a 21-minute cold MSVC analysis build. A subsequent qualification reaches its 60-minute
+runner limit during stress; the explicit manual three-pass plus 20-browser-graph job now has 90 minutes.
 Individual case deadlines remain unchanged.
 
 The next workflow, [43411600509](https://github.com/ambroise-leclerc/WebFront/actions/runs/43411600509), exposes a
 runner-title regression on all engines and the deferred-send registration race under TSan. Both are corrected;
-that failed revision is retained as evidence and cannot qualify the final changes. The final multi-platform campaign
-must pass before treating the unresolved platform cases as qualified or creating the implementation PR.
+that failed revision is retained as evidence and cannot qualify the final changes.
+
+The isolated Linux closure investigation
+[43425563151](https://github.com/ambroise-leclerc/WebFront/actions/runs/43425563151) passes its initial 22-case fixture
+graph, then 1,000 consecutive invocations **of each** of `WebKitGTKLifecycle-navigation-allow-list` and
+`JourneyEmbeddedRun`, with `--repeat until-fail:1000` on one shared Xvfb display (3353.92 seconds). It completes before
+the job limit. The probe retains native stage markers, a 45-second Life phase watchdog, HTTP diagnostics and explicit
+Life shutdown; the latter is also in this branch. Artifact `native-542-reproduction` retains the XML reports and
+preparation transcript. This does not reproduce or identify the historical internal stall, and does not justify
+describing the session-bus warning as its cause.
+
+The main campaign [43430071781](https://github.com/ambroise-leclerc/WebFront/actions/runs/43430071781) passes GCC and
+Clang CEF, all five portability configurations, ASan/UBSan (including differential gzip), TSan without the former
+GLib suppression and 100 interface-loop repetitions, and GCC 13 ARM64's normal and ASan/UBSan fast tiers.
+Linux and macOS pass all three complete desktop graphs. All three native engines pass all 20 selected browser
+graphs, including the developer report readers on every pass. The Windows complete graph stops after pass 1 because
+`WebView2Lifecycle-native-early-close` reports `STA COM initialization was not released` (job 131901058296); its other
+192 cases pass. That is the independently tracked #564, explicitly outside this investigation. The workflow remains
+red; its successful targeted stress step does not erase or retry that failure. All three desktop artifacts retain
+the 20 stress transcripts; Windows and macOS also retain all 20 XML reports (13 cases per graph). The container's
+`${{ github.workspace }}` differs from its working directory: Linux's XML reports were written outside the uploaded
+build directory. Use `$PWD` for the fast/stress reports, matching the retained transcripts and complete-suite reports.
+Linux's 20 successful 14-case graphs remain evidenced by both the job log and `LastTest-stress-*.log`.
+
+Optional mddlog [43432296860](https://github.com/ambroise-leclerc/WebFront/actions/runs/43432296860) passes all 603
+source-integration cases and all 603 installed-integration cases, plus both sanitizer jobs and their five randomized
+transport/bridge repetitions. This follows the failed outdated-payload assertion in run 43430076833; its replacement
+verifies redaction rather than restoring the removed dump.
+
+After the explicit Life shutdown, [43433160286](https://github.com/ambroise-leclerc/WebFront/actions/runs/43433160286)
+at `10672ead` passes both GCC/Clang CEF jobs and both sanitizer jobs. The final documentation/archive-path update
+changes no runtime behavior; the `$PWD` report command is also exercised locally with `TestPerformanceProfile`.

@@ -206,7 +206,7 @@ jobs:
         shell: bash
         run: >-
           ctest --test-dir build -C ${{ matrix.build_type }} -L fast ${{ env.WEBFRONT_CONFIGURATION != 'true' && '-LE configuration' || '' }}
-          --parallel 4 --output-on-failure --no-tests=error --output-junit "${{ github.workspace }}/build/fast-results.xml"
+          --parallel 4 --output-on-failure --no-tests=error --output-junit "$PWD/build/fast-results.xml"
       - name: Capture CTest dependency graph
         shell: bash
         run: ctest --test-dir build --show-only=json-v1 > build/ctest-graph.json
@@ -235,7 +235,7 @@ jobs:
               --test-output-size-passed 2097152 --test-output-size-failed 2097152 \
               --fixture-exclude-any '.*' \
               -R '^(ConsumerJasmine-file-services|WebFront(WebKitGTK|WKWebView|WebView2)Integration|WebKitGTKLifecycle-navigation-allow-list|JourneyEmbeddedRun|WfDriverSession|JourneyBuildSession|AutomationConsumerWindow|DeveloperBrowserSession|DeveloperBrowserIntegration(-.*)?)$' \
-              --output-junit "${{ github.workspace }}/build/browser-stress-results-$pass.xml" || status=$?
+              --output-junit "$PWD/build/browser-stress-results-$pass.xml" || status=$?
             cp build/Testing/Temporary/LastTest.log "build/Testing/Temporary/LastTest-stress-$pass.log"
             if [ "$status" -ne 0 ]; then exit "$status"; fi
           done

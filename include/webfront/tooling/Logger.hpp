@@ -15,14 +15,14 @@
 #include <condition_variable>
 #include <filesystem>
 #include <functional>
-    #include <iostream>
-    #include <limits>
-    #include <list>
-    #include <memory>
-    #include <mutex>
-    #include <string_view>
-    #include <utility>
-    #include <vector>
+#include <iostream>
+#include <limits>
+#include <list>
+#include <memory>
+#include <mutex>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 namespace webfront::log {
 using LogType              = const uint8_t;
