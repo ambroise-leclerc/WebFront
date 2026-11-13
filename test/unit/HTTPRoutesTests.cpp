@@ -45,11 +45,12 @@ using Router = Server<RouteNet, Files>;
 
 template <typename Condition>
 bool waitFor(Condition condition, std::chrono::milliseconds limit = 10s) {
-    for (auto waited = 0ms; waited < limit; waited += 1ms) {
-        if (condition()) return true;
+    const auto deadline = std::chrono::steady_clock::now() + limit;
+    while (!condition()) {
+        if (std::chrono::steady_clock::now() >= deadline) return false;
         std::this_thread::sleep_for(1ms);
     }
-    return false;
+    return true;
 }
 
 void send(std::string_view request) {
