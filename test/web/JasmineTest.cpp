@@ -8,6 +8,7 @@
 #include <webfront/WebFront.hpp>
 
 #include "../driver/WfDriver.hpp"
+#include "../../examples/life/cuda/LifeCuda.hpp"
 #include "../../examples/life/react/LifeReact.hpp"
 #include "RejectedWebSocketServer.hpp"
 #include "../unit/FormsSettings.hpp"
@@ -119,6 +120,7 @@ public:
         registerBitsetCallbacks();
         registerListCallbacks();
         lifeReactSubscription = demo::installLifeReact(app);
+        lifeCudaSubscription  = demo::lifecuda::installLifeCuda(app);
         registerMediaRoute(app);
         registerReadRoute(app);
         streamRoute           = app.addRoute("/webfront/services/test-stream/", [](const http::RouteRequest& request) {
@@ -191,6 +193,7 @@ private:
     optional<TestWF::UI> connectedUI;
     UISubscription                   uiSubscription;
     UISubscription                   lifeReactSubscription;
+    UISubscription                   lifeCudaSubscription;
     http::RouteTable::Registration   streamRoute, mediaRoute;
     ReadRoute                        readRoute;
     filesystem::path                 mediaFile;

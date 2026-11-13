@@ -74,6 +74,9 @@ its generated provider from an empty directory. Configured tests need no public 
 [Tiers](TEST_TIERS.md) defines the desktop and extended CI scope, including the GCC 13 Linux aarch64 job (#548).
 [Jetson Orin Nano validation](validation/jetson-528.md) records a partial JetPack 6 pass with WebKitGTK
 under Xvfb; hardware-accelerated display, kiosk use and JetPack 7.2 remain unqualified.
+The [Life CUDA example](LIFE_CUDA.md) computes a 2048 × 2048 field on the CPU or an optional CUDA backend
+(verified against each other on the Orin Nano); in the native window there WebKitGTK renders in software and the
+display reaches about 5 frames per second, so the demo is not fluid on that board yet.
 [Test execution and profiling](TEST_PERFORMANCE.md) documents session isolation, fixture locks,
 resource limits and complete-suite repetition. Sessions retain individual CTest assertions;
 independent driver processes use OS-assigned loopback ports. Manual transport measurements

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebFront Life · CUDA</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overflow: hidden; }
+  body { background: #06140f; color: #dcffed; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+  canvas.dragging { cursor: grabbing; }
+  aside {
+    position: fixed; top: 16px; left: 16px; width: 290px; padding: 16px; border-radius: 12px;
+    background: rgba(9, 29, 23, .86); border: 1px solid rgba(129, 239, 189, .25);
+  }
+  h1 { margin: 0 0 2px; font-size: 17px; }
+  .eyebrow { margin: 0 0 12px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #81efbd; }
+  fieldset { margin: 0 0 12px; padding: 0; border: 0; }
+  legend { padding: 0; margin-bottom: 4px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #9fcac2; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  button, .choice {
+    flex: 1; padding: 6px 8px; border-radius: 8px; border: 1px solid rgba(129, 239, 189, .35);
+    background: transparent; color: inherit; font: inherit; text-align: center; white-space: nowrap; cursor: pointer;
+  }
+  button:hover:enabled, .choice:hover { background: rgba(129, 239, 189, .12); }
+  button:disabled { opacity: .4; cursor: default; }
+  button[aria-pressed="true"], .choice:has(input:checked) { background: #81efbd; color: #06140f; border-color: #81efbd; }
+  .choice:has(input:disabled) { opacity: .4; cursor: default; }
+  .choice input { position: absolute; opacity: 0; pointer-events: none; }
+  .choice:has(input:focus-visible), button:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+  input[type="range"] { width: 100%; accent-color: #81efbd; }
+  #device { margin: 4px 0 0; font-size: 12px; color: #9fcac2; }
+  dl { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; margin: 0; }
+  dt { color: #9fcac2; }
+  dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  #error { margin: 10px 0 0; color: #ff9d8f; }
+  #error:empty { display: none; }
+  .hint { margin: 10px 0 0; font-size: 12px; color: #9fcac2; }
+</style>
+</head>
+<body>
+<canvas id="field" role="img" aria-label="Game of Life field. Drag to pan, scroll to zoom, double-click to reset the view."></canvas>
+<aside aria-label="Simulation controls">
+  <h1>Game of Life</h1>
+  <p class="eyebrow"><span id="size">…</span> torus · computed in C++</p>
+  <fieldset>
+    <legend>Backend</legend>
+    <div class="row">
+      <label class="choice"><input type="radio" name="backend" value="0" data-testid="backend-cpu" checked>CPU</label>
+      <label class="choice"><input type="radio" name="backend" value="1" data-testid="backend-cuda" disabled>CUDA</label>
+    </div>
+    <p id="device" data-testid="device">Connecting…</p>
+  </fieldset>
+  <fieldset>
+    <legend><label for="load">Generations per frame: <output id="load-value" for="load">1</output></label></legend>
+    <input id="load" data-testid="load" type="range" min="0" max="10" value="0">
+  </fieldset>
+  <fieldset>
+    <legend>Simulation</legend>
+    <div class="row">
+      <button id="play" data-testid="play" aria-pressed="false">Play</button>
+      <button id="step" data-testid="step">Step</button>
+      <button id="fullscreen" data-testid="fullscreen" title="Full screen (F)">Fullscreen</button>
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>Start from</legend>
+    <div class="row">
+      <button data-pattern="0" data-testid="pattern-soup">Soup</button>
+      <button data-pattern="1" data-testid="pattern-gliders">Gliders</button>
+      <button data-pattern="2" data-testid="pattern-acorn">Acorn</button>
+    </div>
+  </fieldset>
+  <dl aria-label="Measurements">
+    <dt>Generation</dt><dd data-testid="generation" id="generation">0</dd>
+    <dt>Living cells</dt><dd data-testid="population" id="population">0</dd>
+    <dt>Generations / s</dt><dd data-testid="rate" id="rate">–</dd>
+    <dt>C++ per generation</dt><dd id="compute">–</dd>
+    <dt>Bridge round trip</dt><dd id="round-trip">–</dd>
+    <dt>Frames / s</dt><dd id="frames">–</dd>
+    <dt>Message</dt><dd id="message">–</dd>
+    <dt>Renderer</dt><dd data-testid="renderer" id="renderer">–</dd>
+  </dl>
+  <p id="error" role="alert"></p>
+  <p class="hint">Drag to pan · scroll to zoom · double-click to reset</p>
+</aside>
+<script src="WebFront.js"></script>
+<script type="module" src="life-cuda.mjs"></script>
+</body>
+</html>

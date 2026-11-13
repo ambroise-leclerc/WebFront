@@ -1,5 +1,7 @@
 add_executable(webtest JasmineTest.cpp)
 target_link_libraries(webtest PRIVATE WebFront_test_hardening WebFront WebFront_warnings WebFront_options)
+# The bridge of the Life CUDA example, on the CPU kernel and, where a toolkit was found, on the CUDA one.
+target_link_libraries(webtest PRIVATE WebFront_life_field)
 if(MSVC)
     # The shared browser suite instantiates enough bridge callbacks to exceed standard COFF's section limit.
     target_compile_options(webtest PRIVATE /bigobj)

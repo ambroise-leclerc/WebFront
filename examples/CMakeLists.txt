@@ -45,3 +45,26 @@ if(WEBFRONT_LIFE_ASSETS)
     target_compile_definitions(WebFrontLifeEmbedded PRIVATE WEBFRONT_LIFE_ASSETS_HEADER="${WEBFRONT_LIFE_ASSETS}")
     webfront_setup_frontends_for_target(WebFrontLifeEmbedded)
 endif()
+
+# The Life field at 2048 x 2048, computed by the CPU kernel or, when a CUDA toolkit was found, on the GPU
+# (cmake/LifeCuda.cmake). Its page is plain HTML and JavaScript rendered into headers at build time, so this
+# stage is a single offline binary without any wf step.
+set(_life_cuda_generated "${CMAKE_CURRENT_BINARY_DIR}/life-cuda/generated")
+set(_life_cuda_headers "")
+foreach(_asset "index.html|LifeCudaIndexHtmlData" "life-cuda.mjs|LifeCudaModuleData")
+    string(REPLACE "|" ";" _asset "${_asset}")
+    list(GET _asset 0 _file)
+    list(GET _asset 1 _struct)
+    add_custom_command(OUTPUT "${_life_cuda_generated}/${_struct}.hpp"
+        COMMAND ${CMAKE_COMMAND} -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/life/cuda/ui/${_file}
+            -DOUTPUT=${_life_cuda_generated}/${_struct}.hpp -DSTRUCT=${_struct}
+            -P ${PROJECT_SOURCE_DIR}/js/core/EmbedAsset.cmake
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/life/cuda/ui/${_file}" "${PROJECT_SOURCE_DIR}/js/core/EmbedAsset.cmake"
+        COMMENT "Embedding life/cuda/ui/${_file}"
+        VERBATIM)
+    list(APPEND _life_cuda_headers "${_life_cuda_generated}/${_struct}.hpp")
+endforeach()
+add_executable(WebFrontLifeCuda life/cuda/LifeCuda.cpp ${_life_cuda_headers})
+target_include_directories(WebFrontLifeCuda PRIVATE "${_life_cuda_generated}")
+target_link_libraries(WebFrontLifeCuda PRIVATE WebFront WebFront_life_field WebFront_warnings WebFront_options)
+webfront_setup_frontends_for_target(WebFrontLifeCuda)

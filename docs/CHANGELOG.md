@@ -12,6 +12,7 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Added
 
+- Add the `WebFrontLifeCuda` example: a 2048 by 2048 Game of Life in one offline binary, computed in C++ on the CPU or on an optional CUDA backend and drawn by the page from packed typed arrays. On a Jetson Orin Nano the CUDA backend computes up to 21 times faster than one CPU core, while the native window's software rendering limits the display to about 5 frames per second (#530, `docs/LIFE_CUDA.md`).
 - Build and test with GCC 13 on a hosted Linux aarch64 runner in the weekly and `master` checks (`gcc13-arm64`), and let `setup-cmake` install CMake on aarch64 (#548, `docs/TEST_TIERS.md`).
 
 ### Changed
