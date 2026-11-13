@@ -4,6 +4,9 @@
 
 #include <list>
 #include <string>
+#include <atomic>
+#include <future>
+#include <thread>
 
 using namespace webfront;
 using namespace std;
@@ -72,3 +75,66 @@ SCENARIO("Logger") {
         log::removeSinks(sinkId);
     }
 }
+
+#if !defined(WEBFRONT_USE_MDDLOG) || !WEBFRONT_USE_MDDLOG
+SCENARIO("Fallback logger removal waits for active delivery") {
+    using namespace std::chrono_literals;
+    log::setLogLevel(log::Info);
+    std::promise<void> entered, release;
+    auto               ready = entered.get_future();
+    const auto         gate  = release.get_future().share();
+    const auto         sink  = log::addSinks([&](std::string_view) {
+        entered.set_value();
+        gate.wait();
+    });
+    std::thread        producer([] {
+        log::info("blocked delivery");
+    });
+    const bool         running = ready.wait_for(30s) == std::future_status::ready;
+    CHECK(running);
+    std::promise<void> removed;
+    auto               done = removed.get_future();
+    std::thread        remover([&] {
+        log::removeSinks(sink);
+        removed.set_value();
+    });
+    // A negative observation of a deliberately blocked call, not a readiness deadline.
+    if (running)
+        CHECK(done.wait_for(50ms) == std::future_status::timeout);
+    release.set_value();
+    producer.join();
+    remover.join();
+    CHECK(done.wait_for(0ms) == std::future_status::ready);
+    log::setLogLevel(log::Error);
+}
+
+SCENARIO("Fallback logger registration and delivery may run on different threads") {
+    log::setLogLevel(log::Info);
+    std::atomic<unsigned> seen{0};
+    const auto            sink = log::addSinks([&](std::string_view line) {
+        if (line.find("stable record") != std::string_view::npos)
+            ++seen;
+    });
+    constexpr unsigned    each = 2000;
+    auto                  emit = [] {
+        for (unsigned i = 0; i < each; ++i) {
+            log::info("stable record");
+            log::warn("level changed concurrently");
+        }
+    };
+    std::thread first(emit), second(emit);
+    std::thread registrations([] {
+        for (unsigned i = 0; i < each; ++i) {
+            const auto temporary = log::addSinks([](std::string_view) { });
+            log::set(log::Warn, (i & 1) != 0);
+            log::removeSinks(temporary);
+        }
+    });
+    first.join();
+    second.join();
+    registrations.join();
+    log::removeSinks(sink);
+    log::setLogLevel(log::Error);
+    REQUIRE(seen == 2 * each);
+}
+#endif

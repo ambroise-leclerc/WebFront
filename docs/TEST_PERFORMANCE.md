@@ -247,8 +247,10 @@ process timeout or check that a disarm remains blocked are separate from these r
 Manual dispatch with `repeat_desktop_tests=true` runs three complete desktop graphs, then 20 repetitions of file-services,
 the browser suite, embedded Life, Linux's navigation allow-list, repeatable driver sessions, the automation consumer and
 the developer session with every report reader, retaining the already installed fixtures. It also
-runs 100 interface-loop repetitions under ThreadSanitizer. These qualifications stop at the first failure. Its native desktop job has a 60-minute budget for the cold MSVC
-analysis build plus all three passes; ordinary jobs and individual case deadlines retain their existing bounds.
+runs 100 interface-loop repetitions under ThreadSanitizer. These qualifications stop at the first failure. They also run
+after a failed complete graph, preserving that failure, so an unrelated case cannot hide the targeted results.
+The explicit desktop qualification has a 90-minute job budget for the cold analysis build, three complete graphs and
+twenty browser graphs; ordinary jobs and individual case deadlines retain their existing bounds.
 
 ## Recording a run
 

@@ -28,6 +28,7 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Fixed
 
+- Keep Windows developer publication independent of a slow HTTP reader: retain the old resource through a section with bounded read mappings, closing the file handle before the directory is replaced. Concurrent fallback logging now protects registrations, waits for delivery on removal outside callbacks, and guards browser-transport lifetime (#542).
 - Serialize the developer session's phase logs and keep CI timing analysis running if a duration is malformed: report and omit that timing while retaining the other phases and test results (#542).
 - Use one eventfd-backed GLib source per Linux interface loop, avoiding producer-side source allocation and the broad GLib ThreadSanitizer suppression. Exercise automation deadline boundaries with a controlled clock, check startup readiness atomically with expiry, and count browser-close dispatch time toward the close grace (#542).
 - Keep driver command frames and their Jasmine runners in the native viewport, and avoid waiting for an animation callback before a command can start. Wait for observable capture/executor/send states in asynchronous unit tests (#542).

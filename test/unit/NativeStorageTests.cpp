@@ -1057,7 +1057,13 @@ SCENARIO("A commit takes the rights of the file it replaces at that moment") {
 SCENARIO("Running out of descriptors does not mark the root as moved") {
     Sandbox           sandbox;
     fs::NativeStorage storage(sandbox.root);
-    struct ::rlimit   previous{};
+    // GCC 13's UBSan vptr check opens a pipe. Exercise the error types before denying it the descriptors for its
+    // first check; checks stay enabled, and an invalid vptr still misses that valid-type cache entry.
+    REQUIRE(errorOf([&] {
+                storage.openRead("missing-before-exhaustion");
+            })
+            == fs::StorageErrc::notFound);
+    struct ::rlimit previous{};
     REQUIRE(::getrlimit(RLIMIT_NOFILE, &previous) == 0);
     struct Pressure {
         ::rlimit    previous;

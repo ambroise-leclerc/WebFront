@@ -73,7 +73,7 @@ jobs:
     # Only Linux waits for its image. Native desktops below start immediately and reuse these steps.
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.repeat_desktop_tests) }}
     # No `name:` expression: a skipped matrix job would display it unevaluated.
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && 60 || 25 }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && 90 || 25 }}
     strategy:
       fail-fast: false
       matrix:
@@ -211,6 +211,7 @@ jobs:
         shell: bash
         run: ctest --test-dir build --show-only=json-v1 > build/ctest-graph.json
       - name: Test C++ and native browser integration
+        id: desktop_suite
         # The fast tier has just run: a single pass does not run it again; the three passes of the complete tier do.
         # Only Linux trusted fixtures need the sandbox opt-out on hosted runners.
         env: ${{ matrix.test_env }}
@@ -221,7 +222,7 @@ jobs:
           '-DLABEL_EXCLUDE=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && 'none' || (env.WEBFRONT_CONFIGURATION == 'true' && '^(portability|fast)$' || '^(portability|fast|configuration)$') }}'
           -P test/cmake/RunTestSuite.cmake
       - name: Qualify intermittent browser cases
-        if: github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests
+        if: always() && !cancelled() && github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && steps.desktop_suite.outcome != 'skipped'
         shell: bash
         env: ${{ matrix.test_env }}
         # Installed fixtures are retained. Repeat a whole selected graph so every developer report is checked on
@@ -315,8 +316,8 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.repeat_desktop_tests
     permissions:
       contents: read
-    # The explicit three-pass qualification also enables MSVC /analyze; a cold build can consume 21 minutes alone.
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && 60 || 25 }}
+    # The explicit qualification includes a cold analysis build, three complete graphs and twenty browser graphs.
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && 90 || 25 }}
     strategy:
       fail-fast: false
       matrix:

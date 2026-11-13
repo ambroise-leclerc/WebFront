@@ -19,6 +19,22 @@ does not close, a runner deadline and an infrastructure failure; a successful re
 
 ## Changes and regression coverage
 
+- The new Windows diagnostic in run 43414910133, job 131851704974, identifies the missed workspace reload as
+  `rename: Access is denied` while moving `preview` to its backup. A held `DeveloperFS` HTTP source reproduces this
+  deterministically in [43426274521](https://github.com/ambroise-leclerc/WebFront/actions/runs/43426274521).
+  Sharing deletion does not suffice: Windows [forbids renaming a directory containing open files](https://learn.microsoft.com/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information).
+  Retain a read-only section and close the file handle before returning the resource; map/unmap only each read's
+  window. The response retains its old bytes across replacement without holding the publication directory open or
+  mapping the entire asset. [43427838167](https://github.com/ambroise-leclerc/WebFront/actions/runs/43427838167) passes
+  that reproduction; [43428301160](https://github.com/ambroise-leclerc/WebFront/actions/runs/43428301160) also verifies
+  backup cleanup while sections remain alive and replacement with an empty file. Unit coverage includes a read
+  across the mapping granularity, seeking, EOF and simultaneous old/new versions.
+- The macOS stress campaign in that run traps in `WebSocket::enqueue` through the fallback log transport.
+  The default logger concurrently reads/modifies its callback vector without synchronization, and removal does not
+  wait for an active callback. The removal regression fails before the change. A three-thread registration/logging
+  probe reports that vector race under local ThreadSanitizer before the change and exits successfully afterwards.
+  Snapshot registrations under a mutex, invoke outside it, retire callbacks before releasing captured state, make
+  severity flags atomic, and protect transport callbacks with the link's existing lifetime guard.
 - Driver cases and nested Jasmine runners occupy the native viewport. The old off-screen driver case stalls the
   WebSuite fixture graph locally; the visible case completes it in 2.73 seconds. A case checks its viewport, without
   awaiting an animation callback that can stop when the window becomes inactive. Preserve the runner title used by
@@ -45,6 +61,10 @@ uses [an accessibility check implemented with a pipe](https://github.com/gcc-mir
 If the two pipe descriptors cannot be allocated, it returns false. This explains why an uncached Catch2 virtual-type
 check can report an invalid vptr under deliberate descriptor exhaustion. The test now retains the exception and
 inspects it only after releasing pressure; sanitizer checks remain enabled.
+The ordinary missing-file error is exercised before fault injection as well, so GCC 13 can perform the initial
+virtual-type checks while their own pipe can be allocated. The isolated native ARM64 probe in
+[43428433115](https://github.com/ambroise-leclerc/WebFront/actions/runs/43428433115) reproduces the cold constructor's
+invalid-vptr report and then passes error/recovery with that preparation, with ASan and UBSan still enabled.
 
 ## Validation record
 
