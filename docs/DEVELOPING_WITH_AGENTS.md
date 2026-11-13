@@ -160,5 +160,5 @@ security boundary. Project code runs with the user's rights; this is not a sandb
 | `webfront-agent --agent-help` | The rules of the contract, starting with the model |
 
 The terminal texts belong to the developer environment and reach an application with the environment its library pins:
-the ones described here are in the sources of environment 0.9.2, not published yet. The ready line, the README, the CMake
-helpers and the stderr note come with the library.
+the ones described here are in environment 0.9.2 (the ready line, the README, the CMake helpers and the stderr note come with
+the library). A library that still pins 0.9.1 shows none of the first ones: see the sequence for older environments above.

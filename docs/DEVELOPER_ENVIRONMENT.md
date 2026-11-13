@@ -42,9 +42,9 @@ lease; version 0.6.2 predates that API. Environment **0.6.4** adds the project s
 runner (`init`, `create`, `install`, `restore`, `embed`). Environment **0.6.6** adds the `call` operation, the terminal and `wf help` notice of automation and the starter's `AGENTS.md`. It was published under the dedicated
 `developer-v0.6.6` tag and verified after deployment. The test bootstrap (`cmake/WebFrontBootstrap.cmake`) stays on the
 published 0.6.3 and advances in a separate pull request. Environment **0.9.1** adds the page layout (full-window
-interface and floating terminal, #539); it is published and the release pin selects it. The sources of environment
-**0.9.2**, not published yet, add the `app` starter, `wf help <command>` and `wf help agents`, and errors that give the next
-steps (#561). Publication and pin changes follow
+interface and floating terminal, #539). Environment **0.9.2** adds the `app` starter, `wf help <command>` and
+`wf help agents`, errors that give the next steps (#561) and the prompt after a `wf dev` startup error (#560); it is
+published and the release pin selects it. Publication and pin changes follow
 [PUBLISHING](../js/developer/tools/PUBLISHING.md).
 
 ## Minimal C++ application
