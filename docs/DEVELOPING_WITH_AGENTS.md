@@ -56,7 +56,8 @@ wf build                 # compiles the manifest's entries once
 wf embed ui/main.ts --output generated/AppUI.hpp   # the interface as a C++ header, for the distributed build
 ```
 
-`wf help` lists the commands, `wf help <command>` describes one and `wf help agents` prints this sequence. Declaring
+`wf help` lists the commands, `wf help <command>` describes one and `wf help agents` prints this sequence (environment 0.9.2
+or later; 0.9.1 ignores the argument and prints the list). Declaring
 `"entries": {"main": "ui/main.ts"}` in `webfront.project.json` lets `wf dev`, `wf build` and `wf preview` run without
 argument. The [developer environment reference](DEVELOPER_ENVIRONMENT.md) has the details of each command.
 

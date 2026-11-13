@@ -28,8 +28,8 @@ int main() {
 
 ## The development loop
 
-`wf create <starter>` takes the name of a **starter** (`app`: a minimal TypeScript interface, environment 0.9.2 or later;
-`life`: the React example), not the name of your project. With an older environment, write `ui/main.ts` yourself, run `wf init`, then `wf install` without argument (before 0.9.2, `wf preview` and `wf embed` need the lock it writes). In the application's terminal:
+`wf create <starter>` takes the name of a **starter**, not the name of your project: `app` is a minimal TypeScript interface
+(environment 0.9.2 or later), `life` the React example. In the application's terminal, with environment **0.9.2 or later**:
 
 ```text
 wf create app            # writes ui/main.ts and ui/style.css; never replaces an existing ui/
@@ -39,6 +39,14 @@ wf dev ui/main.ts        # builds, shows the interface in the window and rebuild
 wf check                 # type check (needs tsconfig.json and `wf install typescript`)
 wf test                  # Jasmine specs listed in "test": {"specs": [...]} (needs `wf install jasmine-core`)
 wf embed ui/main.ts --output generated/AppUI.hpp   # the interface as a C++ header, for the distributed build
+```
+
+With an **older environment** (0.9.1 has no `app` starter), write `ui/main.ts` yourself, then:
+
+```text
+wf init                  # writes webfront.project.json; declare "entries": {"main": "ui/main.ts"} in it
+wf install               # no package: writes the empty lock that wf preview and wf embed need before 0.9.2
+wf dev ui/main.ts        # then wf check, wf test and wf embed as above
 ```
 
 ## Run wf yourself: JSON or MCP
