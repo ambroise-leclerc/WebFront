@@ -48,6 +48,9 @@ does not close, a runner deadline and an infrastructure failure; a successful re
 - Capture and executor tests wait for observable file/result/attachment/closure states. The streamed-reply shutdown
   test waits until its deferred send registers cancellation, rather than merely observing bytes prepared before
   sender start. TSan exposed that race in run 43411600509; it is independent of the GLib report.
+- Embedded Life explicitly shuts down before its callback-captured result state and empty working directory leave
+  scope. Its two phase messages distinguish a frontend that did not return from a stalled native shutdown; they do
+  not claim that the historical timeout's internal cause has been reproduced.
 - The optional manual qualification repeats the complete fixture graph three times, then the independent browser
   cases 20 times and the TSan interface-loop case 100 times. `until-fail` stops on a failure; there is no pass-on-retry.
   Installed fixtures are retained for independent-process stress tests; stateful setup is not repeated alone.
@@ -67,7 +70,7 @@ virtual-type checks while their own pipe can be allocated. The isolated native A
 invalid-vptr report and then passes error/recovery with that preparation, with ASan and UBSan still enabled.
 
 The optional mddlog qualification also exposed an outdated context assertion: it still expected a binary dump,
-although `onBinaryMessage` has intentionally omitted payload bytes since `70c585c1` (2026-11-04). Keep that redaction:
+although `onBinaryMessage` has intentionally omitted payload bytes since `59d5aaaa` (2026-11-04). Keep that redaction:
 the regression now requires the message summary and call context, and verifies the test payload is absent from both
 the structured message and rendered text. No payload logging is restored to satisfy the old assertion.
 
