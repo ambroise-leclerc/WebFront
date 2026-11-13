@@ -200,6 +200,19 @@ describe('The project manifest', () => {
         expect((await loadProject(bridge)).manifest.entries).withContext('the defaults are still applied when reading').toEqual({});
     });
 
+    it('wf install without argument writes an empty lock for a project without dependency (#561)', async () => {
+        // The way on an environment before 0.9.2, whose wf preview and wf embed read a lock: wf init, then wf install.
+        const {bridge, storage} = memoryBridge();
+        await initProject(bridge, []);
+        expect(storage.has(lockPath)).toBeFalse();
+        const {fetchImpl} = registry(source());
+        const {lock} = await install(bridge, [], options(fetchImpl));
+        expect(lock.roots).toEqual({});
+        expect(lock.packages).toEqual({});
+        expect(JSON.parse(new TextDecoder().decode(storage.get(lockPath))).roots).toEqual({});
+        expect((await loadProject(bridge)).status).toBe('consistent');
+    });
+
     it('wf install needs a manifest, then publishes manifest and lock together', async () => {
         const {bridge, storage} = memoryBridge();
         const {fetchImpl} = registry(source());

@@ -29,7 +29,7 @@ int main() {
 ## The development loop
 
 `wf create <starter>` takes the name of a **starter** (`app`: a minimal TypeScript interface, environment 0.9.2 or later;
-`life`: the React example), not the name of your project. With an older environment, write `ui/main.ts` yourself. In the application's terminal:
+`life`: the React example), not the name of your project. With an older environment, write `ui/main.ts` yourself, run `wf init`, then `wf install` without argument (before 0.9.2, `wf preview` and `wf embed` need the lock it writes). In the application's terminal:
 
 ```text
 wf create app            # writes ui/main.ts and ui/style.css; never replaces an existing ui/

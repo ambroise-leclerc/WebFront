@@ -41,8 +41,9 @@ cross the bridge.
 `wf create <starter>` takes the name of a **starter**, not the name of your project: `app` is a minimal TypeScript
 interface without dependency that calls one C++ callback, `life` is the React interface of the Game of Life example.
 The `app` starter is in environment **0.9.2 or later**; a library that still pins 0.9.1 only has `life`. With 0.9.1, write
-`ui/main.ts` yourself (any TypeScript that calls `webFront.cppFunction`), run `wf init` and declare `"entries": {"main": "ui/main.ts"}`;
-the rest of the loop is the same.
+`ui/main.ts` yourself (any TypeScript that calls `webFront.cppFunction`), run `wf init`, then **`wf install` without
+argument**, which writes the empty lock that `wf preview` and `wf embed` of 0.9.1 require (0.9.2 and later no longer do), and
+declare `"entries": {"main": "ui/main.ts"}`; the rest of the loop is the same.
 
 ```text
 wf create app            # writes ui/main.ts, ui/style.css and ui/AGENTS.md; never replaces an existing ui/
