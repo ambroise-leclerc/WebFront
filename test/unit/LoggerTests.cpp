@@ -198,10 +198,12 @@ SCENARIO("The request log keeps what the HTTP layer says about a request (#542)"
     GIVEN("bridge traffic logged at the information level") {
         THEN("it is left out") {
             CHECK_FALSE(isRequestLine("[I] Call 12 to cppFunction x"));
+            CHECK_FALSE(isRequestLine("[I] Call 12 to cppFunction [W]"));
         }
     }
     GIVEN("the rows of a hex dump, which carry no level tag") {
         THEN("they are left out") {
+            CHECK_FALSE(isRequestLine("00000010  5b 57 5d 20 20 20 20 20  20 20 20 20 20 20 20 20  |[W]             |"));
             CHECK_FALSE(isRequestLine("00000000  47 45 54 20 2f 20 48 54  54 50 2f 31 2e 31 0d 0a  |GET / HTTP/1.1..|"));
         }
     }

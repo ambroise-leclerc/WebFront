@@ -98,7 +98,7 @@ private:
     inline static thread_local std::vector<const Entry*> dispatchStack;
     // Contract: never remove a sink while holding a lock that the sink's callback takes (the removal would wait for a
     // callback that waits for that lock). WebLink removes its transport after releasing transportMutex.
-    struct Entry {
+    struct Entry : std::enable_shared_from_this<Entry> {
         explicit Entry(std::function<void(std::string_view)> function) : callback(std::move(function)) { }
         void invoke(std::string_view line) {
             {
@@ -126,7 +126,7 @@ private:
                 alive = false;
             }
             // This thread's own deliveries of the sink (it removes itself) cannot end before this call returns.
-            WaitRegistry::Waiting waiting{self, this};
+            WaitRegistry::Waiting waiting{self, this->weak_from_this()};
             std::unique_lock      lock(mutex);
             while (std::count_if(runners.begin(), runners.end(), [&](auto id) { return id != self; }) != 0) {
                 lock.unlock();
@@ -155,9 +155,9 @@ private:
     // through others) waiting for a callback of the remover is a deadlock, and gives up instead.
     struct WaitRegistry {
         struct Waiting {
-            Waiting(std::thread::id thread, Entry* entry) : id(thread) {
+            Waiting(std::thread::id thread, std::weak_ptr<Entry> entry) : id(thread) {
                 const std::lock_guard lock(mutex());
-                waits()[id] = entry;
+                waits()[id] = std::move(entry);
             }
             ~Waiting() {
                 const std::lock_guard lock(mutex());
@@ -174,11 +174,13 @@ private:
                 if (std::find(seen.begin(), seen.end(), thread) != seen.end())
                     continue;
                 seen.push_back(thread);
-                Entry* waitedFor = nullptr;
+                // A strong reference, taken under the registry lock: the waiting thread may finish and release the entry
+                // while this one still reads it.
+                std::shared_ptr<Entry> waitedFor;
                 {
                     const std::lock_guard lock(mutex());
                     if (const auto found = waits().find(thread); found != waits().end())
-                        waitedFor = found->second;
+                        waitedFor = found->second.lock();
                 }
                 if (!waitedFor)
                     continue;  // running, not waiting: it will finish its callback
@@ -194,8 +196,8 @@ private:
             static std::mutex instance;
             return instance;
         }
-        static std::map<std::thread::id, Entry*>& waits() {
-            static std::map<std::thread::id, Entry*> instance;
+        static std::map<std::thread::id, std::weak_ptr<Entry>>& waits() {
+            static std::map<std::thread::id, std::weak_ptr<Entry>> instance;
             return instance;
         }
     };
