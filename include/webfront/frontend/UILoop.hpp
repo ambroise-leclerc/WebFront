@@ -430,7 +430,7 @@ inline void run(UIExecutorHost& host, UILoopStop& stop) {
     if (!loop)
         throw std::runtime_error("UI loop: cannot create the GLib main loop");
     struct Unref {
-        const GLib&  glib;
+        const GLib& glib;
         GLib::Object loop;
         ~Unref() {
             glib.loopUnref(loop);

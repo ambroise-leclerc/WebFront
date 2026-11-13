@@ -1,3 +1,4 @@
+#include "../driver/RequestLog.hpp"
 #include <webfront/tooling/Logger.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -138,3 +139,22 @@ SCENARIO("Fallback logger registration and delivery may run on different threads
     REQUIRE(seen == 2 * each);
 }
 #endif
+
+SCENARIO("The request log keeps what the HTTP layer says about a request (#542)") {
+    using webfront::testdriver::isRequestLine;
+    // The wording of HTTPServer.hpp: a renamed message must fail here instead of emptying the transcript of a failed case.
+    GIVEN("the lines of an answered request") {
+        THEN("they are kept") {
+            CHECK(isRequestLine("[I] Received request GET on /WebFront.js"));
+            CHECK(isRequestLine("[I]   responding http 200"));
+            CHECK(isRequestLine("[W] HTTP asset request failed: boom"));
+            CHECK(isRequestLine("[W] Route /api failed: boom"));
+            CHECK(isRequestLine("[W] connection ended its response early: boom"));
+        }
+    }
+    GIVEN("bridge traffic logged at the information level") {
+        THEN("it is left out") {
+            CHECK_FALSE(isRequestLine("[I] Call 12 to cppFunction x"));
+        }
+    }
+}

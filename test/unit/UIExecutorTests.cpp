@@ -518,6 +518,33 @@ SCENARIO("The system browser can run an interface-thread loop on the calling thr
             CHECK_FALSE(Browser::uiExecutor().available());
         }
     }
+    GIVEN("an operation queued just before the stop request") {
+        launches = 0;
+        LoopOutcome       outcome;
+        std::atomic<bool> clientOk{false};
+        std::jthread      client([&] {
+            const auto executor = Browser::uiExecutor();
+            if (waitFor([&] { return executor.available(); })) {
+                struct Holder {
+                    decltype(ex::connect(std::declval<decltype(Browser::uiExecutor().schedule())>(), std::declval<LoopReceiver>())) op;
+                    Holder(const UIExecutor& e, LoopOutcome& o) : op(ex::connect(e.schedule(), LoopReceiver{o})) { }
+                } holder(executor, outcome);
+                ex::start(holder.op);
+                Browser::requestStop();  // the loop may run the job first or close with it still queued
+                clientOk = waitFor([&] { return outcome.completions >= 1; });
+            } else {
+                Browser::requestStop();
+            }
+        });
+        THEN("it completes exactly once, run or stopped, and is never left waiting") {
+            Browser::loop("127.0.0.1", "9002", "index.html", fakeLaunch);
+            client.join();
+            CHECK(clientOk);
+            CHECK(outcome.completions == 1);
+            CHECK_FALSE(outcome.unavailable);
+            CHECK_FALSE(Browser::uiExecutor().available());
+        }
+    }
     GIVEN("several stop requests arriving while the loop exits") {
         launches = 0;
         std::atomic<bool> finished{false};

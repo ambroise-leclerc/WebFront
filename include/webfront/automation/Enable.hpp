@@ -28,6 +28,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <type_traits>
 
 namespace webfront::automation {
 struct AutomationOptions {
@@ -60,6 +61,10 @@ struct AutomationOptions {
 // Clock is a time source returning steady_clock::time_point; tests advance it without sleeping through deadlines.
 template <typename App, typename Clock = std::chrono::steady_clock>
 class Automation {
+    // Session keeps its deadlines in steady_clock::time_point: an injected clock must return that type.
+    static_assert(std::is_same_v<decltype(Clock::now()), std::chrono::steady_clock::time_point>,
+                  "Automation's Clock must return std::chrono::steady_clock::time_point");
+
 public:
     /// @throws std::invalid_argument for an unknown grant, an empty `listen` path, or a `listen` directory inside the project
     /// @throws std::runtime_error (including std::filesystem::filesystem_error) when the endpoint or the discovery directory cannot be
@@ -85,6 +90,7 @@ public:
                 if (session->expire(Clock::now()) || session->expireStartup(launched + startup, Clock::now()))
                     session->close("Native automation deadline exceeded");
                 if (session->isClosed()) {
+                    // The grace starts when the window is asked to close, so a closeBrowser() that blocks does not extend it.
                     const auto deadline = Clock::now() + grace;
                     binding.closeBrowser();
                     // Whatever revoked the session (a deadline, a signal, an attached client's --shutdown, the page's own failure

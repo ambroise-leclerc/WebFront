@@ -51,6 +51,11 @@ private:
     // Windows refuses to rename a directory with an open child file, even with FILE_SHARE_DELETE. Retain a section
     // instead of the file handle and map only the read window: slow HTTP clients neither lock publication nor pin
     // the whole asset in process memory. The original section keeps serving the old publication after replacement.
+    //
+    // Contract: a published file is immutable. A publication replaces its directory; it never truncates or rewrites a
+    // file in place. Touching the pages of a mapped file would raise a structured exception (EXCEPTION_IN_PAGE_ERROR),
+    // which `catch (std::exception&)` does not see. Each read maps one window, so the HTTP layer should ask for
+    // large blocks: the cost of a read is a map/unmap pair, not a per-byte price.
     class PublishedSource final : public ByteSource {
     public:
         PublishedSource(HANDLE opened, std::uint64_t length) : handle(opened), total(length) {

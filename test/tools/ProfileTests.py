@@ -98,6 +98,7 @@ def phase_durations(transcripts):
             if match:
                 # Parallel native/browser output can interleave. Do not turn a corrupt timing into a failed CI job,
                 # or silently accept its numeric prefix and publish a fabricated measurement.
+                # An absurdly long digit string passes the pattern and overflows to infinity: both checks are needed.
                 if not re.fullmatch(r'\d+(?:\.\d+)?', match[2]) or not math.isfinite(float(match[2])):
                     print(f'Ignoring malformed phase duration in pass {index}: {line}', file=sys.stderr)
                     continue

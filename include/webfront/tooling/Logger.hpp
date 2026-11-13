@@ -25,29 +25,28 @@
 #include <vector>
 
 namespace webfront::log {
-using LogType              = const uint8_t;
+using LogType = const uint8_t;
 constinit LogType Disabled = 0, Error = 1, Warn = 2, Info = 3, Debug = 4;
-const auto        clogSink = [](std::string_view t) {
-    std::clog << t << "\n";
-};
+const auto clogSink = [](std::string_view t) { std::clog << t << "\n"; };
 inline std::array<std::atomic<bool>, Debug + 1> logTypeEnabled{};
 inline struct Sinks {
     void operator()(std::string_view t) const {
-        std::vector<std::shared_ptr<Entry>> snapshot;
+        // The registry lock only copies a pointer: the snapshot is rebuilt when a sink is added or removed, never per line.
+        std::shared_ptr<const Snapshot> snapshot;
         {
             const std::lock_guard lock(mutex);
-            for (const auto& entry : sinks)
-                if (entry)
-                    snapshot.push_back(entry);
+            snapshot = published;
         }
         // Never invoke a callback under the registry lock: it may log or change registrations.
-        for (const auto& entry : snapshot)
-            entry->invoke(t);
+        if (snapshot)
+            for (const auto& entry : *snapshot)
+                entry->invoke(t);
     }
 
     auto add(auto&&... callbacks) {
         const std::lock_guard lock(mutex);
         (sinks.push_back(std::make_shared<Entry>(std::forward<decltype(callbacks)>(callbacks))), ...);
+        publish();
         return sinks.size() - 1;
     }
 
@@ -58,14 +57,19 @@ inline struct Sinks {
             if (index >= sinks.size())
                 return;
             entry = std::exchange(sinks[index], nullptr);
+            publish();
         }
         if (entry)
             entry->retire(dispatchDepth == 0);
     }
 
 private:
+    struct Entry;
+    using Snapshot = std::vector<std::shared_ptr<Entry>>;
     // Removing from a callback cannot wait for callbacks on other logging threads: two callbacks can detach each
     // other. Outside delivery, removal is a quiescence barrier before the caller releases captured state.
+    // Contract: never remove a sink while holding a lock that the sink's callback takes (the removal would wait for a
+    // callback that waits for that lock). WebLink removes its transport after releasing transportMutex.
     inline static thread_local unsigned dispatchDepth = 0;
     struct Entry {
         explicit Entry(std::function<void(std::string_view)> function) : callback(std::move(function)) { }
@@ -102,8 +106,17 @@ private:
         std::size_t                                 active = 0;
         const std::function<void(std::string_view)> callback;
     };
-    inline static std::mutex                          mutex;
+    // Called with the registry lock held.
+    static void publish() {
+        auto live = std::make_shared<Snapshot>();
+        for (const auto& entry : sinks)
+            if (entry)
+                live->push_back(entry);
+        published = std::move(live);
+    }
+    inline static std::mutex                        mutex;
     inline static std::vector<std::shared_ptr<Entry>> sinks;
+    inline static std::shared_ptr<const Snapshot>     published;
 } out;
 
 

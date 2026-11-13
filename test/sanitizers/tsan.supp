@@ -2,3 +2,8 @@
 #
 # No race suppression: the Linux interface loop creates/removes its single GLib source on the interface thread.
 # Other threads signal an eventfd and publish their work through the C++ host/stop mutexes (#542).
+#
+# This holds because the sanitizers job configures -DWEBFRONT_EMBED_WEBKITGTK=OFF: the WebKitGTK adapter still
+# queues work with g_idle_add_full, which GLib orders with futexes ThreadSanitizer cannot see. A job that runs
+# WebKitGTK under TSan must restore `race:libglib-2.0.so` (a race is then suppressed only when one of its stacks
+# goes through libglib; WebFront's own code stays checked).
