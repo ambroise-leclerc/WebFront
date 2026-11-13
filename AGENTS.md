@@ -23,6 +23,7 @@ The README introduces WebFront through the Game of Life walkthrough, demonstrati
 - `include/webfront/frontend/`: system-browser, CEF, optional Windows WebView2 and macOS WKWebView frontend adapters.
 - `examples/`: only Hello World (`hello-world/`) and Game of Life (`life/`, with console, developer and embedded stages, plus the `life/react/` variant with a C++ panel inside React).
 - `js/core/`: readable browser bridge, fallback and bootstrap loader compiled into `include/webfront/`, plus the embedding CMake modules; `js/developer/`: developer environment (its terminal and `wf`), the wf scripts that build it (`scripts/`), build and publication tools. The repository is itself a `wf` project (`js/developer/webfront.project.json` and its lock, selected with `--manifest-dir js/developer`): the environment builds itself, and its pure JavaScript specs (`test/developer/`) run with `wf test`. Production C++ remains header-only in `include/webfront/`.
+- `js/developer/starters/`: the sources of the `app` starter and `agent-guide.md`, the `AGENTS.md` that `wf create` puts beside a starter and that `webfront_write_agent_guide()` (`cmake/WebFrontAgentGuide.cmake`) writes in a consuming project.
 - `js/services/`: optional `@webfront/services` package, the browser side of the system services (ADR-020; a skeleton so far), built like `@webfront/react` by `wf run services-package`; outside the core's embedded resource list.
 - `js/react/`: optional `@webfront/react` package (`createStore`, `useStore`, `Island`), declarations and package-local license. `wf run react-package` assembles it; tests verify the exact archive installed by the registry. It is outside the core's embedded resource list.
 - `test/fixtures/`, `test/web/fixtures/`: retained regression fixtures, not public example applications.
@@ -31,6 +32,7 @@ The README introduces WebFront through the Game of Life walkthrough, demonstrati
 - `docs/`: current reference guides, architecture decisions and `docs/CHANGELOG.md`.
 - `docs/PROJECT_STATUS.md`: current supported paths, validation scope and known limitations; completed work belongs in the changelog and Git history.
 - `docs/adr/README.md`: architecture decision index, Git history, tradeoffs and implementation rules; read the relevant ADRs before changing their contracts.
+- `docs/DEVELOPING_WITH_AGENTS.md`: what an agent developing a consuming application reads first (the model, the loop, each `wf` command in JSON and MCP); the README section, `wf help agents`, the starters' `AGENTS.md` and the `AgentGuidance` CTest case keep to it.
 - `docs/DEVELOPER_ENVIRONMENT.md`: the reference of the developer environment (`wf` commands, manifest and lock, TypeScript and `wf check`, tests, limits, distribution); `docs/EMBEDDED_ASSETS.md`: the core's embedded resources and their regeneration.
 
 The historical `webfront/` prototype and the former top-level `webtest/` are gone: use `test/unit/` for current C++ tests and `test/web/` for browser tests. Do not revive legacy code without a specific issue and regression coverage.

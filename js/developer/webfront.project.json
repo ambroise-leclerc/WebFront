@@ -46,6 +46,7 @@
       "js/developer/environment",
       "js/developer/tools",
       "js/developer/scripts",
+      "js/developer/starters",
       "test/developer",
       "test/web/registry",
       "registry-archives",

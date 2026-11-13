@@ -7,7 +7,7 @@ export {discoverCommands, reservedNames};
 import {validateLock} from './packages.mjs';
 import {call, readProject, publish, writeChunks} from './io.mjs';
 import {isUnsafe} from './paths.mjs';
-import {createStarter} from './starter.mjs';
+import {createStarter, starterNames} from './starter.mjs';
 import {install, initProject} from './installer.mjs';
 import {restore, describeRegistry} from './restore.mjs';
 import {loadProject, syncNotice, resolveEntry, embedTarget, lockPath, packageRoot, noManifest} from './project.mjs';
@@ -92,7 +92,8 @@ function dependencyNotices(lock, packages) {
 }
 
 export async function compile(bridge, entry, signal) {
-    const lock = await readLock(bridge);
+    // Without dependency there is no lock: wf init writes the manifest only, and wf dev and wf build already accept that.
+    const lock = await readLock(bridge, true);
     const packages = await readPackages(bridge, lock, signal);
     const files = await buildInWorker(bridge, {type: 'build', entry, lock, packages}, signal);
     files.set('index.html', applicationPage(files));
@@ -100,7 +101,7 @@ export async function compile(bridge, entry, signal) {
 }
 
 async function create([starter, directory, ...extra], {bridge, config, signal}) {
-    if (!starter || extra.length) throw new Error('Usage: wf create <starter> [directory]');
+    if (!starter || extra.length) throw new Error(`Usage: wf create <starter> [directory]${availableStarters(config)}`);
     return createStarter(bridge, config, [starter, directory ?? 'ui'], {signal});
 }
 
@@ -285,7 +286,58 @@ async function list(_args, {bridge}) {
     return syncNotice(project) + (names || 'No installed packages.');
 }
 
-const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf run [--timeout <seconds>] <script> [args...]\nwf exec [--timeout <seconds>] <package>[:<entry>] [args...]\nwf check [--timeout <seconds>]\nwf test [--timeout <seconds>] [pattern]\nwf list\nwf build [entry.tsx|name]\nwf dev [entry.tsx|name]\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a command. No system shell is exposed.' + automationHelp();
+const availableStarters = config => starterNames(config).length ? ` (starters: ${starterNames(config).join(', ')})` : '';
+const usage = {
+    init: 'wf init [name]', create: 'wf create <starter> [directory]', install: 'wf install [--update] [<package>[@range] ...]',
+    restore: 'wf restore [--offline]', run: 'wf run [--timeout <seconds>] <script> [args...]',
+    exec: 'wf exec [--timeout <seconds>] <package>[:<entry>] [args...]', check: 'wf check [--timeout <seconds>]',
+    test: 'wf test [--timeout <seconds>] [pattern]', list: 'wf list', build: 'wf build [entry.tsx|name]', dev: 'wf dev [entry.tsx|name]',
+    preview: 'wf preview [entry.tsx|name]', embed: 'wf embed <provider> | <entry.tsx> --output <Provider.hpp>',
+    help: 'wf help [command|agents]'};
+// What a command does, in one or two lines, for wf help <command>.
+const purposes = {
+    init: 'Writes webfront.project.json, the manifest every other command reads; it never replaces one.',
+    create: config => 'Writes the sources of a starter into a new directory (ui by default); it never replaces one.\n' +
+        `<starter> names a starter of this environment, not your project${availableStarters(config)}.\nThen: wf init, wf dev ui/<entry>.`,
+    install: 'Resolves npm packages, verifies them and records exact versions in the lock; installation scripts are not run.',
+    restore: 'Rebuilds the package cache from the lock; --offline only verifies it.',
+    run: 'Runs a script of the manifest ("scripts") or a module of the project.',
+    exec: 'Runs the command-line entry of an installed package.',
+    check: 'Type-checks the entries with the locked typescript (wf install typescript) and tsconfig.json.',
+    test: 'Runs the Jasmine specs of "test": {"specs": [...]} under the locked jasmine-core (wf install jasmine-core).',
+    list: 'Lists the installed packages.',
+    build: 'Compiles the entries once into .webfront/developer/build/.',
+    dev: 'Compiles a TypeScript/TSX entry (ui/main.tsx), shows the interface in the window and rebuilds on every save. Ctrl+C stops it.',
+    preview: 'Compiles an entry once and shows the interface in the window.',
+    embed: 'Compiles an entry and packages it as a C++ header for the distributed application.',
+    help: 'Lists the commands, describes one, or with agents gives the sequence for an agent.'};
+// The first thing an agent must learn: the model, the sequence, and that it can run the commands itself (docs/DEVELOPING_WITH_AGENTS.md).
+const agentsHelp = config => `A WebFront application is C++ with a TypeScript/TSX interface in ui/, developed with wf dev.
+New interface, in order:
+  wf create app                 a starter${availableStarters(config)}, not the name of your project
+  wf init                       the manifest webfront.project.json
+  wf install <package>          only for the npm packages the interface imports
+  wf dev ui/main.ts             rebuilds on every save; wf preview builds once
+  wf check, wf test, wf embed <entry> --output generated/AppUI.hpp
+An agent runs these itself and reads JSON results, with webfront-agent (WebFront configured with
+-DWEBFRONT_BUILD_AUTOMATION=ON) once the application has called webfront::automation::enableAutomation:
+  webfront-agent --list                                                      the shared sessions
+  webfront-agent --attach DIRECTORY --operation create --starter app
+  webfront-agent --attach DIRECTORY --operation preview --entry ui/main.ts   after each edit, in place of wf dev
+  webfront-agent --attach DIRECTORY --mcp                                    the same operations as MCP on stdio
+  webfront-agent --agent-help                                                rules and contract
+Guide: docs/DEVELOPING_WITH_AGENTS.md`;
+function help([topic, ...extra] = [], {config} = {}) {
+    if (extra.length) throw new Error(`Usage: ${usage.help}`);
+    if (topic === 'agents' || topic === '--agents') return agentsHelp(config);
+    if (topic !== undefined) {
+        if (!Object.hasOwn(usage, topic)) throw new Error(`Unknown help topic: ${topic}. Usage: ${usage.help}`);
+        const purpose = purposes[topic];
+        return `${usage[topic]}\n${typeof purpose === 'function' ? purpose(config) : purpose}`;
+    }
+    return Object.values(usage).join('\n') + '\nAgents: wf help agents (the sequence, and how to run wf in JSON or MCP).' +
+        '\nCtrl+C interrupts a command. No system shell is exposed.' + automationHelp();
+}
 const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, check, test, build, dev, preview, embed, list, help};
 
 let executionToken = null, executionCount = 0, automationActive = false, cppActive = 0;

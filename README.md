@@ -20,6 +20,27 @@ Keep application logic in C++ and create reactive interfaces with TypeScript, Re
 
 Desktop Windows, macOS and Linux are the qualified platforms; embedded targets and microcontrollers are not. WebFront already drives a real application: [SiliconForge](https://github.com/ambroise-leclerc/SiliconForge), a microcontroller simulator.
 
+## Developing with an agent
+
+If you are a coding agent, or work with one, read this before anything else. The [agent guide](docs/DEVELOPING_WITH_AGENTS.md) has the details.
+
+- **The model.** A WebFront application is a C++ program whose interface is TypeScript/TSX. The interface lives in **`ui/`** of the project directory (`ui/main.ts` or `ui/main.tsx`) and is developed with **`wf dev`**, in the terminal that `app.bootstrap("developer")` opens in the application's window. Pages of hand-written HTML and classic JavaScript served through `documentRoot` are not the development path: none of the tools apply to them.
+- **The sequence.** `wf create app` (a starter, not your project's name; needs environment 0.9.2 or later, otherwise write `ui/main.ts` yourself, run `wf init` and then `wf install` without argument (the lock that `wf preview` needs before 0.9.2); `life` is the React example), `wf init`, `wf install <package>` if the interface imports npm packages, `wf dev ui/main.ts`, then `wf check`, `wf test` and `wf embed`. `wf help agents` prints it in the terminal (environment 0.9.2 or later; before, the [agent guide](docs/DEVELOPING_WITH_AGENTS.md) has it).
+- **An agent runs `wf` itself, in JSON or MCP.** Do not ask a person to type the commands. Configure with `-DWEBFRONT_BUILD_AUTOMATION=ON` to build `webfront-agent`; the application opts in with `webfront::automation::enableAutomation(app, {.grants = {...}, .listen = directory})`, whose grants stay the owner's; then:
+
+```sh
+webfront-agent --list                                              # the sessions shared with agents
+webfront-agent --attach DIRECTORY --operation create --starter app
+webfront-agent --attach DIRECTORY --operation preview --entry ui/main.ts   # after each edit, in place of wf dev
+webfront-agent --print-mcp-config --attach DIRECTORY > .mcp.json   # the same operations as an MCP server
+```
+
+```json
+{"mcpServers": {"webfront": {"command": "/path/to/webfront-agent", "args": ["--attach", "/path/to/directory", "--mcp"]}}}
+```
+
+In a project that embeds WebFront, `webfront_write_agent_guide()` writes these rules as `AGENTS.md` at its root, and `wf create` writes them beside the starter's sources.
+
 ## From C++ to a reactive UI
 
 Register your simulation, bootstrap the tools, then build the interface in the application's terminal. `life-project` is the working directory for the UI sources:
@@ -192,7 +213,7 @@ wf install react@19.3.1 react-dom@19.3.1
 wf dev ui/main.tsx
 ```
 
-- `wf create life` writes the editable [TSX and CSS starter](examples/life/ui) into `ui/`; it never overwrites an existing directory.
+- `wf create life` writes the editable [TSX and CSS starter](examples/life/ui) into `ui/`; it never overwrites an existing directory. The argument names a starter, not your project: `wf create app` writes a minimal TypeScript interface for a new application instead.
 - `wf init` writes `webfront.project.json`, the manifest every other command reads: dependencies, entries, providers, scripts and permissions.
 - `wf install` resolves the packages and their dependencies from the registry, verifies their integrity and records exact versions in `webfront-packages.lock.json`. It does not run the installation scripts of packages. `wf restore` rebuilds the cache from the lock on another machine, and `wf restore --offline` verifies it without any network.
 - `wf dev` compiles the TSX with esbuild-wasm, opens the interface inside the application and rebuilds it whenever you save a source. A build error appears in the terminal and over the preview, which keeps its last good version. Ctrl+C stops it; `wf build` compiles once without opening anything.

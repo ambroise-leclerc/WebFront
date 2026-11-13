@@ -91,6 +91,7 @@ public:
             throw std::logic_error("Developer bootstrap is already configured");
         developer::validateBootstrap(mode, project, options);
         store = std::make_shared<developer::Store>(project);
+        this->useDeveloperEnvironment();
         registerBridge(developer::bootstrapConfig(options));
     }
 

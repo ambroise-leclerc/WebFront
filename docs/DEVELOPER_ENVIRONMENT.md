@@ -13,13 +13,17 @@ commands of the terminal operate on it:
 
 | Command | Purpose |
 | --- | --- |
-| `wf init`, `wf create <starter>` | write the manifest; copy the Life starter into a new directory |
+| `wf init`, `wf create <starter>` | write the manifest; copy a starter (`app` or `life`, not your project's name) into a new directory |
+| `wf help [command\|agents]` | list the commands, describe one, or print the sequence for an agent |
 | `wf install`, `wf restore` | resolve, download and lock packages; rebuild or verify the cache from the lock |
 | `wf dev`, `wf build`, `wf preview` | rebuild and reload the preview on every change; build once; preview once |
 | `wf check` | type-check with the locked TypeScript compiler |
 | `wf test` | run Jasmine specs in the application's window |
 | `wf run`, `wf exec` | run a manifest script or a package's executable entry |
 | `wf embed` | generate the C++ provider of the application's resources |
+
+**Agents.** A WebFront interface is TypeScript/TSX in `ui/`, developed with `wf dev`, and an agent runs every command of
+this page itself in JSON or MCP: see [developing with an agent](DEVELOPING_WITH_AGENTS.md).
 
 **Limits, stated directly.** The downloaded environment and the scripts you authorize run with the application's bridge
 authority and may read and write the selected project: there is **no sandbox**, and the manifest's permissions frame only the
@@ -38,7 +42,9 @@ lease; version 0.6.2 predates that API. Environment **0.6.4** adds the project s
 runner (`init`, `create`, `install`, `restore`, `embed`). Environment **0.6.6** adds the `call` operation, the terminal and `wf help` notice of automation and the starter's `AGENTS.md`. It was published under the dedicated
 `developer-v0.6.6` tag and verified after deployment. The test bootstrap (`cmake/WebFrontBootstrap.cmake`) stays on the
 published 0.6.3 and advances in a separate pull request. Environment **0.9.1** adds the page layout (full-window
-interface and floating terminal, #539); it is published and the release pin selects it. Publication and pin changes follow
+interface and floating terminal, #539); it is published and the release pin selects it. The sources of environment
+**0.9.2**, not published yet, add the `app` starter, `wf help <command>` and `wf help agents`, and errors that give the next
+steps (#561). Publication and pin changes follow
 [PUBLISHING](../js/developer/tools/PUBLISHING.md).
 
 ## Minimal C++ application
@@ -121,6 +127,11 @@ wf embed ui/main.tsx --output generated/LifeUI.hpp
 ```
 
 `wf test` needs `test.specs` declared in the manifest and `jasmine-core` installed; type checking is a separate step: `wf install typescript@5.9.3 @types/react@19.3.0 @types/react-dom@19.3.0` then `wf check` need a `tsconfig.json` (see the README for a complete one). The terminal does not read `#` comments, so type the commands only.
+
+`wf create` takes the name of a starter, not of your project, and an unknown name is answered with the starters of the
+environment. `life` is this example; `app` (environment 0.9.2) is a minimal TypeScript interface without dependency for a new
+application: `ui/main.ts` calls one C++ callback, `app.greet`, and each of its elements has an `id`. Every starter carries an
+`AGENTS.md` that states the model and how an agent runs `wf` (the text of `js/developer/starters/agent-guide.md`).
 
 The starter contains editable TSX/CSS and a recipe of exact versions; `wf init` does not copy it, so list the dependencies with `wf install` and declare `test.specs`, `entries` and `providers` in the manifest yourself.
 `wf create life another-directory` selects a different new destination; existing directories
@@ -421,6 +432,13 @@ commands and its own: `help`, `clear` (screen and scrollback), `history` (`histo
 `exit [code]`, which ends the session and closes the window; when the browser keeps a window that a script did not
 open, Enter starts a new session. No system shell is exposed.
 
+`wf help` lists the `wf` commands; `wf help <command>` gives the usage and purpose of one, and `wf help agents` (or
+`wf help --agents`) the model, the sequence for a new interface and the `webfront-agent` commands that run it in JSON or
+MCP (environment 0.9.2). The errors a newcomer meets first carry the next steps: a missing manifest names `wf init`, then
+`wf dev <entry.tsx>` and `wf create app`; a missing entry gives `ui/main.tsx` as an example; `wf create` without or with an
+unknown starter lists the starters. The line under the terminal that reports the bootstrap ends with `Agents: docs/DEVELOPING_WITH_AGENTS.md`;
+it comes from the library's embedded loader, not from the environment.
+
 - **Editing:** left/right, Home/End (Ctrl+A/Ctrl+E), Backspace/Delete, Ctrl+U/Ctrl+K, Ctrl+L, up/down through the
   history. A line wider than the terminal wraps over several rows and is redrawn in place; a line taller than the
   terminal is drawn a screen of rows at a time around the cursor, since rows that left the screen cannot be rewritten. The editor moves over
@@ -700,14 +718,14 @@ wf run build build-developer-environment --refresh-bootstrap
 ```
 
 `js/developer/scripts/build.mjs` bundles the environment and compiler with the locked esbuild-wasm (run in the script's
-Worker), includes esbuild.wasm, xterm styles and licenses, and writes deterministic `environment.tgz`, `life-starter.tgz`,
+Worker), includes esbuild.wasm, xterm styles and licenses, and writes deterministic `environment.tgz`, `app-starter.tgz`, `life-starter.tgz`,
 `provision.json` and `DeveloperReleaseData.hpp`. The version and public base URL are in
 `js/developer/tools/distribution.json`. `--refresh-bootstrap` additionally refreshes the two checked-in JS bundles, their
 input checksums (`bundles.json`, over `js/developer/tools/bundle-inputs.json`) and the pinned header; the core headers that embed
 the bundles come from `cmake --build <dir> --target webfront-embedded-assets`. Without
 that flag, it writes only to the output directory. `site.mjs` stages a build into the GitHub Pages site and `pin.mjs`
 checks the pinned header against the published archive. The headers of the core's embedded assets are rendered by `js/core/EmbedAsset.cmake`, in pure CMake (see below). The archives have the package identifiers
-`@webfront/developer-environment` and `@webfront/life-starter`. They are distributed as static
+`@webfront/developer-environment`, `@webfront/app-starter` and `@webfront/life-starter`. They are distributed as static
 GitHub Pages downloads; no npm publication or scope ownership is required.
 
 The `SelfBuild*` CTest cases run the scripts on a copy of the sources, with the dependencies installed from the local

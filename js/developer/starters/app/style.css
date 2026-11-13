@@ -1,0 +1,7 @@
+:root { color-scheme: light dark; font: 16px/1.5 system-ui, sans-serif; }
+body { margin: 0; }
+#root { max-width: 32rem; margin: 3rem auto; padding: 0 1rem; display: grid; gap: .75rem; }
+h1 { margin: 0; font-size: 1.5rem; }
+input, button { font: inherit; padding: .5rem .75rem; border-radius: .5rem; border: 1px solid color-mix(in srgb, currentColor 30%, transparent); }
+button { cursor: pointer; background: #2f6fed; border-color: #2f6fed; color: #fff; }
+#answer { margin: 0; min-height: 1.5em; }

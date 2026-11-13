@@ -44,7 +44,7 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   native attachment. This does not discover arbitrary processes or isolate untrusted project code.
   An application opts in to being driven with `automation::enableAutomation` (its own window and callbacks), shared sessions are
   listed by `webfront-agent --list`, and `--print-mcp-config` generates the client configuration. The owner may allow-list application callbacks that an agent reaches through the `call` operation, and the terminal, `wf help` and
-  the starter's `AGENTS.md` announce automation (environment 0.6.6). Environment 0.6.6 is published; the release pin selects 0.9.1.
+  the starter's `AGENTS.md` announce automation (environment 0.6.6). Environment 0.6.6 is published; the release pin selects 0.9.1. First-contact guidance for agents (README section, `docs/DEVELOPING_WITH_AGENTS.md`, `webfront_write_agent_guide()`, configuration and startup notices) comes with the library; the `app` starter, `wf help agents` and the errors that give the next steps are in the sources of environment 0.9.2, not published yet (#561).
 - **Maintaining WebFront.** The repository is itself a `wf` project, selected with
   `--manifest-dir js/developer`. Build and publish its environment using
   [PUBLISHING](../js/developer/tools/PUBLISHING.md). Regenerate the core's versioned headers

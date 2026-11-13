@@ -602,6 +602,49 @@ SCENARIO("Registered C++ function handlers own and invoke their callable") {
     }
 }
 
+SCENARIO("An application that serves a document root is told the development path once") {
+    using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, ClosingFrontend>;
+    std::ostringstream captured;
+    struct Redirect {
+        explicit Redirect(std::ostream& out) {
+            detail::developmentPathOutput = &out;
+            detail::developmentPathNoted.clear();
+        }
+        ~Redirect() { detail::developmentPathOutput = nullptr; }
+    } const redirect{captured};
+    const auto notes = [&captured] {
+        std::size_t count = 0;
+        const auto  text  = captured.str();
+        for (auto at = text.find(detail::developmentPathNote); at != std::string::npos; at = text.find(detail::developmentPathNote, at + 1))
+            ++count;
+        return count;
+    };
+    GIVEN("an application without a document root") {
+        FrontendWF webFront;
+        WHEN("it is shown") {
+            webFront.show();
+            THEN("nothing is said") {
+                REQUIRE(captured.str().empty());
+            }
+        }
+    }
+    GIVEN("two applications that serve a document root") {
+        FrontendWF first(WebFrontConfig{.documentRoot = "web"});
+        FrontendWF second(WebFrontConfig{.port = "9003", .documentRoot = "web"});
+        WHEN("both are shown, one of them twice") {
+            first.show();
+            first.show();
+            second.show();
+            THEN("the process names ui/, wf dev and the agent guide exactly once") {
+                REQUIRE(notes() == 1);
+                REQUIRE_THAT(captured.str(), Catch::Matchers::ContainsSubstring("TypeScript/TSX interface in ui/"));
+                REQUIRE_THAT(captured.str(), Catch::Matchers::ContainsSubstring("`wf dev`"));
+                REQUIRE_THAT(captured.str(), Catch::Matchers::ContainsSubstring("docs/DEVELOPING_WITH_AGENTS.md"));
+            }
+        }
+    }
+}
+
 SCENARIO("show opens the default page and returns when the window session ends") {
     GIVEN("a default-constructed application whose frontend completes after open") {
         using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, ClosingFrontend>;

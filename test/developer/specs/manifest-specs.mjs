@@ -7,6 +7,12 @@ import {memoryBridge} from '../memory-bridge.mjs';
 import {rejects, throws, integrity} from '../support.mjs';
 
 describe('The project manifest', () => {
+    it('answers a missing manifest or entry with the next steps, not only the first one', async () => {
+        // #561: an agent that had never seen a WebFront project was told "run wf init", then "Usage: wf dev <entry.tsx>".
+        await rejects(install(memoryBridge().bridge, ['a'], {}), /No webfront\.project\.json: run wf init, then wf dev <entry\.tsx> \(the interface is TypeScript\/TSX in ui\/; wf create app writes a first one; wf help agents gives the sequence\)/);
+        throws(() => resolveEntry({entries: {}}, undefined, 'wf dev <entry.tsx>'), /Usage: wf dev <entry\.tsx>, for example ui\/main\.tsx \(declare entries\.main in webfront\.project\.json to omit the entry; wf create app writes a first ui\/main\.ts\)/);
+    });
+
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
     const encode = value => encoder.encode(typeof value === 'string' ? value : JSON.stringify(value));
@@ -192,6 +198,19 @@ describe('The project manifest', () => {
         await install(bridge, ['a@'], options(fetchImpl));
         expect(json(storage, manifestPath)).toEqual({format: 1, name: 'webfront-app', version: '0.1.0', dependencies: {a: '^1.2.0'}});
         expect((await loadProject(bridge)).manifest.entries).withContext('the defaults are still applied when reading').toEqual({});
+    });
+
+    it('wf install without argument writes an empty lock for a project without dependency (#561)', async () => {
+        // The way on an environment before 0.9.2, whose wf preview and wf embed read a lock: wf init, then wf install.
+        const {bridge, storage} = memoryBridge();
+        await initProject(bridge, []);
+        expect(storage.has(lockPath)).toBeFalse();
+        const {fetchImpl} = registry(source());
+        const {lock} = await install(bridge, [], options(fetchImpl));
+        expect(lock.roots).toEqual({});
+        expect(lock.packages).toEqual({});
+        expect(JSON.parse(new TextDecoder().decode(storage.get(lockPath))).roots).toEqual({});
+        expect((await loadProject(bridge)).status).toBe('consistent');
     });
 
     it('wf install needs a manifest, then publishes manifest and lock together', async () => {

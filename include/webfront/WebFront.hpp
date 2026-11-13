@@ -24,11 +24,13 @@
 #include "weblink/Messages.hpp"
 #include "weblink/WebLink.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <concepts>
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -449,6 +451,29 @@ auto makeCppFunctionResponder(Callable&& callable) {
         if (callId != 0)
             link.sendFrame(std::move(frame));
     };
+}
+}  // namespace detail
+
+namespace detail {
+/// What an application that serves a document root is told once: a document root holds development files, and the
+/// development path of an interface is not hand-written pages there but TypeScript/TSX in ui/ built by wf.
+inline constexpr std::string_view developmentPathNote =
+  "WebFront: serving local files from documentRoot (development only). The intended development path is a TypeScript/TSX "
+  "interface in ui/, built with `wf dev` in the terminal of app.bootstrap(\"developer\"); an agent can run wf in JSON or MCP "
+  "(docs/DEVELOPING_WITH_AGENTS.md).";
+
+/// Set once the process has written developmentPathNote.
+inline std::atomic_flag developmentPathNoted;
+
+/// Where the note goes: std::cerr when null. Tests point it at a stream of their own.
+inline std::ostream* developmentPathOutput = nullptr;
+
+/// Writes developmentPathNote unless it was written already. @return whether this call wrote it
+inline bool noteDevelopmentPath() {
+    if (developmentPathNoted.test_and_set())
+        return false;
+    (developmentPathOutput ? *developmentPathOutput : std::cerr) << developmentPathNote << '\n';
+    return true;
 }
 }  // namespace detail
 
@@ -1031,7 +1056,16 @@ public:
     // Starts the server and opens the page on the calling thread. Embedded frontends return after
     // window closure and server shutdown; the system browser waits for Enter and leaves the server running.
     void show(std::string_view page = "index.html") {
+        // Once per process, and never for an application whose document root is the project of its developer environment.
+        if (!httpDocRoot.empty() && !developerEnvironment)
+            detail::noteDevelopmentPath();
         openAndRun(page);
+    }
+
+protected:
+    /// For the developer application: its document root is the project that wf builds, which is the development path.
+    void useDeveloperEnvironment() noexcept {
+        developerEnvironment = true;
     }
 
 private:
@@ -1211,6 +1245,7 @@ private:
     WindowOptions                                                            windowOptions;
     const std::string                                                        viewSecret = detail::newViewSecret();  // this launch's proof of an embedded view
     const bool                                                               trustLoopbackClients;
+    bool                                                                     developerEnvironment = false;
     mutable std::mutex                                                       linksMutex;  // guards webLinks, read from any thread
     struct Connection {
         std::shared_ptr<WebLink<Net, Policy>> link;
