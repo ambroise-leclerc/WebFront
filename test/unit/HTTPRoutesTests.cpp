@@ -428,7 +428,7 @@ SCENARIO("Stopping the server ends a reply being streamed") {
     });
     InjectableSocket::deferWrites();
     send(get("/webfront/services/files/endless"));
-    REQUIRE(waitFor([] { return InjectableSocket::hasWrittenData(); }));
+    REQUIRE(waitFor([] { return InjectableSocket::hasDeferredWrites(); }));
     WHEN("the server is stopped and drained while a send is pending") {
         server.stop();
         THEN("the drain returns") { REQUIRE_NOTHROW(server.drain()); }

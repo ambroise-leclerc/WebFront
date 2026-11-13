@@ -210,7 +210,6 @@ inline constexpr std::string_view suitePage = R"HTML(<!doctype html><div id="pre
                         if (box.width <= 0 || box.height <= 0 || box.right <= 0 || box.bottom <= 0
                             || box.left >= parent.innerWidth || box.top >= parent.innerHeight)
                             throw new Error('A driver session case must be displayed in the native window');
-                        await new Promise(requestAnimationFrame);
                         localStorage.clear();
                         sessionStorage.clear();
                         // No environment command uses IndexedDB today, but discard databases created by a spec when supported.
@@ -349,7 +348,7 @@ inline constexpr auto driverScript = R"JS(
     // Tests that own a DOM must stay in the viewport, including the nested wf test runner.
     const createFrame = () => {
         const frame = document.createElement('iframe');
-        frame.title = 'WebFront test runner';
+        frame.title = 'WebFront tests';
         frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483647;background:white';
         return frame;
     };

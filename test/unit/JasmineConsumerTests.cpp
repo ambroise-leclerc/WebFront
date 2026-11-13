@@ -151,7 +151,7 @@ CaptureResult fakeImage(std::chrono::milliseconds) {
 
 /// Waits for an observable condition instead of a fixed delay: a loaded CI machine only makes it take longer.
 template <typename Predicate>
-bool waitUntil(Predicate done, std::chrono::seconds limit = std::chrono::seconds{10}) {
+bool waitUntil(Predicate done, std::chrono::seconds limit = std::chrono::seconds{30}) {
     const auto deadline = std::chrono::steady_clock::now() + limit;
     while (!done()) {
         if (std::chrono::steady_clock::now() > deadline)
@@ -244,12 +244,9 @@ SCENARIO("A recording that loses its window reports the failure when it is stopp
 namespace {
 template <typename Poll>
 double pollUntilDone(Poll poll) {
-    for (int attempt = 0; attempt < 500; ++attempt) {
-        if (const auto value = poll(); value >= 0)
-            return value;
-        std::this_thread::sleep_for(std::chrono::milliseconds{10});
-    }
-    return -1;
+    double value = -1;
+    waitUntil([&] { return (value = poll()) >= 0; });
+    return value;
 }
 }  // namespace
 
@@ -268,8 +265,7 @@ SCENARIO("A capture store takes a screenshot without making the caller wait for 
             REQUIRE_THROWS_AS(store.beginScreenshot("other"), std::logic_error);
             release = true;
             std::optional<std::size_t> size;
-            for (int attempt = 0; attempt < 500 && !(size = store.pollScreenshot()); ++attempt)
-                std::this_thread::sleep_for(std::chrono::milliseconds{10});
+            REQUIRE(waitUntil([&] { return (size = store.pollScreenshot()).has_value(); }));
             REQUIRE(size == 3);
             REQUIRE(std::filesystem::exists(directory.path / "slow.png"));
             REQUIRE_THROWS_AS(store.pollScreenshot(), std::logic_error);
@@ -290,8 +286,7 @@ SCENARIO("An asynchronous screenshot reports a capture failure when polled") {
     std::optional<std::size_t> size;
     REQUIRE_THROWS_WITH(
         [&] {
-            for (int attempt = 0; attempt < 500 && !(size = store.pollScreenshot()); ++attempt)
-                std::this_thread::sleep_for(std::chrono::milliseconds{10});
+            waitUntil([&] { return (size = store.pollScreenshot()).has_value(); });
         }(),
         Catch::Matchers::Equals("Capture failed: no window"));
 }
@@ -305,8 +300,7 @@ SCENARIO("A recording stops on request and reports its count by polling") {
     }));
     store.requestStop();
     std::optional<std::size_t> frames;
-    for (int attempt = 0; attempt < 500 && !(frames = store.pollRecording()); ++attempt)
-        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    REQUIRE(waitUntil([&] { return (frames = store.pollRecording()).has_value(); }));
     REQUIRE(frames.has_value());
     REQUIRE(*frames >= 2);
     REQUIRE_THROWS_AS(store.requestStop(), std::logic_error);
@@ -322,8 +316,7 @@ SCENARIO("A recording ends by itself at the image limit and can still be collect
     }));
     store.requestStop();  // finished or about to: not an error
     std::optional<std::size_t> frames;
-    for (int attempt = 0; attempt < 500 && !(frames = store.pollRecording()); ++attempt)
-        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    REQUIRE(waitUntil([&] { return (frames = store.pollRecording()).has_value(); }));
     REQUIRE(frames == 3);
     REQUIRE_FALSE(std::filesystem::exists(directory.path / "run" / "0004.png"));
     store.startRecording("again", 30);  // the slot is free once collected
@@ -336,7 +329,7 @@ SCENARIO("A capture that nobody collects does not block the next one") {
     GIVEN("a screenshot that finished but was never polled") {
         store.beginScreenshot("a");
         THEN("a concurrent request cannot take over its result") {
-            std::this_thread::sleep_for(std::chrono::milliseconds{200});  // Long enough for the fake source to finish.
+            REQUIRE(waitUntil([&] { return fileExists(directory.path / "a.png"); }));
             REQUIRE_THROWS_AS(store.beginScreenshot("b"), std::logic_error);
             REQUIRE(pollUntilDone([&] {
                         const auto size = store.pollScreenshot();
@@ -410,8 +403,7 @@ SCENARIO("A stop request belongs to its own recording") {
     store.startRecording("one", 30);
     store.requestStop();
     std::optional<std::size_t> frames;
-    for (int attempt = 0; attempt < 500 && !(frames = store.pollRecording()); ++attempt)
-        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    REQUIRE(waitUntil([&] { return (frames = store.pollRecording()).has_value(); }));
     store.startRecording("two", 30);  // must not inherit, nor lose, the earlier stop request
     REQUIRE(waitUntil([&] {
         return fileExists(directory.path / "two" / "0003.png");

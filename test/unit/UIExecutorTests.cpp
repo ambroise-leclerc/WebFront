@@ -64,7 +64,7 @@ struct FakeLoop {
     bool                    woken{false};
     bool                    quit{false};
     std::thread::id         uiThread;
-    std::atomic<bool>       attached{false};
+    bool                    attached{false};
     std::thread             thread;
 
     void start() {
@@ -75,7 +75,11 @@ struct FakeLoop {
                 woken = true;
                 changed.notify_all();
             });
-            attached = true;
+            {
+                std::lock_guard lock(mutex);
+                attached = true;
+                changed.notify_all();
+            }
             for (;;) {
                 {
                     std::unique_lock lock(mutex);
@@ -88,8 +92,8 @@ struct FakeLoop {
             }
             host.close();
         });
-        while (!attached)
-            std::this_thread::sleep_for(1ms);
+        std::unique_lock lock(mutex);
+        REQUIRE(changed.wait_for(lock, 30s, [&] { return attached; }));
     }
     void stop() {
         {
@@ -582,7 +586,7 @@ SCENARIO("Closing waits for the wake-ups in flight, which may use what the loop 
             closed = true;
         });
         WHEN("the loop closes meanwhile") {
-            std::this_thread::sleep_for(50ms);
+            CHECK(waitFor([&] { return !host.executor().available(); }));
             THEN("close() does not return before the wake-up is over") {
                 CHECK_FALSE(closed);
                 {

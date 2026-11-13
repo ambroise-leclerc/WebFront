@@ -35,10 +35,10 @@ Each new realm owns its bridge connection, imports, timers, Workers, listeners a
 those resources. Local/session storage and enumerated IndexedDB databases are reset before the next command. The native project Store survives intentionally. Pinned and rebuilt environments retain different
 profiles and URLs/ports. The normal suite resets both; never point the two revisions at a shared persistent profile.
 
-Driver session frames fill the native window while their command runs. A case verifies its viewport and receives a
-rendering frame before starting work; off-screen frames can have their scripts, messages and Workers suspended by the
-engine. Like the developer session, each driver session reserves four CTest processors, so another browser test does
-not cover its window while it waits for rendering.
+Driver session frames fill the native window while their command runs. A case verifies its viewport before starting
+work; it does not wait for `requestAnimationFrame`, which an engine may suspend when its window is inactive. Nested
+Jasmine runners use the same visible layout and retain the `WebFront tests` title used by the readiness handshake.
+Like the developer session, each driver session reserves four CTest processors to avoid competing native windows.
 
 Filter the familiar CTest names with `ctest --test-dir build -R WfDriverTestFails --output-on-failure`. CTest includes the
 session fixture and its prerequisite project setup. For a truly isolated process per case, configure
@@ -233,6 +233,20 @@ For grouped sessions, read `DeveloperBrowserSession` or the corresponding `*Sess
 `Testing/Temporary/LastTest-<pass>.log` even when that aggregate case passes: the individual report reader may fail later.
 The workspace reloading assertion also reports the preview URL, document readiness, displayed root, tab status and
 `wf dev` output. A 200 response alone does not prove that a frame executed its script.
+
+The native automation supervisor's unit tests advance a steady-clock time source to check the operation/startup
+boundary and the close grace separately. They wait for the supervisor to observe each advance, rather than sleeping
+through a 1.1-second deadline. A separate case retains the default real clock. Startup readiness and expiry are checked
+under one session lock; time spent sending the browser close request counts toward its grace.
+
+Asynchronous unit-test guards use predicates with early exit: capture tests wait for their published file or collected
+result, executor tests wait for attachment/closure, and streamed-reply shutdown waits for a registered deferred send.
+A scheduling guard does not change a product deadline. Sleeps that deliberately hold a mock operation, exercise a
+process timeout or check that a disarm remains blocked are separate from these readiness waits.
+
+Manual dispatch with `repeat_desktop_tests=true` runs three complete desktop graphs and 100 interface-loop repetitions
+under ThreadSanitizer, stopping at the first failure. Its native desktop job has a 60-minute budget for the cold MSVC
+analysis build plus all three passes; ordinary jobs and individual case deadlines retain their existing bounds.
 
 ## Recording a run
 

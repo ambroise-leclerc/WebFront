@@ -123,7 +123,7 @@ try {
     config.starters = Object.fromEntries(Object.entries(environment.starters).map(([name, value]) => [name, {url: new URL(value.archive, new URL(config.environment, location.href)).href, integrity: value.integrity}]));
     const createFrame = () => {
         const frame = document.createElement('iframe');
-        frame.title = 'Developer integration Jasmine runner';
+        frame.title = 'WebFront tests';
         frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483647;background:white';
         return frame;
     };
