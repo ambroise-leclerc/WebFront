@@ -1027,13 +1027,7 @@ public:
     // Starts the server in a background thread and opens the frontend. An embedded window's close
     // or a frontend exception stops and joins the server. An external browser keeps it running.
     void openAndRun(std::string_view htmlFilename) {
-        // The constructor has already bound and listened; this thread services the queued I/O.
-        // Launch server only once or restart if previous thread ended
-        if (!serverThread.joinable()) {
-            serverThread = std::thread([this] {
-                run();
-            });
-        }
+        startServerThread();
         WindowAction action;
         try {
             action = openWindow(htmlFilename);
@@ -1062,6 +1056,48 @@ public:
         openAndRun(page);
     }
 
+    /** @brief Starts the server on its own thread, opens the page and returns at once: the calling thread keeps its
+     * own loop (docs/HOST_INTEGRATION.md). Nothing is read from the console and nothing waits for the interface.
+     *
+     * Only for a frontend that can open without running a loop, which it declares with `launch()`: the system browser
+     * (the default `webfront::WebFront`). An embedded window lives in the loop of `show()`; such a frontend is refused at
+     * compile time. Callable from any thread, once per application. If the opening throws, the server is stopped and
+     * joined before the exception propagates, as for show(). The server then runs until stop(), shutdown() or
+     * destruction; register callbacks and handlers before the call.
+     */
+    void start(std::string_view page = "index.html") {
+        static_assert(requires { Frontend::launch(std::string_view{}, std::string_view{}, std::string_view{}); },
+                      "webfront::BasicWF::start(): this frontend opens its window inside the loop of show(), which keeps the "
+                      "calling thread. Call show() on the interface thread and end it with requestClose(), or run the "
+                      "application in a webfront::UIThread when the frontend allows a secondary thread "
+                      "(docs/HOST_INTEGRATION.md).");
+        if constexpr (requires { Frontend::launch(std::string_view{}, std::string_view{}, std::string_view{}); }) {
+            if (!httpDocRoot.empty() && !developerEnvironment)
+                detail::noteDevelopmentPath();
+            startServerThread();
+            try {
+                Frontend::launch(httpAddress, httpPort, page);
+            } catch (...) {
+                stopAndJoinServer();
+                throw;
+            }
+        }
+    }
+
+    /** @brief Asks the interface that show() is running to end, as if the user had closed the window; show() then
+     * returns on its own thread. Callable from any thread while the application lives, never blocking.
+     *
+     * Returns false when the request reached nothing: the frontend has no window of its own to close (the system
+     * browser), no window is open yet, or it already closed. A caller that must end a session whose window may still be
+     * opening repeats the request until show() has returned, as webfront::UIThread::stop() does.
+     */
+    bool requestClose() {
+        if constexpr (requires { { Frontend::requestClose() } -> std::same_as<bool>; })
+            return Frontend::requestClose();
+        else
+            return false;
+    }
+
 protected:
     /// For the developer application: its document root is the project that wf builds, which is the development path.
     void useDeveloperEnvironment() noexcept {
@@ -1069,6 +1105,16 @@ protected:
     }
 
 private:
+    // The constructor has already bound and listened; this thread services the queued I/O.
+    // Launch server only once or restart if previous thread ended
+    void startServerThread() {
+        if (!serverThread.joinable()) {
+            serverThread = std::thread([this] {
+                run();
+            });
+        }
+    }
+
     void stopAndJoinServer() {
         stop();
         if (serverThread.joinable())

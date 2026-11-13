@@ -49,7 +49,7 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-004](ADR-004-appels-asynchrones-et-erreurs.md) | Asynchronous calls with deliberately asymmetric contracts | Accepted | 2022-02-06 | 2.6 — 2026-11-05 |
 | [ADR-005](ADR-005-evolution-reseau-asio-stdnet.md) | From standalone ASIO to stdnet: anticipating standard networking without blocking progress | Accepted through 3.1; 3.2 proposed | 2022-01-21 | 3.2 — 2026-10-26 |
 | [ADR-006](ADR-006-taches-structurees-et-arret.md) | Owning, cancelling and joining every task | Accepted | 2026-10-13 | 2.1 — 2026-10-25 |
-| [ADR-007](ADR-007-frontends-explicites.md) | Explicit frontend selection and a shared lifecycle contract | Accepted | 2026-05-31 | 1.11 — 2026-11-09 |
+| [ADR-007](ADR-007-frontends-explicites.md) | Explicit frontend selection and a shared lifecycle contract | Accepted | 2026-05-31 | 1.12 — 2026-11-13 |
 | [ADR-008](ADR-008-contenu-de-confiance-et-origines.md) | Restricting bridge origins without promising a sandbox | Accepted through 1.0; 1.1 and 1.2 proposed | 2026-10-18 | 1.2 — 2026-11-04 |
 | [ADR-009](ADR-009-modules-et-assets-reproductibles.md) | Serving modules locally and regenerating assets reproducibly | Accepted | 2023-03-16 | 2.5 — 2026-10-25 |
 | [ADR-010](ADR-010-composants-et-outils-optionnels.md) | Extending WebFront through optional components and development tools | Accepted | 2026-10-14 | 1.8 — 2026-11-09 |

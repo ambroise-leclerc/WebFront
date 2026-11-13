@@ -1,0 +1,9 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Window closed by its host</title>
+<script src="WebFront.js"></script>
+<script>
+    // This page never closes itself: only the host application ends the session (requestClose, #567).
+    window.hostTests = {echo: text => text + "-from-page"};
+    webFront.ready.then(() => webFront.cppFunction("pageReady")()).catch(() => {});
+</script>

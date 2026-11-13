@@ -5,6 +5,7 @@
 #include "Action.hpp"
 #include "Window.hpp"
 #include "CEF.hpp"
+#include "CloseRequest.hpp"
 #include "DefaultBrowser.hpp"
 #include "NativeWebView.hpp"
 #include "NativeWindow.hpp"
@@ -48,6 +49,12 @@ namespace webfront::frontend {
  * An optional static UIExecutor uiExecutor() publishes the interface thread (UIExecutor.hpp): it is available while
  * open() runs the frontend's loop, and BasicWF::uiExecutor() forwards it.
  * An optional static bool closeServerAfterOpen() overrides `action` at run time (NativeOrBrowserFrontend).
+ * An optional static void launch(address, port, file) opens the interface and returns without waiting for it: BasicWF::start()
+ * needs it, and a frontend whose window lives in open()'s loop does not offer it.
+ * An optional static bool requestClose() asks, from any thread, the session that open() runs to end as if the user had
+ * closed the window; it returns false when nothing is open to receive the request. BasicWF::requestClose() forwards it.
+ * An optional static constexpr bool requiresMainThread tells that open() belongs to the process main thread
+ * (frontend::requiresMainThread<Frontend>); webfront::UIThread refuses such a frontend at compile time.
  * An optional open(address, port, file) overload receives the configured address; build URLs with
  * detail::applicationUrl() so all frontends preserve the same URI-reference semantics.
  */
@@ -62,8 +69,14 @@ concept FrontendType = requires(std::string_view port, std::string_view file) {
 // stop it when `open()` returns after the UI session is finished.
 struct DefaultBrowserFrontend {
     static constexpr Action action{Action::keepServerRunning};
+    static constexpr bool   requiresMainThread = false;
 
     static void initialize() { }
+
+    /// Opens the page in the system browser and returns at once, without the console wait of open() (BasicWF::start()).
+    static void launch(std::string_view address, std::string_view port, std::string_view file) {
+        browser::launch(detail::applicationUrl(address, port, file));
+    }
 
     static void open(std::string_view port, std::string_view file) {
         browser::open(port, file);
@@ -94,8 +107,20 @@ struct DefaultBrowserFrontend {
  */
 struct BrowserWithUILoopFrontend {
     static constexpr Action action{Action::keepServerRunning};
+    // AppKit's run loop belongs to the main thread; the Windows message pump and the GLib loop run where open() is called.
+#if defined(__APPLE__)
+    static constexpr bool requiresMainThread = true;
+#else
+    static constexpr bool requiresMainThread = false;
+#endif
 
     static void initialize() { }
+
+    /// The same as requestStop(): the browser's window is not ours to close, the loop is. Always accepted.
+    static bool requestClose() noexcept {
+        requestStop();
+        return true;
+    }
 
     /// Ends the loop of a running open(), or the next one at its start; callable from any thread.
     static void requestStop() noexcept {
@@ -133,6 +158,19 @@ private:
 
 struct CEFFrontend {
     static constexpr Action action{Action::closeServerAfterOpen};
+    // CEF is initialized and run on the process main thread; another thread is not a qualified configuration.
+    static constexpr bool requiresMainThread = true;
+
+    /// Asks the window to close, from any thread; false when no window is open (see CloseRequest.hpp).
+    static bool requestClose() noexcept {
+#ifdef WEBFRONT_EMBED_CEF
+        return detail::requestWindowClose(uiExecutor(), nativeWindow(), [](const NativeWindowHandle& window) {
+            cef::closeBrowser(window.pointer);
+        });
+#else
+        return false;
+#endif
+    }
 
     /// CEF's UI thread while open() runs its message loop (see UIExecutor.hpp).
     [[nodiscard]] static UIExecutor uiExecutor() {
@@ -222,6 +260,19 @@ void openWith(std::string_view address, std::string_view port, std::string_view 
 template <FrontendType Native, FrontendType Browser>
 struct NativeOrBrowserFrontendFor {
     static constexpr Action action{Native::action};
+    static constexpr bool   requiresMainThread = frontend::requiresMainThread<Native> || frontend::requiresMainThread<Browser>;
+
+    /// Asks the one in use to end its session; false when it has nothing to close (the plain system browser never has).
+    static bool requestClose() noexcept {
+        if (usesNativeWindow()) {
+            if constexpr (requires { { Native::requestClose() } -> std::same_as<bool>; })
+                return Native::requestClose();
+        } else {
+            if constexpr (requires { { Browser::requestClose() } -> std::same_as<bool>; })
+                return Browser::requestClose();
+        }
+        return false;
+    }
 
     /// Why the browser is used, or nullopt when the native window is. Meaningful after initialize().
     [[nodiscard]] static std::optional<std::string> fallbackReason() {

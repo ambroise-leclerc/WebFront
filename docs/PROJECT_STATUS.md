@@ -23,7 +23,10 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   engine when its dependencies are available (outside test/fuzzing builds).
   `webfront_use_native_window(target)` provides target setup and a definition for selecting
   the native adapter with a browser fallback; see the [consumer example](../README.md#use-webfront-in-your-project)
-  and [frontends](FRONTENDS.md).
+  and [frontends](FRONTENDS.md). An application that keeps its own loop uses `app.start()` with the
+  system browser, `app.requestClose()` from another thread, or `webfront::UIThread` where the frontend
+  accepts a secondary thread (WebView2); a host loop cannot share the main thread with an embedded
+  window. See [host integration](HOST_INTEGRATION.md).
 - **Developer environment.** `NativeApp::bootstrap("developer")` loads the verified, pinned
   environment selected by `DeveloperReleaseData.hpp`. Its terminal provides `wf init`, `create`,
   `install`, `restore`, `run`, `exec`, `check`, `test`, `build`, `dev`, `preview`, `embed`, `list` and `help`. The manifest and lock describe
@@ -35,7 +38,8 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
 - **Distribution.** `wf embed` generates the application's compressed C++ provider.
   `NativeAppWithAssets<Provider>` runs without project files, developer callbacks or tool cache.
   Native-engine deployment remains application work. The [README walkthrough](../README.md)
-  covers the console, developer and embedded Game of Life stages; Hello World is the other public example.
+  covers the console, developer and embedded Game of Life stages; Hello World and the host loop
+  (`examples/host-loop/`) are the other public examples.
 - **Developer automation (opt-in).** `webfront-agent` provides local stdio MCP and a JSON CLI
   for an explicitly launched developer window. Native grants select check/build/test/preview,
   bounded inspection and semantic actions. [Automation](AUTOMATION.md) documents provisioning,

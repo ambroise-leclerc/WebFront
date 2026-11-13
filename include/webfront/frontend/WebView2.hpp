@@ -4,6 +4,7 @@
 #include "../tooling/Logger.hpp"
 #include "Action.hpp"
 #include "Capture.hpp"
+#include "CloseRequest.hpp"
 #include "DefaultBrowser.hpp"
 #include "../ViewAssociation.hpp"
 #include "ScriptDialogs.hpp"
@@ -928,6 +929,19 @@ namespace webfront::frontend {
 /** @brief Optional Windows embedded frontend. open() owns an STA and blocks until the window closes. */
 struct WebView2Frontend {
     static constexpr Action action{Action::closeServerAfterOpen};
+    // open() makes its calling thread an STA and pumps its messages there: any thread that is not already MTA.
+    static constexpr bool requiresMainThread = false;
+
+    /// Asks the window to close, from any thread; false when no window is open (see CloseRequest.hpp).
+    static bool requestClose() noexcept {
+#if defined(WEBFRONT_EMBED_WEBVIEW2) && defined(_WIN32)
+        return detail::requestWindowClose(uiExecutor(), nativeWindow(), [](const NativeWindowHandle& window) {
+            PostMessageW(static_cast<HWND>(window.pointer), WM_CLOSE, 0, 0);
+        });
+#else
+        return false;
+#endif
+    }
 
     /// The thread of the window's message pump while open() runs (see UIExecutor.hpp).
     [[nodiscard]] static UIExecutor uiExecutor() {

@@ -15,9 +15,12 @@ A frontend is a type with:
 | `static void open(address, port, page, const ContentPolicy&)` (optional) | Preferred overload receiving the per-application [content policy](CONTENT_POLICY.md). |
 | `static void open(address, port, page, const ContentPolicy&, const WindowOptions&, const ViewLaunch&)` (optional) | Richest overload: also receives the [view association](#view-association) proof of this launch. |
 | `static constexpr Action action` | What `BasicWF` does once `open()` returns. |
+| `static void launch(address, port, page)` (optional) | Opens the interface and returns without waiting for it. `BasicWF::start()` requires it; only a frontend without a window loop offers it (the system browser). |
+| `static bool requestClose()` (optional) | Asks, from any thread, the session that `open()` runs to end as if the user had closed the window; false when nothing is open. `BasicWF::requestClose()` forwards it. |
+| `static constexpr bool requiresMainThread` (optional) | `open()` belongs to the process main thread; `webfront::UIThread` refuses the frontend at compile time. Undeclared means any thread. |
 
 - **Blocking.** With `Action::closeServerAfterOpen` (embedded windows), `open()` blocks until the window is closed, releases its session resources, and returns; `BasicWF` then stops the server and joins its thread, so `show()` returns after a clean shutdown. With `Action::keepServerRunning` (the system browser), the server keeps running after `open()` returns, until `stop()` or application destruction. The action determines server lifetime, not whether opening returns immediately: the built-in system-browser adapter waits for Enter in the console after launching the page and cannot observe when the external browser closes.
-- **Threading.** Construct the application and call `show()` from its main thread when selecting an embedded frontend, because initialization can also have thread affinity. `show()` runs `open()` on that calling thread while the server runs separately. AppKit and GTK require toolkit-specific thread checks, and WebView2 needs an STA-compatible thread (an MTA thread is rejected with a clear error). Thread validation belongs in each adapter: the C++ concept checks signatures and supplies no main-thread detection or automatic dispatch. No `requiresMainThread` flag is currently needed; the native adapters must check their toolkit's requirements before using it.
+- **Threading.** Construct the application and call `show()` from its main thread when selecting an embedded frontend, because initialization can also have thread affinity. `show()` runs `open()` on that calling thread while the server runs separately. AppKit and GTK require toolkit-specific thread checks, and WebView2 needs an STA-compatible thread (an MTA thread is rejected with a clear error). Thread validation belongs in each adapter: the C++ concept checks signatures and supplies no main-thread detection or automatic dispatch. An adapter declares `requiresMainThread` (true for WKWebView, WebKitGTK, CEF and, on macOS, the system browser's loop mode) so that `webfront::UIThread` refuses it at compile time; the native adapters still check their toolkit's requirements before using it. An application that keeps its own loop follows [host integration](HOST_INTEGRATION.md).
 - **Errors.** A frontend reports failure by throwing from `open()`, whatever its action. `show()` / `openAndRun()` stop and join the server before the original exception propagates, including non-standard exceptions, so a failed start leaves no running thread behind. `openWindow()` is a lower-level delegation API: it neither starts nor joins the server, and returns the requested `WindowAction` to its caller.
 - **Unavailable frontends.** Every frontend type is always declared. In a build without its support, initialization or opening throws a message naming the CMake option that enables it (`-DWEBFRONT_EMBED_CEF=ON`, `-DWEBFRONT_EMBED_WEBVIEW2=ON`, `-DWEBFRONT_EMBED_WKWEBVIEW=ON`, `-DWEBFRONT_EMBED_WEBKITGTK=ON`).
 - **URL.** Built-in frontends also provide `open(address, port, file)`, which `BasicWF` prefers when available. Build the URL with `frontend::detail::applicationUrl(address, port, file)` in `frontend/Url.hpp`: it uses the configured address and preserves URI query/fragment syntax and existing percent escapes. Spaces and UTF-8 bytes are encoded. For literal filename delimiters use `%23`, `%3F` and `%25`. The two-argument overload uses `127.0.0.1`; wildcard binds open their matching loopback address.
@@ -170,7 +173,7 @@ engines show it only after a user gesture on the page); its wiring is implemente
 
 1. Implement the type in `include/webfront/frontend/` following the contract above and include it from `Frontend.hpp`. Keep platform headers behind the option's macro.
 2. Add its support module and one `webfront_register_frontend(...)` entry in `cmake/Frontends.cmake`, using the fields below.
-3. Extend `FrontendSelection` coverage and run the shared Jasmine and lifecycle suites. Enabling the engine on a `TEST_PLATFORMS` platform automatically registers the eight shared lifecycle cases; `WEBFRONT_TEST_FRONTEND` selects its C++ type in both runners.
+3. Extend `FrontendSelection` coverage and run the shared Jasmine and lifecycle suites. Enabling the engine on a `TEST_PLATFORMS` platform automatically registers the shared lifecycle cases; `WEBFRONT_TEST_FRONTEND` selects its C++ type in both runners.
 
 | Field | Meaning |
 | --- | --- |
@@ -192,7 +195,7 @@ Registry order determines the initial cache default: the first enabled embedded 
 
 ## Lifecycle tests
 
-`test/web/FrontendLifecycle.cpp` runs the same eight cases under the selected embedded engine:
+`test/web/FrontendLifecycle.cpp` runs the same cases under the selected embedded engine:
 
 - `no-bridge`: close a page that never connects to the bridge and return from `show()`.
 - `early-close`: close immediately from the page's first script, before any bridge connection.
@@ -201,6 +204,8 @@ Registry order determines the initial cache default: the first enabled embedded 
 - `path-encoding`: load `encoded path #.html` and verify that its query and fragment survived.
 - `content-policy`: block a popup and a foreign-origin top-level navigation while keeping the original page alive.
 - `navigation-allow-list`: permit the same top-level destination through the explicit navigation allow-list.
+- `host-close`: a host thread exchanges with the page while `show()` runs, then `requestClose()` ends the session; a request before and after the window is refused.
+- `host-thread` (not CEF): `webfront::UIThread` runs the application on a secondary thread where the frontend allows it; elsewhere a window opened on a secondary thread must be refused with the main-thread diagnostic.
 - `view-association`: the page of the view connects with the secret of the launch and `UI::isEmbeddedView()` is true; a second connection of that page, from the same loopback address and without the secret, is not associated.
 
 Each runs in a separate process as `<Frontend>Lifecycle-<case>`, with the registry's timeout, the

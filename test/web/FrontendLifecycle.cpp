@@ -1,5 +1,6 @@
 #include "../driver/TestFrontend.hpp"
 #include <webfront/system/NativeFS.hpp>
+#include <webfront/UIThread.hpp>
 #include <webfront/WebFront.hpp>
 
 #include <atomic>
@@ -14,6 +15,7 @@
 #include <cstdint>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string_view>
 #include <vector>
@@ -561,6 +563,120 @@ int checkContentPolicy(bool allowNavigation) {
     return 0;
 }
 
+// A host thread that keeps working while show() runs: it talks to the page, then ends the session (#567).
+template <typename Application>
+class HostSession {
+    std::mutex              mutex;
+    std::condition_variable changed;
+    std::optional<typename Application::UI> page;
+    bool                                    abandoned = false;
+
+public:
+    /// The session is over: a host still waiting for the page gives up.
+    void abandon() {
+        {
+            std::lock_guard lock{mutex};
+            abandoned = true;
+        }
+        changed.notify_all();
+    }
+    void setup(Application& app) {
+        app.cppFunction("pageReady", [this](typename Application::UI ui) {
+            lifecycleStage = LifecycleStage::bridgeConnected;
+            {
+                std::lock_guard lock{mutex};
+                page = ui;
+            }
+            changed.notify_all();
+        });
+    }
+    /// On the host's thread: waits for the page, then exchanges with it. The watchdog bounds the wait.
+    std::string exchange() {
+        std::unique_lock lock{mutex};
+        changed.wait(lock, [this] { return page.has_value() || abandoned; });
+        if (!page)
+            return {};
+        auto ui = *page;
+        lock.unlock();
+        return ui.template jsFunction<std::string>("hostTests.echo")("host").get();
+    }
+};
+
+// show() keeps the interface thread; the host's own thread exchanges with the page and asks the window to close.
+int checkHostClose() {
+    App app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    lifecycleStage = LifecycleStage::startingInstrumented;
+    if (app.requestClose())
+        throw std::runtime_error("A close request was accepted before any window was open");
+    HostSession<App> session;
+    session.setup(app);
+    std::string       answer;
+    std::atomic<bool> accepted = false;
+    std::thread       host([&] {
+        try {
+            answer = session.exchange();
+            if (!answer.empty())
+                accepted = app.requestClose();  // the page answered: its window is open
+        } catch (const std::exception& error) {
+            answer = error.what();
+        }
+    });
+    struct Join {
+        HostSession<App>& session;
+        std::thread&      thread;
+        ~Join() {
+            session.abandon();
+            thread.join();
+        }
+    };
+    {
+        Join join{session, host};
+        app.show("host-close.html");
+        lifecycleStage = LifecycleStage::windowClosed;
+    }
+    if (answer != "host-from-page")
+        throw std::runtime_error("The host thread did not exchange with the page: '" + answer + "'");
+    if (!accepted)
+        throw std::runtime_error("The close request of the host was not accepted");
+    if (app.requestClose())
+        throw std::runtime_error("A close request was accepted after the window closed");
+    return 0;
+}
+
+// The application on a thread of its own, for a frontend that allows it; the others must refuse with a diagnostic
+// instead of opening a window off the main thread.
+template <typename Application>
+int checkHostThread() {
+    lifecycleStage = LifecycleStage::startingInstrumented;
+    const webfront::WebFrontConfig config{.documentRoot = std::filesystem::current_path()};
+    if constexpr (webfront::frontend::requiresMainThread<typename Application::FrontendProvider>) {
+        std::string diagnostic;
+        std::thread secondary([&] {
+            try {
+                Application app(config);
+                app.show("host-close.html");
+            } catch (const std::exception& error) {
+                diagnostic = error.what();
+            }
+        });
+        secondary.join();
+        if (diagnostic.find("main thread") == std::string::npos)
+            throw std::runtime_error("Opening off the main thread was not refused with a diagnostic: '" + diagnostic + "'");
+        return 0;
+    } else {
+        HostSession<Application>      session;
+        webfront::UIThread<Application> ui(config, [&](Application& app) { session.setup(app); }, "host-close.html");
+        const auto answer = session.exchange();  // this thread stays the host's
+        if (!ui.running())
+            throw std::runtime_error("The session ended before the host stopped it");
+        ui.stop();
+        lifecycleStage = LifecycleStage::windowClosed;
+        if (answer != "host-from-page")
+            throw std::runtime_error("The host thread did not exchange with the page: '" + answer + "'");
+        return 0;
+    }
+}
+
 int run(std::string_view mode) {
     std::map<std::string_view, int (*)()> cases;
     cases.emplace(
@@ -597,6 +713,8 @@ int run(std::string_view mode) {
     cases.emplace("ui-executor", checkUIExecutor);
     cases.emplace("native-window", checkNativeWindow);
     cases.emplace("second-open", checkSecondOpen);
+    cases.emplace("host-close", checkHostClose);
+    cases.emplace("host-thread", +[] { return checkHostThread<App>(); });
     cases.emplace("view-association", checkViewAssociation);
     cases.emplace("stage-report", checkStageReport);
     const auto selected = cases.find(mode);

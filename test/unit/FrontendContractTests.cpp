@@ -2,8 +2,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
 #include <webfront/networking/NetworkingMock.hpp>
+#include <webfront/UIThread.hpp>
 #include <webfront/WebFront.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <exception>
@@ -323,6 +325,237 @@ SCENARIO("A frontend that accepts a view launch receives this application's secr
             }
             THEN("every application has its own secret") {
                 CHECK(firstLaunch.secret != secondLaunch.secret);
+            }
+        }
+    }
+}
+
+// Host integration (#567): a launch that returns, a close request from the host and an application on its own thread.
+namespace {
+struct LaunchRecorder {
+    static inline std::string     url;
+    static inline std::thread::id thread;
+    static inline bool            fail = false;
+    static constexpr frontend::Action action = frontend::Action::keepServerRunning;
+    static void                       initialize() { }
+    static void                       open(std::string_view, std::string_view) {
+        throw std::logic_error("start() must not call open()");
+    }
+    static void launch(std::string_view address, std::string_view port, std::string_view file) {
+        thread = std::this_thread::get_id();
+        url    = frontend::detail::applicationUrl(address, port, file);
+        if (fail)
+            throw std::runtime_error("no browser to launch");
+    }
+};
+
+// A window that a host can ask to close. With lateWindow, open() creates it only after one request was refused.
+template <Failure failure = Failure::none, bool lateWindow = false>
+struct HostFrontend : ContractFrontend<frontend::Action::closeServerAfterOpen, failure> {
+    static inline std::atomic<int> refused = 0;
+
+    static void open(std::string_view port, std::string_view file) {
+        if constexpr (lateWindow) {
+            const auto deadline = std::chrono::steady_clock::now() + coordinationTimeout;
+            while (refused == 0 && std::chrono::steady_clock::now() < deadline)
+                std::this_thread::yield();
+        }
+        ContractFrontend<frontend::Action::closeServerAfterOpen, failure>::open(port, file);
+    }
+    static bool requestClose() {
+        const auto      state = ContractIoContext::current;
+        std::lock_guard lock(state->mutex);
+        if (!state->windowCreated) {
+            ++refused;
+            return false;
+        }
+        state->closeWindow = true;
+        state->changed.notify_all();
+        return true;
+    }
+};
+
+struct UninitializableFrontend : HostFrontend<> {
+    static void initialize() {
+        throw std::runtime_error("no display");
+    }
+};
+
+template <typename Frontend>
+using HostApp = BasicWFWithFrontend<ContractNet, MockFileSystem<>, Frontend>;
+
+bool waitForWindow(const std::shared_ptr<LoopState>& state) {
+    std::unique_lock lock(state->mutex);
+    return state->changed.wait_for(lock, coordinationTimeout, [&] {
+        return state->windowCreated && state->running;
+    });
+}
+
+static_assert(!frontend::requiresMainThread<frontend::DefaultBrowserFrontend>);
+static_assert(!frontend::requiresMainThread<frontend::WebView2Frontend>);
+static_assert(frontend::requiresMainThread<frontend::WKWebViewFrontend>);
+static_assert(frontend::requiresMainThread<frontend::WebKitGTKFrontend>);
+static_assert(frontend::requiresMainThread<frontend::CEFFrontend>);
+static_assert(frontend::requiresMainThread<frontend::NativeOrBrowserFrontendFor<frontend::WKWebViewFrontend, frontend::DefaultBrowserFrontend>>);
+static_assert(!frontend::requiresMainThread<LaunchRecorder>);  // undeclared: any thread
+}  // namespace
+
+SCENARIO("start() opens the interface and returns to the host with the server running") {
+    GIVEN("a frontend that can launch without a loop") {
+        LaunchRecorder::fail = false;
+        LaunchRecorder::url.clear();
+        std::shared_ptr<LoopState> state;
+        {
+            HostApp<LaunchRecorder> app;
+            state = ContractIoContext::current;
+            WHEN("the host starts the application") {
+                app.start("page.html");
+                THEN("the page was launched on the calling thread and the server loop runs on its own") {
+                    CHECK(LaunchRecorder::thread == std::this_thread::get_id());
+                    CHECK(LaunchRecorder::url == "http://127.0.0.1:9002/page.html");
+                    std::unique_lock lock(state->mutex);
+                    CHECK(state->changed.wait_for(lock, coordinationTimeout, [&] { return state->running; }));
+                    CHECK_FALSE(state->stopped);
+                }
+                AND_THEN("the frontend has no window to close") {
+                    CHECK_FALSE(app.requestClose());
+                }
+            }
+            WHEN("the launch fails") {
+                LaunchRecorder::fail = true;
+                THEN("the server is stopped and joined before the error reaches the host") {
+                    REQUIRE_THROWS_WITH(app.start(), "no browser to launch");
+                    std::lock_guard lock(state->mutex);
+                    CHECK(state->stopped);
+                    CHECK(state->exited);
+                    CHECK_FALSE(state->running);
+                }
+            }
+        }
+        // Destruction is the host's stop: the loop has been left, without waiting for its timeout.
+        std::lock_guard lock(state->mutex);
+        CHECK(state->stopped);
+        CHECK(state->exited);
+        CHECK_FALSE(state->timedOut);
+    }
+}
+
+SCENARIO("requestClose() ends show() from another thread") {
+    GIVEN("an embedded window shown on one thread") {
+        HostApp<HostFrontend<>> app;
+        const auto              state = ContractIoContext::current;
+        CHECK_FALSE(app.requestClose());  // nothing is open yet
+        std::jthread            caller([&] {
+            app.show();
+        });
+        REQUIRE(waitForWindow(state));
+        WHEN("the host asks for the closure from its own thread") {
+            CHECK(app.requestClose());
+            caller.join();
+            THEN("show has returned after stopping the server") {
+                std::lock_guard lock(state->mutex);
+                CHECK(state->stopped);
+                CHECK(state->exited);
+            }
+        }
+    }
+}
+
+SCENARIO("UIThread runs an application on its own thread while the host keeps its thread") {
+    GIVEN("a host that starts its interface") {
+        std::thread::id setupThread;
+        std::string     port;
+        UIThread<HostApp<HostFrontend<>>> ui(WebFrontConfig{}, [&](auto& app) {
+            setupThread = std::this_thread::get_id();
+            port        = std::string(app.port());
+        });
+        const auto state = ContractIoContext::current;
+        THEN("the constructor returned with the application set up on the interface thread") {
+            CHECK(setupThread != std::this_thread::get_id());
+            CHECK(setupThread != std::thread::id{});
+            CHECK(port == "9002");
+            CHECK(ui.app().port() == "9002");
+        }
+        REQUIRE(waitForWindow(state));
+        CHECK(ui.running());
+        CHECK_FALSE(ui.waitFor(0ms));
+        {
+            std::lock_guard lock(state->mutex);
+            CHECK(state->openThread == setupThread);
+        }
+        WHEN("the host stops it") {
+            REQUIRE_NOTHROW(ui.stop());
+            THEN("the window closed, the server loop ended and nothing is left running") {
+                CHECK_FALSE(ui.running());
+                CHECK_FALSE(ui.failure());
+                std::lock_guard lock(state->mutex);
+                CHECK(state->closeWindow);
+                CHECK(state->stopped);
+                CHECK(state->exited);
+                CHECK_FALSE(state->timedOut);
+            }
+            AND_THEN("stopping again does nothing") {
+                REQUIRE_NOTHROW(ui.stop());
+            }
+        }
+        WHEN("the user closes the window") {
+            {
+                std::lock_guard lock(state->mutex);
+                state->closeWindow = true;
+                state->changed.notify_all();
+            }
+            THEN("the host observes the end and the application stays usable until stop") {
+                REQUIRE(ui.waitFor(coordinationTimeout));
+                CHECK_FALSE(ui.running());
+                CHECK(ui.app().port() == "9002");
+                REQUIRE_NOTHROW(ui.stop());
+            }
+        }
+    }
+    GIVEN("a window that is still opening when the host stops") {
+        using Late    = HostFrontend<Failure::none, true>;
+        Late::refused = 0;
+        UIThread<HostApp<Late>> ui(WebFrontConfig{}, [](auto&) { });
+        const auto              state = ContractIoContext::current;
+        WHEN("stop is called at once") {
+            REQUIRE_NOTHROW(ui.stop());
+            THEN("the request was repeated until the window existed, and the thread was joined") {
+                CHECK(Late::refused >= 1);
+                std::lock_guard lock(state->mutex);
+                CHECK(state->windowCreated);
+                CHECK(state->exited);
+            }
+        }
+    }
+}
+
+SCENARIO("UIThread reports start and opening failures to the host") {
+    GIVEN("a setup that throws") {
+        THEN("the constructor rethrows it on the host thread") {
+            using Hosted = UIThread<HostApp<HostFrontend<>>>;
+            REQUIRE_THROWS_WITH(Hosted(WebFrontConfig{}, [](auto&) { throw std::runtime_error("setup failed"); }), "setup failed");
+        }
+    }
+    GIVEN("a frontend that cannot be initialized on that thread") {
+        THEN("the constructor rethrows the initialization error") {
+            using Hosted = UIThread<HostApp<UninitializableFrontend>>;
+            REQUIRE_THROWS_WITH(Hosted(WebFrontConfig{}, [](auto&) { }), "no display");
+        }
+    }
+    GIVEN("a window that fails to open") {
+        UIThread<HostApp<HostFrontend<Failure::beforeWindow>>> ui(WebFrontConfig{}, [](auto&) { });
+        const auto                                             state = ContractIoContext::current;
+        WHEN("the host waits for the session") {
+            REQUIRE(ui.waitFor(coordinationTimeout));
+            THEN("the failure is observable without throwing, then rethrown once by stop") {
+                CHECK_FALSE(ui.running());
+                REQUIRE(ui.failure());
+                CHECK_THROWS_WITH(std::rethrow_exception(ui.failure()), "frontend failed before window creation");
+                REQUIRE_THROWS_WITH(ui.stop(), "frontend failed before window creation");
+                REQUIRE_NOTHROW(ui.stop());
+                std::lock_guard lock(state->mutex);
+                CHECK(state->stopped);
+                CHECK(state->exited);
             }
         }
     }
