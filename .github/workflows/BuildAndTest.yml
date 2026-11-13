@@ -220,6 +220,16 @@ jobs:
           -DREPEAT=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && '3' || '1' }}
           '-DLABEL_EXCLUDE=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && 'none' || (env.WEBFRONT_CONFIGURATION == 'true' && '^(portability|fast)$' || '^(portability|fast|configuration)$') }}'
           -P test/cmake/RunTestSuite.cmake
+      - name: Qualify intermittent browser cases
+        if: github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests
+        env: ${{ matrix.test_env }}
+        # These independent processes reuse installed fixtures; never repeat setup alone and clear their inputs.
+        # until-fail is a stress qualification, not a retry of a failure.
+        run: >-
+          ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure --no-tests=error --parallel 4
+          --fixture-exclude-any '.*'
+          -R '^(ConsumerJasmine-file-services|WebFront(WebKitGTK|WKWebView|WebView2)Integration|WebKitGTKLifecycle-navigation-allow-list|JourneyEmbeddedRun)$'
+          --repeat until-fail:20 --output-junit "${{ github.workspace }}/build/browser-stress-results.xml"
       - name: Repeat WebKitGTK pointer tests with suite display sharing enabled
         if: runner.os == 'Linux'
         env: ${{ matrix.test_env }}
@@ -281,6 +291,7 @@ jobs:
           path: |
             build/test-results-*.xml
             build/fast-results.xml
+            build/browser-stress-results.xml
             build/unit-results-*.xml
             build/ctest-graph.json
             build/test/unit/consumer-build/.ninja_log

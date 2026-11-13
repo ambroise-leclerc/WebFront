@@ -244,8 +244,9 @@ result, executor tests wait for attachment/closure, and streamed-reply shutdown 
 A scheduling guard does not change a product deadline. Sleeps that deliberately hold a mock operation, exercise a
 process timeout or check that a disarm remains blocked are separate from these readiness waits.
 
-Manual dispatch with `repeat_desktop_tests=true` runs three complete desktop graphs and 100 interface-loop repetitions
-under ThreadSanitizer, stopping at the first failure. Its native desktop job has a 60-minute budget for the cold MSVC
+Manual dispatch with `repeat_desktop_tests=true` runs three complete desktop graphs, then 20 repetitions of file-services,
+the browser suite, embedded Life and Linux's navigation allow-list, retaining the already installed fixtures. It also
+runs 100 interface-loop repetitions under ThreadSanitizer. These qualifications stop at the first failure. Its native desktop job has a 60-minute budget for the cold MSVC
 analysis build plus all three passes; ordinary jobs and individual case deadlines retain their existing bounds.
 
 ## Recording a run
