@@ -366,7 +366,9 @@ SCENARIO("Automation cancellation and native deadlines cannot reuse a stalled re
 
 SCENARIO("Automation startup expiry respects readiness at the deadline") {
     webfront::test::TemporaryDirectory directory;
-    Session session{{directory.path(), {"build"}}};
+    Session                            session{
+        {directory.path(), {"build"}}
+    };
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
     REQUIRE_FALSE(session.expireStartup(deadline, deadline - std::chrono::milliseconds{1}));
     GIVEN("the renderer has polled before expiry is checked") {

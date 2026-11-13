@@ -73,7 +73,7 @@ jobs:
     # Only Linux waits for its image. Native desktops below start immediately and reuse these steps.
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.repeat_desktop_tests) }}
     # No `name:` expression: a skipped matrix job would display it unevaluated.
-    timeout-minutes: 25
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && 60 || 25 }}
     strategy:
       fail-fast: false
       matrix:
@@ -222,14 +222,21 @@ jobs:
           -P test/cmake/RunTestSuite.cmake
       - name: Qualify intermittent browser cases
         if: github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests
+        shell: bash
         env: ${{ matrix.test_env }}
-        # These independent processes reuse installed fixtures; never repeat setup alone and clear their inputs.
-        # until-fail is a stress qualification, not a retry of a failure.
-        run: >-
-          ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure --no-tests=error --parallel 4
-          --fixture-exclude-any '.*'
-          -R '^(ConsumerJasmine-file-services|WebFront(WebKitGTK|WKWebView|WebView2)Integration|WebKitGTKLifecycle-navigation-allow-list|JourneyEmbeddedRun)$'
-          --repeat until-fail:20 --output-junit "${{ github.workspace }}/build/browser-stress-results.xml"
+        # Installed fixtures are retained. Repeat a whole selected graph so every developer report is checked on
+        # every pass: repeating its producer alone could hide a failed part behind a subsequent successful report.
+        run: |
+          set -euo pipefail
+          for pass in {1..20}; do
+            status=0
+            ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure --no-tests=error --parallel 4 \
+              --fixture-exclude-any '.*' \
+              -R '^(ConsumerJasmine-file-services|WebFront(WebKitGTK|WKWebView|WebView2)Integration|WebKitGTKLifecycle-navigation-allow-list|JourneyEmbeddedRun|WfDriverSession|JourneyBuildSession|AutomationConsumerWindow|DeveloperBrowserSession|DeveloperBrowserIntegration(-.*)?)$' \
+              --output-junit "${{ github.workspace }}/build/browser-stress-results-$pass.xml" || status=$?
+            cp build/Testing/Temporary/LastTest.log "build/Testing/Temporary/LastTest-stress-$pass.log"
+            if [ "$status" -ne 0 ]; then exit "$status"; fi
+          done
       - name: Repeat WebKitGTK pointer tests with suite display sharing enabled
         if: runner.os == 'Linux'
         env: ${{ matrix.test_env }}
@@ -291,7 +298,7 @@ jobs:
           path: |
             build/test-results-*.xml
             build/fast-results.xml
-            build/browser-stress-results.xml
+            build/browser-stress-results-*.xml
             build/unit-results-*.xml
             build/ctest-graph.json
             build/test/unit/consumer-build/.ninja_log

@@ -245,7 +245,8 @@ A scheduling guard does not change a product deadline. Sleeps that deliberately 
 process timeout or check that a disarm remains blocked are separate from these readiness waits.
 
 Manual dispatch with `repeat_desktop_tests=true` runs three complete desktop graphs, then 20 repetitions of file-services,
-the browser suite, embedded Life and Linux's navigation allow-list, retaining the already installed fixtures. It also
+the browser suite, embedded Life, Linux's navigation allow-list, repeatable driver sessions, the automation consumer and
+the developer session with every report reader, retaining the already installed fixtures. It also
 runs 100 interface-loop repetitions under ThreadSanitizer. These qualifications stop at the first failure. Its native desktop job has a 60-minute budget for the cold MSVC
 analysis build plus all three passes; ordinary jobs and individual case deadlines retain their existing bounds.
 

@@ -83,7 +83,9 @@ struct FakeLoop {
             for (;;) {
                 {
                     std::unique_lock lock(mutex);
-                    changed.wait(lock, [&] { return woken || quit; });
+                    changed.wait(lock, [&] {
+                        return woken || quit;
+                    });
                     if (quit)
                         break;
                     woken = false;
@@ -93,7 +95,9 @@ struct FakeLoop {
             host.close();
         });
         std::unique_lock lock(mutex);
-        REQUIRE(changed.wait_for(lock, 30s, [&] { return attached; }));
+        REQUIRE(changed.wait_for(lock, 30s, [&] {
+            return attached;
+        }));
     }
     void stop() {
         {
