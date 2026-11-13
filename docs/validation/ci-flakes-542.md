@@ -40,6 +40,12 @@ does not close, a runner deadline and an infrastructure failure; a successful re
   Catch2 assertion (also on an exception), and use a 64 KiB test buffer for the same 128 MiB/48 MiB memory proof,
   reducing the handoffs to 2048. Neither the transmitted size nor the memory-growth bound is reduced.
 
+GCC 13's [vptr lookup](https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.4.0/libsanitizer/ubsan/ubsan_type_hash_itanium.cpp#L181)
+uses [an accessibility check implemented with a pipe](https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.4.0/libsanitizer/sanitizer_common/sanitizer_posix_libcdep.cpp#L250).
+If the two pipe descriptors cannot be allocated, it returns false. This explains why an uncached Catch2 virtual-type
+check can report an invalid vptr under deliberate descriptor exhaustion. The test now retains the exception and
+inspects it only after releasing pressure; sanitizer checks remain enabled.
+
 ## Validation record
 
 Local platform: macOS arm64, AppleClang 21, Release, CEF off, WKWebView on, four CTest workers. The diagnostics-only

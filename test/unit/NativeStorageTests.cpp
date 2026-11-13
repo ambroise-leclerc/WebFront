@@ -9,13 +9,13 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iterator>
 #include <map>
 #include <memory>
-#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -1079,23 +1079,27 @@ SCENARIO("Running out of descriptors does not mark the root as moved") {
     for (int descriptor = ::dup(0); descriptor >= 0; descriptor = ::dup(0))
         held.push_back(descriptor);
     // One descriptor left: `/` opens, the next component of the declared location does not.
-    const bool                     hadDescriptors = !held.empty();
-    std::optional<fs::StorageErrc> exhausted;
+    const bool         hadDescriptors = !held.empty();
+    std::exception_ptr exhausted;
     if (hadDescriptors) {
         ::close(held.back());
         held.pop_back();
         try {
             storage.createDirectory("dir");
-        } catch (const fs::StorageError& error) {
-            exhausted = error.errc();
+        } catch (...) {
+            exhausted = std::current_exception();
         }
     }
     // Catch2 and sanitizer diagnostics may themselves open files. Do not assert under descriptor exhaustion.
     const int restored = pressure.release();
     REQUIRE(restored == 0);
     REQUIRE(hadDescriptors);
-    REQUIRE(exhausted.has_value());
-    REQUIRE(*exhausted != fs::StorageErrc::rootMoved);
+    REQUIRE(exhausted);
+    try {
+        std::rethrow_exception(exhausted);
+    } catch (const fs::StorageError& error) {
+        REQUIRE(error.errc() != fs::StorageErrc::rootMoved);
+    }
     storage.createDirectory("dir");
     REQUIRE(stdfs::is_directory(sandbox.root / "dir"));
 }
