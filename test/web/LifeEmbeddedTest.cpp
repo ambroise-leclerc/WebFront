@@ -1,13 +1,41 @@
 #include "../driver/TestFrontend.hpp"
+#include "../driver/RequestLog.hpp"
 #include <webfront/WebFront.hpp>
 #include WEBFRONT_LIFE_ASSETS_HEADER
 #include "../../examples/life/Life.hpp"
 #include "../unit/TemporaryDirectory.hpp"
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstdlib>
+#include <mutex>
+#include <thread>
 #include <iostream>
 
 namespace {
+std::atomic<int> phase{0};
+const char* phaseName() {
+    switch (phase.load()) {
+    case 1: return "UI result reported, awaiting reply delivery or close";
+    case 2: return "window.close returned to JavaScript";
+    case 3: return "frontend returned, shutdown started";
+    case 4: return "shutdown completed, destroying application";
+    default: return "starting frontend or running UI assertions";
+    }
+}
+struct Watchdog {
+    std::mutex mutex;
+    std::condition_variable_any changed;
+    std::jthread worker{[this](std::stop_token stop) {
+        std::unique_lock lock(mutex);
+        changed.wait_for(lock, stop, std::chrono::seconds{45}, [] { return false; });
+        if (!stop.stop_requested()) {
+            std::cerr << "Embedded Life timeout at phase: " << phaseName() << std::endl;
+            std::_Exit(1);
+        }
+    }};
+};
 constexpr auto uiScript = R"JS(
 (async () => {
     try {
@@ -47,7 +75,10 @@ constexpr auto uiScript = R"JS(
         await webFront.cppFunction('test.report')(true, 'Embedded React + C++ Life passed with an empty working directory');
     } catch (error) {
         await webFront.cppFunction('test.report')(false, String(error.stack || error));
-    } finally { setTimeout(() => globalThis.close(), 0); }
+    } finally { setTimeout(() => {
+        globalThis.close();
+        try { webFront.cppFunction('test.closeReturned')().catch(() => {}); } catch {}
+    }, 0); }
 })().catch(error => { console.error(error); globalThis.close(); });
 )JS";
 }  // namespace
@@ -55,6 +86,8 @@ constexpr auto uiScript = R"JS(
 int main() {
     try {
         webfront::detail::ensureFrontendInitialized<WEBFRONT_TEST_FRONTEND>();
+        webfront::testdriver::logRequests();
+        Watchdog watchdog;
         webfront::test::TemporaryDirectory empty;
         const auto                         original = std::filesystem::current_path();
         std::filesystem::current_path(empty.path());
@@ -68,11 +101,21 @@ int main() {
         app.cppFunction("test.report", [&](bool success, std::string message) {
             std::cout << message << std::endl;
             passed.store(success);
+            phase = 1;
+        });
+        app.cppFunction("test.closeReturned", [] {
+            int reported = 1;
+            phase.compare_exchange_strong(reported, 2);
         });
         auto subscription = app.subscribeUIStarted([](App::UI ui) {
             ui.addScript(uiScript);
         });
         app.show();
+        phase = 3;
+        std::cerr << "Embedded Life frontend returned; beginning shutdown" << std::endl;
+        app.shutdown();
+        phase = 4;
+        std::cerr << "Embedded Life shutdown completed" << std::endl;
         std::filesystem::current_path(original);
         return passed.load() ? 0 : 1;
     } catch (const std::exception& error) {

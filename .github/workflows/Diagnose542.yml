@@ -1,0 +1,79 @@
+name: Diagnose native shutdown 542
+on:
+  push:
+    branches: [542-ci-flakes-linux-probe]
+permissions:
+  contents: read
+  packages: read
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    outputs:
+      image: ${{ steps.tag.outputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: tag
+        run: |
+          hash=$(sha256sum .github/docker/linux-ci.Dockerfile | cut -c1-16)
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}/linux-ci:$hash" >> "$GITHUB_OUTPUT"
+  probe:
+    needs: image
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    container:
+      image: ${{ needs.image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+      options: --shm-size=1g
+    env:
+      SCCACHE_GHA_ENABLED: 'true'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/remove-node
+      - uses: ./.github/actions/setup-cmake
+        with:
+          version: '4.4.4'
+      - run: echo "CPM_SOURCE_CACHE=$GITHUB_WORKSPACE/.cache/CPM" >> "$GITHUB_ENV"
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad
+      - uses: actions/cache@v4
+        with:
+          path: .cache/CPM
+          key: cpm-Linux-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake', 'test/unit/CMakeLists.txt') }}
+          restore-keys: cpm-Linux-
+      - name: Configure reference Linux test settings
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          -DWEBFRONT_ENABLE_TESTING=ON -DWEBFRONT_EMBED_CEF=OFF
+          -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK
+          -DWEBFRONT_ENABLE_COVERAGE=ON -DWEBFRONT_TEST_UNIT_SHARDS=4
+          -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+      - name: Build native probes and fixture driver
+        run: cmake --build build --target frontend_lifecycle webfront-wf forms_declaration --parallel 4
+      - name: Reproduce closure on one shared display
+        env:
+          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'
+          WEBFRONT_TEST_SHARED_DISPLAY: '1'
+        shell: bash
+        run: |
+          xvfb-run -a bash -euo pipefail <<'PROBE'
+          ctest --test-dir build --parallel 4 --output-on-failure --no-tests=error \
+            --test-output-size-failed 2097152 --output-junit "$PWD/build/preparation.xml" \
+            -R '^(WebKitGTKLifecycle-navigation-allow-list|JourneyEmbeddedRun)$'
+          cp build/Testing/Temporary/LastTest.log build/preparation.log
+          ctest --test-dir build --parallel 4 --output-on-failure --no-tests=error \
+            --test-output-size-failed 2097152 --fixture-exclude-any '.*' \
+            -R '^(WebKitGTKLifecycle-navigation-allow-list|JourneyEmbeddedRun)$' \
+            --repeat until-fail:1000 --output-junit "$PWD/build/reproduction.xml"
+          PROBE
+      - name: Retain every failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-542-reproduction
+          path: |
+            build/*.xml
+            build/preparation.log
+            build/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore

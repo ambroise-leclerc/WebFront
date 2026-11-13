@@ -1,4 +1,5 @@
 #include "../driver/TestFrontend.hpp"
+#include "../driver/RequestLog.hpp"
 #include <webfront/system/NativeFS.hpp>
 #include <webfront/WebFront.hpp>
 
@@ -41,6 +42,7 @@ enum class LifecycleStage : std::int32_t {
     pageCompleted = 8,
     windowClosed = 9,
     startingInstrumented = 10,
+    closeCallReturned = 11,
 };
 std::atomic<LifecycleStage> lifecycleStage = LifecycleStage::uninstrumented;
 constexpr const char* stageName(LifecycleStage stage) {
@@ -56,6 +58,7 @@ constexpr const char* stageName(LifecycleStage stage) {
         case LifecycleStage::pageCompleted: return "page reported completion, waiting for window close";
         case LifecycleStage::windowClosed: return "window closed, checking results or shutting down";
         case LifecycleStage::startingInstrumented: return "starting frontend or waiting for first bridge connection";
+        case LifecycleStage::closeCallReturned: return "window.close returned to JavaScript";
     }
     return "unknown stage";
 }
@@ -89,7 +92,8 @@ template <class Application>
 void registerLifecycleStage(Application& app) {
     app.cppFunction("lifecycleStage", [](std::int32_t stage) {
         if (stage >= static_cast<std::int32_t>(LifecycleStage::associationOrigins)
-            && stage <= static_cast<std::int32_t>(LifecycleStage::pageCompleted))
+            && (stage <= static_cast<std::int32_t>(LifecycleStage::pageCompleted)
+                || stage == static_cast<std::int32_t>(LifecycleStage::closeCallReturned)))
             lifecycleStage = static_cast<LifecycleStage>(stage);
     });
 }
@@ -609,6 +613,7 @@ int run(std::string_view mode) {
 
 int main(int argc, char** argv) {
     try {
+        webfront::testdriver::logRequests();
         if (argc == 2 && (std::string_view(argv[1]) == "watchdog-probe" || std::string_view(argv[1]) == "watchdog-uninstrumented-probe")) {
             LifecycleWatchdog watchdog(std::chrono::seconds(1));
             if (std::string_view(argv[1]) == "watchdog-probe")
