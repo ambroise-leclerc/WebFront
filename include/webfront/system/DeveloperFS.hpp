@@ -15,6 +15,7 @@
 #include <optional>
 #include <algorithm>
 #include <memory>
+#include <cstring>
 #include <system_error>
 #include <string>
 #include <string_view>
@@ -51,30 +52,35 @@ private:
     // prevent the directory rename or removal: a slow browser can retain that handle beyond any bounded retry.
     class PublishedSource final : public ByteSource {
     public:
-        PublishedSource(HANDLE opened, std::uint64_t length) : handle(opened), total(length) {}
+        PublishedSource(HANDLE opened, std::uint64_t length) : handle(opened), total(length) {
+            SYSTEM_INFO info{};
+            ::GetSystemInfo(&info);
+            granularity = info.dwAllocationGranularity;
+        }
         PublishedSource(const PublishedSource&) = delete;
-        ~PublishedSource() override { ::CloseHandle(handle); }
+        ~PublishedSource() override { if (handle) ::CloseHandle(handle); }
         std::size_t read(std::span<char> buffer) override {
-            std::size_t count = 0;
-            while (count < buffer.size()) {
-                DWORD got = 0;
-                const auto want = static_cast<DWORD>(std::min<std::size_t>(buffer.size() - count, 1u << 30));
-                if (!::ReadFile(handle, buffer.data() + count, want, &got, nullptr))
-                    throw std::system_error(static_cast<int>(::GetLastError()), std::system_category(), "Cannot read published developer resource");
-                if (got == 0) break;
-                count += got;
-            }
+            const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), total - position));
+            if (count == 0) return 0;
+            const auto offset = position / granularity * granularity;
+            const auto skip = static_cast<std::size_t>(position - offset);
+            auto view = ::MapViewOfFile(handle, FILE_MAP_READ, static_cast<DWORD>(offset >> 32), static_cast<DWORD>(offset), count + skip);
+            if (!view) throw std::system_error(static_cast<int>(::GetLastError()), std::system_category(), "Cannot map published resource");
+            std::memcpy(buffer.data(), static_cast<const char*>(view) + skip, count);
+            ::UnmapViewOfFile(view);
+            position += count;
             return count;
         }
         std::optional<std::uint64_t> size() const override { return total; }
         bool seek(std::uint64_t offset) override {
-            LARGE_INTEGER position{};
-            position.QuadPart = static_cast<LONGLONG>(std::min(offset, total));
-            return ::SetFilePointerEx(handle, position, nullptr, FILE_BEGIN) != 0;
+            position = std::min(offset, total);
+            return true;
         }
     private:
         HANDLE handle;
         std::uint64_t total;
+        std::uint64_t position = 0;
+        std::uint64_t granularity = 0;
     };
 #endif
     static std::optional<File> embeddedResource(const std::string& path) {
@@ -98,8 +104,11 @@ private:
             std::unique_ptr<void, decltype(close)> opened(handle, close);
             LARGE_INTEGER length{};
             if (!::GetFileSizeEx(handle, &length) || length.QuadPart < 0) return std::nullopt;
-            auto source = std::make_unique<PublishedSource>(handle, static_cast<std::uint64_t>(length.QuadPart));
-            opened.release();
+            const auto mapping = length.QuadPart == 0 ? nullptr : ::CreateFileMappingW(handle, nullptr, PAGE_READONLY, 0, 0, nullptr);
+            if (length.QuadPart != 0 && !mapping) return std::nullopt;
+            std::unique_ptr<void, decltype(close)> section(mapping, close);
+            auto source = std::make_unique<PublishedSource>(mapping, static_cast<std::uint64_t>(length.QuadPart));
+            section.release();
             return File{std::move(source)};
 #else
             std::ifstream stream(target, std::ios::binary);
