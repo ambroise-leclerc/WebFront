@@ -23,6 +23,20 @@
 
 namespace webfront::fs {
 
+#ifdef _WIN32
+namespace detail {
+/// Copies `count` bytes that may sit in a mapped view whose backing storage can disappear (a network share dropped, a
+/// removable medium ejected, a file truncated in place). Touching such a page raises EXCEPTION_IN_PAGE_ERROR, a
+/// structured exception that C++ handlers do not see and that only MSVC can catch with __try. ReadProcessMemory on this
+/// process copies with the kernel's own fault handling instead: it reports the failure by value on every Windows toolchain,
+/// with no exception to catch. Returns false when any byte could not be read.
+[[nodiscard]] inline bool copyReadable(void* destination, const void* source, std::size_t count) noexcept {
+    SIZE_T copied = 0;
+    return ::ReadProcessMemory(::GetCurrentProcess(), source, destination, count, &copied) != 0 && copied == count;
+}
+}  // namespace detail
+#endif
+
 class DeveloperFS {
 public:
     explicit DeveloperFS(std::filesystem::path project) {
@@ -58,13 +72,8 @@ private:
     // read is a map/unmap pair, not a per-byte price.
     class PublishedSource final : public ByteSource {
     public:
-        // A mapped view whose backing storage disappears (a network share dropped, a removable medium ejected, a file
-        // truncated in place) raises EXCEPTION_IN_PAGE_ERROR when it is touched, a structured exception that C++ handlers
-        // do not see and that only MSVC can catch with __try. ReadProcessMemory on this process copies with the kernel's own
-        // fault handling instead: it reports the failure by value on every Windows toolchain, with no exception to catch.
         static bool copyMapped(void* destination, const void* source, std::size_t count) noexcept {
-            SIZE_T copied = 0;
-            return ::ReadProcessMemory(::GetCurrentProcess(), source, destination, count, &copied) != 0 && copied == count;
+            return detail::copyReadable(destination, source, count);
         }
 
         PublishedSource(HANDLE opened, std::uint64_t length) : handle(opened), total(length) {

@@ -201,6 +201,11 @@ SCENARIO("The request log keeps what the HTTP layer says about a request (#542)"
             CHECK_FALSE(isRequestLine("[I] Call 12 to cppFunction [W]"));
         }
     }
+    GIVEN("a warning whose message spans several lines") {
+        THEN("it is kept whole, its continuation included, as the sink receives it in one call") {
+            CHECK(isRequestLine("[W] 12:00:00 | Route /api failed: first line\nsecond line\nthird line"));
+        }
+    }
     GIVEN("the rows of a hex dump, which carry no level tag") {
         THEN("they are left out") {
             CHECK_FALSE(isRequestLine("00000010  5b 57 5d 20 20 20 20 20  20 20 20 20 20 20 20 20  |[W]             |"));

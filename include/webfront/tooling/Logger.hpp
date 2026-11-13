@@ -94,8 +94,8 @@ private:
         std::shared_ptr<Entry> retired;  // strong, but its callback is released once nothing runs it
         std::size_t            generation = 0;
     };
-    // The callbacks being run by this thread, innermost last.
-    inline static thread_local std::vector<const Entry*> dispatchStack;
+    // Lock order: the registry mutex, then an entry's mutex (addOne asks an entry whether it is quiet); an entry never
+    // takes the registry mutex, and the wait registry's mutex is a leaf taken alone.
     // Contract: never remove a sink while holding a lock that the sink's callback takes (the removal would wait for a
     // callback that waits for that lock). WebLink removes its transport after releasing transportMutex.
     struct Entry : std::enable_shared_from_this<Entry> {
@@ -107,11 +107,9 @@ private:
                     return;
                 runners.push_back(std::this_thread::get_id());
             }
-            dispatchStack.push_back(this);
             struct Exit {
                 Entry& entry;
                 ~Exit() {
-                    dispatchStack.pop_back();
                     std::function<void(std::string_view)> released;  // destroyed after the lock is dropped
                     const std::lock_guard lock(entry.mutex);
                     entry.runners.erase(std::find(entry.runners.begin(), entry.runners.end(), std::this_thread::get_id()));
@@ -227,9 +225,9 @@ private:
             ++index;
         if (index == slots.size())
             slots.emplace_back();
-        slots[index].entry      = std::move(entry);
+        slots[index].entry   = std::move(entry);
         slots[index].retired = nullptr;
-        const auto generation   = ++slots[index].generation;
+        const auto generation = ++slots[index].generation;
         publish();
         return {index, generation};
     }
