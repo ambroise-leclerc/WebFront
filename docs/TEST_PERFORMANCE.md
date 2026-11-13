@@ -142,8 +142,18 @@ fewer native openings; it does not establish a whole-suite speedup.
 
 Failed navigation, native close, startup failures, watchdogs and cancellation remain real process tests. The two macOS
 executable/dylib registration orders remain separate images and processes. `ConsumerJasmine` modes and `Automation*`
-retain their own visible windows where they have not yet been grouped; no whole-suite budget of two or three visible
-openings is claimed. Hidden WKWebView tests require macOS 14+ and a WindowServer session.
+keep their own visible windows; no whole-suite budget of two or three visible openings is claimed.
+
+`ConsumerJasmine` was measured and deliberately not grouped (#544). On macOS 27 with WKWebView (warm caches, 8 cores),
+the eight modes that finish with a report (`pass`, `fail`, `empty`, `pending`, `unicode`, `report-bounds`,
+`async-diagnostics`, `file-services`) take 0.45 to 0.53 s each alone, except `file-services` at 1.53 s: 4.96 s in sequence
+and 4.15 s on four workers. Sharing one window would remove at most seven openings of roughly 0.3 s, and would turn
+parallel cases into one sequential session that holds four CTest processors; the gain is of the order of a second in a suite
+of 150 s. It would also need a multi-run `JasmineTest` (a public API that supports one page and one report per process) and
+the reports and CTest names kept by separate readers. Under parallel load a visible window can be throttled: with
+other windows running, `ConsumerJasmine-host` once hit its 60 s limit, while it passes in 5.2 s alone. No speedup is
+demonstrated, so the cases stay separate. `broken`, `close`, `hang`, the `host-*` modes (grants, timeouts, launch failures),
+`capture` and the lifecycle cases would stay separate in any case: their contract is a process of their own. Hidden WKWebView tests require macOS 14+ and a WindowServer session.
 The timed `ConsumerJasmine-capture` sequence reserves four CTest processors too, so another test cannot cover its
 visible window and throttle WebKit's rendering while it records.
 
