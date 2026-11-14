@@ -182,6 +182,10 @@ public:
         std::lock_guard lock(mutex);
         return phase == Phase::running && uiThread == std::this_thread::get_id();
     }
+    [[nodiscard]] std::optional<std::thread::id> interfaceThread() const {
+        std::lock_guard lock(mutex);
+        return phase == Phase::running ? std::optional{uiThread} : std::nullopt;
+    }
 
 private:
     mutable std::mutex                 mutex;
@@ -338,6 +342,12 @@ public:
     [[nodiscard]] bool onUIThread() const {
         const auto state = shared.lock();
         return state && state->onUIThread();
+    }
+    /// The interface thread of the running loop, which is the thread that called the frontend's open(); empty when no loop
+    /// runs. It identifies whose session this is: only the application that called open() on that thread owns the window.
+    [[nodiscard]] std::optional<std::thread::id> interfaceThread() const {
+        const auto state = shared.lock();
+        return state ? state->interfaceThread() : std::nullopt;
     }
     /// A sender completing on the interface thread; see the file comment for the other completions. Compose it with
     /// `ex::then` to run a function there. The operation always goes through the queue, even from the interface thread.

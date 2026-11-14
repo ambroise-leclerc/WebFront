@@ -1006,6 +1006,16 @@ public:
     #pragma warning(disable : 4702)
 #endif
     WindowAction openWindow(std::string_view htmlFilename) {
+        // The thread of this application's show(): requestClose() recognizes the session that is its own by it.
+        struct Showing {
+            std::atomic<std::thread::id>& thread;
+            explicit Showing(std::atomic<std::thread::id>& value) : thread(value) {
+                thread = std::this_thread::get_id();
+            }
+            ~Showing() {
+                thread = std::thread::id{};
+            }
+        } showing{showThread};
         if constexpr (requires(const ViewLaunch& launch) { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, launch); })
             Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, ViewLaunch{viewSecret, detail::browserOrigin(httpAddress, httpPort)});
         else if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions); })
@@ -1101,15 +1111,28 @@ public:
     /** @brief Asks the interface that show() is running to end, as if the user had closed the window; show() then
      * returns on its own thread. Callable from any thread while the application lives, never blocking.
      *
-     * Returns false when the request reached nothing: the frontend has no window of its own to close (the system
+     * Returns false when the request reached nothing: this application is not showing a window (the frontend's
+     * session, if any, belongs to another application), the frontend has no window of its own to close (the system
      * browser), no window is open yet, or it already closed. A caller that must end a session whose window may still be
      * opening repeats the request until show() has returned, as webfront::UIThread::stop() does.
      */
     bool requestClose() {
-        if constexpr (requires { { Frontend::requestClose() } -> std::same_as<bool>; })
+        if constexpr (requires { { Frontend::requestClose() } -> std::same_as<bool>; }) {
+            // The frontend is process-wide: a window it shows may belong to another application. This one asks only
+            // while its own show() runs and, for a frontend that publishes its interface thread, only if that thread is
+            // the one this show() runs on (a second open() refused because another session exists never owns it).
+            const auto shows = showThread.load();
+            if (shows == std::thread::id{})
+                return false;
+            if constexpr (requires { { Frontend::uiExecutor() } -> std::same_as<frontend::UIExecutor>; }) {
+                const auto owner = Frontend::uiExecutor().interfaceThread();
+                if (!owner || *owner != shows)
+                    return false;
+            }
             return Frontend::requestClose();
-        else
+        } else {
             return false;
+        }
     }
 
 protected:
@@ -1307,6 +1330,7 @@ private:
     const bool                                                               trustLoopbackClients;
     bool                                                                     developerEnvironment = false;
     std::atomic<bool>                                                        launched{false};  // start() was called
+    std::atomic<std::thread::id>                                             showThread{};  // the thread inside this application's Frontend::open(), if any
     std::atomic<bool>                                                        shown{false};     // show() was called, whether or not its server still runs
     mutable std::mutex                                                       linksMutex;  // guards webLinks, read from any thread
     struct Connection {

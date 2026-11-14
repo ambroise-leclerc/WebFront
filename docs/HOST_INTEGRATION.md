@@ -139,7 +139,10 @@ host.request_stop();                          // the user closed the window firs
 ```
 
 - `requestClose()` never blocks. It returns false when the request reached nothing: no window is open yet, it already
-  closed, or the frontend has no window of its own. A host that may ask before the window exists repeats the request
+  closed, the frontend has no window of its own, or the window is another application's. A frontend is process-wide, so
+  an application asks it only while its own `show()` runs and, when the frontend publishes its interface thread, only
+  if that thread is the one `show()` runs on: an application that shows nothing, or whose `open()` was refused
+  because another session exists, never closes that session. A host that may ask before the window exists repeats the request
   until `show()` has returned, as `UIThread::stop()` does. The window closes without asking the page (`beforeunload`).
 - Host work that must touch the toolkit runs on the interface thread through `app.uiExecutor().schedule()`, which is
   available while `show()` runs ([UIExecutor](../include/webfront/frontend/UIExecutor.hpp)).

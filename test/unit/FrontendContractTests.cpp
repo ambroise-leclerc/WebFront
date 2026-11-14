@@ -394,6 +394,39 @@ struct SlowCloseFrontend : ContractFrontend<frontend::Action::closeServerAfterOp
     }
 };
 
+// Counts the close requests that reach the frontend, which is process-wide: with two applications, only the one that
+// owns the window may cause one. `ownsExecutor` makes it publish its interface thread like the embedded frontends, and
+// refuse a second open() while a session exists; `hold` keeps an open() before that point until the test lets it go.
+template <bool ownsExecutor>
+struct SharedWindowFrontend : ContractFrontend<frontend::Action::closeServerAfterOpen> {
+    static inline std::atomic<int>  requests = 0;
+    static inline std::atomic<bool> hold     = false;
+
+    [[nodiscard]] static frontend::UIExecutor uiExecutor()
+        requires ownsExecutor
+    {
+        return frontend::uiExecutorHostOf<SharedWindowFrontend>().executor();
+    }
+    static void open(std::string_view port, std::string_view file) {
+        while (hold)
+            std::this_thread::yield();
+        if constexpr (ownsExecutor) {
+            auto& host = frontend::uiExecutorHostOf<SharedWindowFrontend>();
+            host.attach([] { });  // throws std::logic_error when another session runs
+            struct Detach {
+                ~Detach() { frontend::uiExecutorHostOf<SharedWindowFrontend>().close(); }
+            } detach;
+            ContractFrontend<frontend::Action::closeServerAfterOpen>::open(port, file);
+        } else {
+            ContractFrontend<frontend::Action::closeServerAfterOpen>::open(port, file);
+        }
+    }
+    static bool requestClose() {
+        ++requests;
+        return true;
+    }
+};
+
 // A window that ignores every close request, until the test closes it.
 struct DeafFrontend : ContractFrontend<frontend::Action::closeServerAfterOpen> {
     static bool requestClose() {
@@ -725,6 +758,79 @@ SCENARIO("UIThread joins its thread when a close request throws") {
                 REQUIRE(waitForWindow(ContractIoContext::current));
             }());
         }
+    }
+}
+
+SCENARIO("An application closes only the window that it shows") {
+    GIVEN("two applications of the same frontend, the first showing a window") {
+        using Shared     = SharedWindowFrontend<false>;
+        Shared::requests = 0;
+        Shared::hold     = false;
+        HostApp<Shared> first;
+        const auto      firstState = ContractIoContext::current;
+        std::jthread    firstShow([&] { first.show(); });
+        REQUIRE(waitForWindow(firstState));
+        HostApp<Shared> second;  // shows nothing
+        WHEN("the second asks to close") {
+            THEN("nothing reaches the frontend: the window is the first application's (#567)") {
+                CHECK_FALSE(second.requestClose());
+                CHECK(Shared::requests == 0);
+                std::lock_guard lock(firstState->mutex);
+                CHECK_FALSE(firstState->closeWindow);
+            }
+        }
+        WHEN("the first asks to close") {
+            THEN("its own request is forwarded") {
+                CHECK(first.requestClose());
+                CHECK(Shared::requests == 1);
+            }
+        }
+        {
+            std::lock_guard lock(firstState->mutex);
+            firstState->closeWindow = true;
+            firstState->changed.notify_all();
+        }
+    }
+    GIVEN("a second application whose show() runs while the first owns the interface thread") {
+        using Shared     = SharedWindowFrontend<true>;
+        Shared::requests = 0;
+        Shared::hold     = false;
+        HostApp<Shared> first;
+        const auto      firstState = ContractIoContext::current;
+        std::jthread    firstShow([&] { first.show(); });
+        REQUIRE(waitForWindow(firstState));
+        Shared::hold = true;  // the second open() waits before it is refused
+        HostApp<Shared>    second;
+        const auto         secondState = ContractIoContext::current;
+        std::exception_ptr refusal;
+        std::jthread       secondShow([&] {
+            try {
+                second.show();
+            } catch (...) {
+                refusal = std::current_exception();
+            }
+        });
+        WHEN("the second asks to close while its open() is pending") {
+            THEN("the first application's window is not closed (#567)") {
+                CHECK_FALSE(second.requestClose());
+                CHECK(Shared::requests == 0);
+            }
+        }
+        Shared::hold = false;
+        secondShow.join();
+        THEN("its open() was refused, and it still cannot close the first's window") {
+            CHECK(refusal != nullptr);
+            CHECK_FALSE(second.requestClose());
+            CHECK(Shared::requests == 0);
+            std::lock_guard lock(firstState->mutex);
+            CHECK_FALSE(firstState->closeWindow);
+        }
+        {
+            std::lock_guard lock(firstState->mutex);
+            firstState->closeWindow = true;
+            firstState->changed.notify_all();
+        }
+        (void)secondState;
     }
 }
 
