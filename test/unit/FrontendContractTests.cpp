@@ -9,6 +9,9 @@
 #include <chrono>
 #include <condition_variable>
 #include <exception>
+#include <filesystem>
+#include <fstream>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <mutex>
@@ -16,6 +19,7 @@
 #include <thread>
 #ifndef _WIN32
     #include <sys/wait.h>
+    #include <unistd.h>
 #endif
 
 namespace {
@@ -405,6 +409,8 @@ template <bool ownsExecutor>
 struct SharedWindowFrontend : ContractFrontend<frontend::Action::closeServerAfterOpen> {
     static inline std::atomic<int>  requests = 0;
     static inline std::atomic<bool> hold     = false;
+    static inline std::atomic<int>  waiting  = 0;  // open() calls kept by `hold`, counted when they start waiting
+    static inline std::function<void()> insideOpen;  // run on the interface thread once the session exists
 
     [[nodiscard]] static frontend::UIExecutor uiExecutor()
         requires ownsExecutor
@@ -412,14 +418,19 @@ struct SharedWindowFrontend : ContractFrontend<frontend::Action::closeServerAfte
         return frontend::uiExecutorHostOf<SharedWindowFrontend>().executor();
     }
     static void open(std::string_view port, std::string_view file) {
-        while (hold)
-            std::this_thread::yield();
+        if (hold) {
+            ++waiting;
+            while (hold)
+                std::this_thread::yield();
+        }
         if constexpr (ownsExecutor) {
             auto& host = frontend::uiExecutorHostOf<SharedWindowFrontend>();
             host.attach([] { });  // throws std::logic_error when another session runs
             struct Detach {
                 ~Detach() { frontend::uiExecutorHostOf<SharedWindowFrontend>().close(); }
             } detach;
+            if (insideOpen)
+                insideOpen();
             ContractFrontend<frontend::Action::closeServerAfterOpen>::open(port, file);
         } else {
             ContractFrontend<frontend::Action::closeServerAfterOpen>::open(port, file);
@@ -456,6 +467,17 @@ struct UninitializableFrontend : HostFrontend<> {
 
 template <typename Frontend>
 using HostApp = BasicWFWithFrontend<ContractNet, MockFileSystem<>, Frontend>;
+
+template <typename Predicate>
+bool eventually(Predicate predicate) {
+    const auto deadline = std::chrono::steady_clock::now() + coordinationTimeout;
+    while (!predicate()) {
+        if (std::chrono::steady_clock::now() > deadline)
+            return false;
+        std::this_thread::yield();
+    }
+    return true;
+}
 
 bool waitForWindow(const std::shared_ptr<LoopState>& state) {
     std::unique_lock lock(state->mutex);
@@ -838,6 +860,87 @@ SCENARIO("An application closes only the window that it shows") {
     }
 }
 
+SCENARIO("A show() that owns no session cannot close the session of another") {
+    GIVEN("a frontend without an executor, the first application showing and the second's open() pending") {
+        using Shared     = SharedWindowFrontend<false>;
+        Shared::requests = 0;
+        Shared::waiting  = 0;
+        Shared::hold     = false;
+        HostApp<Shared> first;
+        const auto      firstState = ContractIoContext::current;
+        std::jthread    firstShow([&] { first.show(); });
+        REQUIRE(waitForWindow(firstState));
+        Shared::hold = true;
+        HostApp<Shared> second;
+        const auto      secondState = ContractIoContext::current;
+        std::jthread    secondShow([&] { second.show(); });
+        REQUIRE(eventually([] { return Shared::waiting == 1; }));  // inside show(), not yet in the frontend
+        THEN("its close request is refused: show() running proves nothing about owning the window (#567)") {
+            CHECK_FALSE(second.requestClose());
+            CHECK(Shared::requests == 0);
+        }
+        Shared::hold = false;
+        for (const auto& state : {firstState, secondState}) {
+            std::lock_guard lock(state->mutex);
+            state->closeWindow = true;
+            state->changed.notify_all();
+        }
+    }
+    GIVEN("a second show() called from the interface thread of the first") {
+        using Shared      = SharedWindowFrontend<true>;
+        Shared::requests  = 0;
+        Shared::waiting   = 0;
+        Shared::hold      = false;
+        HostApp<Shared>    first;
+        const auto         firstState = ContractIoContext::current;
+        HostApp<Shared>    second;  // the frontend reads the state of the latest application: made after `first` captured its own
+        std::exception_ptr refusal;
+        Shared::insideOpen = [&] {
+            Shared::hold = true;
+            try {
+                second.show();  // the same thread, inside the first's open(): refused by the frontend
+            } catch (...) {
+                refusal = std::current_exception();
+            }
+            ContractIoContext::current = firstState;  // the mock reads the latest application's state: back to the first's
+        };
+        std::jthread firstShow([&] { first.show(); });
+        REQUIRE(eventually([] { return Shared::waiting == 1; }));
+        THEN("it cannot close the first's window while its open() is pending, though both run on one thread (#567)") {
+            CHECK_FALSE(second.requestClose());
+            CHECK(Shared::requests == 0);
+        }
+        Shared::hold = false;
+        REQUIRE(eventually([&] { return refusal != nullptr; }));
+        CHECK(eventually([&] { return ContractIoContext::current == firstState; }));  // the hook has finished
+        Shared::insideOpen = nullptr;
+        THEN("the first still owns its session and can close it") {
+            REQUIRE(waitForWindow(firstState));
+            CHECK(first.requestClose());
+            CHECK(Shared::requests == 1);
+        }
+        {
+            std::lock_guard lock(firstState->mutex);
+            firstState->closeWindow = true;
+            firstState->changed.notify_all();
+        }
+    }
+}
+
+SCENARIO("NativeOrBrowserFrontend forwards a close request when its native frontend has no executor") {
+    GIVEN("a native frontend that offers only requestClose()") {
+        using Either = frontend::NativeOrBrowserFrontendFor<HostFrontend<>, DeafFrontend>;
+        HostApp<Either> app;
+        const auto      state = ContractIoContext::current;
+        CHECK_FALSE(Either::publishesUIExecutor());
+        std::jthread show([&] { app.show(); });
+        REQUIRE(waitForWindow(state));
+        THEN("the empty executor is not taken for a session that is not there (#567)") {
+            CHECK(app.requestClose());
+        }
+    }
+}
+
 SCENARIO("UIThread::stop reports a window that does not close") {
     GIVEN("a window that ignores close requests") {
         UIThread<HostApp<DeafFrontend>> ui(WebFrontConfig{}, [](auto&) { });
@@ -858,17 +961,6 @@ SCENARIO("UIThread::stop reports a window that does not close") {
         }
         REQUIRE_NOTHROW(ui.stop());
     }
-}
-
-template <typename Predicate>
-bool eventually(Predicate predicate) {
-    const auto deadline = std::chrono::steady_clock::now() + coordinationTimeout;
-    while (!predicate()) {
-        if (std::chrono::steady_clock::now() > deadline)
-            return false;
-        std::this_thread::yield();
-    }
-    return true;
 }
 
 SCENARIO("A close request made for one session never closes the window of a later one") {
@@ -950,7 +1042,47 @@ SCENARIO("The system browser's loop ignores a close request made for an earlier 
     }
 }
 
-#ifndef _WIN32
+#if !defined(_WIN32)
+SCENARIO("The system browser's loop is up while its opener is still running") {
+    GIVEN("an opener that lives longer than the close request") {
+        namespace fs = std::filesystem;
+        if (browser::isWSL())
+            SUCCEED("WSL opens the page through PowerShell, not through a command this test can replace");
+        else {
+            const auto directory = fs::temp_directory_path() / ("webfront-opener-" + std::to_string(::getpid()));
+            fs::create_directories(directory);
+            for (const char* name : {"xdg-open", "open"}) {
+                std::ofstream script(directory / name);
+                script << "#!/bin/sh\nsleep 3\n";
+                fs::permissions(directory / name, fs::perms::owner_all);
+            }
+            const std::string path = directory.string() + ":" + (std::getenv("PATH") ? std::getenv("PATH") : "");
+            const std::string saved = std::getenv("PATH") ? std::getenv("PATH") : "";
+            ::setenv("PATH", path.c_str(), 1);
+            using Browser = frontend::BrowserWithUILoopFrontend;
+            Browser::requestStop();  // spend a request that an earlier test may have left pending
+            Browser::loop("127.0.0.1", "9002", "index.html", +[](const std::string&) { });
+            std::atomic<bool> closed{false};
+            std::jthread      host([&] {
+                // The host's own thread: the loop must be there to receive the request well before the opener ends.
+                closed = eventually([] { return Browser::requestClose(Browser::uiExecutor().session()); });
+                if (!closed)
+                    Browser::requestStop();
+            });
+            const auto start = std::chrono::steady_clock::now();
+            Browser::open("9002", "index.html");
+            const auto elapsed = std::chrono::steady_clock::now() - start;
+            host.join();
+            ::setenv("PATH", saved.c_str(), 1);
+            fs::remove_all(directory);
+            THEN("the loop ran and ended at the request, not after the opener (#567)") {
+                CHECK(closed);
+                CHECK(elapsed < 2500ms);
+            }
+        }
+    }
+}
+
 SCENARIO("The system browser opener is started without being waited for") {
     GIVEN("a command that lives for two seconds") {
         const auto start = std::chrono::steady_clock::now();

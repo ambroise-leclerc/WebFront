@@ -148,7 +148,8 @@ struct BrowserWithUILoopFrontend {
         open("127.0.0.1", port, file);
     }
     static void open(std::string_view address, std::string_view port, std::string_view file) {
-        loop(address, port, file, browser::launch);
+        // The opener is not waited for: it can live as long as the browser, and requestClose() must find the loop meanwhile.
+        loop(address, port, file, browser::launchWithoutWaiting);
     }
     static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy&) {
         open(address, port, file);
@@ -299,6 +300,14 @@ struct NativeOrBrowserFrontendFor {
             return usesNativeWindow();
         else
             return false;
+    }
+
+    /// Whether the frontend in use publishes an interface thread at all (uiExecutor() is not just an empty handle): the
+    /// owner of a session is told apart by it only then.
+    [[nodiscard]] static bool publishesUIExecutor() {
+        if (usesNativeWindow())
+            return requires { { Native::uiExecutor() } -> std::same_as<UIExecutor>; };
+        return requires { { Browser::uiExecutor() } -> std::same_as<UIExecutor>; };
     }
 
     /// The interface thread of the window in use; the browser path has one only with its loop mode.

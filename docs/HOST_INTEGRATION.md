@@ -144,7 +144,7 @@ host.request_stop();                          // the user closed the window firs
   closed, the frontend has no window of its own, or the window is another application's. A frontend is process-wide, so
   an application asks it only while its own `show()` runs and, when the frontend publishes its interface thread, only
   if that thread is the one `show()` runs on: an application that shows nothing, or whose `open()` was refused
-  because another session exists, never closes that session. A host that may ask before the window exists repeats the request
+  because another session exists, never closes that session. Ownership is taken by one `show()` at a time per frontend type, so a `show()` that is only waiting to be refused (or called again from the interface thread) owns nothing. A frontend without an executor cannot name its session: a request can still reach a window opened by another application of that frontend in the instant between the check and the call, which is why every embedded frontend publishes one. A host that may ask before the window exists repeats the request
   until `show()` has returned, as `UIThread::stop()` does. The window closes without asking the page (`beforeunload`).
 - Host work that must touch the toolkit runs on the interface thread through `app.uiExecutor().schedule()`, which is
   available while `show()` runs ([UIExecutor](../include/webfront/frontend/UIExecutor.hpp)).

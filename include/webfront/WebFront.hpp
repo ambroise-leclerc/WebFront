@@ -201,6 +201,12 @@ public:
 };
 
 namespace detail {
+/// The application that currently shows a window through `Frontend`, process-wide like the frontend itself: only one
+/// show() at a time can own it, so a second application's request never reaches the first's window.
+template <typename Frontend>
+struct FrontendSessionOwner {
+    static inline std::atomic<const void*> owner{nullptr};
+};
 
 /// True for the loopback address of either family, including an IPv4 loopback seen through a dual-stack socket (::ffff:127.0.0.1).
 template <typename Address>
@@ -1007,15 +1013,25 @@ public:
 #endif
     WindowAction openWindow(std::string_view htmlFilename) {
         // The thread of this application's show(): requestClose() recognizes the session that is its own by it.
+        // Only the show() that takes the frontend's session ownership can be asked to close; one that finds it taken (another
+        // application's window, or its own interface thread calling show() again) is refused by the frontend and owns nothing.
         struct Showing {
             BasicWF& self;
-            explicit Showing(BasicWF& owner) : self(owner) {
-                self.showThread = std::this_thread::get_id();
-                ++self.showEpoch;  // odd: showing
+            bool     owns;
+            explicit Showing(BasicWF& owner) : self(owner), owns(false) {
+                const void* none = nullptr;
+                owns             = detail::FrontendSessionOwner<Frontend>::owner.compare_exchange_strong(none, &self);
+                if (owns) {
+                    self.showThread = std::this_thread::get_id();
+                    ++self.showEpoch;  // odd: owns the session
+                }
             }
             ~Showing() {
-                ++self.showEpoch;  // even: not showing; a reader that saw the odd value and sees this one reads nothing
-                self.showThread = std::thread::id{};
+                if (owns) {
+                    ++self.showEpoch;  // even: a reader that saw the odd value and sees this one reads nothing
+                    self.showThread = std::thread::id{};
+                    detail::FrontendSessionOwner<Frontend>::owner = nullptr;
+                }
             }
         } showing{*this};
         if constexpr (requires(const ViewLaunch& launch) { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, launch); })
@@ -1120,23 +1136,28 @@ public:
      */
     bool requestClose() {
         if constexpr (requires { { Frontend::requestClose() } -> std::same_as<bool>; }) {
-            // The frontend is process-wide: a window it shows may belong to another application. This one asks only
-            // while its own show() runs and, for a frontend that publishes its interface thread, only if that thread is
-            // the one this show() runs on (a second open() refused because another session exists never owns it).
+            // The frontend is process-wide: a window it shows may belong to another application. Only the show() that took
+            // the session's ownership (an odd epoch) asks; and a frontend that publishes its interface thread must also
+            // be running a session on that show()'s thread. A second open() refused for another session owns nothing.
             const auto epoch = showEpoch.load();
             if (epoch % 2 == 0)
                 return false;
-            const auto shows = showThread.load();
             if constexpr (requires { { Frontend::uiExecutor() } -> std::same_as<frontend::UIExecutor>; }) {
-                const auto session = Frontend::uiExecutor().session();
-                // This show() was running throughout the reads (same epoch), and its thread is busy inside open(): a
-                // session on that thread is this application's, not a later application's on a reused thread.
-                if (!session || session->thread != shows || showEpoch.load() != epoch)
-                    return false;
-                // Another application may open a window between this check and the toolkit call: a frontend that takes
-                // the session checks it again where the request runs, so that it never closes a later session's window.
-                if constexpr (requires { { Frontend::requestClose(session) } -> std::same_as<bool>; })
-                    return Frontend::requestClose(session);
+                bool publishesSessions = true;  // false: the frontend in use has no executor (an empty handle), so no session to name
+                if constexpr (requires { { Frontend::publishesUIExecutor() } -> std::same_as<bool>; })
+                    publishesSessions = Frontend::publishesUIExecutor();
+                if (publishesSessions) {
+                    const auto shows   = showThread.load();
+                    const auto session = Frontend::uiExecutor().session();
+                    // The same epoch after the reads: this show() owned the session throughout, and its thread is busy
+                    // inside open(), so a session on that thread is this application's.
+                    if (!session || session->thread != shows || showEpoch.load() != epoch)
+                        return false;
+                    // Another application may open a window between this check and the toolkit call: a frontend that
+                    // takes the session checks it again where the request runs, so that it never closes a later one.
+                    if constexpr (requires { { Frontend::requestClose(session) } -> std::same_as<bool>; })
+                        return Frontend::requestClose(session);
+                }
             }
             return showEpoch.load() == epoch && Frontend::requestClose();
         } else {
