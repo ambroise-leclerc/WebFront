@@ -930,7 +930,7 @@ const Scenario macOSACLs{"macOS ACLs that let another user change a directory re
 const Scenario replacedFile{"A replaced file keeps the permission bits it has at the commit", [] {
     Sandbox           sandbox;
     fs::NativeStorage storage(sandbox.root);
-    constexpr auto    privateBits = stdfs::perms::owner_read | stdfs::perms::owner_write;
+    static constexpr auto    privateBits = stdfs::perms::owner_read | stdfs::perms::owner_write;
     given("a private file", [&] {
         writeDisk(sandbox.root / "private.txt", "old");
         stdfs::permissions(sandbox.root / "private.txt", privateBits, stdfs::perm_options::replace);

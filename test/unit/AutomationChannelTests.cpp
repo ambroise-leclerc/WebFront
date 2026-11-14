@@ -69,7 +69,7 @@ const Scenario nativeAttachment{"Native attachment sockets cannot be inherited b
 #ifdef _WIN32
             WSASetLastError(index == 0 ? WSAEINTR : WSAEWOULDBLOCK);
 #else
-            constexpr std::array errors{EINTR, EAGAIN, EWOULDBLOCK};
+            static constexpr std::array errors{EINTR, EAGAIN, EWOULDBLOCK};
             errno = errors[static_cast<std::size_t>(index)];
 #endif
         };

@@ -150,7 +150,7 @@ void serveEmbedded(std::string content, std::string_view encoding = {}) {
 } // namespace
 
 const Scenario rangeHeader{"A Range header selects one part of a representation", [] {
-    constexpr std::uint64_t size = 1000;
+    static constexpr std::uint64_t size = 1000;
     given("well-formed single ranges", [&] {
         then("first-last selects the bytes, last being clamped to the end", [&] {
             expectSelection(withRange("bytes=0-0"), size, {Outcome::partial, 0, 1});

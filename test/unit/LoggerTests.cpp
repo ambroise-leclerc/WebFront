@@ -161,7 +161,7 @@ const Scenario fallbackLoggerRegistration{"Fallback logger registration and deli
         if (line.find("stable record") != std::string_view::npos)
             ++seen;
     });
-    constexpr unsigned    each = 2000;
+    static constexpr unsigned    each = 2000;
     auto                  emit = [] {
         for (unsigned i = 0; i < each; ++i) {
             log::info("stable record");

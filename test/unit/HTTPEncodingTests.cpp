@@ -69,7 +69,7 @@ struct AssetServerNet : Net {
 
     static auto Receive(Socket&, MutableBuffer buffer) {
         return networking::ex::then(networking::ex::just(), [buffer] {
-            constexpr std::string_view request = "GET /asset.js HTTP/1.1\r\nHost: localhost\r\n\r\n";
+            static constexpr std::string_view request = "GET /asset.js HTTP/1.1\r\nHost: localhost\r\n\r\n";
             std::copy(request.begin(), request.end(), static_cast<char*>(buffer.data()));
             return request.size();
         });

@@ -158,8 +158,8 @@ const Scenario interfaceThread{"The interface thread runs scheduled operations",
             });
         });
         when("operations are scheduled by many threads", [&] {
-            constexpr int  threads = 4;
-            constexpr int  each    = 50;
+            static constexpr int  threads = 4;
+            static constexpr int  each    = 50;
             Observed       observed;
             std::mutex     keep;
             std::vector<std::unique_ptr<std::thread>> workers;
@@ -405,7 +405,7 @@ const Scenario shutdownWhile{"Shutdown while operations are racing stops or runs
             auto                    executor = loop.host.executor();
             Observed                observed;
             ex::inplace_stop_source stop;
-            constexpr int           count = 100;
+            static constexpr int           count = 100;
             using Op = Connected<decltype(executor.schedule())>;
             std::vector<std::unique_ptr<Op>> ops;
             for (int i = 0; i < count; ++i)
@@ -426,7 +426,7 @@ const Scenario linuxInterface{"The Linux interface loop coalesces wake-ups witho
     webfront::frontend::detail::uiloop::WakeEvent wake;
     given("a wake event shared by several producers", [&] {
         require(wake.consume() == 0);
-        constexpr int             producers = 4, signals = 10000;
+        static constexpr int             producers = 4, signals = 10000;
         std::vector<std::jthread> threads;
         for (int i = 0; i < producers; ++i)
             threads.emplace_back([&] {

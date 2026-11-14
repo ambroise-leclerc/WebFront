@@ -111,7 +111,7 @@ const Scenario handWrittenDescriptors{"Hand-written descriptors parse and format
             double       ratio{0.12345678901234567};
             std::int64_t count{};
         };
-        constexpr double            ratioMax = 0.1234567890123456;
+        static constexpr double            ratioMax = 0.1234567890123456;
         forms::Description<Precise> precise{
             .name   = "Precise",
             .fields = {forms::field("ratio", &Precise::ratio, "Ratio", forms::Bounds{0, 0.5}),

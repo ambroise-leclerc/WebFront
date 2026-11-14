@@ -352,7 +352,7 @@ struct UpgradingNet : networking::NetworkingMock {
 
     static auto Receive(Socket&, MutableBuffer buffer) {
         return networking::ex::then(networking::ex::just(), [buffer] {
-            constexpr string_view request{"GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+            static constexpr string_view request{"GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                                           "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"};
             copy(request.begin(), request.end(), static_cast<char*>(buffer.data()));
             return request.size();

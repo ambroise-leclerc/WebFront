@@ -135,7 +135,7 @@ const Scenario downloadsAsk{"Downloads that ask for the same name before their f
         });
     });
     given("many threads asking for the same name at once", [&] {
-        constexpr std::size_t                threads = 16;
+        static constexpr std::size_t                threads = 16;
         std::vector<std::filesystem::path> granted(threads);
         std::vector<std::thread>           workers;
         for (std::size_t index = 0; index < threads; ++index)

@@ -602,7 +602,7 @@ const Scenario webSocketFramesEncode{"WebSocket frames encode extended payload l
         unsigned lengthField;
         size_t   headerSize;
     };
-    constexpr std::array<Expected, 4> cases{{{125, 125, 2}, {126, 126, 4}, {65535, 126, 4}, {65536, 127, 10}}};
+    static constexpr std::array<Expected, 4> cases{{{125, 125, 2}, {126, 126, 4}, {65535, 126, 4}, {65536, 127, 10}}};
     for (const auto& expected : cases) {
         const std::string     text(expected.size, 'x');
         websocket::Frame<Net> frame(text);

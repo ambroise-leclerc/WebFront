@@ -427,7 +427,7 @@ const Scenario browserStops{"A browser that stops reading bounds the diagnostic 
 #if defined(WEBFRONT_USE_MDDLOG) && WEBFRONT_USE_MDDLOG
     const auto before = log::transportHealth();
 #endif
-    constexpr size_t messages = 10240;
+    static constexpr size_t messages = 10240;
     for (size_t index = 0; index < messages; ++index) {
         log::info("unread diagnostic");
         if (index % 64 == 63) drainBrowserLogs();  // Keep the rings below saturation.

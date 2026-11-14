@@ -4,6 +4,7 @@
 #include <webfront/networking/NetworkingMock.hpp>
 #include <webfront/weblink/Messages.hpp>
 
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <span>

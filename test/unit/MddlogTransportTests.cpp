@@ -248,7 +248,7 @@ const Scenario browserTransports{"Browser transports receive the context capture
         string_view        call;
     };
     // ADR-003 Decision 6: two links, CallId 1 in both directions, then call 2 and disconnection.
-    constexpr array<Event, 7> events{
+    static constexpr array<Event, 7> events{
         {{"jsFunction", "1", log::CallDirection::CppToJs, "1"},
          {"jsFunction", "2", log::CallDirection::CppToJs, "1"},
          {"jsFunction", "2", log::CallDirection::CppToJs, "1"},
@@ -321,7 +321,7 @@ const Scenario blockedTransport{"A blocked transport never blocks producers; sat
 
     log::info("blocks the consumer");
     require(gate->waitEntered());
-    constexpr size_t overflow = 20;
+    static constexpr size_t overflow = 20;
     size_t           written  = 0;
     size_t           refused  = 0;
     for (size_t index = 0; index < log::transportRingCapacity + overflow; ++index) {
