@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 using namespace webfront::bdd;
 
@@ -19,8 +20,9 @@ const Scenario pathsBrowser{"Paths from the browser stay inside their directory"
     });
     given("unsafe paths", [&] {
         then("they are rejected", [&] {
-            for (string path : initializer_list<string>{"", "/etc/passwd", "../x", "a/../../x", "a/./b", "a//b", "a/", "..", "...", "C:/x", "c:x",
-                                                        "a\\..\\b", "a?.js", "a*.js", "a<b", "a>b", "a|b", "a\"b", "main..html", "a/b..c/d", string("a\0b", 3), string(4097, 'a')}) {
+            const vector<string> paths{"", "/etc/passwd", "../x", "a/../../x", "a/./b", "a//b", "a/", "..", "...", "C:/x", "c:x",
+                                       "a\\..\\b", "a?.js", "a*.js", "a<b", "a>b", "a|b", "a\"b", "main..html", "a/b..c/d", string("a\0b", 3), string(4097, 'a')};
+            for (const auto& path : paths) {
                 auto scope = info(path);
                 requireThrows<invalid_argument>([&] { fs::safeRelativePath(path); });
             }
