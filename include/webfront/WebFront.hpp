@@ -1141,7 +1141,7 @@ public:
      * opening repeats the request until show() has returned, as webfront::UIThread::stop() does.
      */
     bool requestClose() {
-        if constexpr (requires { { Frontend::requestClose() } -> std::same_as<bool>; }) {
+        if constexpr (frontend::CanRequestClose<Frontend>) {
             // The frontend is process-wide: a window it shows may belong to another application. Only the show() that took
             // the session's ownership (an odd epoch) asks; and a frontend that publishes its interface thread must also
             // be running a session on that show()'s thread. A second open() refused for another session owns nothing.
@@ -1165,7 +1165,12 @@ public:
                         return Frontend::requestClose(session);
                 }
             }
-            return showEpoch.load() == epoch && Frontend::requestClose();
+            if (showEpoch.load() != epoch)
+                return false;
+            if constexpr (requires { { Frontend::requestClose() } -> std::same_as<bool>; })
+                return Frontend::requestClose();
+            else
+                return Frontend::requestClose(std::nullopt);  // only the form that takes a session, and none is published
         } else {
             return false;
         }

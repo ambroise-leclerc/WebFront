@@ -442,6 +442,20 @@ struct SharedWindowFrontend : ContractFrontend<frontend::Action::closeServerAfte
     }
 };
 
+// Releases the held open() calls when the scope ends, also by a failed REQUIRE, so that no joined thread stays blocked.
+// Declare a ReleaseHold after the threads that may wait on it: it is destroyed first, before their join.
+template <typename Frontend>
+struct HoldGuard {
+    HoldGuard() { Frontend::hold = true; }
+    ~HoldGuard() { Frontend::hold = false; }
+    HoldGuard(const HoldGuard&) = delete;
+    HoldGuard& operator=(const HoldGuard&) = delete;
+};
+template <typename Frontend>
+struct ReleaseHold {
+    ~ReleaseHold() { Frontend::hold = false; }
+};
+
 // A window that ignores every close request, until the test closes it.
 struct DeafFrontend : ContractFrontend<frontend::Action::closeServerAfterOpen> {
     static bool requestClose() {
@@ -825,7 +839,7 @@ SCENARIO("An application closes only the window that it shows") {
         const auto      firstState = ContractIoContext::current;
         std::jthread    firstShow([&] { first.show(); });
         REQUIRE(waitForWindow(firstState));
-        Shared::hold = true;  // the second open() waits before it is refused
+        const HoldGuard<Shared> held;  // the second open() would wait before it is refused
         HostApp<Shared>    second;
         const auto         secondState = ContractIoContext::current;
         std::exception_ptr refusal;
@@ -836,6 +850,7 @@ SCENARIO("An application closes only the window that it shows") {
                 refusal = std::current_exception();
             }
         });
+        const ReleaseHold<Shared> release;
         WHEN("the second asks to close while its open() is pending") {
             THEN("the first application's window is not closed (#567)") {
                 CHECK_FALSE(second.requestClose());
@@ -956,7 +971,7 @@ SCENARIO("A show() that cannot own the session is refused before it opens a wind
         const auto      firstState = ContractIoContext::current;
         std::jthread    firstShow([&] { first.show(); });
         REQUIRE(waitForWindow(firstState));
-        Shared::hold = true;
+        std::optional<HoldGuard<Shared>> held{std::in_place};
         HostApp<Shared>   second;
         const auto        secondState = ContractIoContext::current;
         std::atomic<bool> refused{false};
@@ -967,6 +982,7 @@ SCENARIO("A show() that cannot own the session is refused before it opens a wind
                 refused = true;
             }
         });
+        const ReleaseHold<Shared> release;
         // Refused at once, or (without the ownership rule) held in front of the frontend.
         REQUIRE(eventually([&] { return refused.load() || Shared::waiting == 1; }));
         {
@@ -975,7 +991,7 @@ SCENARIO("A show() that cannot own the session is refused before it opens a wind
             firstState->changed.notify_all();
         }
         firstShow.join();  // the first session is over before the second could attach
-        Shared::hold = false;
+        held.reset();
         {
             std::lock_guard lock(secondState->mutex);  // releases a window that opens anyway, so that the test ends
             secondState->closeWindow = true;
@@ -985,6 +1001,51 @@ SCENARIO("A show() that cannot own the session is refused before it opens a wind
         THEN("it never opens a window that the host could not close (#567)") {
             CHECK(refused);
         }
+    }
+}
+
+// A frontend that offers only the close request that takes a session (no requestClose() without argument).
+struct SessionOnlyFrontend : ContractFrontend<frontend::Action::closeServerAfterOpen> {
+    static inline std::atomic<int> requests = 0;
+    [[nodiscard]] static frontend::UIExecutor uiExecutor() {
+        return frontend::uiExecutorHostOf<SessionOnlyFrontend>().executor();
+    }
+    static void open(std::string_view port, std::string_view file) {
+        auto& host = frontend::uiExecutorHostOf<SessionOnlyFrontend>();
+        host.attach([] { });
+        struct Detach {
+            ~Detach() { frontend::uiExecutorHostOf<SessionOnlyFrontend>().close(); }
+        } detach;
+        ContractFrontend<frontend::Action::closeServerAfterOpen>::open(port, file);
+    }
+    static bool requestClose(std::optional<frontend::UISession> session) {
+        if (!session || session != uiExecutor().session())
+            return false;
+        ++requests;
+        const auto      state = ContractIoContext::current;
+        std::lock_guard lock(state->mutex);
+        state->closeWindow = true;
+        state->changed.notify_all();
+        return true;
+    }
+};
+static_assert(frontend::CanRequestClose<SessionOnlyFrontend>);
+static_assert(frontend::endsOnRequest<SessionOnlyFrontend>);
+
+SCENARIO("A frontend that offers only the close request with a session can be closed") {
+    GIVEN("an application shown through it") {
+        SessionOnlyFrontend::requests = 0;
+        HostApp<SessionOnlyFrontend> app;
+        const auto                   state = ContractIoContext::current;
+        std::jthread                 show([&] { app.show(); });
+        REQUIRE(waitForWindow(state));
+        THEN("requestClose() reaches it with the session of its show() (#567)") {
+            CHECK(eventually([&] { return app.requestClose(); }));
+            CHECK(SessionOnlyFrontend::requests == 1);
+        }
+        std::lock_guard lock(state->mutex);
+        state->closeWindow = true;
+        state->changed.notify_all();
     }
 }
 

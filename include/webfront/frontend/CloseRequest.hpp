@@ -26,12 +26,22 @@ inline constexpr bool requiresMainThread = [] {
         return false;
 }();
 
+/// @brief True when the frontend offers a close request in either documented form: `requestClose()`, or
+/// `requestClose(std::optional<UISession>)` for a frontend that publishes its interface thread (with a default argument,
+/// both forms exist).
+template <typename Frontend>
+concept CanRequestClose = requires {
+    { Frontend::requestClose() } -> std::same_as<bool>;
+} || requires(std::optional<UISession> session) {
+    { Frontend::requestClose(session) } -> std::same_as<bool>;
+};
+
 /// @brief True when `Frontend::requestClose()` exists and can end every session the frontend opens. A frontend whose
 /// session cannot always be ended that way (a fallback that waits for the console) declares
 /// `static constexpr bool endsOnRequest = false`; webfront::UIThread, which must join its thread, refuses it.
 template <typename Frontend>
 inline constexpr bool endsOnRequest = [] {
-    if constexpr (!requires { { Frontend::requestClose() } -> std::same_as<bool>; })
+    if constexpr (!CanRequestClose<Frontend>)
         return false;
     else if constexpr (requires { { Frontend::endsOnRequest } -> std::convertible_to<bool>; })
         return static_cast<bool>(Frontend::endsOnRequest);
