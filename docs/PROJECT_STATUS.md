@@ -133,7 +133,8 @@ are retained for investigation; diagnostics alone do not establish a correction.
 - A synchronous infinite loop in a spec blocks the page hosting `wf test`; the native test
   driver's watchdog terminates stalled runs with failure. Windows file reads beyond 260
   characters remain unsupported (#349).
-- Native windows require their platform event loop and the main thread. Hidden WKWebView tests
+- Native windows require their platform event loop; WKWebView, WebKitGTK and CEF also require the main thread, while
+  WebView2 runs on any thread that is not already MTA (`webfront::UIThread`). Hidden WKWebView tests
   require macOS 14+ and a WindowServer session. Automated CEF coverage is Linux/Xvfb;
   Windows/macOS CEF deployment is not qualified. WebView2 needs its installed Evergreen runtime;
   fixed-version runtime packaging, application installers and accessibility remain application work.

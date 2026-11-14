@@ -511,6 +511,34 @@ SCENARIO("The system browser can run an interface-thread loop on the calling thr
             }
         }
     }
+    GIVEN("a host's close request while no loop runs") {
+        THEN("it reaches nothing and is not remembered for the next loop (#567)") {
+            CHECK_FALSE(Browser::requestClose());
+            std::jthread client([&] {
+                const auto executor = Browser::uiExecutor();
+                // The loop of this test ends only because the client asks, after it has run: a remembered request would end it first.
+                const bool ran = waitFor([&] { return executor.available(); });
+                CHECK(ran);
+                Browser::requestStop();
+            });
+            Browser::loop("127.0.0.1", "9002", "index.html", fakeLaunch);
+            client.join();
+        }
+        THEN("a request made while it runs ends it, and one made after it is refused again") {
+            std::atomic<bool> accepted{false};
+            std::jthread      client([&] {
+                const auto executor = Browser::uiExecutor();
+                if (waitFor([&] { return executor.available(); }))
+                    accepted = Browser::requestClose();
+                else
+                    Browser::requestStop();
+            });
+            Browser::loop("127.0.0.1", "9002", "index.html", fakeLaunch);
+            client.join();
+            CHECK(accepted);
+            CHECK_FALSE(Browser::requestClose());
+        }
+    }
     GIVEN("a stop requested before the loop starts") {
         Browser::requestStop();
         THEN("the loop ends at once") {

@@ -375,6 +375,25 @@ struct HostFrontend : ContractFrontend<frontend::Action::closeServerAfterOpen, f
     }
 };
 
+// A window that accepts a close request only on its Nth attempt, as a slow or busy interface thread does; with
+// throwing, the earlier attempts throw instead of returning false.
+template <int attempts, bool throwing = false>
+struct SlowCloseFrontend : ContractFrontend<frontend::Action::closeServerAfterOpen> {
+    static inline std::atomic<int> requests = 0;
+    static bool                    requestClose() {
+        const auto      state = ContractIoContext::current;
+        std::lock_guard lock(state->mutex);
+        if (++requests < attempts) {
+            if constexpr (throwing)
+                throw std::runtime_error("transient close failure");
+            return false;
+        }
+        state->closeWindow = true;
+        state->changed.notify_all();
+        return true;
+    }
+};
+
 // A window that ignores every close request, until the test closes it.
 struct DeafFrontend : ContractFrontend<frontend::Action::closeServerAfterOpen> {
     static bool requestClose() {
@@ -623,12 +642,88 @@ SCENARIO("start() is called once and replaces show()") {
             CHECK_FALSE(state->stopped);
         }
     }
+    GIVEN("a window frontend that can also launch, shown and closed so that show joined its server") {
+        struct Window : HostFrontend<> {
+            static void launch(std::string_view, std::string_view, std::string_view) {
+                LaunchRecorder::url = "launched";
+            }
+        };
+        LaunchRecorder::url.clear();
+        HostApp<Window> app;
+        const auto      state = ContractIoContext::current;
+        {
+            std::jthread host([&] {
+                if (waitForWindow(state))
+                    while (!app.requestClose())
+                        std::this_thread::yield();
+            });
+            app.show();
+        }
+        THEN("a later start is refused although no server thread is left to see (#567)") {
+            REQUIRE_THROWS_AS(app.start(), std::logic_error);
+            CHECK(LaunchRecorder::url.empty());
+        }
+    }
+    GIVEN("a launch that failed") {
+        LaunchRecorder::fail = true;
+        HostApp<LaunchRecorder> app;
+        REQUIRE_THROWS_WITH(app.start(), "no browser to launch");
+        LaunchRecorder::fail = false;
+        THEN("the server is stopped and a new attempt is accepted") {
+            REQUIRE_NOTHROW(app.start());
+        }
+    }
     GIVEN("a frontend whose launch takes the content policy") {
         PolicyLaunchRecorder::receivedPolicy = false;
         HostApp<PolicyLaunchRecorder> app;
         app.start();
         THEN("start gives it the application's policy") {
             CHECK(PolicyLaunchRecorder::receivedPolicy);
+        }
+    }
+}
+
+SCENARIO("UIThread waits for a window that takes longer than one retry period to close") {
+    GIVEN("a window that accepts the request on its fifth attempt (about forty milliseconds)") {
+        using Slow     = SlowCloseFrontend<5>;
+        Slow::requests = 0;
+        THEN("the destructor waits for it instead of reporting a stall and leaving its thread joinable (#567)") {
+            std::shared_ptr<LoopState> state;
+            {
+                UIThread<HostApp<Slow>> ui(WebFrontConfig{}, [](auto&) { });
+                state = ContractIoContext::current;
+                REQUIRE(waitForWindow(state));
+            }  // an overflowing patience made this throw inside the destructor and terminate the process
+            std::lock_guard lock(state->mutex);
+            CHECK(state->closeWindow);
+            CHECK(state->stopped);  // show() returned and the application was destroyed after the window closed
+            CHECK(Slow::requests >= 5);
+        }
+    }
+}
+
+SCENARIO("UIThread joins its thread when a close request throws") {
+    GIVEN("a frontend whose first close requests throw") {
+        using Flaky     = SlowCloseFrontend<3, true>;
+        Flaky::requests = 0;
+        UIThread<HostApp<Flaky>> ui(WebFrontConfig{}, [](auto&) { });
+        REQUIRE(waitForWindow(ContractIoContext::current));
+        WHEN("the host stops the session") {
+            THEN("stop repeats the request until the window closes and joins") {
+                REQUIRE_NOTHROW(ui.stop());
+                CHECK_FALSE(ui.running());
+                CHECK(Flaky::requests >= 3);
+            }
+        }
+    }
+    GIVEN("a frontend whose close requests throw until the object is destroyed") {
+        using Flaky     = SlowCloseFrontend<4, true>;
+        Flaky::requests = 0;
+        THEN("the destructor still joins") {
+            REQUIRE_NOTHROW([&] {
+                UIThread<HostApp<Flaky>> ui(WebFrontConfig{}, [](auto&) { });
+                REQUIRE(waitForWindow(ContractIoContext::current));
+            }());
         }
     }
 }

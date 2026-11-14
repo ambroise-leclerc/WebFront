@@ -39,25 +39,12 @@ class UILoopStop {
 public:
     /// Asks the loop to end; a request made before the loop starts ends it as soon as it starts.
     void request() noexcept {
-        std::function<void()> wake;
-        {
-            std::lock_guard lock(mutex);
-            requested = true;
-            wake      = quit;
-            if (wake)
-                ++calls;  // disarm() waits for it: the quit function uses what the loop frees after disarming
-        }
-        if (!wake)
-            return;
-        struct Done {
-            UILoopStop& self;
-            ~Done() {
-                std::lock_guard lock(self.mutex);
-                --self.calls;
-                self.callsDone.notify_all();
-            }
-        } done{*this};
-        wake();
+        end(false);
+    }
+    /// Asks the loop to end only if one runs (armed); false, and nothing remembered, otherwise. For a host's close
+    /// request, which concerns the session in progress and never the next one.
+    bool requestIfRunning() noexcept {
+        return end(true);
     }
     /// True once request() was called and until the next run starts.
     [[nodiscard]] bool requestedStop() const {
@@ -80,6 +67,32 @@ public:
     }
 
 private:
+    // Records the request and calls the quit function outside the lock; false when `onlyIfRunning` and none is armed.
+    bool end(bool onlyIfRunning) noexcept {
+        std::function<void()> wake;
+        {
+            std::lock_guard lock(mutex);
+            if (onlyIfRunning && !quit)
+                return false;
+            requested = true;
+            wake      = quit;
+            if (wake)
+                ++calls;  // disarm() waits for it: the quit function uses what the loop frees after disarming
+        }
+        if (!wake)
+            return true;
+        struct Done {
+            UILoopStop& self;
+            ~Done() {
+                std::lock_guard lock(self.mutex);
+                --self.calls;
+                self.callsDone.notify_all();
+            }
+        } done{*this};
+        wake();
+        return true;
+    }
+
     mutable std::mutex      mutex;
     std::condition_variable callsDone;
     unsigned                calls{0};

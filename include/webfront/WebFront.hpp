@@ -1029,6 +1029,7 @@ public:
     void openAndRun(std::string_view htmlFilename) {
         if (launched)
             throw std::logic_error("webfront::BasicWF::show(): this application was started with start(); it has no window loop to run");
+        shown = true;
         startServerThread();
         WindowAction action;
         try {
@@ -1064,7 +1065,7 @@ public:
      * Only for a frontend that can open without running a loop, which it declares with `launch()`: the system browser
      * (the default `webfront::WebFront`). An embedded window lives in the loop of `show()`; such a frontend is refused at
      * compile time. Call it once per application, on the thread that owns it, instead of show(): a second start(), or
-     * a start() or show() after the other, throws std::logic_error and leaves the running server untouched. If the
+     * a start() or show() after the other (also once show() has stopped its server), throws std::logic_error and leaves the running server untouched. If the
      * opening throws, the server is stopped and joined before the exception propagates, as for show(). The server then
      * runs until stop(), shutdown() or destruction; register callbacks and handlers before the call.
      *
@@ -1079,7 +1080,7 @@ public:
                       "application in a webfront::UIThread when the frontend allows a secondary thread "
                       "(docs/HOST_INTEGRATION.md).");
         if constexpr (requires { Frontend::launch(std::string_view{}, std::string_view{}, std::string_view{}); }) {
-            if (serverThread.joinable() || launched.exchange(true))
+            if (shown || serverThread.joinable() || launched.exchange(true))
                 throw std::logic_error("webfront::BasicWF::start(): the application is already started; call start() once, instead of show()");
             if (!httpDocRoot.empty() && !developerEnvironment)
                 detail::noteDevelopmentPath();
@@ -1091,6 +1092,7 @@ public:
                     Frontend::launch(httpAddress, httpPort, page);
             } catch (...) {
                 stopAndJoinServer();
+                launched = false;  // nothing runs any more: a new attempt is allowed, as after a show() that failed to open
                 throw;
             }
         }
@@ -1304,7 +1306,8 @@ private:
     const std::string                                                        viewSecret = detail::newViewSecret();  // this launch's proof of an embedded view
     const bool                                                               trustLoopbackClients;
     bool                                                                     developerEnvironment = false;
-    std::atomic<bool>                                                        launched{false};  // start() was called
+    std::atomic<bool>                                                        launched{false};  // start() was called and its server was not stopped by a failed launch
+    std::atomic<bool>                                                        shown{false};     // show() was called, whether or not its server still runs
     mutable std::mutex                                                       linksMutex;  // guards webLinks, read from any thread
     struct Connection {
         std::shared_ptr<WebLink<Net, Policy>> link;

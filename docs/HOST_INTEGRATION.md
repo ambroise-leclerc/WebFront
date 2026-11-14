@@ -117,14 +117,24 @@ around: the main thread constructs the application and calls `show()`, and the h
 creates, or as work scheduled on the interface thread.
 
 ```cpp
+#include <atomic>
+#include <chrono>
+#include <thread>
+
 using App = webfront::WebFrontWithFrontend<webfront::frontend::NativeWebViewFrontend>;
-App app;                                      // main thread
+App               app;                        // main thread
+std::atomic<bool> showReturned{false};
 std::jthread host([&](std::stop_token stopping) {
     const auto onTick = app.broadcast("hostLoop.onTick");
     while (!stopping.stop_requested() && hostLoopIteration(onTick)) { }
-    app.requestClose();                       // any thread: show() returns as if the user had closed the window
+    // The host may finish before the window exists: the request reaches nothing and is not kept, so repeat it.
+    while (!showReturned && !stopping.stop_requested()) {
+        app.requestClose();                   // any thread: show() returns as if the user had closed the window
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    }
 });
 app.show();                                   // main thread, until the window closes
+showReturned = true;
 host.request_stop();                          // the user closed the window first
 ```
 

@@ -121,10 +121,11 @@ struct BrowserWithUILoopFrontend {
 
     static void initialize() { }
 
-    /// The same as requestStop(): the browser's window is not ours to close, the loop is. Always accepted.
+    /// Ends the loop of a running open(), as the user closing the window would end the others; the browser's window is
+    /// not ours to close, the loop is. False, and nothing remembered, when no loop runs: unlike requestStop(), a request
+    /// never ends a later session.
     static bool requestClose() noexcept {
-        requestStop();
-        return true;
+        return loopStop().requestIfRunning();
     }
 
     /// Ends the loop of a running open(), or the next one at its start; callable from any thread.
@@ -271,7 +272,7 @@ struct NativeOrBrowserFrontendFor {
 
     /// Asks the one in use to end its session; false when it has nothing to close (the plain system browser never has).
     /// Callable from any thread: the decision of initialize() is read atomically.
-    static bool requestClose() noexcept {
+    static bool requestClose() {
         if (usesNativeWindow()) {
             if constexpr (requires { { Native::requestClose() } -> std::same_as<bool>; })
                 return Native::requestClose();

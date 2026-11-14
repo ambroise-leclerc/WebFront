@@ -113,6 +113,8 @@ public:
             stop(std::chrono::milliseconds::max());
         } catch (...) {  // observed through failure() or an explicit stop(), or not at all
         }
+        if (worker.joinable())  // never leave a joinable thread to std::thread's destructor, whatever stop() threw
+            worker.join();
     }
 
     /// The application, valid until stop() or destruction. Use the calls that are callable from any thread.
@@ -148,8 +150,9 @@ public:
      * still opening receives the request once it exists), joins the thread and destroys the application. Rethrows what
      * show() threw. Safe to repeat; afterwards app() is no longer valid.
      *
-     * If show() has not returned within `patience`, throws UIThreadStalled and changes nothing: the session still runs,
-     * app() stays valid and stop() can be called again.
+     * If show() has not returned within `patience` (`milliseconds::max()` waits without limit), throws UIThreadStalled
+     * and changes nothing: the session still runs, app() stays valid and stop() can be called again. A request that
+     * throws is treated like one that reached nothing and repeated; the thread is joined whatever the frontend does.
      */
     void stop(std::chrono::milliseconds patience = defaultPatience) {
         if (worker.joinable()) {
@@ -157,11 +160,15 @@ public:
             std::unique_lock lock(mutex);
             while (!finished) {
                 lock.unlock();
-                application->requestClose();
+                try {
+                    application->requestClose();
+                } catch (...) {  // a request that failed is repeated at the next period, like one that reached nothing
+                }
                 lock.lock();
                 if (changed.wait_for(lock, closeRetry, [&] { return finished; }))
                     break;
-                if (std::chrono::steady_clock::now() - start >= patience)
+                // Elapsed time is converted down to the patience's unit: converting milliseconds::max() up would overflow.
+                if (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start) >= patience)
                     throw UIThreadStalled();
             }
             lock.unlock();
