@@ -11,7 +11,7 @@
 | 1.4 | 2026-10-18 | Acceptée | Ambroise Leclerc | Scénarios de cycle de vie mutualisés entre frontends. | [a3ba113](https://github.com/ambroise-leclerc/WebFront/commit/a3ba1134b1f3ad03dc01f24fd59e2b47f47c3466) |
 | 1.5 | 2026-10-18 | Acceptée | Ambroise Leclerc | Durcissement des décodeurs, assainisseurs et tests par génération d’entrées dans la CI. | [d6f086d](https://github.com/ambroise-leclerc/WebFront/commit/d6f086d50350379162ab01e7bdba2a734646d24d) |
 | 1.6 | 2026-10-19 | Acceptée | Ambroise Leclerc | Contrôles hors ligne de fraîcheur et de contenu des ressources gzip reproductibles. | [b031ab5](https://github.com/ambroise-leclerc/WebFront/commit/b031ab58ea9cc32290d701094c1333bab455e67f) |
-| 1.7 | 2026-11-14 | Acceptée | Ambroise Leclerc | Catch2 remplacé par `test/unit/Bdd.hpp`, un cadre BDD en un seul en-tête, sans macros. | [54c0d0f](https://github.com/ambroise-leclerc/WebFront/commit/54c0d0fd35a414e01e2cff0c27882695ca9a4e9d) |
+| 1.7 | 2026-11-14 | Acceptée | Ambroise Leclerc | Catch2 remplacé par `test/unit/Bdd.hpp`, un cadre BDD en un seul en-tête. | [54c0d0f](https://github.com/ambroise-leclerc/WebFront/commit/54c0d0fd35a414e01e2cff0c27882695ca9a4e9d) |
 
 ## État et chronologie
 
@@ -28,7 +28,7 @@ comme sous-projet constituent elles aussi des contrats observables.
 ## Décision
 
 Que les tests unitaires, sous `test/unit/`, vérifient unités, états et erreurs à l’aide de simulacres déterministes.
-Ils emploient `test/unit/Bdd.hpp`, un cadre BDD tenant dans un seul en-tête et écrit sans macros : un
+Ils emploient `test/unit/Bdd.hpp`, un cadre BDD tenant dans un seul en-tête : un
 scénario est un objet `Scenario` nommé, ses sections `given`/`when`/`then` sont des lambdas, et `require`/`check`
 situent un échec par `std::source_location`. Le cadre rejoue un scénario jusqu’à avoir parcouru chacune de ses
 feuilles, une nouvelle par passe, comme le faisait Catch2, dont seul ce sous-ensemble servait et dont la
@@ -67,7 +67,7 @@ préexistant, ni d’une intervention humaine, ni du réseau public après confi
 ## Prescriptions d’implémentation et de génération de code
 
 - Pour chaque correction, qu’une régression échoue d’abord au niveau pertinent le plus bas.
-- Écrire les scénarios avec `Scenario`, `given`/`when`/`then` et `require`/`check` de `Bdd.hpp`, sans macros ;
+- Écrire les scénarios avec `Scenario`, `given`/`when`/`then` et `require`/`check` de `Bdd.hpp` ;
   traiter les Promises dans Jasmine.
 - Que toute modification du protocole couvre encodeur et décodeur dans les deux langages,
   ainsi que le trajet réel dans le navigateur.

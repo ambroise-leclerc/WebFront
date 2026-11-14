@@ -3,6 +3,7 @@
 /// Some scenarios fail on purpose: main() runs each one and compares what it did with what is expected.
 #include "Bdd.hpp"
 
+#include <clocale>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -53,6 +54,16 @@ Scenario sameNames{"sections of the same name", [] {
                                trace.push_back("value " + std::to_string(value));
                            });
                    }};
+
+// Sections of the same name and the same body, as an identical code folding linker would merge, stay two sections.
+Scenario sameComposed{"composed sections of the same name", [] {
+                          given("same ", 1, [&] {
+                              trace.push_back("x");
+                          });
+                          given("same ", 1, [&] {
+                              trace.push_back("x");
+                          });
+                      }};
 
 Scenario checkGoesOn{"check goes on", [] {
                          given("a failed check", [&] {
@@ -154,6 +165,11 @@ Scenario controlCharacters{"a failure with a control character", [] {
                                check(false);
                            }};
 
+Scenario invalidText{"a failure with invalid UTF-8", [] {
+                         auto scope = info("caf\xC3\xA9 ", std::string("\xC3"), " \xED\xA0\x80");
+                         check(false);
+                     }};
+
 Scenario concurrentFailures{"failures on several threads", [] {
                                 std::vector<std::thread> threads;
                                 for (int index = 0; index != 4; ++index)
@@ -205,6 +221,7 @@ void expectExit(std::vector<std::string> options, int code) {
 int main() {
     expect("sections", 0, {"start", "a", "a1", "x", "start", "a", "a1", "y", "start", "a", "a2", "start", "b"});
     expect("sections of the same name", 0, {"first", "second", "value 1", "value 2"});
+    expect("composed sections of the same name", 0, {"x", "x"});
     expect("check goes on", 1, {"after check", "other"});
     expect("require stops", 1, {"other"});
     expect("an exception is a failure", 1, {"other"});
@@ -232,6 +249,35 @@ int main() {
     }
     file.close();
     std::remove(report.c_str());
+
+    // Bytes that are not UTF-8 (a truncated sequence, an encoded surrogate) are escaped; valid UTF-8 is kept.
+    expectExit({"--exact", "a failure with invalid UTF-8", "--junit", report}, 1);
+    file.open(report);
+    const std::string text{std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
+    if (text.find("caf\xC3\xA9 \\xc3 \\xed\\xa0\\x80") == std::string::npos) {
+        ++failures;
+        std::cerr << "MISMATCH: the JUnit report does not escape invalid UTF-8\n";
+    }
+    file.close();
+    std::remove(report.c_str());
+
+    // CTest names each scenario from one line of --list, in a bracket argument.
+    if (webfront::bdd::impl::titleError("a\nb").empty() || webfront::bdd::impl::titleError("a]==]b").empty() || webfront::bdd::impl::titleError("").empty()
+        || !webfront::bdd::impl::titleError("a [b] c").empty()) {
+        ++failures;
+        std::cerr << "MISMATCH: titleError\n";
+    }
+
+    // A number keeps its decimal point whatever the locale.
+    for (const char* locale : {"fr_FR.UTF-8", "fr_FR.utf8", "de_DE.UTF-8"})
+        if (std::setlocale(LC_NUMERIC, locale)) {
+            if (webfront::bdd::impl::concat(0.5) != "0.5") {
+                ++failures;
+                std::cerr << "MISMATCH: the decimal point depends on the locale " << locale << '\n';
+            }
+            std::setlocale(LC_NUMERIC, "C");
+            break;
+        }
     expectExit({"--shard-count", "2", "--shard-index", "2"}, 2);
     expectExit({"--unknown"}, 2);
     expectExit({"[passing]", "--list"}, 0);

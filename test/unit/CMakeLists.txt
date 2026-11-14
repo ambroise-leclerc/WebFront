@@ -1,4 +1,4 @@
-# The scenarios use Bdd.hpp, a test framework without macros in a single header; BddDiscoverTests registers them in CTest.
+# The scenarios use Bdd.hpp, a test framework in a single header; BddDiscoverTests registers them in CTest.
 include(BddDiscoverTests.cmake)
 
 find_package(Threads)

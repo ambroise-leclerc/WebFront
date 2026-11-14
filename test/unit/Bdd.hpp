@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
 /// @file
-/// @brief A minimal behaviour-driven test framework, without macros.
+/// @brief A minimal behaviour-driven test framework in a single header.
 ///
 /// A scenario is a named object that registers itself; its sections are lambdas:
 /// @code
@@ -23,6 +23,7 @@
 
 #include <atomic>
 #include <charconv>
+#include <clocale>
 #include <concepts>
 #include <cstdint>
 #include <cstdio>
@@ -125,7 +126,12 @@ void append(std::string& text, const T& value) {
     else if constexpr (std::is_floating_point_v<T>) {
         char buffer[64];
         auto length = std::snprintf(buffer, sizeof buffer, "%.17g", static_cast<double>(value));
-        text.append(buffer, length > 0 ? static_cast<std::size_t>(length) : 0);
+        // snprintf writes the decimal point of the C locale a test may have changed.
+        std::string      number(buffer, length > 0 ? static_cast<std::size_t>(length) : 0);
+        std::string_view point = std::localeconv()->decimal_point;
+        if (auto position = number.find(point); !point.empty() && point != "." && position != std::string::npos)
+            number.replace(position, point.size(), ".");
+        text += number;
     } else if constexpr (std::is_integral_v<T>) {
         char buffer[64];
         auto [end, error] = std::to_chars(buffer, buffer + sizeof buffer, value);
@@ -247,18 +253,28 @@ inline std::string sourceLine(const std::source_location& location) {
 }
 
 /// Reports a failure with its location, its source line, the sections that lead to it and the messages in scope.
+/// Holds the lock of the reports, which also guards the path of sections a failure on another thread reads.
+class Lock {
+public:
+    explicit Lock(std::atomic_flag& flag) : held{flag} {
+        while (held.test_and_set(std::memory_order_acquire))
+            held.wait(true, std::memory_order_relaxed);
+    }
+    Lock(const Lock&)            = delete;
+    Lock& operator=(const Lock&) = delete;
+    ~Lock() {
+        held.clear(std::memory_order_release);
+        held.notify_one();
+    }
+
+private:
+    std::atomic_flag& held;
+};
+
 /// Several threads may fail at once: the lock covers the whole report, the cache of the source lines included.
 inline void reportFailure(const std::source_location& location, std::string_view what) {
-    auto& current = state();
-    while (current.reporting.test_and_set(std::memory_order_acquire))
-        current.reporting.wait(true, std::memory_order_relaxed);
-    struct Unlock {
-        std::atomic_flag& flag;
-        ~Unlock() {
-            flag.clear(std::memory_order_release);
-            flag.notify_one();
-        }
-    } unlock{current.reporting};
+    auto&       current = state();
+    Lock        lock{current.reporting};
     std::string text;
     if (location.line() != 0)
         text += concat(location.file_name(), ':', location.line(), ": ");
@@ -322,12 +338,16 @@ inline void runSection(std::string_view kind, std::string_view name, const void*
         return;
     parent->enteredChildPass = current.pass;
     current.current          = node;
-    current.path.emplace_back(kind, node->name);
+    {
+        Lock lock{current.reporting};
+        current.path.emplace_back(kind, node->name);
+    }
     struct Restore {
         State& owner;
         Node*  previous;
         ~Restore() {
             owner.current = previous;
+            Lock lock{owner.reporting};
             owner.path.pop_back();
         }
     } restore{current, parent};
@@ -359,11 +379,19 @@ inline void section(std::string_view kind, std::string_view name, Body body, con
     sectionRunner(kind, name, location.file_name(), location.line(), body);
 }
 
-/// A section whose name is made of several parts: given("q=", value, [&] { ... }). The function its lambda compiles to
-/// tells where it is written.
+/// The first part of a section name made of several parts, which records where the section is written.
+struct NamePart {
+    std::string_view     text;
+    std::source_location location;
+    template <typename T>
+        requires std::convertible_to<const T&, std::string_view>
+    NamePart(const T& part, std::source_location where = std::source_location::current()) : text{part}, location{where} { }
+};
+
+/// A section whose name is made of several parts: given("q=", value, [&] { ... }).
 template <typename... Args>
-void composedSection(std::string_view kind, Args&... arguments) {
-    std::string name;
+void composedSection(std::string_view kind, const NamePart& first, Args&... arguments) {
+    std::string name{first.text};
     Body        body{};
     auto        take = [&]<typename T>(T& argument) {
         if constexpr (std::invocable<T&>)
@@ -372,7 +400,7 @@ void composedSection(std::string_view kind, Args&... arguments) {
             append(name, argument);
     };
     (take(arguments), ...);
-    sectionRunner(kind, name, reinterpret_cast<const void*>(body.call), 0, body);
+    sectionRunner(kind, name, first.location.file_name(), first.location.line(), body);
 }
 
 /// What a condition may be: anything convertible to bool except a string, which would always be true.
@@ -381,7 +409,7 @@ concept Testable = !std::is_same_v<std::remove_cv_t<std::remove_pointer_t<std::d
 
 /// Whether the last argument is the body of a section whose name has several parts.
 template <typename... Args>
-concept ComposedSection = sizeof...(Args) >= 3 && std::invocable<std::remove_reference_t<decltype((std::declval<Args&>(), ...))>&>;
+concept ComposedSection = sizeof...(Args) >= 2 && std::invocable<std::remove_reference_t<decltype((std::declval<Args&>(), ...))>&>;
 
 }  // namespace impl
 
@@ -435,23 +463,23 @@ inline void section(std::string_view name, impl::Body body, std::source_location
 /// Sections whose name is made of several parts, the body coming last: when("the value ", value, [&] { ... }).
 template <typename... Args>
     requires impl::ComposedSection<Args...>
-void given(Args&&... arguments) {
-    impl::composedSection("Given: ", arguments...);
+void given(impl::NamePart first, Args&&... arguments) {
+    impl::composedSection("Given: ", first, arguments...);
 }
 template <typename... Args>
     requires impl::ComposedSection<Args...>
-void when(Args&&... arguments) {
-    impl::composedSection("When: ", arguments...);
+void when(impl::NamePart first, Args&&... arguments) {
+    impl::composedSection("When: ", first, arguments...);
 }
 template <typename... Args>
     requires impl::ComposedSection<Args...>
-void then(Args&&... arguments) {
-    impl::composedSection("Then: ", arguments...);
+void then(impl::NamePart first, Args&&... arguments) {
+    impl::composedSection("Then: ", first, arguments...);
 }
 template <typename... Args>
     requires impl::ComposedSection<Args...>
-void section(Args&&... arguments) {
-    impl::composedSection("", arguments...);
+void section(impl::NamePart first, Args&&... arguments) {
+    impl::composedSection("", first, arguments...);
 }
 
 /// Adds a message to the failures reported while the returned object lives.
@@ -759,33 +787,61 @@ inline Result runScenario(const Entry& entry) {
     return {&entry, outcome, now() - start, current.report};
 }
 
-/// Escapes a text for XML 1.0, which forbids the control characters other than tab, line feed and carriage return:
-/// they are written as \xNN.
+/// The length of the UTF-8 sequence that starts a text and that XML 1.0 accepts, or 0.
+inline std::size_t utf8Length(std::string_view text) {
+    auto byte = [&](std::size_t index) {
+        return static_cast<unsigned char>(text[index]);
+    };
+    auto          lead = byte(0);
+    std::size_t   length;
+    std::uint32_t code;
+    if (lead < 0x80)
+        return 1;
+    if (lead >= 0xc2 && lead <= 0xdf)
+        length = 2, code = lead & 0x1fu;
+    else if (lead >= 0xe0 && lead <= 0xef)
+        length = 3, code = lead & 0x0fu;
+    else if (lead >= 0xf0 && lead <= 0xf4)
+        length = 4, code = lead & 0x07u;
+    else
+        return 0;
+    if (text.size() < length)
+        return 0;
+    for (std::size_t index = 1; index != length; ++index) {
+        if ((byte(index) & 0xc0) != 0x80)
+            return 0;
+        code = (code << 6) | (byte(index) & 0x3fu);
+    }
+    bool overlong = (length == 3 && code < 0x800) || (length == 4 && code < 0x10000);
+    bool excluded = (code >= 0xd800 && code <= 0xdfff) || code == 0xfffe || code == 0xffff || code > 0x10ffff;
+    return overlong || excluded ? 0 : length;
+}
+
+/// Escapes a text for XML 1.0: the control characters it forbids, other than tab, line feed and carriage return, and
+/// the bytes that are not valid UTF-8 are written as \xNN.
 inline std::string xmlEscape(std::string_view text) {
-    std::string escaped;
-    for (char character : text)
-        switch (character) {
-            case '&':
-                escaped += "&amp;";
-                break;
-            case '<':
-                escaped += "&lt;";
-                break;
-            case '>':
-                escaped += "&gt;";
-                break;
-            case '"':
-                escaped += "&quot;";
-                break;
-            default:
-                if (auto code = static_cast<unsigned char>(character); code < 0x20 && code != '\t' && code != '\n' && code != '\r') {
-                    constexpr std::string_view digits = "0123456789abcdef";
-                    escaped                          += "\\x";
-                    escaped                          += digits[code >> 4];
-                    escaped                          += digits[code & 0xf];
-                } else
-                    escaped += character;
-        }
+    constexpr std::string_view digits = "0123456789abcdef";
+    std::string                escaped;
+    while (!text.empty()) {
+        auto character = static_cast<unsigned char>(text.front());
+        auto length    = utf8Length(text);
+        if (character == '&')
+            escaped += "&amp;";
+        else if (character == '<')
+            escaped += "&lt;";
+        else if (character == '>')
+            escaped += "&gt;";
+        else if (character == '"')
+            escaped += "&quot;";
+        else if (length == 0 || (character < 0x20 && character != '\t' && character != '\n' && character != '\r')) {
+            escaped += "\\x";
+            escaped += digits[character >> 4];
+            escaped += digits[character & 0xf];
+            length   = 1;
+        } else
+            escaped += text.substr(0, length);
+        text.remove_prefix(length);
+    }
     return escaped;
 }
 
@@ -885,6 +941,21 @@ inline std::uint64_t nextRandom(std::uint64_t& seed) {
 
 }  // namespace impl
 
+namespace impl {
+
+/// Why CTest could not name a scenario: its title is written in a bracket argument, one per line of `--list`.
+inline std::string_view titleError(std::string_view title) {
+    if (title.empty())
+        return "is empty";
+    if (title.find_first_of("\r\n") != std::string_view::npos)
+        return "holds a line break";
+    if (title.find("]==]") != std::string_view::npos)
+        return "holds ]==]";
+    return {};
+}
+
+}  // namespace impl
+
 /// Runs the selected scenarios. Returns 0 when they pass, 1 when one fails, 2 for a usage error or when nothing is
 /// selected, and 4 when every selected scenario was skipped.
 inline int run(int argc, char** argv) {
@@ -901,6 +972,10 @@ inline int run(int argc, char** argv) {
     std::vector<const Entry*> selection;
     const auto&               entries = registry();
     for (std::size_t index = 0; index != entries.size(); ++index) {
+        if (auto error = titleError(entries[index].title); !error.empty()) {
+            std::fprintf(stderr, "%s\n", concat(entries[index].file, ':', entries[index].line, ": the title of a scenario ", error).c_str());
+            return 2;
+        }
         for (std::size_t previous = 0; previous != index; ++previous)
             if (entries[previous].title == entries[index].title) {
                 std::fprintf(stderr,

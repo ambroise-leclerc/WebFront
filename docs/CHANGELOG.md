@@ -24,7 +24,7 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Changed
 
-- Replace Catch2 with `test/unit/Bdd.hpp`, a single-header BDD framework without macros: scenarios are `Scenario` objects whose `given`/`when`/`then` sections are lambdas, checked with `require`/`check`. The tests no longer download or compile Catch2; `tests` takes `--exact`, `--list`, `--junit` and the former filters, order and shard options (ADR-012, `docs/TEST_TIERS.md`).
+- Replace Catch2 with `test/unit/Bdd.hpp`, a single-header BDD framework: scenarios are `Scenario` objects whose `given`/`when`/`then` sections are lambdas, checked with `require`/`check`. The tests no longer download or compile Catch2; `tests` takes `--exact`, `--list`, `--junit` and the former filters, order and shard options (ADR-012, `docs/TEST_TIERS.md`).
 - Keep automated browser windows visible (#544, #556, `docs/TEST_PERFORMANCE.md`).
 - Run each developer integration part and each wf command of the tests in a process of its own again: the shared windows of #544 and #556 made the driver cases about a third slower on Windows and failed more often. Remove the timing analysis tools and their CI steps, and repeat the desktop suite through one path, with `desktop_passes` on a manual dispatch (#570, `docs/TEST_PERFORMANCE.md`).
 - Close the test driver's window with `requestClose()` instead of asking the page: a spec that blocks the page now ends with the driver's timeout report instead of a forced exit (#570).
