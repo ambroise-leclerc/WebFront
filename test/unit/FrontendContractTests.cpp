@@ -860,8 +860,8 @@ SCENARIO("An application closes only the window that it shows") {
     }
 }
 
-SCENARIO("A show() that owns no session cannot close the session of another") {
-    GIVEN("a frontend without an executor, the first application showing and the second's open() pending") {
+SCENARIO("A show() that cannot own the session is refused before it opens a window") {
+    GIVEN("a frontend without an executor, the first application showing") {
         using Shared     = SharedWindowFrontend<false>;
         Shared::requests = 0;
         Shared::waiting  = 0;
@@ -870,59 +870,120 @@ SCENARIO("A show() that owns no session cannot close the session of another") {
         const auto      firstState = ContractIoContext::current;
         std::jthread    firstShow([&] { first.show(); });
         REQUIRE(waitForWindow(firstState));
-        Shared::hold = true;
         HostApp<Shared> second;
-        const auto      secondState = ContractIoContext::current;
-        std::jthread    secondShow([&] { second.show(); });
-        REQUIRE(eventually([] { return Shared::waiting == 1; }));  // inside show(), not yet in the frontend
-        THEN("its close request is refused: show() running proves nothing about owning the window (#567)") {
+        THEN("the second show() is refused and its close request reaches nothing (#567)") {
+            REQUIRE_THROWS_AS(second.show(), std::logic_error);
             CHECK_FALSE(second.requestClose());
             CHECK(Shared::requests == 0);
         }
-        Shared::hold = false;
-        for (const auto& state : {firstState, secondState}) {
-            std::lock_guard lock(state->mutex);
-            state->closeWindow = true;
-            state->changed.notify_all();
-        }
+        std::lock_guard lock(firstState->mutex);
+        firstState->closeWindow = true;
+        firstState->changed.notify_all();
     }
     GIVEN("a second show() called from the interface thread of the first") {
-        using Shared      = SharedWindowFrontend<true>;
-        Shared::requests  = 0;
-        Shared::waiting   = 0;
-        Shared::hold      = false;
+        using Shared       = SharedWindowFrontend<true>;
+        Shared::requests   = 0;
+        Shared::waiting    = 0;
+        Shared::hold       = false;
         HostApp<Shared>    first;
         const auto         firstState = ContractIoContext::current;
         HostApp<Shared>    second;  // the frontend reads the state of the latest application: made after `first` captured its own
-        std::exception_ptr refusal;
+        std::atomic<bool>  refused{false};
+        std::atomic<bool>  hookDone{false};
         Shared::insideOpen = [&] {
-            Shared::hold = true;
             try {
-                second.show();  // the same thread, inside the first's open(): refused by the frontend
-            } catch (...) {
-                refusal = std::current_exception();
+                second.show();  // the same thread, inside the first's open()
+            } catch (const std::logic_error&) {
+                refused = true;
             }
-            ContractIoContext::current = firstState;  // the mock reads the latest application's state: back to the first's
+            ContractIoContext::current = firstState;  // back to the first's state, which its open() is about to read
+            hookDone                   = true;
         };
         std::jthread firstShow([&] { first.show(); });
-        REQUIRE(eventually([] { return Shared::waiting == 1; }));
-        THEN("it cannot close the first's window while its open() is pending, though both run on one thread (#567)") {
+        REQUIRE(eventually([&] { return hookDone.load(); }));
+        Shared::insideOpen = nullptr;
+        THEN("it is refused, cannot close the first's window, and the first can close its own (#567)") {
+            CHECK(refused);
             CHECK_FALSE(second.requestClose());
             CHECK(Shared::requests == 0);
-        }
-        Shared::hold = false;
-        REQUIRE(eventually([&] { return refusal != nullptr; }));
-        CHECK(eventually([&] { return ContractIoContext::current == firstState; }));  // the hook has finished
-        Shared::insideOpen = nullptr;
-        THEN("the first still owns its session and can close it") {
             REQUIRE(waitForWindow(firstState));
             CHECK(first.requestClose());
             CHECK(Shared::requests == 1);
+        }
+        std::lock_guard lock(firstState->mutex);
+        firstState->closeWindow = true;
+        firstState->changed.notify_all();
+    }
+    GIVEN("an application refused while the first showed, and another that tries after the first ended") {
+        using Shared     = SharedWindowFrontend<true>;
+        Shared::requests = 0;
+        Shared::waiting  = 0;
+        Shared::hold     = false;
+        Shared::insideOpen = nullptr;
+        HostApp<Shared> first;
+        const auto      firstState = ContractIoContext::current;
+        std::jthread    firstShow([&] { first.show(); });
+        REQUIRE(waitForWindow(firstState));
+        {
+            HostApp<Shared> refused;  // a refused application is finished: its server was stopped with the refusal
+            REQUIRE_THROWS_AS(refused.show(), std::logic_error);
         }
         {
             std::lock_guard lock(firstState->mutex);
             firstState->closeWindow = true;
             firstState->changed.notify_all();
+        }
+        firstShow.join();
+        HostApp<Shared> second;  // the next attempt, as a UIThread makes it: a new application
+        const auto      secondState = ContractIoContext::current;
+        std::jthread    secondShow([&] { second.show(); });
+        REQUIRE(waitForWindow(secondState));
+        THEN("it owns its window and the host can close it, instead of a window nobody can close (#567)") {
+            CHECK(eventually([&] { return second.requestClose(); }));
+            CHECK(Shared::requests >= 1);
+        }
+        std::lock_guard lock(secondState->mutex);
+        secondState->closeWindow = true;
+        secondState->changed.notify_all();
+    }
+    GIVEN("a second show() held before the frontend while the first one ends") {
+        using Shared       = SharedWindowFrontend<true>;
+        Shared::requests   = 0;
+        Shared::waiting    = 0;
+        Shared::hold       = false;
+        Shared::insideOpen = nullptr;
+        HostApp<Shared> first;
+        const auto      firstState = ContractIoContext::current;
+        std::jthread    firstShow([&] { first.show(); });
+        REQUIRE(waitForWindow(firstState));
+        Shared::hold = true;
+        HostApp<Shared>   second;
+        const auto        secondState = ContractIoContext::current;
+        std::atomic<bool> refused{false};
+        std::jthread      secondShow([&] {
+            try {
+                second.show();
+            } catch (const std::logic_error&) {
+                refused = true;
+            }
+        });
+        // Refused at once, or (without the ownership rule) held in front of the frontend.
+        REQUIRE(eventually([&] { return refused.load() || Shared::waiting == 1; }));
+        {
+            std::lock_guard lock(firstState->mutex);
+            firstState->closeWindow = true;
+            firstState->changed.notify_all();
+        }
+        firstShow.join();  // the first session is over before the second could attach
+        Shared::hold = false;
+        {
+            std::lock_guard lock(secondState->mutex);  // releases a window that opens anyway, so that the test ends
+            secondState->closeWindow = true;
+            secondState->changed.notify_all();
+        }
+        secondShow.join();
+        THEN("it never opens a window that the host could not close (#567)") {
+            CHECK(refused);
         }
     }
 }

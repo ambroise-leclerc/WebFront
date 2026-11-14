@@ -1014,7 +1014,7 @@ public:
     WindowAction openWindow(std::string_view htmlFilename) {
         // The thread of this application's show(): requestClose() recognizes the session that is its own by it.
         // Only the show() that takes the frontend's session ownership can be asked to close; one that finds it taken (another
-        // application's window, or its own interface thread calling show() again) is refused by the frontend and owns nothing.
+        // application's window, or its own interface thread calling show() again) is refused below, before the frontend.
         struct Showing {
             BasicWF& self;
             bool     owns;
@@ -1034,6 +1034,12 @@ public:
                 }
             }
         } showing{*this};
+        // A frontend that can be asked to close shows one window at a time: a show() that did not take the ownership must
+        // not open one that nobody could close (the first may end before this one attaches, and the frontend would accept it).
+        if constexpr (frontend::endsOnRequest<Frontend>) {
+            if (!showing.owns)
+                throw std::logic_error("webfront::BasicWF::show(): another application is already showing a window through this frontend");
+        }
         if constexpr (requires(const ViewLaunch& launch) { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, launch); })
             Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, ViewLaunch{viewSecret, detail::browserOrigin(httpAddress, httpPort)});
         else if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions); })
