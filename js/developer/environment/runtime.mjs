@@ -1,6 +1,6 @@
 import {Terminal} from '@xterm/xterm';
 import {FitAddon} from '@xterm/addon-fit';
-import {LineEditor, tokenize, wordAtEnd, unicodeProvider, clearScreen, historyLimit} from './terminal.mjs';
+import {LineEditor, tokenize, wordAtEnd, unicodeProvider, clearScreen, historyLimit, inline} from './terminal.mjs';
 import {manifestPath, setManifestDirectory} from './manifest.mjs';
 import {discoverCommands, runCommand, reservedNames} from './commands.mjs';
 export {discoverCommands, reservedNames};
@@ -287,7 +287,7 @@ async function list(args, {bridge}) {
     if (args.length > 1 || (args.length && args[0] !== '--tree')) throw new Error(`Usage: ${usage.list}`);
     const project = await loadProject(bridge);
     if (args.length) return syncNotice(project) + dependencyTree(project.lock);
-    const names = Object.keys(project.lock?.packages ?? {}).sort().join('\n');
+    const names = Object.keys(project.lock?.packages ?? {}).sort().map(inline).join('\n');
     return syncNotice(project) + (names || 'No installed packages.');
 }
 

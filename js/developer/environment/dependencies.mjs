@@ -1,19 +1,21 @@
 // The installed packages as a graph, read from the lock alone: wf list --tree, wf why and wf info. The lock records, for
 // every package, the exact package each of its dependencies and satisfied peers resolved to.
 import {packageRoot} from './paths.mjs';
+import {inline} from './terminal.mjs';
 
 const byName = (a, b) => a < b ? -1 : a > b ? 1 : 0;
-const idOf = node => `${node.name}@${node.version}`;
+// Everything shown comes from the lock, so from the package.json of packages: control characters are made visible.
+const idOf = node => inline(`${node.name}@${node.version}`);
 
 // How a package asks for one of its dependencies: the range of its package.json, marked when it is a peer.
 function request(node, name) {
     const manifest = node.manifest ?? {};
-    if (manifest.dependencies?.[name] !== undefined) return manifest.dependencies[name];
-    if (manifest.optionalDependencies?.[name] !== undefined) return `optional ${manifest.optionalDependencies[name]}`;
-    if (manifest.peerDependencies?.[name] !== undefined) return `peer ${manifest.peerDependencies[name]}`;
+    if (manifest.dependencies?.[name] !== undefined) return inline(manifest.dependencies[name]);
+    if (manifest.optionalDependencies?.[name] !== undefined) return inline(`optional ${manifest.optionalDependencies[name]}`);
+    if (manifest.peerDependencies?.[name] !== undefined) return inline(`peer ${manifest.peerDependencies[name]}`);
     return '';
 }
-const requested = range => range ? `  (${range})` : '';
+const requested = range => range ? `  (${inline(range)})` : '';
 const edges = node => Object.entries(node.dependencies ?? {}).sort(([a], [b]) => byName(a, b));
 
 /**
@@ -51,9 +53,9 @@ export function dependencyTree(lock) {
 
 /** The locked packages a word designates: every version of a name, or the one "name@version". Throws when none is. */
 export function selectPackages(lock, spec) {
-    const found = Object.entries(lock?.packages ?? {}).filter(([, node]) => node.name === spec || idOf(node) === spec)
+    const found = Object.entries(lock?.packages ?? {}).filter(([, node]) => node.name === spec || `${node.name}@${node.version}` === spec)
         .sort(([, a], [, b]) => byName(idOf(a), idOf(b)));
-    if (!found.length) throw new Error(`${spec} is not installed (wf list names the installed packages)`);
+    if (!found.length) throw new Error(`${inline(spec)} is not installed (wf list names the installed packages)`);
     return found;
 }
 
@@ -70,7 +72,7 @@ function chains(lock, target) {
     const climb = (id, below, seen) => {
         if (found.length >= chainLimit) return;
         for (const [, root] of rootsOf(lock, id))
-            found.push([`${idOf(lock.packages[id])} (root${root.requested ? `, ${root.requested}` : ''})`, ...below]);
+            found.push([`${idOf(lock.packages[id])} (root${root.requested ? `, ${inline(root.requested)}` : ''})`, ...below]);
         for (const {parent, node, name} of dependents(lock, id)) {
             if (seen.has(parent)) continue;  // a cycle of peers: the chain through it was already taken
             climb(parent, [`${idOf(lock.packages[id])}${request(node, name) ? ` (${request(node, name)})` : ''}`, ...below], new Set([...seen, parent]));
@@ -91,11 +93,16 @@ export function why(lock, spec) {
     }).join('\n');
 }
 
-const license = manifest => typeof manifest?.license === 'string' ? manifest.license : manifest?.license?.type ?? 'not declared';
+// "license" is a string; older packages have {type} or a "licenses" array of them. Anything else is not a declaration.
+function license(manifest) {
+    const names = [manifest?.license, manifest?.licenses].flat()
+        .map(value => typeof value === 'string' ? value : value?.type).filter(value => typeof value === 'string' && value);
+    return names.length ? inline(names.join(', ')) : 'not declared';
+}
 function executables(node) {
     const bin = node.manifest?.webfront?.bin;
-    if (typeof bin === 'string') return [node.name.split('/').pop()];
-    return bin && typeof bin === 'object' && !Array.isArray(bin) ? Object.keys(bin) : [];
+    if (typeof bin === 'string') return [inline(node.name.split('/').pop())];
+    return bin && typeof bin === 'object' && !Array.isArray(bin) ? Object.keys(bin).map(inline) : [];
 }
 
 /** wf info <package>: what the lock records of each locked version of it. */
@@ -106,14 +113,14 @@ export function info(lock, spec) {
         const neededBy = [...new Set(dependents(lock, id).map(({node: parent}) => idOf(parent)))];
         const bins = executables(node);
         const rows = [
-            ['root', roots.length ? `yes, requested ${roots.map(([, root]) => root.requested).join(', ')}` : 'no, installed for another package (wf why)'],
-            ...(node.manifest?.description ? [['description', node.manifest.description]] : []),
+            ['root', roots.length ? `yes, requested ${roots.map(([, root]) => inline(root.requested)).join(', ')}` : 'no, installed for another package (wf why)'],
+            ...(typeof node.manifest?.description === 'string' && node.manifest.description ? [['description', inline(node.manifest.description)]] : []),
             ['license', license(node.manifest)],
-            ['integrity', node.integrity],
-            ['files', `${node.files.length} in ${packageRoot}/${node.key}/`],
+            ['integrity', inline(node.integrity)],
+            ['files', `${node.files.length} in ${packageRoot}/${inline(node.key)}/`],
             ['dependencies', needs.join(', ') || 'none'],
             ['dependents', neededBy.join(', ') || 'none'],
-            ...(bins.length ? [['executables', bins.map(name => `wf exec ${node.name}${bins.length > 1 ? `:${name}` : ''}`).join(', ')]] : []),
+            ...(bins.length ? [['executables', bins.map(name => `wf exec ${inline(node.name)}${bins.length > 1 ? `:${name}` : ''}`).join(', ')]] : []),
         ];
         return [idOf(node), ...rows.map(([label, value]) => `  ${label.padEnd(12)}  ${value}`)].join('\n');
     }).join('\n');

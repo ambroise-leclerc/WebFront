@@ -109,5 +109,39 @@ describe('The graph of the installed packages', () => {
             expect(selectPackages(lock, 'scheduler@0.28.0').length).toBe(1);
             throws(() => info(lock, 'scheduler@9.9.9'), /scheduler@9\.9\.9 is not installed/);
         });
+
+        it('reads a license in each of its forms, and nothing from another value', () => {
+            const licensed = value => info({roots: {}, packages: {'a@1': node('a', '1', {}, value)}}, 'a').match(/license +(.*)/)[1];
+            expect(licensed({license: 'MIT'})).toBe('MIT');
+            expect(licensed({license: {type: 'ISC', url: 'https://example.org'}})).toBe('ISC');
+            expect(licensed({licenses: [{type: 'MIT'}, {type: 'Apache-2.0'}]})).toBe('MIT, Apache-2.0');
+            expect(licensed({license: ['MIT', 'BSD']})).toBe('MIT, BSD');
+            for (const value of [{}, {license: {}}, {license: {url: 'x'}}, {license: []}, {license: 3}, {license: null}, {license: ''}, {license: [{}]}])
+                expect(licensed(value)).withContext(JSON.stringify(value)).toBe('not declared');
+        });
+    });
+
+    describe('text that comes from packages', () => {
+        // A package.json is not trusted: an escape sequence in it must not reach the terminal.
+        const hostile = {
+            roots: {'evil\x1b[2J': {requested: '1\x1b[1A', id: 'evil@1'}},
+            packages: {
+                'evil@1': node('evil\x1b[2J', '1\u009b2K', {'dep\nline': 'dep@1'},
+                    {description: 'fine\x1b[2J\nsecond line', license: 'MIT\x1b[0m', dependencies: {'dep\nline': '^1\x07'}, webfront: {bin: {'run\x1b[H': 'run.mjs'}}}),
+                'dep@1': node('dep\nline', '1'),
+            },
+        };
+        const controls = /[\x00-\x09\x0b-\x1f\x7f-\x9f]/;
+
+        it('is shown with its control characters made visible, in every command', () => {
+            const outputs = [dependencyTree(hostile), why(hostile, 'dep\nline'), info(hostile, 'evil\x1b[2J'), info(hostile, 'dep\nline')];
+            for (const output of outputs) expect(output).not.toMatch(controls);
+            expect(outputs[0]).toContain('evil^[[2J@1\\x9b2K  (1^[[1A)\n└── dep^Jline@1  (^1^G)');
+            expect(outputs[1]).toBe('dep^Jline@1\n  evil^[[2J@1\\x9b2K (root, 1^[[1A) > dep^Jline@1 (^1^G)');
+            expect(outputs[2]).toContain('  description   fine^[[2J^Jsecond line\n  license       MIT^[[0m');
+            expect(outputs[2]).toContain('wf exec evil^[[2J');
+            expect(outputs[2].split('\n').length).toBe(9);
+            throws(() => why(hostile, 'x\x1b[2J'), error => !controls.test(error.message) && error.message.startsWith('x^[[2J is not installed'));
+        });
     });
 });

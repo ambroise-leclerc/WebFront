@@ -1,7 +1,8 @@
 // Specs of the terminal's file commands (files.mjs): ls, cat, tree and mounts read the project and nothing else. The
 // commands as the terminal runs them are checked in test/web/developer-specs.mjs.
 import {ls, cat, tree, mounts, projectPath, nature, columns, longListing, catLimit, treeLimit, withheld, withheldReason,
-    fileCommandHelp} from '../../../js/developer/environment/files.mjs';
+    fileCommandHelp, isMissingCallback} from '../../../js/developer/environment/files.mjs';
+import {printable, inline} from '../../../js/developer/environment/terminal.mjs';
 import {reservedNames} from '../../../js/developer/environment/commands.mjs';
 import {memoryBridge} from '../memory-bridge.mjs';
 import {rejects, throws} from '../support.mjs';
@@ -71,6 +72,26 @@ describe('The file commands of the terminal', () => {
                 ? async () => { throw new Error("C++ function 'webfront.developer.entries' was not found"); } : bridge.cppFunction(name)};
             await rejects(ls(['-l'], {bridge: older}), /needs a more recent WebFront library/);
             expect(await ls(['tools'], {bridge: older})).toBe('icons.ts');
+            // The bridge's own wording is pinned on the real bridge in test/web/developer-specs.mjs.
+            expect(isMissingCallback(new Error("C++ function 'webfront.developer.entries' was not found"), 'entries')).toBeTrue();
+            expect(isMissingCallback(new Error('Cannot list project directory: ui'), 'entries')).toBeFalse();
+            expect(isMissingCallback(undefined, 'entries')).toBeFalse();
+        });
+
+        it('shows the control characters of a name instead of sending them to the terminal', async () => {
+            const {bridge} = memoryBridge(new Map([['bad/a\x1b[2Jb.ts', encode('')], ['bad/c\nd\u009b1mE', encode('')]]));
+            expect(await ls(['bad'], {bridge, width: 1})).toBe('a^[[2Jb.ts\nc^Jd\\x9b1mE');
+            expect(await ls(['-l', 'bad'], {bridge})).toMatch(/  a\^\[\[2Jb\.ts\n.*  c\^Jd\\x9b1mE$/);
+            expect(await tree(['bad'], {bridge})).toContain('├── a^[[2Jb.ts\n└── c^Jd\\x9b1mE\n');
+            expect(longListing([{name: 'main.tsx', type: 'file', size: 1, modified: 0}], '', {entries: {'x\x1b[2J': 'main.tsx'}})).toContain('[entry x^[[2J]');
+        });
+
+        it('takes a name that starts with a dash after --', async () => {
+            const {bridge} = memoryBridge(new Map([['-x/-y.ts', encode('y\n')]]));
+            expect(await ls(['--', '-x'], {bridge})).toBe('-y.ts');
+            expect(await ls(['-a', '--', '-x'], {bridge})).toBe('-y.ts');
+            expect(await cat(['--', '-x/-y.ts'], {bridge})).toBe('y\n');
+            expect(await tree(['--', '-x'], {bridge})).toContain('└── -y.ts');
         });
 
         it('shows a date for a known modification time', () => {
@@ -114,8 +135,10 @@ describe('The file commands of the terminal', () => {
         });
 
         it('shows control characters instead of sending them to the terminal', async () => {
-            const {bridge} = memoryBridge(new Map([['a.txt', encode('one\r\ntwo\tx\x1b[2J\x7f')]]));
-            expect(await cat(['a.txt'], {bridge})).toBe('one\ntwo\tx^[[2J^?\n');
+            const {bridge} = memoryBridge(new Map([['a.txt', encode('one\r\ntwo\tx\x1b[2J\x7f\u009b1m\u0080\u009f\u00a0é')]]));
+            expect(await cat(['a.txt'], {bridge})).toBe('one\ntwo\tx^[[2J^?\\x9b1m\\x80\\x9f\u00a0é\n');
+            expect(printable('a\rb\x00')).toBe('a^Mb^@');
+            expect(inline('a\tb\nc\u0085')).toBe('a^Ib^Jc\\x85');
         });
 
         it('refuses a binary file, a file that is not UTF-8, a large one, a directory and a missing file', async () => {
@@ -168,11 +191,26 @@ describe('The file commands of the terminal', () => {
             const {bridge} = project();
             expect(await tree(['-L', '1', 'ui'], {bridge})).toBe('ui/\n├── main-specs.ts\n├── main.tsx\n└── parts/\n\n1 directory, 2 files');
             expect(await tree(['ui/parts', '-L', '4'], {bridge})).toContain('    └── b.ts');
+            expect(await tree(['-L1', 'ui'], {bridge})).toBe(await tree(['-L', '1', 'ui'], {bridge}));
+            expect(await tree(['-aL', '1', 'ui'], {bridge})).toBe(await tree(['-a', '-L', '1', 'ui'], {bridge}));
+            expect(await tree(['-aL1', 'ui'], {bridge})).toBe(await tree(['-a', '-L', '1', 'ui'], {bridge}));
+            await rejects(tree(['-La', 'ui'], {bridge}), /depth from 1 to 32/);
             await rejects(tree(['-L'], {bridge}), /Usage: tree/);
             await rejects(tree(['-L', '0'], {bridge}), /depth from 1 to 32/);
             await rejects(tree(['-L', 'x'], {bridge}), /depth from 1 to 32/);
             await rejects(tree(['missing'], {bridge}), /missing: no such directory in the project/);
-            await rejects(tree(['ui/main.tsx'], {bridge}), /no such directory/);
+            await rejects(tree(['ui/main.tsx'], {bridge}), /ui\/main\.tsx is a file: cat ui\/main\.tsx prints it/);
+            await rejects(tree(['webfront.project.json'], {bridge}), /webfront\.project\.json is a file/);
+        });
+
+        it('shows a directory that can no longer be listed without content, and reports other failures', async () => {
+            const {bridge} = project();
+            const failing = message => ({cppFunction: name => name === 'webfront.developer.list'
+                ? async directory => { if (directory === 'ui/parts') throw new Error(message); return bridge.cppFunction(name)(directory); }
+                : bridge.cppFunction(name)});
+            const removed = await tree(['ui'], {bridge: failing('Cannot list project directory: ui/parts')});
+            expect(removed).toContain('└── parts/\n\n1 directory, 2 files');
+            await rejects(tree(['ui'], {bridge: failing('bridge down')}), /bridge down/);
         });
 
         it('shows hidden entries with -a, and opens .webfront only when it is named', async () => {

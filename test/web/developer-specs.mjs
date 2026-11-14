@@ -1219,6 +1219,10 @@ try {
         assert(/^- +\d+  \d{4}-\d\d-\d\d \d\d:\d\d  webfront\.project\.json  \[manifest\]\r?$/m.test(long) && /^d +-  \S+ \S+  \.webfront\/  \[managed by wf\]\r?$/m.test(long),
             `ls -l must give sizes, dates and natures: ${long}`);
         assert(/\[entry main\]/.test(await runtime.runLine('ls -l ui/main.tsx', lineContext())), 'ls -l must name an entry of the manifest');
+        // ls -l recognizes a library without Store::entries by the bridge's own error for a callback that is not registered.
+        const unregistered = await failure(webFront.cppFunction('webfront.developer.absent')());
+        assert(String(unregistered?.message).includes("C++ function 'webfront.developer.absent' was not found"),
+            `The bridge must name a callback that is not registered the way the environment reads it: ${unregistered?.message}`);
         assert((await runtime.runLine('cat webfront.project.json', lineContext())).includes('"entries"'), 'cat must print a project file');
         assert(/is not a text file|is larger than 1 MiB/.test((await failure(runtime.runLine('cat .webfront/developer/environment/esbuild.wasm', lineContext())))?.message), 'cat must refuse a binary file');
         assert(/^\.\r\n(.*\r\n)*[├└]── ui\/\r\n/.test(await runtime.runLine('tree -L 1', lineContext())), 'tree must draw the project');

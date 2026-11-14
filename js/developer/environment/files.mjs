@@ -4,10 +4,11 @@
 import {call, blockSize} from './io.mjs';
 import {isUnsafe} from './paths.mjs';
 import {manifestPath, lockPath} from './manifest.mjs';
+import {printable, inline} from './terminal.mjs';
 
 const decoder = new TextDecoder();
 const usage = {
-    ls: 'ls [-l] [-a] [path]', cat: 'cat <file> [file...]', tree: 'tree [-a] [-L <depth>] [path]', mounts: 'mounts'};
+    ls: 'ls [-l] [-a] [--] [path]', cat: 'cat [--] <file> [file...]', tree: 'tree [-a] [-L <depth>] [--] [path]', mounts: 'mounts'};
 /** One line per file command, for the terminal's help. */
 export const fileCommandHelp = {
     ls: 'List a project directory; -l adds size, date and what wf knows of each entry, -a the hidden entries',
@@ -29,17 +30,22 @@ export function projectPath(argument = '') {
     return path;
 }
 
-// Splits arguments into single-letter flags (-la is -l -a) and the other words; `valued` flags take the next word.
+// Splits arguments into single-letter flags (-la is -l -a) and the other words. A `valued` flag takes the rest of its
+// word (-L3) or the next word (-L 3, -aL 3). After "--" every word is a path, so that a name may start with "-".
 function parseArguments(name, args, allowed, valued = '') {
     const flags = new Map(), words = [];
     for (let index = 0; index < args.length; ++index) {
         const word = args[index];
+        if (word === '--') { words.push(...args.slice(index + 1)); break; }
         if (!word.startsWith('-') || word === '-') { words.push(word); continue; }
-        for (const flag of word.slice(1)) {
+        for (let position = 1; position < word.length; ++position) {
+            const flag = word[position];
             if (!allowed.includes(flag)) throw usageError(name);
             if (!valued.includes(flag)) { flags.set(flag, true); continue; }
-            if (word.length !== 2 || index + 1 === args.length) throw usageError(name);
-            flags.set(flag, args[++index]);
+            const attached = word.slice(position + 1);
+            if (!attached && index + 1 === args.length) throw usageError(name);
+            flags.set(flag, attached || args[++index]);
+            break;
         }
     }
     return {flags, words};
@@ -105,14 +111,17 @@ export function longListing(entries, directory, manifest) {
         const isDirectory = entry.type === 'directory';
         const role = nature(join(directory, entry.name), manifest);
         const size = (isDirectory ? '-' : String(entry.size)).padStart(width);
-        return `${isDirectory ? 'd' : '-'} ${size}  ${timestamp(entry.modified)}  ${entry.name}${isDirectory ? '/' : ''}${role ? `  [${role}]` : ''}`;
+        return `${isDirectory ? 'd' : '-'} ${size}  ${timestamp(entry.modified)}  ${inline(entry.name)}${isDirectory ? '/' : ''}${role ? `  [${inline(role)}]` : ''}`;
     }).join('\n');
 }
+
+/** Whether an error of the bridge says that the application has no such webfront.developer.* callback (an older library). */
+export const isMissingCallback = (error, name) => String(error?.message).includes(`C++ function 'webfront.developer.${name}' was not found`);
 
 async function describedEntries(bridge, directory) {
     try { return JSON.parse(decoder.decode(await call(bridge, 'entries', directory))); }
     catch (error) {
-        if (/C\+\+ function 'webfront\.developer\.entries' was not found/.test(error?.message))
+        if (isMissingCallback(error, 'entries'))
             throw new Error('ls -l needs a more recent WebFront library in the application; ls and tree work with this one');
         throw error;
     }
@@ -139,7 +148,7 @@ export async function ls(args, {bridge, manifest = async () => null, width = 80}
     const all = flags.has('a');
     if (!flags.has('l')) {
         const {items, single} = await listing(bridge, path, directory => listNames(bridge, directory));
-        return columns(single ? items : visible(items, all), width);
+        return columns((single ? items : visible(items, all)).map(inline), width);
     }
     const {directory, items, single} = await listing(bridge, path, target => describedEntries(bridge, target));
     const shown = single || all ? items : items.filter(entry => !entry.name.startsWith('.'));
@@ -147,10 +156,6 @@ export async function ls(args, {bridge, manifest = async () => null, width = 80}
 }
 
 export const catLimit = 1024 * 1024;
-
-// Control characters would drive the terminal: they are shown in caret notation, except tabs and line breaks.
-const printable = text => text.replace(/\r\n/g, '\n').replace(/[\x00-\x08\x0b-\x1f\x7f]/g,
-    char => char === '\x7f' ? '^?' : '^' + String.fromCharCode(char.charCodeAt(0) + 64));
 
 async function readText(bridge, path, signal) {
     const chunks = [];
@@ -176,9 +181,10 @@ async function readText(bridge, path, signal) {
 
 /** cat <file> [file...]: the text of project files, at most 1 MiB each. */
 export async function cat(args, {bridge, signal}) {
-    if (!args.length || args.some(word => word.startsWith('-') && word !== '-')) throw usageError('cat');
+    const {words} = parseArguments('cat', args, '');
+    if (!words.length) throw usageError('cat');
     let output = '';
-    for (const word of args) {
+    for (const word of words) {
         const path = projectPath(word);
         if (!path) throw new Error(`${word} is a directory`);
         const text = printable(await readText(bridge, path, signal));
@@ -201,28 +207,37 @@ export async function tree(args, {bridge, signal}) {
     if (!Number.isInteger(depth) || depth < 1 || depth > 32) throw new Error('tree -L expects a depth from 1 to 32');
     const root = projectPath(words[0]);
     const all = flags.has('a');
-    const lines = [root ? root + '/' : '.'];
+    const lines = [root ? inline(root) + '/' : '.'];
     let directories = 0, files = 0, cut = false;
+    let rootNames;
+    try { rootNames = await listNames(bridge, root); }
+    catch (error) {
+        if (!/Cannot list project directory/.test(error?.message)) throw error;
+        const cutAt = root.lastIndexOf('/');
+        const siblings = await listNames(bridge, root.slice(0, Math.max(cutAt, 0))).catch(() => []);
+        throw new Error(siblings.includes(root.slice(cutAt + 1)) ? `${root} is a file: cat ${root} prints it` : `${root}: no such directory in the project`);
+    }
+    // A directory that cannot be listed below the root (removed meanwhile, or unreadable) is shown without content.
+    const namesOf = directory => directory === root ? rootNames : listNames(bridge, directory).catch(error => {
+        if (/Cannot list project directory/.test(error?.message)) return [];
+        throw error;
+    });
     const walk = async (directory, prefix, level) => {
         signal?.throwIfAborted();
-        const names = visible(await listNames(bridge, directory), all);
+        const names = visible(await namesOf(directory), all);
         for (const [index, name] of names.entries()) {
             if (lines.length > treeLimit) { cut = true; return; }
             const last = index === names.length - 1;
             const isDirectory = name.endsWith('/');
             const path = join(directory, isDirectory ? name.slice(0, -1) : name);
             const closed = isDirectory && (level === depth || (path === '.webfront' && root !== '.webfront'));
-            lines.push(`${prefix}${last ? '└── ' : '├── '}${name}${closed && level < depth ? '  [managed by wf: tree .webfront]' : ''}`);
+            lines.push(`${prefix}${last ? '└── ' : '├── '}${inline(name)}${closed && level < depth ? '  [managed by wf: tree .webfront]' : ''}`);
             isDirectory ? ++directories : ++files;
             if (isDirectory && !closed) await walk(path, prefix + (last ? '    ' : '│   '), level + 1);
             if (cut) return;
         }
     };
-    try { await walk(root, '', 1); }
-    catch (error) {
-        if (/Cannot list project directory/.test(error?.message)) throw new Error(`${root}: no such directory in the project`);
-        throw error;
-    }
+    await walk(root, '', 1);
     if (cut) lines.push(`... more than ${treeLimit} entries: name a subdirectory or lower -L`);
     lines.push('', `${directories} ${directories === 1 ? 'directory' : 'directories'}, ${files} ${files === 1 ? 'file' : 'files'}`);
     return lines.join('\n');

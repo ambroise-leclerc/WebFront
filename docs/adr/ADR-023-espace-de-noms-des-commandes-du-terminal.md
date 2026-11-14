@@ -4,7 +4,7 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.0 | 2026-11-14 | Acceptée | Ambroise Leclerc | Décision initiale, avant la 1.0 : le préfixe `wf` est conservé ; le terminal reçoit des commandes de fichiers en lecture seule (`ls`, `cat`, `tree`, `mounts`) et réserve le vocabulaire de fichiers qu'il ne fournit pas ; `wf list --tree`, `wf why` et `wf info` montrent le graphe des dépendances. | À renseigner après intégration. |
+| 1.0 | 2026-11-14 | Acceptée | Ambroise Leclerc | Décision initiale (#575), avant la 1.0 : le préfixe `wf` est conservé ; le terminal reçoit des commandes de fichiers en lecture seule (`ls`, `cat`, `tree`, `mounts`) et réserve le vocabulaire de fichiers qu'il ne fournit pas ; `wf list --tree`, `wf why` et `wf info` montrent le graphe des dépendances. | À renseigner après intégration. |
 
 ## État et chronologie
 
@@ -65,7 +65,10 @@ Le terminal fournit, sous des noms nus et dans le vocabulaire habituel :
 | `mounts` | ce que l'application sert au navigateur, couche par couche et dans l'ordre où elle cherche, et ce que les commandes lisent |
 
 Elles lisent le répertoire du projet par les callbacks qu'utilise wf (`developer::Store`) : les chemins sont relatifs au
-projet et n'en sortent pas. `mounts` répond à la question de la nature du système de fichiers : les ressources embarquées
+projet et n'en sortent pas. Ce qu'elles affichent n'est pas de confiance : un dépôt cloné choisit ses noms de fichiers
+et leur contenu, un paquet npm son `package.json`. Tout caractère de contrôle (C0, DEL et les C1 sur 8 bits, dont le CSI
+U+009B) est donc rendu visible avant d'atteindre le terminal, dans ces commandes comme dans `wf list`, `wf why` et
+`wf info`. `mounts` répond à la question de la nature du système de fichiers : les ressources embarquées
 dans l'exécutable, les publications de `.webfront/developer/` (`environment`, `preview`, `test`), les providers propres
 à l'application, et le fait que les sources du projet ne sont jamais servies. Les couches sont décrites, pas énumérées :
 un `fs::Provider` n'a que `open()`, et lui ajouter une énumération aurait étendu l'API publique du cœur.
@@ -79,7 +82,17 @@ fonctionne pour le reste.
 `cd`, `pwd`, `cp`, `mv`, `rm`, `mkdir`, `rmdir`, `touch`, `edit`, `find`, `grep`, `head`, `tail`, `less`, `stat`, `du` et
 `df` sont réservés sans être fournis. Chacun répond par une erreur qui dit quoi faire : il n'y a pas de répertoire
 courant ; le terminal ne modifie pas les fichiers, qui s'éditent dans l'éditeur du développeur pendant que `wf dev`
-reconstruit. Un environnement ultérieur pourra fournir l'un d'eux sans prendre un nom à une application.
+reconstruit.
+
+Réserver un nom sans fournir la commande a un coût immédiat et certain : une application ne peut plus appeler une de
+ses commandes `find`, `stat`, `edit` ou `head`, et `commands.add` lève `std::invalid_argument` pour celles qui le
+faisaient. Ce coût est accepté pour trois raisons. Il se paie une seule fois, avant la 1.0, quand aucune application
+publiée n'a de contrat à faire respecter ; la même réserve décidée après la 1.0 serait une rupture à chaque commande
+ajoutée, donc ne serait jamais décidée, et le terminal resterait figé à quatre commandes. Les noms retenus sont ceux
+qu'un développeur tape par réflexe dans un terminal : une application qui les prendrait pour autre chose tromperait
+son utilisateur, et le terminal ne pourrait plus dire pourquoi `rm` ne fait rien. Enfin la liste est fermée et
+limitée au vocabulaire des fichiers : les mots du domaine d'une application (`status`, `echo`, `print`, `count`…)
+restent libres, et une commande nue future ne peut venir que de cette réserve.
 
 `echo` n'est pas réservé : ce n'est pas une commande de fichiers, et c'est un nom naturel pour une commande
 d'application.
@@ -117,6 +130,8 @@ Elles n'ont pas d'opération d'automatisation, comme `wf list` : un agent lit le
   que cette décision choisit de faire avant la 1.0 plutôt qu'après.
 - **Règle pour la suite :** une commande qui lit ou modifie le manifeste, le lock, les paquets ou la construction entre
   sous `wf` ; une commande nue nouvelle ne peut venir que de la réserve.
+- **Dégradation :** l'environnement reconnaît une bibliothèque sans `webfront.developer.entries` au texte d'erreur du
+  bridge pour un callback non enregistré ; le parcours navigateur vérifie ce texte sur le vrai bridge.
 - **Preuves :** specs Jasmine `files-specs.mjs` et `dependencies-specs.mjs`, scénarios Catch2 de `Store::entries` et
   des noms réservés, test `CommandNamesAgree`, et le parcours navigateur `developer_integration` qui exécute les commandes
   dans le terminal.

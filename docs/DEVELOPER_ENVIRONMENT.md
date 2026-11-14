@@ -444,13 +444,18 @@ every verb added later would take one more. A `wf` command typed without its pre
 line to type (`Unknown command: install. Did you mean: wf install react?`).
 
 **File commands** (environment 0.9.3) read the project directory and never write it. Paths are relative
-to the project and cannot leave it; there is no working directory, no glob and no pipe.
+to the project and cannot leave it; there is no working directory, no glob and no pipe. Options combine (`-la`, `-aL 2`,
+`-L2`), and `--` ends them so that a name may start with a dash (`cat -- -notes.txt`).
+
+Names, file contents and what a package declares about itself are not trusted: every control character they contain (C0,
+DEL and the 8-bit C1 controls) is shown, `^[` for ESC or `\x9b` for an 8-bit CSI, and never sent to the terminal. This
+holds for `ls`, `cat`, `tree`, `wf list`, `wf why` and `wf info`.
 
 | Command | Purpose |
 | --- | --- |
 | `ls [-l] [-a] [path]` | the entries of a directory; `-a` adds the hidden ones; `-l` adds type, size in bytes, modification time and what `wf` knows of the entry: `[manifest]`, `[lock]`, `[entry main]`, `[spec]`, `[script icons]`, `[generated provider LifeUI]`, and under `.webfront/` the package cache, the publications and the history |
-| `cat <file> [file...]` | the text of UTF-8 files, at most 1 MiB each; a binary file is refused and control characters are shown (`^[`) instead of reaching the terminal |
-| `tree [-a] [-L <depth>] [path]` | a directory as a tree, three levels deep by default and at most 2000 entries; `.webfront/` is listed with `-a` but opened only when the path names it |
+| `cat <file> [file...]` | the text of UTF-8 files, at most 1 MiB each; a binary file is refused |
+| `tree [-a] [-L <depth>] [path]` | a directory as a tree, three levels deep by default and at most 2000 entries; `.webfront/` is listed with `-a` but opened only when the path names it; a file is refused with the `cat` line that prints it |
 | `mounts` | what the application answers to the browser, in the order it looks (resources embedded in the executable, the publications of `.webfront/developer/`, the application's own providers), and what the commands read: manifest, lock, cache, environment and registry. The sources of the project are never served |
 
 `ls -l` needs a library that has the `webfront.developer.entries` callback (added with these commands); with an older
