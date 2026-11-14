@@ -155,6 +155,17 @@ try {
         assert(Object.keys(lock.packages).length === 3, 'React, React DOM and scheduler must be resolved');
         const listed = await execute(['list'], context);
         assert(listed.split('\n').length === 3 && listed.includes('react@19.3.1'), 'wf list must name the installed packages');
+        // The graph of the lock: react-dom brings scheduler and its peer react.
+        const graph = await execute(['list', '--tree'], context);
+        assert(/^react-dom@19\.3\.1  \(19\.3\.1\)$/m.test(graph) && /── scheduler@\S+  \(\S+\)$/m.test(graph) && /── react@19\.3\.1  \(peer \S+\)$/m.test(graph) &&
+            graph.endsWith('2 roots, 3 packages'), `wf list --tree must show the packages under their roots: ${graph}`);
+        assert(/^scheduler@\S+\n  react-dom@19\.3\.1 \(root, 19\.3\.1\) > scheduler@/.test(await execute(['why', 'scheduler'], context)), 'wf why must give the chain from a root');
+        const described = await execute(['info', 'react-dom'], context);
+        assert(/^  license +MIT$/m.test(described) && /^  dependents +none$/m.test(described) && /^  files +\d+ in \.webfront\/developer\/packages\//m.test(described),
+            `wf info must describe a locked package: ${described}`);
+        const refusal = promise => promise.then(() => '', error => error.message);
+        assert(/vue is not installed/.test(await refusal(execute(['why', 'vue'], context))) &&
+            /Usage: wf list \[--tree\]/.test(await refusal(execute(['list', '--all'], context))), 'wf why and wf list must refuse what they do not know');
     }
     const historyLength = history.length;
     const frame = context.preview;
@@ -1198,6 +1209,33 @@ try {
         const exitCode = await failure(runtime.runLine('status 3', lineContext()));
         assert(exitCode?.exitCode === 3 && /exited with code 3/.test(exitCode.message), `A C++ exit code must be reported: ${exitCode}`);
         assert(/Unknown command: absent/.test((await failure(runtime.runLine('absent', lineContext())))?.message), 'An unknown command must be refused');
+        // The project commands keep their prefix: a bare one is not run, the line to type is given.
+        const bare = await failure(runtime.runLine('install react', lineContext()));
+        assert(bare?.message === 'Unknown command: install. Did you mean: wf install react?', `A wf command typed without wf must name the line to type: ${bare?.message}`);
+        // The file commands of the terminal read the project through the application's callbacks, Store::entries included.
+        const names = await runtime.runLine('ls', lineContext());
+        assert(/\bui\/( |\r\n|$)/.test(names) && names.includes('webfront.project.json') && !names.includes('.webfront'), `ls must list the project without its hidden entries: ${names}`);
+        const long = await runtime.runLine('ls -la', lineContext());
+        assert(/^- +\d+  \d{4}-\d\d-\d\d \d\d:\d\d  webfront\.project\.json  \[manifest\]\r?$/m.test(long) && /^d +-  \S+ \S+  \.webfront\/  \[managed by wf\]\r?$/m.test(long),
+            `ls -l must give sizes, dates and natures: ${long}`);
+        assert(/\[entry main\]/.test(await runtime.runLine('ls -l ui/main.tsx', lineContext())), 'ls -l must name an entry of the manifest');
+        // ls -l recognizes a library without Store::entries by the bridge's own error for a callback that is not registered.
+        const unregistered = await failure(webFront.cppFunction('webfront.developer.absent')());
+        assert(String(unregistered?.message).includes("C++ function 'webfront.developer.absent' was not found"),
+            `The bridge must name a callback that is not registered the way the environment reads it: ${unregistered?.message}`);
+        assert((await runtime.runLine('cat webfront.project.json', lineContext())).includes('"entries"'), 'cat must print a project file');
+        assert(/is not a text file|is larger than 1 MiB/.test((await failure(runtime.runLine('cat .webfront/developer/environment/esbuild.wasm', lineContext())))?.message), 'cat must refuse a binary file');
+        assert(/^\.\r\n(.*\r\n)*[├└]── ui\/\r\n/.test(await runtime.runLine('tree -L 1', lineContext())), 'tree must draw the project');
+        const served = await runtime.runLine('mounts', lineContext());
+        assert(/\/webfront\/developer\/environment\/ +\.webfront\/developer\/environment\/ of the project \(published\)/.test(served) && served.includes('sha512-'),
+            `mounts must describe the served layers and the environment: ${served}`);
+        assert(/relative to the project directory/.test((await failure(runtime.runLine('cat ../outside', lineContext())))?.message), 'A file command must not leave the project');
+        for (const name of ['rm', 'cd', 'edit'])
+            assert(new RegExp(`^${name} is not provided: `).test((await failure(runtime.runLine(`${name} ui`, lineContext())))?.message), `${name} must be withheld with a reason`);
+        const firstWords = (await runtime.complete('', {bridge: webFront, cppCommands})).candidates;
+        assert(['ls', 'cat', 'tree', 'mounts', 'wf', 'echo'].every(name => firstWords.includes(name)) && !firstWords.includes('rm'), `Completion must offer the commands that exist: ${firstWords}`);
+        assert((await runtime.complete('wf li', {bridge: webFront})).candidates.join() === 'list' && (await runtime.complete('wf list ', {bridge: webFront})).candidates.join() === '--tree',
+            'Completion must offer wf list and its option');
         // Ctrl+C: the terminal stops waiting at once, the next command answers while the first is still ending in C++.
         const interruptLinger = new AbortController();
         const lingering = failure(runtime.runLine('linger first', lineContext(interruptLinger.signal)));

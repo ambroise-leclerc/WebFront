@@ -25,6 +25,8 @@
   "js/developer/environment/workspace.mjs",
   "js/developer/environment/tarball.mjs",
   "js/developer/environment/commands.mjs",
+  "js/developer/environment/files.mjs",
+  "js/developer/environment/dependencies.mjs",
   "js/developer/environment/compiler.mjs",
   "js/developer/environment/bundler.mjs",
   "js/developer/environment/entry.mjs",

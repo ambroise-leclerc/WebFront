@@ -20,7 +20,13 @@ commands of the terminal operate on it:
 | `wf check` | type-check with the locked TypeScript compiler |
 | `wf test` | run Jasmine specs in the application's window |
 | `wf run`, `wf exec` | run a manifest script or a package's executable entry |
+| `wf list [--tree]`, `wf why <package>`, `wf info <package>` | list the installed packages, show them under the dependencies that bring them, explain or describe one |
 | `wf embed` | generate the C++ provider of the application's resources |
+
+The terminal also has commands of its own, without prefix, that only read the project: `ls`, `cat`, `tree` and `mounts`
+(see [the terminal](#the-terminal-and-the-applications-commands)). Project commands keep the `wf` prefix, which leaves
+their names (`test`, `run`, `build`, `list`...) free for the commands of your application
+([ADR-023](adr/ADR-023-espace-de-noms-des-commandes-du-terminal.md)).
 
 **Agents.** A WebFront interface is TypeScript/TSX in `ui/`, developed with `wf dev`, and an agent runs every command of
 this page itself in JSON or MCP: see [developing with an agent](DEVELOPING_WITH_AGENTS.md).
@@ -428,9 +434,56 @@ the same layout; `workspace: false` keeps the page as it is.
 
 The terminal of the environment (developer distribution 0.5.0, #308) is the only WebFront terminal; it is served
 from the environment archive with xterm.js, never from a C++ header. It runs `wf` commands, the application's C++
-commands and its own: `help`, `clear` (screen and scrollback), `history` (`history -c` clears it) and
-`exit [code]`, which ends the session and closes the window; when the browser keeps a window that a script did not
-open, Enter starts a new session. No system shell is exposed.
+commands and its own: `help`, `clear` (screen and scrollback), `history` (`history -c` clears it),
+`exit [code]`, which ends the session and closes the window, and the file commands below; when the browser keeps a
+window that a script did not open, Enter starts a new session. No system shell is exposed.
+
+**Why `wf` stays.** A bare name belongs to the terminal or to your application; `wf` is the namespace of the project
+(manifest, lock, packages, build). Without it the verbs of `wf` would be names your application could not use, and
+every verb added later would take one more. A `wf` command typed without its prefix is not run: the error gives the
+line to type (`Unknown command: install. Did you mean: wf install react?`).
+
+**File commands** (environment 0.9.3) read the project directory and never write it. Paths are relative
+to the project and cannot leave it; there is no working directory, no glob and no pipe. Options combine (`-la`, `-aL 2`,
+`-L2`), and `--` ends them so that a name may start with a dash (`cat -- -notes.txt`).
+
+Names, file contents and what a package declares about itself are not trusted: every control character they contain (C0,
+DEL and the 8-bit C1 controls) is shown, `^[` for ESC or `\x9b` for an 8-bit CSI, and never sent to the terminal. This
+holds for `ls`, `cat`, `tree`, `wf list`, `wf why` and `wf info`.
+
+| Command | Purpose |
+| --- | --- |
+| `ls [-l] [-a] [path]` | the entries of a directory; `-a` adds the hidden ones; `-l` adds type, size in bytes, modification time and what `wf` knows of the entry: `[manifest]`, `[lock]`, `[entry main]`, `[spec]`, `[script icons]`, `[generated provider LifeUI]`, and under `.webfront/` the package cache, the publications and the history |
+| `cat <file> [file...]` | the text of UTF-8 files, at most 1 MiB each; a binary file is refused |
+| `tree [-a] [-L <depth>] [path]` | a directory as a tree, three levels deep by default and at most 2000 entries; `.webfront/` is listed with `-a` but opened only when the path names it; a file is refused with the `cat` line that prints it |
+| `mounts` | what the application answers to the browser, in the order it looks (resources embedded in the executable, the publications of `.webfront/developer/`, the application's own providers), and what the commands read: manifest, lock, cache, environment and registry. The sources of the project are never served |
+
+`ls -l` needs a library that has the `webfront.developer.entries` callback (added with these commands); with an older
+one it says so, and `ls`, `cat`, `tree` and `mounts` still work.
+
+The usual file commands that the terminal does not provide are reserved all the same: `cd`, `pwd`, `cp`, `mv`, `rm`,
+`mkdir`, `rmdir`, `touch`, `edit`, `find`, `grep`, `head`, `tail`, `less`, `stat`, `du`, `df`. Each answers with what to
+do instead (edit the files in your editor while `wf dev` rebuilds), and a later environment can provide one without
+taking a name from an application.
+
+**Dependencies.** `wf list` names the locked packages; `wf list --tree` shows them under the dependencies of the
+manifest, each with the range that asks for it (`peer` for a peer, `deduped` where a package already shown comes again);
+`wf why <package>` gives the chains of requirements from the manifest to a package, for each locked version;
+`wf info <package>` (a name or `name@version`) gives its license, integrity, files, dependencies, dependents and
+`wf exec` entries. They read the lock only: no network, nothing written.
+
+```text
+> wf list --tree
+react@19.3.1  (^19.3.1)
+react-dom@19.3.1  (^19.3.1)
+├── react@19.3.1  (peer ^19.3.1)
+└── scheduler@0.28.0  (^0.28.0)
+
+2 roots, 3 packages
+> wf why scheduler
+scheduler@0.28.0
+  react-dom@19.3.1 (root, ^19.3.1) > scheduler@0.28.0 (^0.28.0)
+```
 
 `wf help` lists the `wf` commands; `wf help <command>` gives the usage and purpose of one, and `wf help agents` (or
 `wf help --agents`) the model, the sequence for a new interface and the `webfront-agent` commands that run it in JSON or
@@ -449,7 +502,8 @@ it comes from the library's embedded loader, not from the environment.
   pages on the same project keep each other's lines. A history file that cannot be read is never replaced.
 - **Typing ahead and paste:** keys typed or pasted while a command runs are applied after it, line by line; a last
   line without a line break waits on the prompt. Ctrl+C drops the keys still waiting.
-- **Completion (Tab):** command names, `wf` subcommands, the manifest's scripts after `wf run`, its entries and
+- **Completion (Tab):** command names, `wf` subcommands, the manifest's scripts after `wf run`, the installed packages after
+  `wf why` and `wf info`, its entries and
   entries/providers after `wf build`, `wf dev`, `wf preview` and `wf embed`, and project paths, also when the word is escaped (`my\ dir/`) or
   quoted (`"my dir/`); the completion is written the same way and closes the quote. Several candidates are completed
   to their common prefix, or listed.
@@ -497,8 +551,9 @@ of its browser with `webfront.commands.start`. In C++, the command is spawned li
 
 A second `webfront::Commands` on the same application throws `std::logic_error` and registers nothing. A copy of a
 `Context` may outlive its command (a detached task): its stop token stays valid and its writes are dropped once the
-browser is gone. The names `wf`, `clear`, `exit`,
-`help` and `history` are reserved. `context.write` has no flow control: a command
+browser is gone. The names the terminal handles itself are reserved (`webfront::commands::reservedNames`): `wf`,
+`clear`, `exit`, `help`, `history`, `ls`, `cat`, `tree`, `mounts` and the file commands listed above; `commands.add`
+throws `std::invalid_argument` for one of them. `context.write` has no flow control: a command
 writing large output with it, faster than the browser reads, grows the connection's write queue; use
 `context.print` for such output.
 

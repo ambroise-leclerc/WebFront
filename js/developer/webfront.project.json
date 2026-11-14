@@ -31,6 +31,8 @@
       "test/developer/specs/testing-specs.mjs",
       "test/developer/specs/timers-specs.mjs",
       "test/developer/specs/workspace-specs.mjs",
+      "test/developer/specs/files-specs.mjs",
+      "test/developer/specs/dependencies-specs.mjs",
       "test/developer/specs/distribution-specs.mjs"
     ]
   },
