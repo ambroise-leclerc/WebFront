@@ -49,7 +49,7 @@ webfront::WebFront app;
 std::atomic<bool> stopRequested = false;
 app.cppFunction("stopHost", [&] { stopRequested = true; });  // server thread
 
-app.start();                                 // returns at once; throws if the browser cannot be launched
+app.start();                                 // returns at once; throws if the opener cannot be spawned
 
 const auto onTick = app.broadcast("hostLoop.onTick");
 for (std::int32_t tick = 0; !stopRequested; ++tick) {  // the host's own loop
@@ -64,7 +64,9 @@ app.shutdown();                              // stops and joins the server
 - **Readiness.** After `start()` returns the server is listening (`app.port()`); a browser has connected when the
   `onUIStarted` handler or a `subscribeUIStarted` subscriber runs. WebFront cannot observe that the external browser
   opened or closed a tab other than through its connections (`subscribeUIClosed`).
-- **Failure.** If the launch throws, the server is stopped and joined before the exception reaches the caller.
+- **Failure.** If the launch throws, the server is stopped and joined before the exception reaches the caller. The opener
+  (`xdg-open`, `open`, the WSL bridge) is spawned and not waited for, since it can live as long as the browser: a command
+  that cannot be spawned throws, one that fails afterwards is reported on stderr and never reaches the host's thread.
 - **Stop.** `app.shutdown()` or the destructor, from a host thread, outside any WebFront callback. `app.stop()` only
   requests it and may be called from anywhere.
 - Register callbacks and `onUIStarted` before `start()`. Call it once per application, on the thread that owns it,

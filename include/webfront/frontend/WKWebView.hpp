@@ -20,6 +20,7 @@
 #include <functional>
 #include <map>
 #include <stdexcept>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -1117,11 +1118,11 @@ struct WKWebViewFrontend {
     static constexpr bool   requiresMainThread = true;  // AppKit
 
     /// Asks the window to close, from any thread; false when no window is open (see CloseRequest.hpp).
-    static bool requestClose() noexcept {
+    static bool requestClose([[maybe_unused]] std::optional<UISession> session = std::nullopt) noexcept {
 #if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
         return detail::requestWindowClose(uiExecutor(), nativeWindow(), [](const NativeWindowHandle& window) {
             detail::wkwebview::requestSessionClose(window.pointer);
-        });
+        }, session);
 #else
         return false;
 #endif

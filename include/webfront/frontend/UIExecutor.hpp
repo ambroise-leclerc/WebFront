@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <exception>
 #include <functional>
@@ -29,6 +30,14 @@
 #include <vector>
 
 namespace webfront::frontend {
+
+/// @brief One run of a frontend's interface loop: the thread that attached it and the attach's own number. A request meant
+/// for a session is dropped, on the interface thread, if the loop that runs it is another one.
+struct UISession {
+    std::thread::id thread;
+    std::uint64_t   id{};
+    friend bool     operator==(const UISession&, const UISession&) = default;
+};
 namespace ex = networking::ex;
 
 /// @brief No interface-thread loop is attached: the frontend has none, it has not started or it has closed.
@@ -118,7 +127,8 @@ public:
         wakeFunction = std::move(wake);
         wakePending  = false;
         uiThread     = std::this_thread::get_id();
-        phase        = Phase::running;
+        ++sessions;
+        phase = Phase::running;
     }
 
     /// Runs the operations queued when it starts, no more: one that reschedules itself, or a producer that keeps queueing,
@@ -182,9 +192,9 @@ public:
         std::lock_guard lock(mutex);
         return phase == Phase::running && uiThread == std::this_thread::get_id();
     }
-    [[nodiscard]] std::optional<std::thread::id> interfaceThread() const {
+    [[nodiscard]] std::optional<UISession> session() const {
         std::lock_guard lock(mutex);
-        return phase == Phase::running ? std::optional{uiThread} : std::nullopt;
+        return phase == Phase::running ? std::optional{UISession{uiThread, sessions}} : std::nullopt;
     }
 
 private:
@@ -194,6 +204,7 @@ private:
     bool                               wakePending{false};
     Phase                              phase{Phase::idle};
     std::thread::id                    uiThread;
+    std::uint64_t                      sessions{0};  // attach() count: names each loop, whatever thread runs it
     std::function<void()>              wakeFunction;
     std::deque<std::shared_ptr<UIJob>> queue;
 };
@@ -343,11 +354,11 @@ public:
         const auto state = shared.lock();
         return state && state->onUIThread();
     }
-    /// The interface thread of the running loop, which is the thread that called the frontend's open(); empty when no loop
-    /// runs. It identifies whose session this is: only the application that called open() on that thread owns the window.
-    [[nodiscard]] std::optional<std::thread::id> interfaceThread() const {
+    /// The running loop, as a session: its thread (the one that called the frontend's open()) and an identity that no
+    /// other loop of this frontend ever has, not even a later one on the same thread. Empty when no loop runs.
+    [[nodiscard]] std::optional<UISession> session() const {
         const auto state = shared.lock();
-        return state ? state->interfaceThread() : std::nullopt;
+        return state ? state->session() : std::nullopt;
     }
     /// A sender completing on the interface thread; see the file comment for the other completions. Compose it with
     /// `ex::then` to run a function there. The operation always goes through the queue, even from the interface thread.

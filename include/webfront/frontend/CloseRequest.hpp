@@ -11,6 +11,7 @@
 
 #include <concepts>
 #include <exception>
+#include <optional>
 #include <utility>
 
 namespace webfront::frontend {
@@ -50,10 +51,13 @@ struct WindowCloseRequest {
         WindowCloseRequest* self;
 
         void set_value() noexcept {
-            // On the interface thread: the window is given only while it is published.
+            // On the interface thread: the window is given only while it is published, and a request made for a session
+            // is dropped if the loop that runs it is another one (the first closed and a second opened since).
             try {
-                if (const auto handle = self->window.get())
-                    self->close(*handle);
+                if (!self->session || self->executor.session() == self->session) {
+                    if (const auto handle = self->window.get())
+                        self->close(*handle);
+                }
             } catch (...) {  // a close that cannot be made leaves the window open
             }
             delete self;
@@ -66,23 +70,29 @@ struct WindowCloseRequest {
         }
     };
 
+    UIExecutor                                                           executor;
     NativeWindow                                                         window;
     Close                                                                close;
+    std::optional<UISession>                                             session;
     ex::connect_result_t<decltype(std::declval<UIExecutor&>().schedule()), Receiver> operation;
 
-    WindowCloseRequest(const UIExecutor& executor, NativeWindow target, Close function)
-        : window(std::move(target)), close(std::move(function)), operation(ex::connect(executor.schedule(), Receiver{this})) { }
+    WindowCloseRequest(const UIExecutor& loop, NativeWindow target, Close function, std::optional<UISession> owner)
+        : executor(loop), window(std::move(target)), close(std::move(function)), session(owner),
+          operation(ex::connect(loop.schedule(), Receiver{this})) { }
 };
 
 /// Runs `close(const NativeWindowHandle&)` on the interface thread with the published window. Returns false, having
 /// done nothing, when no interface loop runs (nothing is open yet, or the window already closed); true when the request
 /// was handed to the loop, which drops it if the window is not published when it runs. Callable from any thread.
+///
+/// With `session` (the one `executor.session()` gave the caller), the request concerns that loop only: the check is made
+/// again on the interface thread when it runs, so a window of a later session is never closed by it.
 template <typename Close>
-bool requestWindowClose(const UIExecutor& executor, NativeWindow window, Close close) noexcept {
+bool requestWindowClose(const UIExecutor& executor, NativeWindow window, Close close, std::optional<UISession> session = std::nullopt) noexcept {
     if (!executor.available())
         return false;
     try {
-        ex::start((new WindowCloseRequest<Close>(executor, std::move(window), std::move(close)))->operation);
+        ex::start((new WindowCloseRequest<Close>(executor, std::move(window), std::move(close), session))->operation);
     } catch (...) {
         return false;
     }

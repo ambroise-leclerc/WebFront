@@ -1008,14 +1008,16 @@ public:
     WindowAction openWindow(std::string_view htmlFilename) {
         // The thread of this application's show(): requestClose() recognizes the session that is its own by it.
         struct Showing {
-            std::atomic<std::thread::id>& thread;
-            explicit Showing(std::atomic<std::thread::id>& value) : thread(value) {
-                thread = std::this_thread::get_id();
+            BasicWF& self;
+            explicit Showing(BasicWF& owner) : self(owner) {
+                self.showThread = std::this_thread::get_id();
+                ++self.showEpoch;  // odd: showing
             }
             ~Showing() {
-                thread = std::thread::id{};
+                ++self.showEpoch;  // even: not showing; a reader that saw the odd value and sees this one reads nothing
+                self.showThread = std::thread::id{};
             }
-        } showing{showThread};
+        } showing{*this};
         if constexpr (requires(const ViewLaunch& launch) { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, launch); })
             Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, ViewLaunch{viewSecret, detail::browserOrigin(httpAddress, httpPort)});
         else if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions); })
@@ -1121,15 +1123,22 @@ public:
             // The frontend is process-wide: a window it shows may belong to another application. This one asks only
             // while its own show() runs and, for a frontend that publishes its interface thread, only if that thread is
             // the one this show() runs on (a second open() refused because another session exists never owns it).
-            const auto shows = showThread.load();
-            if (shows == std::thread::id{})
+            const auto epoch = showEpoch.load();
+            if (epoch % 2 == 0)
                 return false;
+            const auto shows = showThread.load();
             if constexpr (requires { { Frontend::uiExecutor() } -> std::same_as<frontend::UIExecutor>; }) {
-                const auto owner = Frontend::uiExecutor().interfaceThread();
-                if (!owner || *owner != shows)
+                const auto session = Frontend::uiExecutor().session();
+                // This show() was running throughout the reads (same epoch), and its thread is busy inside open(): a
+                // session on that thread is this application's, not a later application's on a reused thread.
+                if (!session || session->thread != shows || showEpoch.load() != epoch)
                     return false;
+                // Another application may open a window between this check and the toolkit call: a frontend that takes
+                // the session checks it again where the request runs, so that it never closes a later session's window.
+                if constexpr (requires { { Frontend::requestClose(session) } -> std::same_as<bool>; })
+                    return Frontend::requestClose(session);
             }
-            return Frontend::requestClose();
+            return showEpoch.load() == epoch && Frontend::requestClose();
         } else {
             return false;
         }
@@ -1331,6 +1340,7 @@ private:
     bool                                                                     developerEnvironment = false;
     std::atomic<bool>                                                        launched{false};  // start() was called
     std::atomic<std::thread::id>                                             showThread{};  // the thread inside this application's Frontend::open(), if any
+    std::atomic<std::uint64_t>                                               showEpoch{0};  // odd while show() runs its frontend, changes at each entry and exit
     std::atomic<bool>                                                        shown{false};     // show() was called, whether or not its server still runs
     mutable std::mutex                                                       linksMutex;  // guards webLinks, read from any thread
     struct Connection {

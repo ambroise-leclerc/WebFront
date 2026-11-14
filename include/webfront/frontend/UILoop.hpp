@@ -39,12 +39,16 @@ class UILoopStop {
 public:
     /// Asks the loop to end; a request made before the loop starts ends it as soon as it starts.
     void request() noexcept {
-        end(false);
+        end(false, {});
     }
     /// Asks the loop to end only if one runs (armed); false, and nothing remembered, otherwise. For a host's close
     /// request, which concerns the session in progress and never the next one.
     bool requestIfRunning() noexcept {
-        return end(true);
+        return end(true, {});
+    }
+    /// The same, if `stillConcerned` (called under the lock that arm() and disarm() take) says the loop is the one meant.
+    bool requestIfRunning(const std::function<bool()>& stillConcerned) noexcept {
+        return end(true, stillConcerned);
     }
     /// True once request() was called and until the next run starts.
     [[nodiscard]] bool requestedStop() const {
@@ -68,11 +72,13 @@ public:
 
 private:
     // Records the request and calls the quit function outside the lock; false when `onlyIfRunning` and none is armed.
-    bool end(bool onlyIfRunning) noexcept {
+    bool end(bool onlyIfRunning, const std::function<bool()>& stillConcerned) noexcept {
         std::function<void()> wake;
         {
             std::lock_guard lock(mutex);
             if (onlyIfRunning && !quit)
+                return false;
+            if (stillConcerned && !stillConcerned())
                 return false;
             requested = true;
             wake      = quit;

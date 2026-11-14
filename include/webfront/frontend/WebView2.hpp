@@ -49,7 +49,8 @@ struct WebView2Options {
     #include <limits>
     #include <memory>
     #include <mutex>
-    #include <string>
+    #include <optional>
+#include <string>
     #include <vector>
 
     #include <shlobj.h>
@@ -933,11 +934,11 @@ struct WebView2Frontend {
     static constexpr bool requiresMainThread = false;
 
     /// Asks the window to close, from any thread; false when no window is open (see CloseRequest.hpp).
-    static bool requestClose() noexcept {
+    static bool requestClose([[maybe_unused]] std::optional<UISession> session = std::nullopt) noexcept {
 #if defined(WEBFRONT_EMBED_WEBVIEW2) && defined(_WIN32)
         return detail::requestWindowClose(uiExecutor(), nativeWindow(), [](const NativeWindowHandle& window) {
             PostMessageW(static_cast<HWND>(window.pointer), WM_CLOSE, 0, 0);
-        });
+        }, session);
 #else
         return false;
 #endif

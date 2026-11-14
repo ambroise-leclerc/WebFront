@@ -10,9 +10,13 @@
 #include <condition_variable>
 #include <exception>
 #include <memory>
+#include <optional>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
+#ifndef _WIN32
+    #include <sys/wait.h>
+#endif
 
 namespace {
 using namespace webfront;
@@ -855,6 +859,135 @@ SCENARIO("UIThread::stop reports a window that does not close") {
         REQUIRE_NOTHROW(ui.stop());
     }
 }
+
+template <typename Predicate>
+bool eventually(Predicate predicate) {
+    const auto deadline = std::chrono::steady_clock::now() + coordinationTimeout;
+    while (!predicate()) {
+        if (std::chrono::steady_clock::now() > deadline)
+            return false;
+        std::this_thread::yield();
+    }
+    return true;
+}
+
+SCENARIO("A close request made for one session never closes the window of a later one") {
+    GIVEN("a request prepared for the first loop of a frontend") {
+        frontend::UIExecutorHost   host;
+        frontend::NativeWindowHost windowHost{host.executor()};
+        int                        firstWindow  = 0;
+        int                        secondWindow = 0;
+        int                        closed       = 0;
+        const auto                 close        = [&](const frontend::NativeWindowHandle& window) {
+            closed = *static_cast<int*>(window.pointer) + 1;
+        };
+        host.attach([] { });
+        const auto first = host.executor().session();
+        REQUIRE(first);
+        windowHost.publish({.kind = frontend::NativeWindowKind::gtk, .pointer = &firstWindow, .portalParent = {}});
+        // The first session ends, as its window closes; another application then opens its own on the same thread, with a
+        // window of its own. Everything is sequenced here: the request is made after the check of the first session passed.
+        windowHost.retract();
+        host.close();
+        host.attach([] { });
+        const auto second = host.executor().session();
+        REQUIRE(second);
+        windowHost.publish({.kind = frontend::NativeWindowKind::gtk, .pointer = &secondWindow, .portalParent = {}});
+        CHECK(first->thread == second->thread);  // the same thread does not make it the same session
+        CHECK(*first != *second);
+        WHEN("the request names the first session") {
+            REQUIRE(frontend::detail::requestWindowClose(host.executor(), windowHost.window(), close, first));
+            host.drain();
+            THEN("the second session's window stays open") {
+                CHECK(closed == 0);
+            }
+        }
+        WHEN("the request names the session that runs") {
+            REQUIRE(frontend::detail::requestWindowClose(host.executor(), windowHost.window(), close, second));
+            host.drain();
+            THEN("its window is closed") {
+                CHECK(closed == 1);
+            }
+        }
+        host.close();
+    }
+}
+
+SCENARIO("The system browser's loop ignores a close request made for an earlier loop") {
+    GIVEN("a session of the first loop, kept after it ended") {
+        using Browser = frontend::BrowserWithUILoopFrontend;
+        // The loop's stop state is process-wide and a test before this one may have left a request pending: spend it.
+        Browser::requestStop();
+        Browser::loop("127.0.0.1", "9002", "index.html", +[](const std::string&) { });
+        std::optional<frontend::UISession> stale;
+        {
+            std::jthread client([&] {
+                const auto executor = Browser::uiExecutor();
+                (void)eventually([&] { return executor.available(); });
+                stale = executor.session();
+                Browser::requestStop();
+            });
+            Browser::loop("127.0.0.1", "9002", "index.html", +[](const std::string&) { });
+        }
+        REQUIRE(stale);
+        THEN("a later loop is not ended by it, and its own session ends it") {
+            bool                staleAccepted = true;
+            bool                ownAccepted   = false;
+            std::jthread        client([&] {
+                const auto executor = Browser::uiExecutor();
+                (void)eventually([&] { return executor.available(); });
+                const auto own = executor.session();
+                staleAccepted  = Browser::requestClose(stale);
+                ownAccepted    = eventually([&] { return Browser::requestClose(own); });
+                if (!ownAccepted)
+                    Browser::requestStop();
+            });
+            Browser::loop("127.0.0.1", "9002", "index.html", +[](const std::string&) { });
+            client.join();
+            CHECK_FALSE(staleAccepted);
+            CHECK(ownAccepted);
+        }
+    }
+}
+
+#ifndef _WIN32
+SCENARIO("The system browser opener is started without being waited for") {
+    GIVEN("a command that lives for two seconds") {
+        const auto start = std::chrono::steady_clock::now();
+        std::mutex              mutex;
+        std::condition_variable ended;
+        std::optional<int>      status;
+        browser::detail::spawnWithoutWaiting("sleep 2", [&](int value) {
+            std::lock_guard lock(mutex);
+            status = value;
+            ended.notify_all();
+        });
+        THEN("the call returns long before it ends, and its end is reported afterwards (#567)") {
+            CHECK(std::chrono::steady_clock::now() - start < 1s);
+            std::unique_lock lock(mutex);
+            CHECK_FALSE(status.has_value());
+            REQUIRE(ended.wait_for(lock, 10s, [&] { return status.has_value(); }));
+            CHECK(*status == 0);
+        }
+    }
+    GIVEN("a command that fails") {
+        std::mutex              mutex;
+        std::condition_variable ended;
+        std::optional<int>      status;
+        browser::detail::spawnWithoutWaiting("exit 3", [&](int value) {
+            std::lock_guard lock(mutex);
+            status = value;
+            ended.notify_all();
+        });
+        THEN("the status is reported, not thrown") {
+            std::unique_lock lock(mutex);
+            REQUIRE(ended.wait_for(lock, 10s, [&] { return status.has_value(); }));
+            CHECK(WIFEXITED(*status));
+            CHECK(WEXITSTATUS(*status) == 3);
+        }
+    }
+}
+#endif
 
 SCENARIO("A window close request is always released by the executor") {
     GIVEN("a close function that holds a resource") {

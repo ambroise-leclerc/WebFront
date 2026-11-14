@@ -512,6 +512,9 @@ SCENARIO("The system browser can run an interface-thread loop on the calling thr
         }
     }
     GIVEN("a host's close request while no loop runs") {
+        // The loop's stop state is process-wide and an earlier test may have left a request pending: spend it.
+        Browser::requestStop();
+        Browser::loop("127.0.0.1", "9002", "index.html", fakeLaunch);
         THEN("it reaches nothing and is not remembered for the next loop (#567)") {
             CHECK_FALSE(Browser::requestClose());
             std::jthread client([&] {

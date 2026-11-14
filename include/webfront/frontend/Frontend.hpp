@@ -58,6 +58,8 @@ namespace webfront::frontend {
  * (frontend::endsOnRequest<Frontend>).
  * An optional static bool requestClose() asks, from any thread, the session that open() runs to end as if the user had
  * closed the window; it returns false when nothing is open to receive the request. BasicWF::requestClose() forwards it.
+ * A frontend that publishes its interface thread (uiExecutor()) declares `requestClose(std::optional<UISession>)` instead:
+ * BasicWF passes the session it owns, and the request is dropped on the interface thread if another loop runs by then.
  * An optional static constexpr bool requiresMainThread tells that open() belongs to the process main thread
  * (frontend::requiresMainThread<Frontend>); webfront::UIThread refuses such a frontend at compile time.
  * An optional open(address, port, file) overload receives the configured address; build URLs with
@@ -78,9 +80,10 @@ struct DefaultBrowserFrontend {
 
     static void initialize() { }
 
-    /// Opens the page in the system browser and returns at once, without the console wait of open() (BasicWF::start()).
+    /// Opens the page in the system browser and returns at once, without the console wait of open() and without waiting
+    /// for the opener command to end (BasicWF::start()).
     static void launch(std::string_view address, std::string_view port, std::string_view file) {
-        browser::launch(detail::applicationUrl(address, port, file));
+        browser::launchWithoutWaiting(detail::applicationUrl(address, port, file));
     }
 
     static void open(std::string_view port, std::string_view file) {
@@ -124,8 +127,13 @@ struct BrowserWithUILoopFrontend {
     /// Ends the loop of a running open(), as the user closing the window would end the others; the browser's window is
     /// not ours to close, the loop is. False, and nothing remembered, when no loop runs: unlike requestStop(), a request
     /// never ends a later session.
-    static bool requestClose() noexcept {
-        return loopStop().requestIfRunning();
+    static bool requestClose([[maybe_unused]] std::optional<UISession> session = std::nullopt) noexcept {
+        if (!session)
+            return loopStop().requestIfRunning();
+        // Checked under the stop's own lock, which the end of that loop takes too: the session cannot change in between.
+        return loopStop().requestIfRunning([&] {
+            return uiExecutor().session() == session;
+        });
     }
 
     /// Ends the loop of a running open(), or the next one at its start; callable from any thread.
@@ -168,11 +176,11 @@ struct CEFFrontend {
     static constexpr bool requiresMainThread = true;
 
     /// Asks the window to close, from any thread; false when no window is open (see CloseRequest.hpp).
-    static bool requestClose() noexcept {
+    static bool requestClose([[maybe_unused]] std::optional<UISession> session = std::nullopt) noexcept {
 #ifdef WEBFRONT_EMBED_CEF
         return detail::requestWindowClose(uiExecutor(), nativeWindow(), [](const NativeWindowHandle& window) {
             cef::closeBrowser(window.pointer);
-        });
+        }, session);
 #else
         return false;
 #endif
@@ -272,15 +280,10 @@ struct NativeOrBrowserFrontendFor {
 
     /// Asks the one in use to end its session; false when it has nothing to close (the plain system browser never has).
     /// Callable from any thread: the decision of initialize() is read atomically.
-    static bool requestClose() {
-        if (usesNativeWindow()) {
-            if constexpr (requires { { Native::requestClose() } -> std::same_as<bool>; })
-                return Native::requestClose();
-        } else {
-            if constexpr (requires { { Browser::requestClose() } -> std::same_as<bool>; })
-                return Browser::requestClose();
-        }
-        return false;
+    static bool requestClose(std::optional<UISession> session = std::nullopt) {
+        if (usesNativeWindow())
+            return closeWith<Native>(session);
+        return closeWith<Browser>(session);
     }
 
     /// Why the browser is used, or nullopt when the native window is. Meaningful after initialize().
@@ -364,6 +367,16 @@ struct NativeOrBrowserFrontendFor {
     }
 
 private:
+    template <typename Used>
+    static bool closeWith(std::optional<UISession> session) {
+        if constexpr (requires { { Used::requestClose(session) } -> std::same_as<bool>; })
+            return Used::requestClose(session);
+        else if constexpr (requires { { Used::requestClose() } -> std::same_as<bool>; })
+            return Used::requestClose();
+        else
+            return false;
+    }
+
     struct State {
         std::optional<std::string> reason;        // written by initialize() only
         std::atomic<bool>          native{true};  // the decision, readable from any thread (requestClose)
