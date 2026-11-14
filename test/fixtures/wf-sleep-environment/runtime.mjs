@@ -5,13 +5,17 @@ export async function mount() {
     await new Promise(resolve => setTimeout(resolve, 5000));
 }
 
+// `run sleep` waits on a timer; `run block` blocks the page, so that nothing in it can close the window.
 export async function runNonInteractive(argv, {bridge}) {
-    if (argv.join(' ') !== 'run sleep') throw new Error('Expected the sleeping watchdog command');
-    const sleeping = new Promise(resolve => setTimeout(resolve, 120000));
-    const call = (name, ...args) => bridge.cppFunction(`webfront.developer.${name}`)(...args);
-    const id = await call('begin', 'sleep.started', false);
+    const command = argv.join(' ');
+    if (command !== 'run sleep' && command !== 'run block') throw new Error('Expected the sleeping or blocking watchdog command');
+    const name = command === 'run sleep' ? 'sleep' : 'block';
+    const call = (operation, ...args) => bridge.cppFunction(`webfront.developer.${operation}`)(...args);
+    const id = await call('begin', `${name}.started`, false);
     await call('write', id, 'output', 0, new TextEncoder().encode('running'));
     await call('commit', id);
-    await sleeping;
+    if (name === 'block')
+        for (;;) {}
+    await new Promise(resolve => setTimeout(resolve, 120000));
     throw new Error('The watchdog did not stop the sleeping command');
 }

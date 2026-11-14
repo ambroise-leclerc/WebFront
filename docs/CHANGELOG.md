@@ -21,6 +21,7 @@ these entries stays in the GitHub releases and the Git history.
 
 - Keep automated browser windows visible (#544, #556, `docs/TEST_PERFORMANCE.md`).
 - Run each developer integration part and each wf command of the tests in a process of its own again: the shared windows of #544 and #556 made the driver cases about a third slower on Windows and failed more often. Remove the timing analysis tools and their CI steps, and repeat the desktop suite through one path, with `desktop_passes` on a manual dispatch (#570, `docs/TEST_PERFORMANCE.md`).
+- Close the test driver's window with `requestClose()` instead of asking the page: a spec that blocks the page now ends with the driver's timeout report instead of a forced exit (#570).
 - Declare GCC 13 as the best-effort S2 minimum for the library and examples, document the GCC 14 exit clause and qualified Clang scope, and add GCC 13 ASan/UBSan fast tests (#525, ADR-022).
 
 - Skip the cases that configure a CMake project (label `configuration`, about 75 s of worker time) and the coverage capture on a pull request that does not change the build system, and drop the compiler-cache probe step; a push to `develop` and the full tier still run them (#545).

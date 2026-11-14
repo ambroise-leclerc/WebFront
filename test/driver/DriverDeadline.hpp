@@ -25,9 +25,17 @@ public:
         ++revision;
         changed.notify_all();
     }
+    // The page is done: expired() returns false, as when it is stopped.
+    void finish() {
+        std::scoped_lock lock{mutex};
+        finished = true;
+        ++revision;
+        changed.notify_all();
+    }
+    // True when a limit elapsed; false when stopped or finished first.
     bool expired(std::stop_token stop) {
         std::unique_lock lock{mutex};
-        while (!stop.stop_requested()) {
+        while (!stop.stop_requested() && !finished) {
             const auto previous = revision;
             const auto limit    = current;
             if (!changed.wait_until(lock, stop, limit, [&] {
@@ -42,6 +50,7 @@ private:
     const std::chrono::steady_clock::time_point overall;
     std::chrono::steady_clock::time_point       current;
     std::size_t                                 revision = 0;
+    bool                                        finished = false;
     std::mutex                                  mutex;
     std::condition_variable_any                 changed;
 };

@@ -414,6 +414,8 @@ if(_browser_tests_available)
         # Bound browser/bootstrap startup separately from the four-second command watchdog.
         # The fixture deliberately mounts slowly and records that the command actually began.
         webfront_add_driver_test(WfDriverTimeout 71 "run|sleep" OUTPUT "time limit of the driver" DRIVER_TIMEOUT 100 COMMAND_TIMEOUT 4 EXPECT_FILE sleep.started SLEEP_ENVIRONMENT)
+        # A page that blocks its script cannot close itself: the driver closes the window natively and still reports.
+        webfront_add_driver_test(WfDriverBlockedPage 71 "run|block" OUTPUT "time limit of the driver" DRIVER_TIMEOUT 100 COMMAND_TIMEOUT 4 EXPECT_FILE block.started SLEEP_ENVIRONMENT)
         webfront_add_driver_test(WfDriverWrongIntegrity 70 "list" OUTPUT "Integrity check failed"
             INTEGRITY "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==")
         webfront_add_driver_test(WfDriverMissingArchive 70 "list" OUTPUT "archive not found"

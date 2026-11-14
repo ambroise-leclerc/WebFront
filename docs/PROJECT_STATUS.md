@@ -132,7 +132,7 @@ are retained for investigation; diagnostics alone do not establish a correction.
   refused there. A `shared` root lifts the POSIX ownership checks. No service uses the storage yet
   (ADR-020). See [ADR-002](adr/ADR-002-systemes-de-fichiers-composables.md).
 - A synchronous infinite loop in a spec blocks the page hosting `wf test`; the native test
-  driver's watchdog terminates stalled runs with failure. Windows file reads beyond 260
+  driver closes its window natively when its time limit elapses and reports the timeout. Windows file reads beyond 260
   characters remain unsupported (#349).
 - Native windows require their platform event loop; WKWebView, WebKitGTK and CEF also require the main thread, while
   WebView2 runs on any thread that is not already MTA (`webfront::UIThread`). Hidden WKWebView tests

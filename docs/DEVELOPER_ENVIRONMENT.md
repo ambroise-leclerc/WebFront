@@ -629,7 +629,7 @@ webfront-wf --project <dir> [--environment <environment.tgz> --integrity <sha512
   `runNonInteractive`; it never extends the overall deadline. Suites use their per-case budgets instead.
 - Exit status: the command's own (`wf test`: 0, 1, 124, 130); **64** usage; **70** bootstrap failure (archive absent, wrong
   integrity, incompatible protocol or API, no non-interactive mode); **71** the driver's overall `--timeout` (default 600 s) or optional command deadline elapsed,
-  after asking the page to close; **72** the browser closed without a result. `--report` writes the JSON result
+  after closing the window natively (`requestClose()`, which works also when a spec blocks the page); **72** the browser closed without a result. `--report` writes the JSON result
   `{exitCode, output, report}` of the command, cut to fit a bridge string as described above.
 
 `webtest`, the Jasmine bridge suite (`test/web/suite/`, #311), is this driver with the C++ callbacks of its specs

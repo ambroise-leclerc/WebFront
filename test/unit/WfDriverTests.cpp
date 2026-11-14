@@ -3,13 +3,9 @@
 
 #include <sstream>
 
+#include <atomic>
+
 namespace {
-struct DriverUI {
-    std::vector<std::string>* scripts;
-    void                      addScript(std::string_view script) const {
-        scripts->emplace_back(script);
-    }
-};
 webfront::testdriver::Options parseDriver(std::initializer_list<std::string> extra) {
     std::vector<std::string> arguments{"webfront-wf", "--project", "project", "--environment", "environment.tgz", "--integrity", "sha512-test"};
     arguments.insert(arguments.end(), extra.begin(), extra.end());
@@ -43,31 +39,47 @@ SCENARIO("Browser test diagnostics retain HTTP failures without filling the tran
     }
 }
 
-SCENARIO("The driver deadline closes both connected and late browsers without losing the request") {
-    std::vector<std::string>                      scripts;
-    webfront::testdriver::DriverBrowser<DriverUI> browser;
-    GIVEN("the browser connects before the deadline") {
-        browser.connected(DriverUI{&scripts});
-        REQUIRE(scripts == std::vector<std::string>{webfront::testdriver::driverScript});
-        WHEN("the watchdog closes it twice") {
-            browser.close();
-            browser.close();
-            THEN("one close follows the command runner") {
-                REQUIRE(scripts.size() == 2);
-                REQUIRE(scripts.back() == "window.close()");
-            }
+SCENARIO("The driver repeats its close request until the window has closed") {
+    using namespace std::chrono_literals;
+    using webfront::testdriver::closeUntilShown;
+    std::stop_source shown;
+    std::atomic<int> requests = 0;
+    GIVEN("a window that only exists after a few requests reached nothing") {
+        const auto requestClose = [&] {
+            // The third request finds the window; show() then returns.
+            if (++requests < 3)
+                return false;
+            shown.request_stop();
+            return true;
+        };
+        THEN("the request is repeated until show() returns") {
+            REQUIRE(closeUntilShown(shown.get_token(), requestClose, 1h));
+            REQUIRE(requests == 3);
         }
     }
-    GIVEN("the deadline expires before a browser connects") {
-        browser.close();
-        REQUIRE(scripts.empty());
-        WHEN("the handshake arrives afterward") {
-            browser.connected(DriverUI{&scripts});
-            THEN("the page closes without starting the command runner") {
-                REQUIRE(scripts == std::vector<std::string>{"window.close()"});
-            }
+    GIVEN("a window that never closes") {
+        THEN("the driver gives up after its patience") {
+            REQUIRE_FALSE(closeUntilShown(
+                shown.get_token(),
+                [&] {
+                    ++requests;
+                    return true;
+                },
+                30ms));
+            REQUIRE(requests >= 1);
         }
     }
+}
+
+SCENARIO("The page's end releases the driver's close without a time limit") {
+    using namespace std::chrono_literals;
+    webfront::testdriver::DriverDeadline deadline{1h};
+    std::stop_source                     shown;
+    std::jthread                         page([&] {
+        deadline.finish();
+    });
+    REQUIRE_FALSE(deadline.expired(shown.get_token()));
+    REQUIRE_FALSE(shown.stop_requested());
 }
 
 SCENARIO("Driver WebView2 profiles isolate environments served at identical URLs") {
