@@ -10,6 +10,24 @@ const ansi = {
 };
 export const clearScreen = ansi.clearScreen;
 
+// --- Untrusted text ----------------------------------------------------------------------------------------------
+
+// C0 controls, DEL and the C1 controls (U+0080 to U+009F, where U+009B is an 8-bit CSI) would drive the terminal.
+const visibleControl = char => {
+    const code = char.charCodeAt(0);
+    if (code === 0x7f) return '^?';
+    return code < 0x20 ? '^' + String.fromCharCode(code + 64) : '\\x' + code.toString(16);
+};
+
+/**
+ * Text of a project file for the terminal: its control characters are shown (^[ for ESC, \x9b for a C1 control) instead
+ * of being sent; tabs and line breaks stay, and "\r\n" is one line break.
+ */
+export const printable = text => String(text).replace(/\r\n/g, '\n').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, visibleControl);
+
+/** A name or a value that comes from the project, its lock or a package, on one line: every control character is shown. */
+export const inline = text => String(text).replace(/[\x00-\x1f\x7f-\x9f]/g, visibleControl);
+
 // --- Cell widths -----------------------------------------------------------------------------------------------
 
 const zeroWidth = /^[\p{Mn}\p{Me}\p{Cf}]$/u;
