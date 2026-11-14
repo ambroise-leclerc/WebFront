@@ -206,6 +206,12 @@ SCENARIO("Commands register their bridge functions and list the commands") {
             for (const auto* name : {"", "two words", "quo'te", "back\\slash", "tab\t", "wf", "clear", "exit", "help", "history", "greet"})
                 CHECK_THROWS_AS(fixture.commands.add(name, "", greet), invalid_argument);
         }
+        THEN("every name the terminal keeps for itself is refused, the file commands it does not provide included") {
+            for (const auto name : webfront::commands::reservedNames)
+                CHECK_THROWS_AS(fixture.commands.add(std::string(name), "", greet), invalid_argument);
+            for (const auto* name : {"ls", "cat", "tree", "mounts", "rm", "cd", "edit"})
+                CHECK(std::ranges::find(webfront::commands::reservedNames, std::string_view{name}) != webfront::commands::reservedNames.end());
+        }
     }
     GIVEN("an application where only webfront.commands.cancel is taken") {
         FakeApp app;

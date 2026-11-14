@@ -4,13 +4,14 @@
 #include <webfront/DeveloperApp.hpp>
 #include <webfront/http/MimeType.hpp>
 
-#include <chrono>
 #include <array>
-#include <span>
-#include <future>
+#include <chrono>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <limits>
+#include <regex>
+#include <span>
 #include <sstream>
 #include <thread>
 #include <utility>
@@ -937,6 +938,49 @@ SCENARIO("A project directory is listed without leaving the project") {
             REQUIRE_THROWS_WITH(store.list("missing"), Catch::Matchers::ContainsSubstring("Cannot list project directory"));
             REQUIRE_THROWS_WITH(store.list("ui/main.tsx"), Catch::Matchers::ContainsSubstring("Cannot list project directory"));
             REQUIRE_THROWS_AS(store.list("../outside"), std::invalid_argument);
+        }
+    }
+}
+
+SCENARIO("The entries of a project directory are described like its listing names them") {
+    TemporaryDirectory project;
+    TemporaryDirectory outside;
+    developer::Store   store{project.path()};
+    publishFile(store, "ui/main.tsx", "main");
+    publishFile(store, "ui/parts/a.ts", "a");
+    publishFile(store, "ui/b.css", "");
+    const auto text = [&](std::string path) {
+        const auto bytes = store.entries(std::move(path));
+        return std::string(bytes.begin(), bytes.end());
+    };
+    // "modified" is a time of this run: its digits are replaced before comparing.
+    const auto shape = [&](std::string path) {
+        return std::regex_replace(text(std::move(path)), std::regex{R"re("modified":[1-9][0-9]{12,})re"}, R"("modified":T)");
+    };
+    GIVEN("files and a subdirectory") {
+        THEN("each entry has its name without a slash, its type, its size and a recent modification time") {
+            REQUIRE(shape("ui")
+                    == R"([{"name":"b.css","type":"file","size":0,"modified":T},)"
+                       R"({"name":"main.tsx","type":"file","size":4,"modified":T},)"
+                       R"({"name":"parts","type":"directory","size":0,"modified":T}])");
+            REQUIRE_THAT(text(""), Catch::Matchers::ContainsSubstring(R"("name":"ui","type":"directory")"));
+        }
+    }
+    GIVEN("a link to a directory outside the project") {
+        std::error_code error;
+        std::filesystem::create_directory_symlink(outside.path(), project.path() / "ui" / "escape", error);
+        if (!error) {
+            THEN("it is omitted, and describing through it is refused") {
+                REQUIRE_THAT(text("ui"), !Catch::Matchers::ContainsSubstring("escape"));
+                REQUIRE_THROWS_AS(store.entries("ui/escape"), std::invalid_argument);
+            }
+        }
+    }
+    GIVEN("a missing directory, a file or a path escaping the project") {
+        THEN("describing fails like listing") {
+            REQUIRE_THROWS_WITH(store.entries("missing"), Catch::Matchers::ContainsSubstring("Cannot list project directory"));
+            REQUIRE_THROWS_WITH(store.entries("ui/main.tsx"), Catch::Matchers::ContainsSubstring("Cannot list project directory"));
+            REQUIRE_THROWS_AS(store.entries("../outside"), std::invalid_argument);
         }
     }
 }

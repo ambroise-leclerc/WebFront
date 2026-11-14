@@ -137,7 +137,7 @@ The JSON column completes `webfront-agent --attach DIRECTORY`; the MCP column is
 
 - **`wf dev` has no agent operation.** It is a watch for a person at the window. An agent edits the files with its own tools
   and runs `preview` again; a person's `wf dev` may stay running meanwhile, and both use the same window.
-- `install` takes one package per operation. `wf run`, `wf exec` and `wf list` have no operation: there is no shell, no
+- `install` takes one package per operation. `wf run`, `wf exec`, `wf list`, `wf why` and `wf info` have no operation, nor have the terminal's `ls`, `cat`, `tree` and `mounts`: there is no shell, no
   script execution and no JavaScript evaluation for an agent.
 - A result is JSON with a `state` and `result.exitCode`; compiler and type errors come as `diagnostics` with file, line and
   column. A failed operation is not a verification. `inspect` returns the visible elements that have an `id`, which is why
