@@ -7,16 +7,18 @@
 #pragma once
 
 #include "../unit/TemporaryDirectory.hpp"
-#include "DriverSuite.hpp"
+#include "DriverDeadline.hpp"
 #include "RequestLog.hpp"
 #include "TestFrontend.hpp"
 #include <webfront/system/SafePath.hpp>
+#include <webfront/utils/Json.hpp>
 #include <webfront/WebFront.hpp>
 
 #include <charconv>
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -104,9 +106,6 @@ struct Options {
     std::chrono::seconds                 timeout{600};
     std::optional<std::chrono::seconds>  commandTimeout;
     std::vector<std::string>             command;
-    std::optional<std::filesystem::path> suite;
-    std::optional<std::filesystem::path> reportDirectory;
-    std::string                          filter;
 };
 
 struct UsageError : std::invalid_argument {
@@ -137,12 +136,6 @@ inline Options parse(int argc, char** argv) {
             options.registryDirectory = value();
         else if (argument == "--manifest-dir")
             options.manifestDirectory = value();
-        else if (argument == "--suite")
-            options.suite = value();
-        else if (argument == "--report-dir")
-            options.reportDirectory = value();
-        else if (argument == "--filter")
-            options.filter = value();
         else if (argument == "--report")
             options.report = value();
         else if (argument == "--timeout" || argument == "--command-timeout") {
@@ -171,14 +164,8 @@ inline Options parse(int argc, char** argv) {
             throw UsageError("--manifest-dir expects a relative '/'-separated directory without '..'");
         }
     }
-    if (options.command.empty() && !options.suite)
+    if (options.command.empty())
         throw UsageError("A wf command is required");
-    if (options.suite && (!options.command.empty() || options.report || !options.reportDirectory))
-        throw UsageError("--suite requires --report-dir and replaces the command and --report");
-    if (options.suite && options.commandTimeout)
-        throw UsageError("--command-timeout is for a single command; suites use per-case timeouts");
-    if (!options.suite && (options.reportDirectory || !options.filter.empty()))
-        throw UsageError("--report-dir and --filter require --suite");
     if (options.environment.has_value() != options.integrity.has_value())
         throw UsageError("--environment and --integrity go together");
 #if defined(WEBFRONT_BOOTSTRAP_ARCHIVE) && defined(WEBFRONT_BOOTSTRAP_INTEGRITY)
@@ -203,40 +190,6 @@ inline Sources& sources() {
     return instance;
 }
 
-// Real HTTP page: WebFront.js derives its WebSocket URL from location.host (srcdoc has no host).
-inline constexpr std::string_view suitePage = R"HTML(<!doctype html><div id="preview"></div><script src="/WebFront.js"></script><script type="module">
-                    Promise.resolve().then(async () => {
-                        const box = frameElement.getBoundingClientRect();
-                        if (box.width <= 0 || box.height <= 0 || box.right <= 0 || box.bottom <= 0
-                            || box.left >= parent.innerWidth || box.top >= parent.innerHeight)
-                            throw new Error('A driver session case must be displayed in the native window');
-                        localStorage.clear();
-                        sessionStorage.clear();
-                        // No environment command uses IndexedDB today, but discard databases created by a spec when supported.
-                        for (const database of await indexedDB.databases?.() ?? []) {
-                            await new Promise((resolve, reject) => {
-                                const request = indexedDB.deleteDatabase(database.name);
-                                request.onsuccess = resolve;
-                                request.onerror = () => reject(request.error);
-                                request.onblocked = () => reject(new Error('A previous case retained an IndexedDB connection'));
-                            });
-                        }
-                        return import('/webfront/developer/environment/' + parent.webfrontDriverCase.entry);
-                    }).then(async runtime => {
-                        await webFront.ready;
-                        const {index, item, config, createFrame} = parent.webfrontDriverCase;
-                        let result;
-                        await runtime.runNonInteractive(item.command, {bridge: webFront, config, createFrame,
-                            preview: document.getElementById('preview'), signal: new AbortController().signal,
-                            write: () => {}, onExit: () => {}, reporter: async json => {
-                                result = JSON.parse(json);
-                                await webFront.cppFunction('wf.caseResult')(index, result.exitCode, json);
-                            }});
-                        if (!result) throw new Error('Suite command returned no report');
-                        parent.postMessage({driverCase: index, status: result.exitCode}, location.origin);
-                    }).catch(error => parent.postMessage({driverCase: parent.webfrontDriverCase.index,
-                        error: String(error?.stack ?? error)}, location.origin));</script>)HTML";
-
 /// Serves the environment archive and the optional local registry under /driver/, from outside the project.
 class DriverFS {
 public:
@@ -244,15 +197,6 @@ public:
 
     std::optional<webfront::fs::File> open(std::filesystem::path path) const {
         const auto relative = path.relative_path().generic_string();
-        if (relative == "driver/case.html") {
-            static const auto words = [] {
-                std::vector<std::uint64_t> packed((suitePage.size() + 7) / 8);
-                for (std::size_t i = 0; i < suitePage.size(); ++i)
-                    packed[i / 8] |= static_cast<std::uint64_t>(static_cast<unsigned char>(suitePage[i])) << ((7 - i % 8) * 8);
-                return packed;
-            }();
-            return fs::File{std::span<const std::uint64_t>{words}, suitePage.size()};
-        }
         if (relative == "driver/environment.tgz")
             return read(sources().archive);
         // The starters the environment pins sit next to its archive: plain file names only.
@@ -372,39 +316,11 @@ inline constexpr auto driverScript = R"JS(
             throw Object.assign(new Error('Bootstrap failed: this developer environment has no non-interactive mode'), {bootstrap: true});
         config.starters = Object.fromEntries(Object.entries(environment.starters ?? {}).map(([name, value]) =>
             [name, {url: new URL(value.archive, new URL(config.environment, location.href)).href, integrity: value.integrity}]));
-        const suite = JSON.parse(await report('wf.suite'));
-        if (suite) {
-            let failed = false;
-            // One native browser, one fresh realm per command: imports, timers, Workers, listeners and frames
-            // belong to that realm. Only the explicit project and immutable HTTP resources survive between cases.
-            for (let index = 0; index < suite.length; ++index) {
-                const item = suite[index];
-                await report('wf.caseStarted', index);
-                const frame = document.createElement('iframe');
-                frame.title = item.name;
-                frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483647;background:#141821';
-                const finished = new Promise((resolve, reject) => {
-                    const receive = event => {
-                        if (event.source !== frame.contentWindow || event.data?.driverCase !== index) return;
-                        removeEventListener('message', receive);
-                        event.data.error ? reject(new Error(event.data.error)) : resolve(event.data.status);
-                    };
-                    addEventListener('message', receive);
-                });
-                window.webfrontDriverCase = {index, item, config, entry: environment.entry, createFrame};
-                frame.src = '/driver/case.html?case=' + index;
-                document.body.append(frame);
-                try { failed = (await finished !== item.expect) || failed; }
-                finally { frame.remove(); delete window.webfrontDriverCase; }
-            }
-            await report('wf.result', failed ? 1 : 0, JSON.stringify({exitCode: failed ? 1 : 0, output: 'Suite completed'}));
-        } else {
-            const argv = JSON.parse(await report('wf.arguments'));
-            await report('wf.commandStarted');
-            await runtime.runNonInteractive(argv, {bridge: webFront, config, createFrame, preview: document.getElementById('preview'),
-                signal: new AbortController().signal, write: () => {}, onExit: () => {},
-                reporter: json => report('wf.result', JSON.parse(json).exitCode, json)});
-        }
+        const argv = JSON.parse(await report('wf.arguments'));
+        await report('wf.commandStarted');
+        await runtime.runNonInteractive(argv, {bridge: webFront, config, createFrame, preview: document.getElementById('preview'),
+            signal: new AbortController().signal, write: () => {}, onExit: () => {},
+            reporter: json => report('wf.result', JSON.parse(json).exitCode, json)});
     } catch (error) {
         await report('wf.bootstrapFailed', String(error?.message ?? error)).catch(() => {});
     } finally { stop(); }
@@ -498,25 +414,7 @@ int run(const Options& options, Setup&& setup = {}) {
     if (sources().registry)
         sources().registry = std::filesystem::canonical(*sources().registry);
 
-    const auto cases = options.suite ? parseSuite(readSuite(*options.suite), options.filter) : std::vector<SuiteCase>{};
-    if (options.reportDirectory) {
-        std::filesystem::create_directories(*options.reportDirectory);
-        for (const auto& item : cases)
-            std::filesystem::remove(*options.reportDirectory / (item.name + ".json"));
-    }
-    std::string suiteJson = "null";
-    if (!cases.empty()) {
-        suiteJson = "[";
-        for (const auto& item : cases)
-            suiteJson += (suiteJson.size() > 1 ? "," : "") + std::string("{\"name\":") + json::quote(item.name) + ",\"command\":" + jsonArray(item.command)
-                         + ",\"expect\":" + std::to_string(item.expected) + "}";
-        suiteJson += "]";
-        if (suiteJson.size() > 60000)
-            throw UsageError("Suite arguments exceed the bridge string budget (60000 bytes)");
-    }
-    std::size_t completed  = 0;
-    bool        caseFailed = false;
-    const auto  started    = std::chrono::steady_clock::now();
+    const auto started = std::chrono::steady_clock::now();
     const auto  phase      = [&](std::string_view name) {
         std::cout << "driver " << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count() << "ms " << name << std::endl;
     };
@@ -525,35 +423,11 @@ int run(const Options& options, Setup&& setup = {}) {
     App            app{options.project, {.port = "0", .remoteFileTransport = webfront::RemoteFileTransport::loopbackAttested}};  // 127.0.0.1: the test pages are not the embedded view
     bool           commandStarted = false;
     app.cppFunction("wf.commandStarted", [&] {
-        if (options.suite || std::exchange(commandStarted, true))
+        if (std::exchange(commandStarted, true))
             throw std::runtime_error("Unexpected single-command start");
         if (options.commandTimeout)
             deadlines.beginCase(*options.commandTimeout);
         phase("begin command");
-    });
-    app.cppFunction("wf.suite", [suiteJson] {
-        return suiteJson;
-    });
-    app.cppFunction("wf.caseStarted", [&](double index) {
-        if (index != static_cast<double>(completed) || completed >= cases.size())
-            throw std::runtime_error("Unexpected suite start index");
-        deadlines.beginCase(cases[completed].timeout);
-        phase("begin " + cases[completed].name);
-    });
-    app.cppFunction("wf.caseResult", [&](double index, double exitCode, std::string json) {
-        if (index != static_cast<double>(completed) || completed >= cases.size())
-            throw std::runtime_error("Unexpected suite result index");
-        deadlines.endCase();
-        const auto& item = cases[completed];
-        printOutput(json);
-        Options reportOptions;
-        reportOptions.report = *options.reportDirectory / (item.name + ".json");
-        writeReport(reportOptions, json);
-        if (exitCode != item.expected)
-            std::cerr << "suite case " << item.name << ": expected status " << item.expected << ", got " << exitCode << std::endl;
-        caseFailed = (exitCode != item.expected) || caseFailed;
-        phase("end " + item.name);
-        ++completed;
     });
     app.cppFunction("wf.arguments", [arguments = jsonArray(options.command)] {
         return arguments;
@@ -625,8 +499,6 @@ int run(const Options& options, Setup&& setup = {}) {
         std::cerr << failure << '\n';
     else
         std::cerr << "The browser closed before the command reported a result\n";
-    if (!cases.empty() && status == 0 && (caseFailed || completed != cases.size()))
-        status = 1;
     return setup.finish(status);
 }
 
@@ -649,8 +521,7 @@ int main(int argc, char** argv, std::string_view program, Setup&& setup = {}) {
         return run<Frontend>(parse(argc, argv), std::forward<Setup>(setup));
     } catch (const UsageError& error) {
         std::cerr << program << ": " << error.what() << "\nUsage: " << program << " --project <dir> [--environment <archive> --integrity <sha512-...>] "
-                  << "[--registry-dir <dir>] [--report <file>] [--timeout <seconds>] [--command-timeout <seconds>] [--suite <json> --report-dir <dir> "
-                     "[--filter <name>]] [--] <wf command> "
+                  << "[--registry-dir <dir>] [--report <file>] [--timeout <seconds>] [--command-timeout <seconds>] [--] <wf command> "
                      "[arguments...]\n";
         return usageStatus;
     } catch (const std::exception& error) {

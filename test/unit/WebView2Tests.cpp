@@ -4,6 +4,8 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <webfront/frontend/WebView2.hpp>
 
+#include <thread>
+
 namespace {
 struct ViewRegistrationBrowser {
     Microsoft::WRL::ComPtr<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler> completion;
@@ -263,4 +265,32 @@ SCENARIO("WebView2 content controls map to engine settings") {
     REQUIRE_FALSE(settings->contextMenus);
     settings->settingsResult = E_FAIL;
     REQUIRE_THROWS_AS(configureContentSettings(settings.Get(), {}), std::runtime_error);
+}
+
+SCENARIO("The apartment of a WebView2 window leaves the thread as it found it") {
+    using namespace webfront::frontend::detail::webview2;
+    // A thread of its own: no other scenario and no engine has initialized COM there (#564).
+    struct State {
+        HRESULT          result{};
+        APTTYPE          apartment{};
+        APTTYPEQUALIFIER qualifier{};
+        bool             operator==(const State&) const = default;
+        static State     read() {
+            State state;
+            state.result = CoGetApartmentType(&state.apartment, &state.qualifier);
+            return state;
+        }
+    };
+    State before, during, after;
+    std::thread([&] {
+        before = State::read();
+        {
+            Apartment apartment;
+            during = State::read();
+        }
+        after = State::read();
+    }).join();
+    REQUIRE(during.result == S_OK);
+    REQUIRE((during.apartment == APTTYPE_STA || during.apartment == APTTYPE_MAINSTA));
+    REQUIRE(after == before);
 }

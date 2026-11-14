@@ -19,7 +19,8 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Changed
 
-- Keep automated browser windows visible and reuse one window for the six developer integration parts and additional compatible wf commands (#544, #556, `docs/TEST_PERFORMANCE.md`).
+- Keep automated browser windows visible (#544, #556, `docs/TEST_PERFORMANCE.md`).
+- Run each developer integration part and each wf command of the tests in a process of its own again: the shared windows of #544 and #556 made the driver cases about a third slower on Windows and failed more often. Remove the timing analysis tools and their CI steps, and repeat the desktop suite through one path, with `desktop_passes` on a manual dispatch (#570, `docs/TEST_PERFORMANCE.md`).
 - Declare GCC 13 as the best-effort S2 minimum for the library and examples, document the GCC 14 exit clause and qualified Clang scope, and add GCC 13 ASan/UBSan fast tests (#525, ADR-022).
 
 - Skip the cases that configure a CMake project (label `configuration`, about 75 s of worker time) and the coverage capture on a pull request that does not change the build system, and drop the compiler-cache probe step; a push to `develop` and the full tier still run them (#545).
@@ -33,7 +34,8 @@ these entries stays in the GitHub releases and the Git history.
 - Serialize the developer session's phase logs and keep CI timing analysis running if a duration is malformed: report and omit that timing while retaining the other phases and test results (#542).
 - The Linux interface loop shuts down without leaving work behind, and the automation deadlines are decided consistently when a window is ready at the moment its startup expires. The ThreadSanitizer job no longer needs its GLib suppression (#542, `docs/validation/ci-flakes-542.md`).
 - Driver commands and their Jasmine runners are displayed in the native window, and asynchronous unit tests wait for observable states instead of fixed delays (#542).
-- Logging delivers to its sinks without allocating per line. A failed `WebView2Lifecycle-native-early-close` now reports the COM state it found (#542, #564).
+- Logging delivers to its sinks without allocating per line (#542).
+- `WebView2Lifecycle-native-early-close` no longer fails under load: the COM initialization that the WebView2 runtime keeps after a window closed during its startup is a documented limit, and the frontend's own apartment has a unit test (#564, #570, `docs/PROJECT_STATUS.md`).
 
 - Restore the terminal prompt with exit code 1 when `wf dev` starts without a project or a selectable entry; compilation errors still keep watching for edits. Environment 0.9.2 (#560).
 - Read all six developer integration reports in CTest after a part fails, and keep the successful parts' dependent tests runnable, also when the session's native deadline ends it (#556).
