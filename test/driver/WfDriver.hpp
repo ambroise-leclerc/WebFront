@@ -284,11 +284,11 @@ private:
     std::string             failure;
 };
 
-// Waits for the environment, runs the command and reports to C++; the page closes itself when it is done.
+// Waits for the environment, runs the command and reports to C++; C++ closes the window when the page says it is done.
 inline constexpr auto driverScript = R"JS(
 (async () => {
     const report = (name, ...args) => webFront.cppFunction(name)(...args);
-    const stop = () => window.close();
+    const stop = () => report('wf.finished').catch(() => window.close());
     // Tests that own a DOM must stay in the viewport, including the nested wf test runner.
     const createFrame = () => {
         const frame = document.createElement('iframe');
@@ -327,31 +327,25 @@ inline constexpr auto driverScript = R"JS(
 })();
 )JS";
 
-// Owns the connected UI and remembers a close requested before the handshake. Connection and
-// watchdog callbacks share one lock, so neither ordering can lose the close or launch a late command.
-template <typename UI>
-class DriverBrowser {
-public:
-    void connected(UI ui) {
-        std::scoped_lock lock{mutex};
-        if (browser)
-            return;  // Commands and wf test create their own connected frames; inject only the native page.
-        browser = std::move(ui);
-        browser->addScript(closing ? "window.close()" : driverScript);
-    }
-    void close() {
-        std::scoped_lock lock{mutex};
-        if (std::exchange(closing, true))
-            return;
-        if (browser)
-            browser->addScript("window.close()");
-    }
-
-private:
-    std::mutex        mutex;
-    std::optional<UI> browser;
-    bool              closing = false;
-};
+// Asks the window to close until show() returns (`shown`). requestClose() reaches nothing before the window exists or
+// once it closed, and keeps no request, so it is repeated, as UIThread::stop() does (docs/HOST_INTEGRATION.md). The
+// request is native: it does not depend on the page, which a spec may block. False when the window outlives `patience`.
+template <typename RequestClose>
+bool closeUntilShown(std::stop_token shown, RequestClose requestClose, std::chrono::steady_clock::duration patience) {
+    std::mutex                  mutex;
+    std::condition_variable_any wake;
+    std::unique_lock            lock{mutex};
+    const auto                  limit = std::chrono::steady_clock::now() + patience;
+    do {
+        requestClose();
+        wake.wait_for(lock, shown, 10ms, [] {
+            return false;
+        });
+        if (shown.stop_requested())
+            return true;
+    } while (std::chrono::steady_clock::now() < limit);
+    return false;
+}
 
 inline std::string jsonArray(const std::vector<std::string>& items) {
     std::string json = "[";
@@ -402,6 +396,7 @@ struct PlainSetup {
 template <typename Frontend, typename Setup = PlainSetup>
 int run(const Options& options, Setup&& setup = {}) {
     using App = webfront::BasicDeveloperApp<DriverFrontend<Frontend>, DriverFS, typename std::remove_reference_t<Setup>::Pages>;
+    static_assert(frontend::CanRequestClose<DriverFrontend<Frontend>>, "The driver closes its window with requestClose()");
     if (!std::filesystem::is_regular_file(*options.environment)) {
         std::cerr << "Bootstrap environment archive not found: " << *options.environment << '\n';
         return bootstrapStatus;
@@ -441,6 +436,9 @@ int run(const Options& options, Setup&& setup = {}) {
     app.cppFunction("wf.progress", [](std::string message) {
         std::cout << "wf spec: " << message << std::endl;
     });
+    app.cppFunction("wf.finished", [&deadlines] {
+        deadlines.finish();
+    });
     setup.configure(app);
     app.bootstrap("developer",
                   {.environment       = "/driver/environment.tgz",
@@ -448,30 +446,25 @@ int run(const Options& options, Setup&& setup = {}) {
                    .registry          = options.registryDirectory ? std::optional<std::string>{"/driver/registry/"} : std::nullopt,
                    .manifestDirectory = options.manifestDirectory});
 
-    DriverBrowser<typename App::UI> browser;
-    auto                            subscription = app.subscribeUIStarted([&](typename App::UI ui) {
-        browser.connected(ui);
+    // Handlers run one at a time on the server thread. Commands and wf test create their own connected frames: the
+    // driver's script goes to the native page only.
+    auto subscription = app.subscribeUIStarted([injected = false](typename App::UI ui) mutable {
+        if (!std::exchange(injected, true))
+            ui.addScript(driverScript);
     });
-    // The time limit: ask the page to close, then end the process if the browser does not follow.
-    std::jthread watchdog([&](std::stop_token stop) {
-        std::mutex                  mutex;
-        std::condition_variable_any wake;
-        std::unique_lock            lock{mutex};
-        if (!deadlines.expired(stop))
-            return;
-        outcome.timedOut();
-        try {
-            browser.close();
-        } catch (const std::exception&) {}  // the bridge is gone: the forced exit below still applies
-        if (!stop.stop_requested()
-            && !wake.wait_for(lock,
-                              stop,
-                              10s,
-                              [] {
-                                  return false;
-                              })
-            && !stop.stop_requested()) {
-            std::cerr << "The browser did not close after the driver deadline elapsed\n";
+    // Closes the window when the page is done or a time limit elapses; ends the process if the window does not follow.
+    std::jthread closer([&](std::stop_token shown) {
+        if (deadlines.expired(shown))
+            outcome.timedOut();
+        else if (shown.stop_requested())
+            return;  // the window closed by itself
+        if (!closeUntilShown(
+                shown,
+                [&] {
+                    return app.requestClose();
+                },
+                10s)) {
+            std::cerr << "The browser did not close when the driver asked\n";
             std::cerr.flush();
             std::_Exit(timeoutStatus);
         }
@@ -479,7 +472,8 @@ int run(const Options& options, Setup&& setup = {}) {
     phase("begin browser");
     app.show();
     phase("end browser / begin shutdown");
-    watchdog.request_stop();
+    closer.request_stop();
+    closer.join();  // no requestClose() may still run when shutdown() starts
     app.shutdown();
     phase("end shutdown");
 

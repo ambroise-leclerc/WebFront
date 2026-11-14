@@ -32,7 +32,8 @@ The complete suite without the portability tier then takes 159 s for 169 cases o
 
 The driver's optional `--command-timeout` starts after bootstrap, just before the command runs; `--timeout` bounds the
 whole invocation. `WfDriverTimeout` uses a deliberately slow bootstrap and a four-second command limit, requiring the
-sleeping command's start marker as well as native watchdog status 71. The command and its Jasmine runner are displayed
+sleeping command's start marker as well as native watchdog status 71. `WfDriverBlockedPage` blocks the page's script
+instead: the driver closes the window with `requestClose()`, which needs nothing from the page, and still reports. The command and its Jasmine runner are displayed
 in the native window.
 
 Browser tests and driver cases bind loopback port `0`; `TCPStdnet` atomically binds an OS-assigned port.
