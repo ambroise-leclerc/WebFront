@@ -1004,6 +1004,7 @@ SCENARIO("A show() that cannot own the session is refused before it opens a wind
     }
 }
 
+namespace {
 // A frontend that offers only the close request that takes a session (no requestClose() without argument).
 struct SessionOnlyFrontend : ContractFrontend<frontend::Action::closeServerAfterOpen> {
     static inline std::atomic<int> requests = 0;
@@ -1031,6 +1032,62 @@ struct SessionOnlyFrontend : ContractFrontend<frontend::Action::closeServerAfter
 };
 static_assert(frontend::CanRequestClose<SessionOnlyFrontend>);
 static_assert(frontend::endsOnRequest<SessionOnlyFrontend>);
+}  // namespace
+
+SCENARIO("A second show() on the same application leaves the first one's server and window alone") {
+    GIVEN("an application showing a window") {
+        using Shared       = SharedWindowFrontend<true>;
+        Shared::requests   = 0;
+        Shared::hold       = false;
+        Shared::insideOpen = nullptr;
+        HostApp<Shared> app;
+        const auto      state = ContractIoContext::current;
+        WHEN("show() is called again from another thread") {
+            std::jthread show([&] { app.show(); });
+            REQUIRE(waitForWindow(state));
+            THEN("it is refused and the server keeps running, with its window still closable (#567)") {
+                REQUIRE_THROWS_AS(app.show(), std::logic_error);
+                {
+                    std::lock_guard lock(state->mutex);
+                    CHECK_FALSE(state->stopped);
+                }
+                CHECK(eventually([&] { return app.requestClose(); }));
+            }
+            std::lock_guard lock(state->mutex);
+            state->closeWindow = true;
+            state->changed.notify_all();
+        }
+        WHEN("show() is called again from the interface thread, inside open()") {
+            std::atomic<bool> refused{false};
+            std::atomic<bool> stoppedByRefusal{true};
+            std::atomic<bool> hookDone{false};
+            Shared::insideOpen = [&] {
+                try {
+                    app.show();
+                } catch (const std::logic_error&) {
+                    refused = true;
+                }
+                {
+                    std::lock_guard lock(state->mutex);
+                    stoppedByRefusal = state->stopped;
+                }
+                hookDone = true;
+            };
+            std::jthread show([&] { app.show(); });
+            REQUIRE(eventually([&] { return hookDone.load(); }));
+            Shared::insideOpen = nullptr;
+            THEN("the nested call is refused without stopping the server of the first (#567)") {
+                CHECK(refused);
+                CHECK_FALSE(stoppedByRefusal);
+                REQUIRE(waitForWindow(state));
+                CHECK(eventually([&] { return app.requestClose(); }));
+            }
+            std::lock_guard lock(state->mutex);
+            state->closeWindow = true;
+            state->changed.notify_all();
+        }
+    }
+}
 
 SCENARIO("A frontend that offers only the close request with a session can be closed") {
     GIVEN("an application shown through it") {

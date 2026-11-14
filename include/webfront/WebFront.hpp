@@ -1063,6 +1063,16 @@ public:
     void openAndRun(std::string_view htmlFilename) {
         if (launched)
             throw std::logic_error("webfront::BasicWF::show(): this application was started with start(); it has no window loop to run");
+        // One show() at a time per application: a second call (from another thread, or re-entrantly from the interface
+        // thread) is refused before it touches anything. Its error path stops the server, which belongs to the first call.
+        if (showRunning.exchange(true))
+            throw std::logic_error("webfront::BasicWF::show(): this application is already showing; its server and window are left untouched");
+        struct ShowDone {
+            std::atomic<bool>& running;
+            ~ShowDone() {
+                running = false;
+            }
+        } showDone{showRunning};
         shown = true;
         startServerThread();
         WindowAction action;
@@ -1373,6 +1383,7 @@ private:
     std::atomic<bool>                                                        launched{false};  // start() was called
     std::atomic<std::thread::id>                                             showThread{};  // the thread inside this application's Frontend::open(), if any
     std::atomic<std::uint64_t>                                               showEpoch{0};  // odd while show() runs its frontend, changes at each entry and exit
+    std::atomic<bool>                                                        showRunning{false};  // a show() of this application is in progress
     std::atomic<bool>                                                        shown{false};     // show() was called, whether or not its server still runs
     mutable std::mutex                                                       linksMutex;  // guards webLinks, read from any thread
     struct Connection {
