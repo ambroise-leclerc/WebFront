@@ -169,7 +169,7 @@ app.bootstrap("developer");
 app.show();
 ```
 
-The project directory gives the application access to its development files. `bootstrap("developer")` opens the integrated terminal and loads the version-pinned developer environment, checking its SHA-512 integrity. Downloads are cached, so later launches work offline. The terminal runs `wf` commands; no system shell is exposed and nothing is installed on your machine.
+The project directory gives the application access to its development files. `bootstrap("developer")` opens the integrated terminal and loads the version-pinned developer environment, checking its SHA-512 integrity. Downloads are cached, so later launches work offline. The terminal runs `wf` commands on the project and has `ls`, `cat`, `tree` and `mounts` to look at it; no system shell is exposed and nothing is installed on your machine.
 
 The build you made above is enough. Start the example from the `build` directory:
 
