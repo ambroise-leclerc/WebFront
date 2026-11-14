@@ -1,5 +1,18 @@
 # Fails unless every listed file is byte for byte the same in two directories.
 # Usage: cmake -DLEFT=<dir> -DRIGHT=<dir> "-DFILES=<name>;<name>..." -P CompareFiles.cmake
+# A FILES list split into separate arguments by its caller leaves only its first name in FILES; CMake ignores the others.
+math(EXPR last "${CMAKE_ARGC} - 1")
+foreach(index RANGE 1 ${last})
+    if(CMAKE_ARGV${index} STREQUAL "-P")
+        break()
+    endif()
+    if(NOT CMAKE_ARGV${index} MATCHES "^-")
+        message(FATAL_ERROR "Unexpected argument '${CMAKE_ARGV${index}}': pass FILES as one argument")
+    endif()
+endforeach()
+if(NOT FILES)
+    message(FATAL_ERROR "FILES names no file to compare")
+endif()
 foreach(name IN LISTS FILES)
     foreach(side LEFT RIGHT)
         if(NOT EXISTS "${${side}}/${name}")
