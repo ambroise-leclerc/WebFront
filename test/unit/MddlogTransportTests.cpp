@@ -1,6 +1,6 @@
 /** @brief Bounded browser transport lane: context, saturation, failures, reentrance and WebLink lifecycle. */
 #include "InjectableNetworking.hpp"
-#include <catch2/catch_test_macros.hpp>
+#include "Bdd.hpp"
 #include <webfront/tooling/Logger.hpp>
 #include <webfront/weblink/WebLink.hpp>
 
@@ -21,6 +21,8 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
+using namespace webfront::bdd;
 
 using namespace std;
 using namespace webfront;
@@ -200,10 +202,10 @@ public:
         link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{21}, [](WebLinkEvent) { }, scope);
         handshake();
         log::info("delivered to the browser");
-        REQUIRE(log::flushTransports());
-        REQUIRE(InjectableSocket::wrote("delivered to the browser"));
+        require(log::flushTransports());
+        require(InjectableSocket::wrote("delivered to the browser"));
         before = log::transportHealth();
-        REQUIRE(before.activeTransports >= 1);
+        require(before.activeTransports >= 1);
     }
     LinkedBrowser(const LinkedBrowser&)            = delete;
     LinkedBrowser& operator=(const LinkedBrowser&) = delete;
@@ -221,24 +223,24 @@ public:
 
 void flushThrice() {
     for (int drain = 0; drain < 3; ++drain)
-        REQUIRE(log::flushTransports());
+        require(log::flushTransports());
 }
 
 void checkDebugRendering(const Delivered& record, uint_least32_t callerLine) {
-    CHECK(record.text.starts_with("[D] "));
-    CHECK(record.text.contains(format("{:16}:{:4} |", "MddlogTransportTests.cpp", callerLine)));
-    CHECK(record.line == callerLine);
+    check(record.text.starts_with("[D] "));
+    check(record.text.contains(format("{:16}:{:4} |", "MddlogTransportTests.cpp", callerLine)));
+    check(record.line == callerLine);
 }
 
 void checkTruncation(const Delivered& record) {
-    CHECK(record.truncated);
-    CHECK(record.message.size() == 160);
-    CHECK(record.text.starts_with("[W] "));
+    check(record.truncated);
+    check(record.message.size() == 160);
+    check(record.text.starts_with("[W] "));
 }
 
 }  // namespace
 
-SCENARIO("Browser transports receive the context captured at emission", "[mddlog][transport]") {
+Scenario browserTransports{"Browser transports receive the context captured at emission", {"mddlog", "transport"}, [] {
     struct Event {
         string_view        component;
         string_view        link;
@@ -268,21 +270,21 @@ SCENARIO("Browser transports receive the context captured at emission", "[mddlog
         string            link(event.link);
         string            call(event.call);
         log::ContextScope context({.component = component, .webLinkId = link, .direction = event.direction, .callId = call});
-        REQUIRE(log::tryWrite(log::Info, "identical text with misleading ids 999").status == log::WriteStatus::Written);
+        require(log::tryWrite(log::Info, "identical text with misleading ids 999").status == log::WriteStatus::Written);
         const auto prefix = event.direction == log::CallDirection::CppToJs ? "cpp-js:" : "js-cpp:";
         expected.push_back({component, prefix + call, link});
     }
-    REQUIRE(log::flushTransports());
+    require(log::flushTransports());
 
     const auto delivered = first.snapshot();
-    CHECK(identities(delivered) == expected);
-    CHECK(identities(second.snapshot()) == expected);
-    CHECK(ranges::all_of(delivered, [](const Delivered& record) {
+    check(identities(delivered) == expected);
+    check(identities(second.snapshot()) == expected);
+    check(ranges::all_of(delivered, [](const Delivered& record) {
         return record.level == log::Info && record.text.starts_with("[I] ") && record.text.ends_with(" | identical text with misleading ids 999");
     }));
-}
+}};
 
-SCENARIO("Browser transports keep the legacy rendering and the governed truncation flag", "[mddlog][transport]") {
+Scenario browserTransportsKeep{"Browser transports keep the legacy rendering and the governed truncation flag", {"mddlog", "transport"}, [] {
     Collector      collector;
     TransportScope scope;
     scope.add(ref(collector));
@@ -291,22 +293,22 @@ SCENARIO("Browser transports keep the legacy rendering and the governed truncati
     const auto callerLine = source_location::current().line() + 1;
     log::debug("located {}", 1);
     log::infoHex("frame:", array<uint8_t, 2>{0x41, 0x7f});
-    REQUIRE(log::tryWrite(log::Warn, string(200, 'x')).status == log::WriteStatus::Written);
-    REQUIRE(log::lastWriteOutcome().messageTruncated);
+    require(log::tryWrite(log::Warn, string(200, 'x')).status == log::WriteStatus::Written);
+    require(log::lastWriteOutcome().messageTruncated);
     log::error("outside any call");
-    REQUIRE(log::flushTransports());
+    require(log::flushTransports());
 
     const auto records = collector.snapshot();
-    REQUIRE(records.size() == 5);
+    require(records.size() == 5);
     checkDebugRendering(records[0], callerLine);
-    CHECK(records[1].text.ends_with(" | frame:"));
-    CHECK(records[2].message.ends_with(" A."));
+    check(records[1].text.ends_with(" | frame:"));
+    check(records[2].message.ends_with(" A."));
     checkTruncation(records[3]);
-    CHECK(records[4].text.starts_with("[E] "));
-    CHECK(identities({records[4]}) == vector<Identity>{{}});
-}
+    check(records[4].text.starts_with("[E] "));
+    check(identities({records[4]}) == vector<Identity>{{}});
+}};
 
-SCENARIO("A blocked transport never blocks producers; saturation is refused observably", "[mddlog][transport]") {
+Scenario blockedTransport{"A blocked transport never blocks producers; saturation is refused observably", {"mddlog", "transport"}, [] {
     const auto     gate = make_shared<Gate>();
     atomic<size_t> calls{0};
     TransportScope scope;
@@ -318,7 +320,7 @@ SCENARIO("A blocked transport never blocks producers; saturation is refused obse
     const auto before = log::transportHealth();
 
     log::info("blocks the consumer");
-    REQUIRE(gate->waitEntered());
+    require(gate->waitEntered());
     constexpr size_t overflow = 20;
     size_t           written  = 0;
     size_t           refused  = 0;
@@ -327,17 +329,17 @@ SCENARIO("A blocked transport never blocks producers; saturation is refused obse
         written          += status == log::WriteStatus::Written ? 1 : 0;
         refused          += status == log::WriteStatus::RingFull ? 1 : 0;
     }
-    CHECK(pair(written, refused) == pair(log::transportRingCapacity, overflow));
-    CHECK(log::lastWriteOutcome().status == log::WriteStatus::RingFull);
-    CHECK(since(before).ringRefusals == overflow);
+    check(pair(written, refused) == pair(log::transportRingCapacity, overflow));
+    check(log::lastWriteOutcome().status == log::WriteStatus::RingFull);
+    check(since(before).ringRefusals == overflow);
 
     gate->open();
-    REQUIRE(log::flushTransports());
-    CHECK(calls.load() == 1 + log::transportRingCapacity);
-    CHECK(since(before).delivered == 1 + log::transportRingCapacity);
-}
+    require(log::flushTransports());
+    check(calls.load() == 1 + log::transportRingCapacity);
+    check(since(before).delivered == 1 + log::transportRingCapacity);
+}};
 
-SCENARIO("A transport throwing synchronously is detached before its next record", "[mddlog][transport]") {
+Scenario transportThrowing{"A transport throwing synchronously is detached before its next record", {"mddlog", "transport"}, [] {
     atomic<size_t> calls{0};
     Collector      healthy;
     TransportScope scope;
@@ -350,17 +352,17 @@ SCENARIO("A transport throwing synchronously is detached before its next record"
 
     log::info("first");
     log::info("second");
-    REQUIRE(log::flushTransports());
+    require(log::flushTransports());
     log::info("third");
-    REQUIRE(log::flushTransports());
+    require(log::flushTransports());
 
     const auto health = since(before);
-    CHECK(calls.load() == 1);
-    CHECK(failures(health) == Failures{.delivered = 3, .writeFailures = 1, .reportedFailures = 0, .detachments = 1});
-    CHECK(health.activeTransports == before.activeTransports - 1);
-}
+    check(calls.load() == 1);
+    check(failures(health) == Failures{.delivered = 3, .writeFailures = 1, .reportedFailures = 0, .detachments = 1});
+    check(health.activeTransports == before.activeTransports - 1);
+}};
 
-SCENARIO("Logging synchronously from a transport is not amplified", "[mddlog][transport]") {
+Scenario loggingSynchronously{"Logging synchronously from a transport is not amplified", {"mddlog", "transport"}, [] {
     atomic<size_t> echoes{0};
     Collector      observer;
     TransportScope scope;
@@ -374,12 +376,12 @@ SCENARIO("Logging synchronously from a transport is not amplified", "[mddlog][tr
     log::info("origin");
     flushThrice();
 
-    CHECK(echoes.load() == 1);
-    CHECK(deliveredMessages(observer.snapshot()) == vector<string>{"origin"});
-    CHECK(since(before).reentrantRecords == 1);
-}
+    check(echoes.load() == 1);
+    check(deliveredMessages(observer.snapshot()) == vector<string>{"origin"});
+    check(since(before).reentrantRecords == 1);
+}};
 
-SCENARIO("An asynchronous write failure detaches the transport before its diagnostic", "[mddlog][transport]") {
+Scenario asynchronousWrite{"An asynchronous write failure detaches the transport before its diagnostic", {"mddlog", "transport"}, [] {
     mutex          queuedMutex;
     vector<string> queued;
     Collector      observer;
@@ -392,7 +394,7 @@ SCENARIO("An asynchronous write failure detaches the transport before its diagno
     const auto before = log::transportHealth();
 
     log::info("queued write");
-    REQUIRE(log::flushTransports());
+    require(log::flushTransports());
     // The write completes later, on another thread, which reports the failure first.
     thread([&] {
         log::reportTransportFailure(failing);
@@ -400,12 +402,12 @@ SCENARIO("An asynchronous write failure detaches the transport before its diagno
     }).join();
     flushThrice();
 
-    CHECK(queued == vector<string>{"queued write"});
-    CHECK(observer.snapshot().size() == 2);
-    CHECK(failures(since(before)) == Failures{.delivered = 3, .writeFailures = 0, .reportedFailures = 1, .detachments = 1});
-}
+    check(queued == vector<string>{"queued write"});
+    check(observer.snapshot().size() == 2);
+    check(failures(since(before)) == Failures{.delivered = 3, .writeFailures = 0, .reportedFailures = 1, .detachments = 1});
+}};
 
-SCENARIO("Removal during emission is quiescent, so captures can be destroyed at once", "[mddlog][transport]") {
+Scenario removalDuring{"Removal during emission is quiescent, so captures can be destroyed at once", {"mddlog", "transport"}, [] {
     log::setLogLevel(log::Info);
     for (int round = 0; round < 10; ++round) {
         auto           state = make_unique<vector<int>>();
@@ -423,32 +425,32 @@ SCENARIO("Removal during emission is quiescent, so captures can be destroyed at 
                 while (!stop.load())
                     log::info("load");
             });
-        REQUIRE(log::flushTransports());
+        require(log::flushTransports());
         log::removeTransport(handle);
         removed.store(true);
         state.reset();
-        REQUIRE(log::flushTransports());
+        require(log::flushTransports());
         stop.store(true);
         for (auto& producer : producers)
             producer.join();
-        CHECK(late.load() == 0);
+        check(late.load() == 0);
     }
     log::setLogLevel(log::Disabled);
-}
+}};
 
-SCENARIO("WebLink removes its browser transport on normal disconnection", "[mddlog][transport][weblink]") {
+Scenario webLinkRemoves{"WebLink removes its browser transport on normal disconnection", {"mddlog", "transport", "weblink"}, [] {
     LinkedBrowser browser;
     InjectableSocket::fail(make_error_code(errc::connection_reset));
     log::info("after disconnection");
-    REQUIRE(log::flushTransports());
+    require(log::flushTransports());
 
     const auto health = since(browser.before);
-    CHECK(health.activeTransports == browser.before.activeTransports - 1);
-    CHECK(health.detachments == 0);
-    CHECK(!InjectableSocket::wrote("after disconnection"));
-}
+    check(health.activeTransports == browser.before.activeTransports - 1);
+    check(health.detachments == 0);
+    check(!InjectableSocket::wrote("after disconnection"));
+}};
 
-SCENARIO("WebLink captures the link and call context of a C++ function call", "[mddlog][transport][weblink]") {
+Scenario webLinkCaptures{"WebLink captures the link and call context of a C++ function call", {"mddlog", "transport", "weblink"}, [] {
     LinkedBrowser  browser;
     Collector      observer;
     TransportScope scope;
@@ -462,26 +464,26 @@ SCENARIO("WebLink captures the link and call context of a C++ function call", "[
     call.encodeParameter(payload, frame);
     frame.freeze();
     InjectableSocket::receive(clientFrame(messagePayload(frame)));
-    REQUIRE(log::flushTransports());
+    require(log::flushTransports());
 
     // Only the message summary and the call: binary payloads must not become diagnostic records.
     const auto records = observer.snapshot();
-    REQUIRE(records.size() == 2);
-    CHECK(identities(records)
+    require(records.size() == 2);
+    check(identities(records)
           == vector<Identity>{
               {    "weblink",          "", "21"},
               {"cppFunction", "js-cpp:37", "21"}
     });
-    CHECK(records.front().message.starts_with("onMessage(binary) : "));
+    check(records.front().message.starts_with("onMessage(binary) : "));
     for (const auto& record : records) {
-        CHECK(record.message.find(payload) == string::npos);
-        CHECK(record.text.find(payload) == string::npos);
+        check(record.message.find(payload) == string::npos);
+        check(record.text.find(payload) == string::npos);
     }
-    CHECK(deliveredMessages(records).back() == "Function called !");
-    CHECK(InjectableSocket::wrote("Function called !"));
-}
+    check(deliveredMessages(records).back() == "Function called !");
+    check(InjectableSocket::wrote("Function called !"));
+}};
 
-SCENARIO("WebLink reports a write failing inside its transport before the diagnostic", "[mddlog][transport][weblink]") {
+Scenario webLinkReports{"WebLink reports a write failing inside its transport before the diagnostic", {"mddlog", "transport", "weblink"}, [] {
     LinkedBrowser  browser;
     Collector      observer;
     TransportScope scope;
@@ -491,28 +493,28 @@ SCENARIO("WebLink reports a write failing inside its transport before the diagno
     flushThrice();
 
     const auto health = since(browser.before);
-    CHECK(failures(health) == Failures{.delivered = 2, .writeFailures = 0, .reportedFailures = 1, .detachments = 1});
+    check(failures(health) == Failures{.delivered = 2, .writeFailures = 0, .reportedFailures = 1, .detachments = 1});
     // The write-error diagnostic is logged during dispatch: suppressed for every transport.
-    CHECK(health.reentrantRecords >= 1);
-    CHECK(deliveredMessages(observer.snapshot()) == vector<string>{"cannot be sent"});
-}
+    check(health.reentrantRecords >= 1);
+    check(deliveredMessages(observer.snapshot()) == vector<string>{"cannot be sent"});
+}};
 
-SCENARIO("WebLink reports a write failing on asynchronous completion", "[mddlog][transport][weblink]") {
+Scenario webLinkReportsWrite{"WebLink reports a write failing on asynchronous completion", {"mddlog", "transport", "weblink"}, [] {
     LinkedBrowser browser;
     InjectableSocket::deferWrites();
     InjectableSocket::failWrites(make_error_code(errc::broken_pipe));
     log::info("completes later");
-    REQUIRE(log::flushTransports());
-    REQUIRE(InjectableSocket::completeDeferredWrites() == 1);
+    require(log::flushTransports());
+    require(InjectableSocket::completeDeferredWrites() == 1);
     flushThrice();
 
     // Neither the failure diagnostic nor anything later reaches the failed transport.
     const auto health = since(browser.before);
-    CHECK(failures(health) == Failures{.delivered = 1, .writeFailures = 0, .reportedFailures = 1, .detachments = 1});
-    CHECK(health.activeTransports == browser.before.activeTransports - 1);
-}
+    check(failures(health) == Failures{.delivered = 1, .writeFailures = 0, .reportedFailures = 1, .detachments = 1});
+    check(health.activeTransports == browser.before.activeTransports - 1);
+}};
 
-SCENARIO("A WebLink destroyed before the drain receives nothing more", "[mddlog][transport][weblink]") {
+Scenario webLinkDestroyed{"A WebLink destroyed before the drain receives nothing more", {"mddlog", "transport", "weblink"}, [] {
     LinkedBrowser  browser;
     const auto     gate = make_shared<Gate>();
     atomic<int>    blocked{0};
@@ -523,13 +525,13 @@ SCENARIO("A WebLink destroyed before the drain receives nothing more", "[mddlog]
             gate->block();
     });
     log::info("holds the consumer");
-    REQUIRE(gate->waitEntered());
+    require(gate->waitEntered());
     log::info("queued before destruction");
     browser.link.reset();
     gate->open();
-    REQUIRE(log::flushTransports());
+    require(log::flushTransports());
 
-    CHECK(!InjectableSocket::wrote("queued before destruction"));
+    check(!InjectableSocket::wrote("queued before destruction"));
     // The link's transport left; the blocker is still registered.
-    CHECK(since(browser.before).activeTransports == browser.before.activeTransports);
-}
+    check(since(browser.before).activeTransports == browser.before.activeTransports);
+}};

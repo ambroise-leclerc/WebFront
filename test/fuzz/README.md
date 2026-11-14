@@ -5,7 +5,7 @@ Clang/libFuzzer, ASan, UBSan, standard library hardening and pattern initializat
 Linux with Clang/compiler-rt is validated in CI. Apple Clang does not include libFuzzer;
 on macOS install it externally (for example as part of LLVM/compiler-rt) and use compatible
 ASan/UBSan runtimes. CMake rejects missing runtimes during configuration.
-It works independently of `WEBFRONT_ENABLE_TESTING`; no Catch2 or CEF is needed.
+It works independently of `WEBFRONT_ENABLE_TESTING`; neither the unit tests nor CEF are needed.
 
 The binary corpus files use the existing wire formats. Seeds derive from
 `MessagesTests.cpp` (handshake, print call, scalar, tuple, typed arrays and return),

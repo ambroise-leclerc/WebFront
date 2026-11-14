@@ -1,4 +1,4 @@
-#include <catch2/catch_test_macros.hpp>
+#include "Bdd.hpp"
 #include <webfront/frontend/UIExecutor.hpp>
 
 #include <atomic>
@@ -9,6 +9,8 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+using namespace webfront::bdd;
 
 namespace {
 using namespace webfront::frontend;
@@ -95,7 +97,7 @@ struct FakeLoop {
             host.close();
         });
         std::unique_lock lock(mutex);
-        REQUIRE(changed.wait_for(lock, 30s, [&] {
+        require(changed.wait_for(lock, 30s, [&] {
             return attached;
         }));
     }
@@ -136,26 +138,26 @@ bool waitFor(Pred pred) {
 }
 }  // namespace
 
-SCENARIO("The interface thread runs scheduled operations") {
-    GIVEN("a frontend loop attached to an executor") {
+Scenario interfaceThread{"The interface thread runs scheduled operations", [] {
+    given("a frontend loop attached to an executor", [&] {
         FakeLoop loop;
         loop.start();
         auto executor = loop.host.executor();
-        REQUIRE(executor.available());
-        CHECK_FALSE(executor.onUIThread());
-        WHEN("an operation is scheduled from another thread") {
+        require(executor.available());
+        check(!executor.onUIThread());
+        when("an operation is scheduled from another thread", [&] {
             Observed                observed;
             ex::inplace_stop_source stop;
             auto                    op = ex::connect(executor.schedule(), Receiver{observed, stop.get_token()});
             ex::start(op);
-            THEN("it completes on the interface thread") {
-                REQUIRE(waitFor([&] { return observed.completions == 1; }));
-                CHECK(observed.valueThread == loop.uiThread);
-                CHECK_FALSE(observed.stopped);
-                CHECK_FALSE(observed.errored);
-            }
-        }
-        WHEN("operations are scheduled by many threads") {
+            then("it completes on the interface thread", [&] {
+                require(waitFor([&] { return observed.completions == 1; }));
+                check(observed.valueThread == loop.uiThread);
+                check(!observed.stopped);
+                check(!observed.errored);
+            });
+        });
+        when("operations are scheduled by many threads", [&] {
             constexpr int  threads = 4;
             constexpr int  each    = 50;
             Observed       observed;
@@ -176,16 +178,16 @@ SCENARIO("The interface thread runs scheduled operations") {
                 }));
             for (auto& worker : workers)
                 worker->join();
-            THEN("each one completes exactly once") {
-                REQUIRE(waitFor([&] { return observed.completions == threads * each; }));
-                CHECK_FALSE(observed.stopped);
-            }
-        }
-    }
-}
+            then("each one completes exactly once", [&] {
+                require(waitFor([&] { return observed.completions == threads * each; }));
+                check(!observed.stopped);
+            });
+        });
+    });
+}};
 
-SCENARIO("An operation is stopped by its token before it runs") {
-    GIVEN("an attached loop that is not draining") {
+Scenario operationStopped{"An operation is stopped by its token before it runs", [] {
+    given("an attached loop that is not draining", [&] {
         UIExecutorHost host;
         host.attach([] { });
         auto                    executor = host.executor();
@@ -193,19 +195,19 @@ SCENARIO("An operation is stopped by its token before it runs") {
         ex::inplace_stop_source stop;
         auto                    op = ex::connect(executor.schedule(), Receiver{observed, stop.get_token()});
         ex::start(op);
-        REQUIRE(observed.completions == 0);
-        WHEN("the stop is requested") {
+        require(observed.completions == 0);
+        when("the stop is requested", [&] {
             stop.request_stop();
-            THEN("it completes stopped and never runs") {
-                CHECK(observed.completions == 1);
-                CHECK(observed.stopped);
+            then("it completes stopped and never runs", [&] {
+                check(observed.completions == 1);
+                check(observed.stopped);
                 host.drain();
-                CHECK(observed.completions == 1);
-            }
-        }
+                check(observed.completions == 1);
+            });
+        });
         host.close();
-    }
-    GIVEN("a token already stopped") {
+    });
+    given("a token already stopped", [&] {
         UIExecutorHost host;
         host.attach([] { });
         Observed                observed;
@@ -213,18 +215,18 @@ SCENARIO("An operation is stopped by its token before it runs") {
         stop.request_stop();
         auto op = ex::connect(host.executor().schedule(), Receiver{observed, stop.get_token()});
         ex::start(op);
-        THEN("it completes stopped without queuing") {
-            CHECK(observed.stopped);
-            CHECK(observed.completions == 1);
+        then("it completes stopped without queuing", [&] {
+            check(observed.stopped);
+            check(observed.completions == 1);
             host.drain();
-            CHECK(observed.completions == 1);
-        }
+            check(observed.completions == 1);
+        });
         host.close();
-    }
-}
+    });
+}};
 
-SCENARIO("Closing the loop abandons pending operations") {
-    GIVEN("an operation pending in a loop that does not drain") {
+Scenario closingLoop{"Closing the loop abandons pending operations", [] {
+    given("an operation pending in a loop that does not drain", [&] {
         UIExecutorHost host;
         host.attach([] { });
         auto                    executor = host.executor();
@@ -232,95 +234,95 @@ SCENARIO("Closing the loop abandons pending operations") {
         ex::inplace_stop_source stop;
         auto                    op = ex::connect(executor.schedule(), Receiver{observed, stop.get_token()});
         ex::start(op);
-        REQUIRE(observed.completions == 0);
-        WHEN("the loop closes") {
+        require(observed.completions == 0);
+        when("the loop closes", [&] {
             host.close();
-            THEN("the operation completes stopped, once") {
-                CHECK(observed.completions == 1);
-                CHECK(observed.stopped);
-                CHECK_FALSE(executor.available());
+            then("the operation completes stopped, once", [&] {
+                check(observed.completions == 1);
+                check(observed.stopped);
+                check(!executor.available());
                 host.close();  // idempotent
-                CHECK(observed.completions == 1);
-            }
-        }
-    }
-}
+                check(observed.completions == 1);
+            });
+        });
+    });
+}};
 
-SCENARIO("An executor without a running loop is unavailable") {
+Scenario executorWithout{"An executor without a running loop is unavailable", [] {
     Observed                observed;
     ex::inplace_stop_source stop;
-    GIVEN("a default handle") {
+    given("a default handle", [&] {
         UIExecutor executor;
-        CHECK_FALSE(executor.available());
+        check(!executor.available());
         auto op = ex::connect(executor.schedule(), Receiver{observed, stop.get_token()});
         ex::start(op);
-        THEN("the operation fails as unavailable") {
-            CHECK(observed.unavailable);
-            CHECK(observed.completions == 1);
-        }
-    }
-    GIVEN("a host not attached yet") {
+        then("the operation fails as unavailable", [&] {
+            check(observed.unavailable);
+            check(observed.completions == 1);
+        });
+    });
+    given("a host not attached yet", [&] {
         UIExecutorHost host;
-        CHECK_FALSE(host.executor().available());
+        check(!host.executor().available());
         auto op = ex::connect(host.executor().schedule(), Receiver{observed, stop.get_token()});
         ex::start(op);
-        THEN("the operation fails as unavailable") {
-            CHECK(observed.unavailable);
-        }
-    }
-    GIVEN("a host closed") {
+        then("the operation fails as unavailable", [&] {
+            check(observed.unavailable);
+        });
+    });
+    given("a host closed", [&] {
         UIExecutorHost host;
         host.attach([] { });
         host.close();
         auto op = ex::connect(host.executor().schedule(), Receiver{observed, stop.get_token()});
         ex::start(op);
-        THEN("the operation fails as unavailable, after closure") {
-            CHECK(observed.unavailable);
-            CHECK(observed.completions == 1);
-        }
-    }
-    GIVEN("an executor whose host is destroyed") {
+        then("the operation fails as unavailable, after closure", [&] {
+            check(observed.unavailable);
+            check(observed.completions == 1);
+        });
+    });
+    given("an executor whose host is destroyed", [&] {
         UIExecutor executor;
         {
             UIExecutorHost host;
             host.attach([] { });
             executor = host.executor();
         }
-        CHECK_FALSE(executor.available());
+        check(!executor.available());
         auto op = ex::connect(executor.schedule(), Receiver{observed, stop.get_token()});
         ex::start(op);
-        THEN("the operation fails as unavailable") {
-            CHECK(observed.unavailable);
-        }
-    }
-}
+        then("the operation fails as unavailable", [&] {
+            check(observed.unavailable);
+        });
+    });
+}};
 
-SCENARIO("The loop cannot be attached twice and a failing wake fails the operation") {
-    GIVEN("an attached host") {
+Scenario loopCannot{"The loop cannot be attached twice and a failing wake fails the operation", [] {
+    given("an attached host", [&] {
         UIExecutorHost host;
         host.attach([] { });
-        CHECK_THROWS_AS(host.attach([] { }), std::logic_error);
+        checkThrows<std::logic_error>([&] { host.attach([] { }); });
         host.close();
-    }
-    GIVEN("a wake function that throws") {
+    });
+    given("a wake function that throws", [&] {
         UIExecutorHost host;
         host.attach([] { throw std::runtime_error("wake failed"); });
         Observed                observed;
         ex::inplace_stop_source stop;
         auto                    op = ex::connect(host.executor().schedule(), Receiver{observed, stop.get_token()});
         ex::start(op);
-        THEN("the operation completes with the error and is not queued") {
-            CHECK(observed.errored);
-            CHECK(observed.completions == 1);
+        then("the operation completes with the error and is not queued", [&] {
+            check(observed.errored);
+            check(observed.completions == 1);
             host.drain();
-            CHECK(observed.completions == 1);
-        }
+            check(observed.completions == 1);
+        });
         host.close();
-    }
-}
+    });
+}};
 
-SCENARIO("A failing wake fails the operations queued behind it") {
-    GIVEN("a wake function that queues a second operation, then throws") {
+Scenario failingWake{"A failing wake fails the operations queued behind it", [] {
+    given("a wake function that queues a second operation, then throws", [&] {
         UIExecutorHost          host;
         Observed                first;
         Observed                second;
@@ -333,18 +335,18 @@ SCENARIO("A failing wake fails the operations queued behind it") {
         });
         Op firstOp(host.executor().schedule(), Receiver{first, stop.get_token()});
         firstOp.start();
-        THEN("both complete with the error, and nothing is left to run") {
-            CHECK(first.errored);
-            CHECK(second.errored);
-            CHECK(first.completions == 1);
-            CHECK(second.completions == 1);
+        then("both complete with the error, and nothing is left to run", [&] {
+            check(first.errored);
+            check(second.errored);
+            check(first.completions == 1);
+            check(second.completions == 1);
             host.drain();
-            CHECK(first.completions == 1);
-            CHECK(second.completions == 1);
-        }
+            check(first.completions == 1);
+            check(second.completions == 1);
+        });
         host.close();
-    }
-}
+    });
+}};
 
 namespace {
 // A wake function whose copy can be made to fail, as an allocation would.
@@ -363,8 +365,8 @@ struct FragileWake {
 };
 }  // namespace
 
-SCENARIO("A failure while queuing completes the operation and leaves the queue usable") {
-    GIVEN("a wake function that cannot be copied") {
+Scenario failureWhile{"A failure while queuing completes the operation and leaves the queue usable", [] {
+    given("a wake function that cannot be copied", [&] {
         UIExecutorHost host;
         std::size_t    wakes{0};
         host.attach(FragileWake{&wakes});
@@ -376,27 +378,27 @@ SCENARIO("A failure while queuing completes the operation and leaves the queue u
         Op failing(host.executor().schedule(), Receiver{failed, stop.get_token()});
         failing.start();  // start() is noexcept: the failure must not end the process
         FragileWake::failCopy = false;
-        THEN("the operation completes with the error and nothing is queued") {
-            CHECK(failed.errored);
-            CHECK(failed.completions == 1);
-            CHECK(wakes == 0);
+        then("the operation completes with the error and nothing is queued", [&] {
+            check(failed.errored);
+            check(failed.completions == 1);
+            check(wakes == 0);
             host.drain();
-            CHECK(failed.completions == 1);
-        }
-        AND_THEN("a later operation queues, wakes the loop and runs") {
+            check(failed.completions == 1);
+        });
+        andThen("a later operation queues, wakes the loop and runs", [&] {
             Op next(host.executor().schedule(), Receiver{later, stop.get_token()});
             next.start();
-            CHECK(wakes == 1);
+            check(wakes == 1);
             host.drain();
-            CHECK(later.completions == 1);
-            CHECK_FALSE(later.errored);
-        }
+            check(later.completions == 1);
+            check(!later.errored);
+        });
         host.close();
-    }
-}
+    });
+}};
 
-SCENARIO("Shutdown while operations are racing stops or runs each exactly once") {
-    GIVEN("a loop that closes while operations are scheduled") {
+Scenario shutdownWhile{"Shutdown while operations are racing stops or runs each exactly once", [] {
+    given("a loop that closes while operations are scheduled", [&] {
         for (int round = 0; round < 20; ++round) {
             FakeLoop loop;
             loop.start();
@@ -412,18 +414,18 @@ SCENARIO("Shutdown while operations are racing stops or runs each exactly once")
             for (auto& op : ops)
                 op->start();
             closer.join();
-            REQUIRE(waitFor([&] { return observed.completions == count; }));
+            require(waitFor([&] { return observed.completions == count; }));
         }
-    }
-}
+    });
+}};
 
 #include <webfront/frontend/Frontend.hpp>
 
 #if defined(__linux__)
-SCENARIO("The Linux interface loop coalesces wake-ups without creating deferred sources") {
+Scenario linuxInterface{"The Linux interface loop coalesces wake-ups without creating deferred sources", [] {
     webfront::frontend::detail::uiloop::WakeEvent wake;
-    GIVEN("a wake event shared by several producers") {
-        REQUIRE(wake.consume() == 0);
+    given("a wake event shared by several producers", [&] {
+        require(wake.consume() == 0);
         constexpr int             producers = 4, signals = 10000;
         std::vector<std::jthread> threads;
         for (int i = 0; i < producers; ++i)
@@ -433,14 +435,14 @@ SCENARIO("The Linux interface loop coalesces wake-ups without creating deferred 
             });
         for (auto& thread : threads)
             thread.join();
-        THEN("all signals occupy one bounded event and consumption resets it") {
-            CHECK(wake.consume() == producers * signals);
-            CHECK(wake.consume() == 0);
+        then("all signals occupy one bounded event and consumption resets it", [&] {
+            check(wake.consume() == producers * signals);
+            check(wake.consume() == 0);
             wake.signal();
-            CHECK(wake.consume() == 1);
-        }
-    }
-}
+            check(wake.consume() == 1);
+        });
+    });
+}};
 #endif
 
 namespace {
@@ -471,19 +473,19 @@ struct LoopReceiver {
 };
 std::atomic<int> launches{0};
 void             fakeLaunch(const std::string& url) {
-    CHECK(url == "http://127.0.0.1:9002/index.html");
+    check(url == "http://127.0.0.1:9002/index.html");
     ++launches;
 }
 }  // namespace
 
-SCENARIO("The system browser can run an interface-thread loop on the calling thread") {
+Scenario systemBrowserCan{"The system browser can run an interface-thread loop on the calling thread", [] {
     using Browser = BrowserWithUILoopFrontend;
-    GIVEN("the browser frontend with its loop") {
-        CHECK_FALSE(Browser::uiExecutor().available());
+    given("the browser frontend with its loop", [&] {
+        check(!Browser::uiExecutor().available());
         launches = 0;
         LoopOutcome       outcome;
         std::atomic<bool> clientOk{false};
-        // No Catch2 assertion off the main thread: the client records its result and always asks the loop to stop,
+        // No assertion off the main thread: the client records its result and always asks the loop to stop,
         // so that a timeout fails the test instead of hanging or terminating the process.
         std::jthread client([&] {
             const auto executor = Browser::uiExecutor();
@@ -498,36 +500,36 @@ SCENARIO("The system browser can run an interface-thread loop on the calling thr
             }
             Browser::requestStop();
         });
-        WHEN("open runs until the stop request") {
+        when("open runs until the stop request", [&] {
             const auto callingThread = std::this_thread::get_id();
             Browser::loop("127.0.0.1", "9002", "index.html", fakeLaunch);
-            THEN("the page was launched, the operation ran on the calling thread and the executor is gone") {
+            then("the page was launched, the operation ran on the calling thread and the executor is gone", [&] {
                 client.join();
-                CHECK(clientOk);
-                CHECK(launches == 1);
-                CHECK(outcome.valueThread == callingThread);
-                CHECK_FALSE(outcome.stopped);
-                CHECK_FALSE(Browser::uiExecutor().available());
-            }
-        }
-    }
-    GIVEN("a host's close request while no loop runs") {
+                check(clientOk);
+                check(launches == 1);
+                check(outcome.valueThread == callingThread);
+                check(!outcome.stopped);
+                check(!Browser::uiExecutor().available());
+            });
+        });
+    });
+    given("a host's close request while no loop runs", [&] {
         // The loop's stop state is process-wide and an earlier test may have left a request pending: spend it.
         Browser::requestStop();
         Browser::loop("127.0.0.1", "9002", "index.html", fakeLaunch);
-        THEN("it reaches nothing and is not remembered for the next loop (#567)") {
-            CHECK_FALSE(Browser::requestClose());
+        then("it reaches nothing and is not remembered for the next loop (#567)", [&] {
+            check(!Browser::requestClose());
             std::jthread client([&] {
                 const auto executor = Browser::uiExecutor();
                 // The loop of this test ends only because the client asks, after it has run: a remembered request would end it first.
                 const bool ran = waitFor([&] { return executor.available(); });
-                CHECK(ran);
+                check(ran);
                 Browser::requestStop();
             });
             Browser::loop("127.0.0.1", "9002", "index.html", fakeLaunch);
             client.join();
-        }
-        THEN("a request made while it runs ends it, and one made after it is refused again") {
+        });
+        then("a request made while it runs ends it, and one made after it is refused again", [&] {
             std::atomic<bool> accepted{false};
             std::jthread      client([&] {
                 const auto executor = Browser::uiExecutor();
@@ -538,18 +540,18 @@ SCENARIO("The system browser can run an interface-thread loop on the calling thr
             });
             Browser::loop("127.0.0.1", "9002", "index.html", fakeLaunch);
             client.join();
-            CHECK(accepted);
-            CHECK_FALSE(Browser::requestClose());
-        }
-    }
-    GIVEN("a stop requested before the loop starts") {
+            check(accepted);
+            check(!Browser::requestClose());
+        });
+    });
+    given("a stop requested before the loop starts", [&] {
         Browser::requestStop();
-        THEN("the loop ends at once") {
+        then("the loop ends at once", [&] {
             Browser::loop("127.0.0.1", "9002", "index.html", fakeLaunch);
-            CHECK_FALSE(Browser::uiExecutor().available());
-        }
-    }
-    GIVEN("an operation queued just before the stop request") {
+            check(!Browser::uiExecutor().available());
+        });
+    });
+    given("an operation queued just before the stop request", [&] {
         launches = 0;
         LoopOutcome       outcome;
         std::atomic<bool> clientOk{false};
@@ -567,16 +569,16 @@ SCENARIO("The system browser can run an interface-thread loop on the calling thr
                 Browser::requestStop();
             }
         });
-        THEN("it completes exactly once, run or stopped, and is never left waiting") {
+        then("it completes exactly once, run or stopped, and is never left waiting", [&] {
             Browser::loop("127.0.0.1", "9002", "index.html", fakeLaunch);
             client.join();
-            CHECK(clientOk);
-            CHECK(outcome.completions == 1);
-            CHECK_FALSE(outcome.unavailable);
-            CHECK_FALSE(Browser::uiExecutor().available());
-        }
-    }
-    GIVEN("several stop requests arriving while the loop exits") {
+            check(clientOk);
+            check(outcome.completions == 1);
+            check(!outcome.unavailable);
+            check(!Browser::uiExecutor().available());
+        });
+    });
+    given("several stop requests arriving while the loop exits", [&] {
         launches = 0;
         std::atomic<bool> finished{false};
         std::atomic<bool> clientOk{false};
@@ -588,17 +590,17 @@ SCENARIO("The system browser can run an interface-thread loop on the calling thr
                 Browser::requestStop();
             while (!finished);
         });
-        THEN("the loop ends") {
+        then("the loop ends", [&] {
             Browser::loop("127.0.0.1", "9002", "index.html", fakeLaunch);
             finished = true;
             client.join();
-            CHECK(clientOk);
-            CHECK_FALSE(Browser::uiExecutor().available());
-        }
-    }
+            check(clientOk);
+            check(!Browser::uiExecutor().available());
+        });
+    });
 #if defined(__APPLE__)
-    GIVEN("a thread that is not the main thread") {
-        THEN("the loop fails before attaching anything") {
+    given("a thread that is not the main thread", [&] {
+        then("the loop fails before attaching anything", [&] {
             bool threw{false};
             std::thread([&] {
                 try {
@@ -607,21 +609,21 @@ SCENARIO("The system browser can run an interface-thread loop on the calling thr
                     threw = true;
                 }
             }).join();
-            CHECK(threw);
-            CHECK_FALSE(Browser::uiExecutor().available());
-        }
-    }
+            check(threw);
+            check(!Browser::uiExecutor().available());
+        });
+    });
 #endif
-    GIVEN("a launcher that fails") {
-        THEN("no executor is left attached") {
-            CHECK_THROWS(Browser::loop("127.0.0.1", "9002", "index.html", [](const std::string&) { throw std::runtime_error("no browser"); }));
-            CHECK_FALSE(Browser::uiExecutor().available());
-        }
-    }
-}
+    given("a launcher that fails", [&] {
+        then("no executor is left attached", [&] {
+            checkThrows([&] { Browser::loop("127.0.0.1", "9002", "index.html", [](const std::string&) { throw std::runtime_error("no browser"); }); });
+            check(!Browser::uiExecutor().available());
+        });
+    });
+}};
 
-SCENARIO("Closing waits for the wake-ups in flight, which may use what the loop frees") {
-    GIVEN("a wake function blocked inside an enqueue on another thread") {
+Scenario closingWaits{"Closing waits for the wake-ups in flight, which may use what the loop frees", [] {
+    given("a wake function blocked inside an enqueue on another thread", [&] {
         UIExecutorHost          host;
         std::mutex              gate;
         std::condition_variable changed;
@@ -640,17 +642,17 @@ SCENARIO("Closing waits for the wake-ups in flight, which may use what the loop 
         std::thread scheduler([&] { op->start(); });
         {
             std::unique_lock lock(gate);
-            REQUIRE(changed.wait_for(lock, 30s, [&] { return inWake; }));
+            require(changed.wait_for(lock, 30s, [&] { return inWake; }));
         }
         std::atomic<bool> closed{false};
         std::thread       closer([&] {
             host.close();
             closed = true;
         });
-        WHEN("the loop closes meanwhile") {
-            CHECK(waitFor([&] { return !host.executor().available(); }));
-            THEN("close() does not return before the wake-up is over") {
-                CHECK_FALSE(closed);
+        when("the loop closes meanwhile", [&] {
+            check(waitFor([&] { return !host.executor().available(); }));
+            then("close() does not return before the wake-up is over", [&] {
+                check(!closed);
                 {
                     std::lock_guard lock(gate);
                     release = true;
@@ -658,11 +660,11 @@ SCENARIO("Closing waits for the wake-ups in flight, which may use what the loop 
                 }
                 scheduler.join();
                 closer.join();
-                CHECK(closed);
-                CHECK(observed.completions == 1);
-                CHECK(observed.stopped);
-            }
-        }
+                check(closed);
+                check(observed.completions == 1);
+                check(observed.stopped);
+            });
+        });
         if (scheduler.joinable()) {
             {
                 std::lock_guard lock(gate);
@@ -672,11 +674,11 @@ SCENARIO("Closing waits for the wake-ups in flight, which may use what the loop 
             scheduler.join();
             closer.join();
         }
-    }
-}
+    });
+}};
 
-SCENARIO("Disarming a stop waits for the request in flight") {
-    GIVEN("a quit function blocked inside request() on another thread") {
+Scenario disarmingStop{"Disarming a stop waits for the request in flight", [] {
+    given("a quit function blocked inside request() on another thread", [&] {
         UILoopStop              stop;
         std::mutex              gate;
         std::condition_variable changed;
@@ -691,7 +693,7 @@ SCENARIO("Disarming a stop waits for the request in flight") {
         std::thread requester([&] { stop.request(); });
         {
             std::unique_lock lock(gate);
-            REQUIRE(changed.wait_for(lock, 30s, [&] { return inQuit; }));
+            require(changed.wait_for(lock, 30s, [&] { return inQuit; }));
         }
         std::atomic<bool> disarmed{false};
         std::thread       loop([&] {
@@ -699,7 +701,7 @@ SCENARIO("Disarming a stop waits for the request in flight") {
             disarmed = true;
         });
         std::this_thread::sleep_for(50ms);
-        CHECK_FALSE(disarmed);
+        check(!disarmed);
         {
             std::lock_guard lock(gate);
             release = true;
@@ -707,10 +709,10 @@ SCENARIO("Disarming a stop waits for the request in flight") {
         }
         requester.join();
         loop.join();
-        CHECK(disarmed);
-        CHECK_FALSE(stop.requestedStop());
-    }
-}
+        check(disarmed);
+        check(!stop.requestedStop());
+    });
+}};
 
 namespace {
 // An operation that schedules its successor from the interface thread, `limit` times.
@@ -746,8 +748,8 @@ void Chain::next() {
 }
 }  // namespace
 
-SCENARIO("A pass of the interface thread runs a bounded batch") {
-    GIVEN("an operation that keeps rescheduling itself") {
+Scenario passInterface{"A pass of the interface thread runs a bounded batch", [] {
+    given("an operation that keeps rescheduling itself", [&] {
         UIExecutorHost host;
         std::size_t    wakes{0};
         host.attach([&] { ++wakes; });  // called on this thread only: the chain starts and runs here
@@ -755,26 +757,26 @@ SCENARIO("A pass of the interface thread runs a bounded batch") {
         chain.executor = host.executor();
         chain.limit    = 10'000;
         chain.next();
-        REQUIRE(wakes == 1);
-        WHEN("the loop drains once") {
+        require(wakes == 1);
+        when("the loop drains once", [&] {
             host.drain();
-            THEN("only the operations queued before the pass ran, and the loop is woken for the rest") {
-                CHECK(chain.completed == 1);
-                CHECK(wakes == 2);
-            }
-        }
-        WHEN("the loop keeps draining after each wake") {
+            then("only the operations queued before the pass ran, and the loop is woken for the rest", [&] {
+                check(chain.completed == 1);
+                check(wakes == 2);
+            });
+        });
+        when("the loop keeps draining after each wake", [&] {
             std::size_t passes{0};
             while (chain.completed < chain.limit && passes < 20'000) {
                 host.drain();
                 ++passes;
             }
-            THEN("every operation ran, one per pass, and the loop got the thread back in between") {
-                CHECK(chain.completed == chain.limit);
-                CHECK(passes == chain.limit);
-                CHECK(wakes <= passes + 1);  // one notification per pass: they never pile up in the native queue
-            }
-        }
+            then("every operation ran, one per pass, and the loop got the thread back in between", [&] {
+                check(chain.completed == chain.limit);
+                check(passes == chain.limit);
+                check(wakes <= passes + 1);  // one notification per pass: they never pile up in the native queue
+            });
+        });
         host.close();
-    }
-}
+    });
+}};

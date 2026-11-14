@@ -1,4 +1,4 @@
-#include <catch2/catch_test_macros.hpp>
+#include "Bdd.hpp"
 #include <webfront/http/BuffersPolicy.hpp>
 #include <webfront/JsFunction.hpp>
 #include <webfront/networking/NetworkingMock.hpp>
@@ -9,6 +9,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+using namespace webfront::bdd;
 
 using namespace webfront;
 using namespace std;
@@ -91,80 +93,80 @@ struct WebFrontMock {
     }
 };
 
-SCENARIO("JsFunction") {
+Scenario jsFunctionScenario{"JsFunction", [] {
     WebFrontMock webFront;
     WebLinkId    id{1};
 
-    GIVEN("A print JsFunction") {
+    given("A print JsFunction", [&] {
         JsFunction  print("print", webFront, id, 1);
         std::string text{"maFunction"};
 
-        WHEN("print is called with a boolean (true) parameter") {
+        when("print is called with a boolean (true) parameter", [&] {
             print(true);
-            THEN("encoded data should be") {
-                REQUIRE(checkType(0, msg::CodedType::smallString));
-                REQUIRE(checkSize8(1, 5));
-                REQUIRE(checkString(2, "print"));
-                REQUIRE(checkType(7, msg::CodedType::booleanTrue));
-            }
-        }
+            then("encoded data should be", [&] {
+                require(checkType(0, msg::CodedType::smallString));
+                require(checkSize8(1, 5));
+                require(checkString(2, "print"));
+                require(checkType(7, msg::CodedType::booleanTrue));
+            });
+        });
 
-        WHEN("print is called with a bunch of different types of parameters") {
+        when("print is called with a bunch of different types of parameters", [&] {
             print(false, "text data", 45, text, bigText);
-            THEN("encoded data should be") {
-                REQUIRE(checkType(0, msg::CodedType::smallString));
-                REQUIRE(checkSize8(1, 5));
-                REQUIRE(checkString(2, "print"));
-                REQUIRE(checkType(7, msg::CodedType::booleanFalse));
-                REQUIRE(checkType(8, msg::CodedType::smallString));
-                REQUIRE(checkSize8(9, 9));
-                REQUIRE(checkString(10, "text data"));
-                REQUIRE(checkType(19, msg::CodedType::number));
-                REQUIRE(checkNumber(20, 45));
-                REQUIRE(checkType(28, msg::CodedType::smallString));
-                REQUIRE(checkSize8(29, 10));
-                REQUIRE(checkString(30, "maFunction"));
-                REQUIRE(checkType(40, msg::CodedType::string));
-                REQUIRE(checkSize16(41, 1980));
-            }
-        }
+            then("encoded data should be", [&] {
+                require(checkType(0, msg::CodedType::smallString));
+                require(checkSize8(1, 5));
+                require(checkString(2, "print"));
+                require(checkType(7, msg::CodedType::booleanFalse));
+                require(checkType(8, msg::CodedType::smallString));
+                require(checkSize8(9, 9));
+                require(checkString(10, "text data"));
+                require(checkType(19, msg::CodedType::number));
+                require(checkNumber(20, 45));
+                require(checkType(28, msg::CodedType::smallString));
+                require(checkSize8(29, 10));
+                require(checkString(30, "maFunction"));
+                require(checkType(40, msg::CodedType::string));
+                require(checkSize16(41, 1980));
+            });
+        });
 
-        WHEN("print is called with a string too long for a message") {
+        when("print is called with a string too long for a message", [&] {
             encodedBuffer.assign({0xEE});
-            THEN("the call throws before anything is sent") {
-                REQUIRE_THROWS_AS(print(std::string(http::defaultMaxMessageSize, 'x')), std::length_error);
-                REQUIRE(encodedBuffer == std::vector<uint8_t>{0xEE});
-            }
-        }
+            then("the call throws before anything is sent", [&] {
+                requireThrows<std::length_error>([&] { print(std::string(http::defaultMaxMessageSize, 'x')); });
+                require(encodedBuffer == std::vector<uint8_t>{0xEE});
+            });
+        });
 
-        WHEN("print is reused for numeric arrays") {
+        when("print is reused for numeric arrays", [&] {
             vector<uint16_t> values{1, 256, 65535};
             print(values);
 
-            THEN("the array uses its typed wire representation") {
-                REQUIRE(checkType(7, msg::CodedType::arrayU16));
-                REQUIRE(checkSize32(8, 3));
+            then("the array uses its typed wire representation", [&] {
+                require(checkType(7, msg::CodedType::arrayU16));
+                require(checkSize32(8, 3));
                 uint16_t first{};
                 uint16_t second{};
                 uint16_t third{};
                 copy_n(&encodedBuffer[12], 2, reinterpret_cast<uint8_t*>(&first));
                 copy_n(&encodedBuffer[14], 2, reinterpret_cast<uint8_t*>(&second));
                 copy_n(&encodedBuffer[16], 2, reinterpret_cast<uint8_t*>(&third));
-                REQUIRE(array{first, second, third} == array<uint16_t, 3>{1, 256, 65535});
-            }
+                require(array{first, second, third} == array<uint16_t, 3>{1, 256, 65535});
+            });
 
-            WHEN("the same function object is called again") {
+            when("the same function object is called again", [&] {
                 array<uint8_t, 2> next{4, 5};
                 print(span<const uint8_t>{next});
 
-                THEN("message counters and payload offsets are reset") {
-                    REQUIRE(checkType(7, msg::CodedType::smallArrayU8));
-                    REQUIRE(checkSize8(8, 2));
-                    REQUIRE(encodedBuffer[9] == 4);
-                    REQUIRE(encodedBuffer[10] == 5);
-                    REQUIRE(encodedBuffer.size() == 11);
-                }
-            }
-        }
-    }
-}
+                then("message counters and payload offsets are reset", [&] {
+                    require(checkType(7, msg::CodedType::smallArrayU8));
+                    require(checkSize8(8, 2));
+                    require(encodedBuffer[9] == 4);
+                    require(encodedBuffer[10] == 5);
+                    require(encodedBuffer.size() == 11);
+                });
+            });
+        });
+    });
+}};

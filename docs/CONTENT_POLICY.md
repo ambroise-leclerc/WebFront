@@ -86,7 +86,7 @@ the policy to their engine; server bridge checks apply even with legacy adapters
 
 ## Regression coverage
 
-Catch2 checks exact origin matching, normalization, allow-lists, absent/malformed/duplicate headers,
+The unit tests check exact origin matching, normalization, allow-lists, absent/malformed/duplicate headers,
 HTTP status and popup delegation. Jasmine verifies the normal same-origin bridge and real denied
 connections from a foreign-origin iframe and a sandboxed opaque origin, bracketed by positive
 connections to the same endpoint. Rejected probes report only after the WebSocket close event,

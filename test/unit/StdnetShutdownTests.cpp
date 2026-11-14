@@ -1,6 +1,5 @@
 #include "InjectableNetworking.hpp"
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_string.hpp>
+#include "Bdd.hpp"
 #include <webfront/http/HTTPServer.hpp>
 #include <webfront/networking/TCPNetworkingStdnet.hpp>
 #include <webfront/system/DefaultFS.hpp>
@@ -20,6 +19,8 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+
+using namespace webfront::bdd;
 
 using namespace webfront;
 using namespace std::chrono_literals;
@@ -101,18 +102,18 @@ const std::string upgradeRequest =
 
 }  // namespace
 
-SCENARIO("The HTTP listener is ready before its event loop starts") {
+Scenario hTTPListener{"The HTTP listener is ready before its event loop starts", [] {
     const auto port = freePort();
     http::Server<Stdnet, fs::DefaultFS> server("127.0.0.1", port);
     Stdnet::IoContext clientContext;
     Stdnet::Socket client(clientContext);
     // No server thread and no run()/runOne(): a synchronous connection must already succeed.
-    REQUIRE_NOTHROW(connect(client, port));
-    REQUIRE(client.is_open());
-}
+    requireNothrow([&] { connect(client, port); });
+    require(client.is_open());
+}};
 
-SCENARIO("Accepted connections retain TCP_NODELAY through WebSocket upgrade") {
-    GIVEN("A real stdnet HTTP server and a loopback client") {
+Scenario acceptedConnections{"Accepted connections retain TCP_NODELAY through WebSocket upgrade", [] {
+    given("A real stdnet HTTP server and a loopback client", [&] {
         const auto                          port = freePort();
         http::Server<Stdnet, fs::DefaultFS> server("127.0.0.1", port);
         Stdnet::IoContext                   clientContext;
@@ -129,15 +130,15 @@ SCENARIO("Accepted connections retain TCP_NODELAY through WebSocket upgrade") {
         connect(client, port);
         client.send(std::as_bytes(std::span(upgradeRequest)));
         server.run();
-        THEN("the socket passed to the bridge has Nagle disabled") {
-            REQUIRE(upgraded);
-            REQUIRE(noDelay);
-        }
-    }
-}
+        then("the socket passed to the bridge has Nagle disabled", [&] {
+            require(upgraded);
+            require(noDelay);
+        });
+    });
+}};
 
-SCENARIO("Stopping a running server releases its connections") {
-    GIVEN("A running server with an idle client connection") {
+Scenario stoppingRunning{"Stopping a running server releases its connections", [] {
+    given("A running server with an idle client connection", [&] {
         const auto port = freePort();
         Stdnet::IoContext clientContext;
         Stdnet::Socket    client(clientContext);
@@ -146,17 +147,17 @@ SCENARIO("Stopping a running server releases its connections") {
             std::thread                              serverThread([&server] { server.run(); });
             connect(client, port);
             waitUntil([] { return CountingNet::liveSockets.load() > 0; });
-            CHECK(CountingNet::liveSockets.load() > 0);
+            check(CountingNet::liveSockets.load() > 0);
 
             server.stop();  // from another thread than the one running the server
             serverThread.join();
         }
-        THEN("no socket is left once the server is destroyed") { REQUIRE(CountingNet::liveSockets.load() == 0); }
-    }
-}
+        then("no socket is left once the server is destroyed", [&] { require(CountingNet::liveSockets.load() == 0); });
+    });
+}};
 
-SCENARIO("Destroying a server which is not running releases its connections") {
-    GIVEN("A server which accepted a client connection") {
+Scenario destroyingServer{"Destroying a server which is not running releases its connections", [] {
+    given("A server which accepted a client connection", [&] {
         const auto port = freePort();
         Stdnet::IoContext clientContext;
         Stdnet::Socket    client(clientContext);
@@ -164,14 +165,14 @@ SCENARIO("Destroying a server which is not running releases its connections") {
             http::Server<CountingNet, fs::DefaultFS> server("127.0.0.1", port);
             connect(client, port);
             for (int i = 0; i < 10 && CountingNet::liveSockets.load() == 0; ++i) server.runOne();
-            CHECK(CountingNet::liveSockets.load() > 0);
+            check(CountingNet::liveSockets.load() > 0);
         }
-        THEN("no socket is left") { REQUIRE(CountingNet::liveSockets.load() == 0); }
-    }
-}
+        then("no socket is left", [&] { require(CountingNet::liveSockets.load() == 0); });
+    });
+}};
 
-SCENARIO("Destroying WebFront closes its established WebSockets") {
-    GIVEN("A WebFront with an established WebSocket") {
+Scenario destroyingWebFront{"Destroying WebFront closes its established WebSockets", [] {
+    given("A WebFront with an established WebSocket", [&] {
         const auto        port = freePort();
         Stdnet::IoContext clientContext;
         Stdnet::Socket    client(clientContext);
@@ -184,7 +185,7 @@ SCENARIO("Destroying WebFront closes its established WebSockets") {
             std::thread serverThread(&decltype(webFront)::run, &webFront);
             connect(client, port);
             client.send(std::as_bytes(std::span(upgradeRequest)));
-            CHECK(readHeaders(client).starts_with("HTTP/1.1 101"));
+            check(readHeaders(client).starts_with("HTTP/1.1 101"));
             // The HTTP response can arrive before onUpgrade creates the WebLink. Complete the
             // masked bridge handshake before stopping, so this tests an established connection.
             const std::array<unsigned char, 8>
@@ -193,15 +194,15 @@ SCENARIO("Destroying WebFront closes its established WebSockets") {
             waitUntil([&] {
                 return linked.load();
             });
-            CHECK(linked.load());
+            check(linked.load());
             webFront.stop();
             serverThread.join();
         }
-        THEN("no socket is left") {
-            REQUIRE(CountingNet::liveSockets.load() == 0);
-        }
-    }
-}
+        then("no socket is left", [&] {
+            require(CountingNet::liveSockets.load() == 0);
+        });
+    });
+}};
 
 namespace {
 struct TaskThreadState {
@@ -226,8 +227,8 @@ Task applicationTaskOnServer(TaskThreadState& state) {
 }
 }  // namespace
 
-SCENARIO("Application task cancellation returns to the server context") {
-    GIVEN("an application task running on a real stdnet context") {
+Scenario applicationTask{"Application task cancellation returns to the server context", [] {
+    given("an application task running on a real stdnet context", [&] {
         TaskThreadState                state;
         BasicWF<Stdnet, fs::DefaultFS> app(WebFrontConfig{.port = "0"});
         auto                           handle = app.spawn(applicationTaskOnServer(state));
@@ -238,8 +239,8 @@ SCENARIO("Application task cancellation returns to the server context") {
         waitUntil([&] {
             return state.started.load(std::memory_order_acquire);
         });
-        CHECK(state.started.load(std::memory_order_acquire));
-        WHEN("another thread requests cancellation") {
+        check(state.started.load(std::memory_order_acquire));
+        when("another thread requests cancellation", [&] {
             handle.requestStop();
             waitUntil([&] {
                 return state.destroyed.load(std::memory_order_acquire);
@@ -247,16 +248,16 @@ SCENARIO("Application task cancellation returns to the server context") {
             app.stop();
             serverThread.join();
             app.shutdown();
-            THEN("the coroutine starts and unwinds on the server context thread") {
-                CHECK(state.destroyed.load(std::memory_order_acquire));
-                CHECK(state.startedOn == serverId);
-                CHECK(state.destroyedOn == serverId);
-            }
-        }
-    }
-}
+            then("the coroutine starts and unwinds on the server context thread", [&] {
+                check(state.destroyed.load(std::memory_order_acquire));
+                check(state.startedOn == serverId);
+                check(state.destroyedOn == serverId);
+            });
+        });
+    });
+}};
 
-SCENARIO("A rejected WebSocket Origin never reaches the server upgrade callback") {
+Scenario rejectedWebSocket{"A rejected WebSocket Origin never reaches the server upgrade callback", [] {
     const auto                          port = freePort();
     http::Server<Stdnet, fs::DefaultFS> server("127.0.0.1", port);
     std::atomic<int>                    upgrades = 0;
@@ -275,33 +276,33 @@ SCENARIO("A rejected WebSocket Origin never reaches the server upgrade callback"
     const auto request = upgradeRequest.substr(0, upgradeRequest.size() - 2) + "Origin: https://untrusted.example\r\n\r\n";
     client.send(std::as_bytes(std::span(request)));
     const auto response = readHeaders(client);
-    THEN("a foreign origin gets 403 without reaching the upgrade callback") {
-        CHECK(response.starts_with("HTTP/1.1 403 Forbidden\r\n"));
-        CHECK(response.find("Sec-WebSocket-Accept:") == std::string::npos);
-        REQUIRE(upgrades == 0);
-    }
-    THEN("the same listener accepts the configured origin and invokes that callback") {
+    then("a foreign origin gets 403 without reaching the upgrade callback", [&] {
+        check(response.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+        check(response.find("Sec-WebSocket-Accept:") == std::string::npos);
+        require(upgrades == 0);
+    });
+    then("the same listener accepts the configured origin and invokes that callback", [&] {
         Stdnet::Socket authorized(context);
         connect(authorized, port);
         const auto allowedRequest = upgradeRequest.substr(0, upgradeRequest.size() - 2) + "Origin: http://127.0.0.1:" + port + "\r\n\r\n";
         authorized.send(std::as_bytes(std::span(allowedRequest)));
-        CHECK(readHeaders(authorized).starts_with("HTTP/1.1 101 Switching Protocols\r\n"));
+        check(readHeaders(authorized).starts_with("HTTP/1.1 101 Switching Protocols\r\n"));
         waitUntil([&] {
             return upgrades.load() != 0;
         });
-        REQUIRE(upgrades == 1);
-    }
-    THEN("an idle peer cannot block the header reader indefinitely") {
+        require(upgrades == 1);
+    });
+    then("an idle peer cannot block the header reader indefinitely", [&] {
         Stdnet::Socket idle(context);
         connect(idle, port);
-        REQUIRE_THROWS_WITH(readHeaders(idle, 0ms), "Timed out waiting for HTTP response headers");
-        REQUIRE_THROWS_WITH(readHeaders(idle, 10ms), "Timed out waiting for HTTP response headers");
-    }
+        requireThrows([&] { readHeaders(idle, 0ms); }, equals("Timed out waiting for HTTP response headers"));
+        requireThrows([&] { readHeaders(idle, 10ms); }, equals("Timed out waiting for HTTP response headers"));
+    });
     serverThread.request_stop();
     serverThread.join();
-}
+}};
 
-SCENARIO("Draining pumps cancelled tasks while a route handler waits for their cleanup") {
+Scenario drainingPumps{"Draining pumps cancelled tasks while a route handler waits for their cleanup", [] {
     const auto                          port = freePort();
     http::Server<Stdnet, fs::DefaultFS> server("127.0.0.1", port);
     std::promise<void>                  released, entered;
@@ -327,12 +328,12 @@ SCENARIO("Draining pumps cancelled tasks while a route handler waits for their c
     const bool handlerEntered = entered.get_future().wait_for(5s) == std::future_status::ready;
     server.stop();
     serverThread.join();  // before any assertion: a joinable thread would terminate the process
-    REQUIRE(handlerEntered);
-    WHEN("the server is drained") {
+    require(handlerEntered);
+    when("the server is drained", [&] {
         auto drained = std::async(std::launch::async, [&server] { server.drain(); });
         const bool finished = drained.wait_for(5s) == std::future_status::ready;
         release();  // never leave the test hanging if the drain waited for the cleanup it was to run
         drained.wait();
-        THEN("the drain ran the cleanup which released the handler") { REQUIRE(finished); }
-    }
-}
+        then("the drain ran the cleanup which released the handler", [&] { require(finished); });
+    });
+}};

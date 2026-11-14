@@ -1,6 +1,6 @@
 #include "InjectableNetworking.hpp"
 
-#include <catch2/catch_test_macros.hpp>
+#include "Bdd.hpp"
 #include <webfront/http/WebSocket.hpp>
 #include <webfront/weblink/WebLink.hpp>
 
@@ -18,6 +18,8 @@
 #include <type_traits>
 #include <vector>
 
+using namespace webfront::bdd;
+
 using namespace std;
 using namespace webfront;
 using namespace webfront::testing;
@@ -27,7 +29,7 @@ namespace {
 /// With mddlog, browser logs are delivered by the transport consumer thread; wait for it.
 void drainBrowserLogs() {
 #if defined(WEBFRONT_USE_MDDLOG) && WEBFRONT_USE_MDDLOG
-    REQUIRE(log::flushTransports());
+    require(log::flushTransports());
 #endif
 }
 
@@ -55,8 +57,7 @@ string futureError(future<Result>& result) {
     } catch (const exception& error) {
         return error.what();
     }
-    FAIL("The asynchronous result did not throw");
-    return {};
+    fail("The asynchronous result did not throw");
 }
 
 template <typename Configure>
@@ -71,15 +72,15 @@ vector<byte> returnMessage(msg::CallId callId, Configure configure) {
 
 }  // namespace
 
-SCENARIO("WebLink settles correlated asynchronous results") {
+Scenario webLinkSettles{"WebLink settles correlated asynchronous results", [] {
     InjectableSocket::reset();
     InlineTaskScope               scope;
     WebLink<InjectableNetworking> link{InjectableSocket{}, 7, [](WebLinkEvent) { }, scope};
 
-    GIVEN("a pending string result") {
+    given("a pending string result", [&] {
         auto [callId, result] = link.expectResult<string>();
 
-        WHEN("the browser returns a matching value") {
+        when("the browser returns a matching value", [&] {
             auto response = returnMessage(callId, [](auto& message, auto& frame) {
                 const string value{"done"};
                 message.encodeParameter(value, frame);
@@ -87,12 +88,12 @@ SCENARIO("WebLink settles correlated asynchronous results") {
             });
             InjectableSocket::receive(response);
 
-            THEN("the future receives the decoded value") {
-                REQUIRE(result.get() == "done");
-            }
-        }
+            then("the future receives the decoded value", [&] {
+                require(result.get() == "done");
+            });
+        });
 
-        WHEN("the browser returns an exception") {
+        when("the browser returns an exception", [&] {
             auto response = returnMessage(callId, [](auto& message, auto& frame) {
                 const runtime_error error{"JavaScript failed"};
                 message.encodeParameter(error, frame);
@@ -100,25 +101,25 @@ SCENARIO("WebLink settles correlated asynchronous results") {
             });
             InjectableSocket::receive(response);
 
-            THEN("the future rethrows it with its message") {
-                REQUIRE(futureError(result) == "JavaScript failed");
-            }
-        }
-    }
+            then("the future rethrows it with its message", [&] {
+                require(futureError(result) == "JavaScript failed");
+            });
+        });
+    });
 
-    GIVEN("a pending void result") {
+    given("a pending void result", [&] {
         auto [callId, result] = link.expectResult<void>();
 
-        WHEN("the browser returns no value") {
+        when("the browser returns no value", [&] {
             auto response = returnMessage(callId, [](auto&, auto&) {});
             InjectableSocket::receive(response);
 
-            THEN("the future completes") {
-                REQUIRE_NOTHROW(result.get());
-            }
-        }
-    }
-}
+            then("the future completes", [&] {
+                requireNothrow([&] { result.get(); });
+            });
+        });
+    });
+}};
 
 namespace {
 /// The BridgeError a future rethrows, as its code and message.
@@ -129,103 +130,102 @@ pair<string, string> futureFailure(future<Result>& result) {
     } catch (const BridgeError& error) {
         return {error.code(), error.what()};
     } catch (const exception& error) {
-        FAIL("The failure is not a BridgeError: " << error.what());
+        fail("The failure is not a BridgeError: ", error.what());
     }
-    FAIL("The asynchronous result did not throw");
-    return {};
+    fail("The asynchronous result did not throw");
 }
 }  // namespace
 
-SCENARIO("A browser rejection reaches C++ with its code") {
+Scenario browserRejection{"A browser rejection reaches C++ with its code", [] {
     InjectableSocket::reset();
     InlineTaskScope               scope;
     WebLink<InjectableNetworking> link{InjectableSocket{}, 7, [](WebLinkEvent) { }, scope};
 
-    GIVEN("a pending call the browser rejects with an application code") {
+    given("a pending call the browser rejects with an application code", [&] {
         auto [callId, result] = link.expectResult<string>();
         InjectableSocket::receive(returnMessage(callId, [](auto& message, auto& frame) {
             const BridgeError error{"denied", "the user said no"};
             message.encodeParameter(error, frame);
             frame.freeze();
         }));
-        THEN("the future throws a BridgeError with that code and message") {
-            REQUIRE(futureFailure(result) == pair<string, string>{"denied", "the user said no"});
-        }
-    }
-    GIVEN("a pending call the browser rejects with a plain error") {
+        then("the future throws a BridgeError with that code and message", [&] {
+            require(futureFailure(result) == pair<string, string>{"denied", "the user said no"});
+        });
+    });
+    given("a pending call the browser rejects with a plain error", [&] {
         auto [callId, result] = link.expectResult<string>();
         InjectableSocket::receive(returnMessage(callId, [](auto& message, auto& frame) {
             const runtime_error error{"plain failure"};
             message.encodeParameter(error, frame);
             frame.freeze();
         }));
-        THEN("the code is the generic one") {
-            REQUIRE(futureFailure(result) == pair<string, string>{string(bridge_code::generic), "plain failure"});
-        }
-    }
-    GIVEN("a pending call the browser rejects with a code of the bridge") {
+        then("the code is the generic one", [&] {
+            require(futureFailure(result) == pair<string, string>{string(bridge_code::generic), "plain failure"});
+        });
+    });
+    given("a pending call the browser rejects with a code of the bridge", [&] {
         auto [callId, result] = link.expectResult<void>();
         InjectableSocket::receive(returnMessage(callId, [](auto& message, auto& frame) {
             const auto error = detail::makeBridgeError(bridge_code::notFound, "JavaScript function 'x' was not found");
             message.encodeParameter(error, frame);
             frame.freeze();
         }));
-        THEN("the reserved code is kept, which tells it from an application's") {
+        then("the reserved code is kept, which tells it from an application's", [&] {
             const auto [code, text] = futureFailure(result);
-            REQUIRE(code == bridge_code::notFound);
-            REQUIRE(BridgeError::isReserved(code));
-        }
-    }
-    GIVEN("a pending call whose result is not of the expected type") {
+            require(code == bridge_code::notFound);
+            require(BridgeError::isReserved(code));
+        });
+    });
+    given("a pending call whose result is not of the expected type", [&] {
         auto [callId, result] = link.expectResult<double>();
         InjectableSocket::receive(returnMessage(callId, [](auto& message, auto& frame) {
             const string text{"text"};  // the frame borrows it until freeze()
             message.encodeParameter(text, frame);
             frame.freeze();
         }));
-        THEN("the failure has the malformed code") {
-            REQUIRE(futureFailure(result).first == bridge_code::malformed);
-        }
-    }
-    GIVEN("a call pending when the connection closes") {
+        then("the failure has the malformed code", [&] {
+            require(futureFailure(result).first == bridge_code::malformed);
+        });
+    });
+    given("a call pending when the connection closes", [&] {
         auto [callId, result] = link.expectResult<string>();
         static_cast<void>(callId);
         InjectableSocket::fail(make_error_code(errc::connection_reset));
-        THEN("the failure has the disconnected code") {
-            REQUIRE(futureFailure(result).first == bridge_code::disconnected);
-        }
-    }
-}
+        then("the failure has the disconnected code", [&] {
+            require(futureFailure(result).first == bridge_code::disconnected);
+        });
+    });
+}};
 
-SCENARIO("WebLink rejects incomplete asynchronous results") {
+Scenario webLinkRejects{"WebLink rejects incomplete asynchronous results", [] {
     InjectableSocket::reset();
     InlineTaskScope               scope;
     WebLink<InjectableNetworking> link{InjectableSocket{}, 8, [](WebLinkEvent) { }, scope};
 
-    GIVEN("a pending value whose return is malformed") {
+    given("a pending value whose return is malformed", [&] {
         auto [callId, result] = link.expectResult<string>();
         auto response         = returnMessage(callId, [](auto& message, auto&) {
             message.setParametersCount(1);
         });
         InjectableSocket::receive(response);
 
-        THEN("the future receives the decoding error") {
-            REQUIRE(futureError(result) == "Not enough data for msg::FunctionCall::decodeParameter");
-        }
-    }
+        then("the future receives the decoding error", [&] {
+            require(futureError(result) == "Not enough data for msg::FunctionCall::decodeParameter");
+        });
+    });
 
-    GIVEN("a pending value when the browser disconnects") {
+    given("a pending value when the browser disconnects", [&] {
         auto [callId, result] = link.expectResult<string>();
         static_cast<void>(callId);
         InjectableSocket::fail(make_error_code(errc::connection_reset));
 
-        THEN("the future receives a connection error") {
-            REQUIRE(futureError(result).starts_with("Browser connection closed:"));
-        }
-    }
-}
+        then("the future receives a connection error", [&] {
+            require(futureError(result).starts_with("Browser connection closed:"));
+        });
+    });
+}};
 
-SCENARIO("WebLink dispatches browser messages and allocates distinct calls") {
+Scenario webLinkDispatches{"WebLink dispatches browser messages and allocates distinct calls", [] {
     InjectableSocket::reset();
     vector<WebLinkEvent::Code>    events;
     string                        calledName;
@@ -244,7 +244,7 @@ SCENARIO("WebLink dispatches browser messages and allocates distinct calls") {
                                        },
                                        scope};
 
-    GIVEN("a browser handshake and function call") {
+    given("a browser handshake and function call", [&] {
         msg::Handshake handshake;
         auto           handshakePayload = span(reinterpret_cast<const byte*>(handshake.header().data()), handshake.header().size());
         InjectableSocket::receive(clientFrame(handshakePayload));
@@ -258,77 +258,77 @@ SCENARIO("WebLink dispatches browser messages and allocates distinct calls") {
         frame.freeze();
         InjectableSocket::receive(clientFrame(messagePayload(frame)));
 
-        THEN("the link acknowledges and dispatches the correlated call") {
-            REQUIRE(events == vector{WebLinkEvent::Code::linked, WebLinkEvent::Code::cppFunctionCalled});
-            REQUIRE(calledName == "registered");
-            REQUIRE(calledValue == 42);
-            REQUIRE(receivedCallId == 37);
-            REQUIRE(InjectableSocket::hasWrittenData());
-        }
-    }
+        then("the link acknowledges and dispatches the correlated call", [&] {
+            require(events == vector{WebLinkEvent::Code::linked, WebLinkEvent::Code::cppFunctionCalled});
+            require(calledName == "registered");
+            require(calledValue == 42);
+            require(receivedCallId == 37);
+            require(InjectableSocket::hasWrittenData());
+        });
+    });
 
-    GIVEN("multiple pending calls") {
+    given("multiple pending calls", [&] {
         auto [firstId, first]   = link.expectResult<string>();
         auto [secondId, second] = link.expectResult<string>();
         static_cast<void>(first);
         static_cast<void>(second);
 
-        THEN("their nonzero correlation identifiers are distinct") {
-            REQUIRE(firstId != 0);
-            REQUIRE(secondId != 0);
-            REQUIRE(firstId != secondId);
-        }
-    }
+        then("their nonzero correlation identifiers are distinct", [&] {
+            require(firstId != 0);
+            require(secondId != 0);
+            require(firstId != secondId);
+        });
+    });
 
-    GIVEN("an explicit error response") {
+    given("an explicit error response", [&] {
         link.sendError(12, "not available");
 
-        THEN("the encoded exception is written") {
-            REQUIRE(InjectableSocket::hasWrittenData());
-        }
-    }
+        then("the encoded exception is written", [&] {
+            require(InjectableSocket::hasWrittenData());
+        });
+    });
 
-    GIVEN("an application error with a code, and one that tries to pass for the bridge's") {
+    given("an application error with a code, and one that tries to pass for the bridge's", [&] {
         link.sendError(15, "no space", "quota:exceeded");
         link.sendError(16, "forged", "webfront.notFound");
         link.sendError(17, "ill formed", "bad code");
 
-        THEN("the application code is kept and the others are sent as the generic one") {
-            REQUIRE(InjectableSocket::wrote("quota:exceeded"));
-            REQUIRE_FALSE(InjectableSocket::wrote(std::string(bridge_code::notFound)));
-            REQUIRE_FALSE(InjectableSocket::wrote("bad code"));
-            REQUIRE(InjectableSocket::wrote(std::string(bridge_code::generic)));
-        }
-    }
+        then("the application code is kept and the others are sent as the generic one", [&] {
+            require(InjectableSocket::wrote("quota:exceeded"));
+            require(!InjectableSocket::wrote(std::string(bridge_code::notFound)));
+            require(!InjectableSocket::wrote("bad code"));
+            require(InjectableSocket::wrote(std::string(bridge_code::generic)));
+        });
+    });
 
-    GIVEN("a closed browser connection") {
+    given("a closed browser connection", [&] {
         InjectableSocket::fail(make_error_code(errc::connection_reset));
         auto [callId, result] = link.expectResult<string>();
 
-        THEN("new calls fail without allocating an identifier") {
-            REQUIRE(callId == 0);
-            REQUIRE(futureError(result) == "Browser connection closed");
-        }
-        THEN("the link reports the disconnection once") {
-            REQUIRE(events == vector{WebLinkEvent::Code::closed});
-        }
-    }
-}
+        then("new calls fail without allocating an identifier", [&] {
+            require(callId == 0);
+            require(futureError(result) == "Browser connection closed");
+        });
+        then("the link reports the disconnection once", [&] {
+            require(events == vector{WebLinkEvent::Code::closed});
+        });
+    });
+}};
 
-SCENARIO("WebLink reports a browser's close frame as its disconnection") {
+Scenario webLinkReportsBrowser{"WebLink reports a browser's close frame as its disconnection", [] {
     InjectableSocket::reset();
     vector<WebLinkEvent::Code>    events;
     InlineTaskScope               scope;
     WebLink<InjectableNetworking> link{InjectableSocket{}, 10, [&](WebLinkEvent event) { events.push_back(event.code); }, scope};
-    WHEN("the browser sends a close frame") {
+    when("the browser sends a close frame", [&] {
         InjectableSocket::receive(std::array{byte{0x88}, byte{0x80}, byte{1}, byte{2}, byte{3}, byte{4}});
-        THEN("the link reports one disconnection, and none when it is destroyed") {
-            REQUIRE(events == vector{WebLinkEvent::Code::closed});
-        }
-    }
-}
+        then("the link reports one disconnection, and none when it is destroyed", [&] {
+            require(events == vector{WebLinkEvent::Code::closed});
+        });
+    });
+}};
 
-SCENARIO("WebLink dispatches every WebSocket frame coalesced in one read") {
+Scenario webLinkDispatchesEvery{"WebLink dispatches every WebSocket frame coalesced in one read", [] {
     InjectableSocket::reset();
     vector<WebLinkEvent::Code>    events;
     string                        calledName;
@@ -342,7 +342,7 @@ SCENARIO("WebLink dispatches every WebSocket frame coalesced in one read") {
                                        },
                                        scope};
 
-    GIVEN("A handshake and function call delivered together") {
+    given("A handshake and function call delivered together", [&] {
         msg::Handshake handshake;
         const auto     handshakePayload = span(reinterpret_cast<const byte*>(handshake.header().data()), handshake.header().size());
         auto           received         = clientFrame(handshakePayload);
@@ -355,18 +355,18 @@ SCENARIO("WebLink dispatches every WebSocket frame coalesced in one read") {
         const auto callFrame = clientFrame(messagePayload(frame));
         received.insert(received.end(), callFrame.begin(), callFrame.end());
 
-        WHEN("The socket completes one read") {
+        when("The socket completes one read", [&] {
             InjectableSocket::receive(received);
 
-            THEN("Both frames are dispatched in order") {
-                REQUIRE(events == vector{WebLinkEvent::Code::linked, WebLinkEvent::Code::cppFunctionCalled});
-                REQUIRE(calledName == "registered");
-            }
-        }
-    }
-}
+            then("Both frames are dispatched in order", [&] {
+                require(events == vector{WebLinkEvent::Code::linked, WebLinkEvent::Code::cppFunctionCalled});
+                require(calledName == "registered");
+            });
+        });
+    });
+}};
 
-SCENARIO("WebLink forwards logs to the browser until a write fails") {
+Scenario webLinkForwards{"WebLink forwards logs to the browser until a write fails", [] {
     InjectableSocket::reset();
     log::setLogLevel(log::Info);
     InlineTaskScope               scope;
@@ -374,7 +374,7 @@ SCENARIO("WebLink forwards logs to the browser until a write fails") {
     browserHandshake();
     log::info("forwarded to the browser");
     drainBrowserLogs();
-    REQUIRE(InjectableSocket::wrote("forwarded to the browser"));
+    require(InjectableSocket::wrote("forwarded to the browser"));
 
     InjectableSocket::receive(clientFrame({}));  // An empty message is reported, not dispatched.
     InjectableSocket::failWrites(make_error_code(errc::broken_pipe));
@@ -385,11 +385,11 @@ SCENARIO("WebLink forwards logs to the browser until a write fails") {
     drainBrowserLogs();
 
     // The failing write detached the transport before its diagnostic.
-    CHECK(!InjectableSocket::wrote("after the failure"));
+    check(!InjectableSocket::wrote("after the failure"));
     log::setLogLevel(log::Disabled);
-}
+}};
 
-SCENARIO("A write failing after its WebLink is destroyed does not reach the link or its successor") {
+Scenario writeFailing{"A write failing after its WebLink is destroyed does not reach the link or its successor", [] {
     InjectableSocket::reset();
     log::setLogLevel(log::Info);
     InlineTaskScope scope;
@@ -407,16 +407,16 @@ SCENARIO("A write failing after its WebLink is destroyed does not reach the link
     // A new link, possibly at the same address, attaches its own transport.
     link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{32}, [](WebLinkEvent) { }, scope);
     browserHandshake();
-    REQUIRE(InjectableSocket::completeDeferredWrites() == 1);
+    require(InjectableSocket::completeDeferredWrites() == 1);
     log::info("delivered by the new link");
     drainBrowserLogs();
 
-    CHECK(InjectableSocket::wrote("delivered by the new link"));
+    check(InjectableSocket::wrote("delivered by the new link"));
     link.reset();
     log::setLogLevel(log::Disabled);
-}
+}};
 
-SCENARIO("A browser that stops reading bounds the diagnostic frames queued for it") {
+Scenario browserStops{"A browser that stops reading bounds the diagnostic frames queued for it", [] {
     InjectableSocket::reset();
     log::setLogLevel(log::Info);
     InlineTaskScope               scope;
@@ -434,18 +434,18 @@ SCENARIO("A browser that stops reading bounds the diagnostic frames queued for i
     }
     drainBrowserLogs();
 
-    CHECK(link.pendingWrites() == link.maxPendingLogFrames);
-    CHECK(link.droppedLogFrames() == messages - link.maxPendingLogFrames);
+    check(link.pendingWrites() == link.maxPendingLogFrames);
+    check(link.droppedLogFrames() == messages - link.maxPendingLogFrames);
 #if defined(WEBFRONT_USE_MDDLOG) && WEBFRONT_USE_MDDLOG
-    CHECK(log::transportHealth().overflows - before.overflows == link.droppedLogFrames());
+    check(log::transportHealth().overflows - before.overflows == link.droppedLogFrames());
 #endif
 
     // Once the network completes, the queue drains and the link keeps working.
     InjectableSocket::deferWrites(false);
-    REQUIRE(InjectableSocket::completeDeferredWrites() == 1);
-    CHECK(link.pendingWrites() == 0);
+    require(InjectableSocket::completeDeferredWrites() == 1);
+    check(link.pendingWrites() == 0);
     log::setLogLevel(log::Disabled);
-}
+}};
 
 namespace {
 template <typename Writes>
@@ -462,55 +462,55 @@ networking::Task waitWritesSeeing(Writes writes, const vector<WebLinkEvent::Code
 }
 }  // namespace
 
-SCENARIO("A link wakes a writer once its write queue drains") {
+Scenario linkWakes{"A link wakes a writer once its write queue drains", [] {
     InjectableSocket::reset();
     InlineTaskScope scope;
     auto            link = make_shared<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{12}, [](WebLinkEvent) { }, scope);
     InjectableSocket::deferWrites();
     for (msg::CallId call = 1; call <= 3; ++call)
         link->sendError(call, "queued");
-    REQUIRE(link->pendingWrites() == 3);
+    require(link->pendingWrites() == 3);
     using Writes = webfront::detail::WritesAtMost<WebLink<InjectableNetworking>>;
     bool woken = false;
-    GIVEN("a task waiting for at most one queued frame") {
+    given("a task waiting for at most one queued frame", [&] {
         networking::Spawn(scope, networking::ex::inline_scheduler{}, waitWrites(Writes{link, 1}, woken));
-        THEN("it wakes when the second write ends, not before") {
-            CHECK_FALSE(woken);
+        then("it wakes when the second write ends, not before", [&] {
+            check(!woken);
             InjectableSocket::completeDeferredWrites();
-            CHECK_FALSE(woken);
+            check(!woken);
             InjectableSocket::completeDeferredWrites();
-            CHECK(woken);
-        }
-    }
-    GIVEN("a waiting task that is stopped") {
+            check(woken);
+        });
+    });
+    given("a waiting task that is stopped", [&] {
         networking::ex::inplace_stop_source stop;
         networking::Spawn(scope, networking::ex::inline_scheduler{}, stop.get_token(), waitWrites(Writes{link, 0}, woken));
         stop.request_stop();
-        THEN("it unwinds, and the drained queue does not call it") {
+        then("it unwinds, and the drained queue does not call it", [&] {
             while (InjectableSocket::completeDeferredWrites() > 0) { }
-            CHECK_FALSE(woken);
-            CHECK(link->pendingWrites() == 0);
-        }
-    }
-    GIVEN("a link destroyed while a task waits") {
+            check(!woken);
+            check(link->pendingWrites() == 0);
+        });
+    });
+    given("a link destroyed while a task waits", [&] {
         networking::Spawn(scope, networking::ex::inline_scheduler{}, waitWrites(Writes{link, 0}, woken));
         link.reset();
-        THEN("the task resumes: nothing is left to wait for") {
-            CHECK(woken);
-        }
-    }
-    GIVEN("a link that is gone") {
+        then("the task resumes: nothing is left to wait for", [&] {
+            check(woken);
+        });
+    });
+    given("a link that is gone", [&] {
         std::weak_ptr<WebLink<InjectableNetworking>> gone;
         networking::Spawn(scope, networking::ex::inline_scheduler{}, waitWrites(Writes{gone, 0}, woken));
-        THEN("the task does not wait") {
-            CHECK(woken);
-        }
-    }
+        then("the task does not wait", [&] {
+            check(woken);
+        });
+    });
     InjectableSocket::deferWrites(false);
     while (InjectableSocket::completeDeferredWrites() > 0) { }
-}
+}};
 
-SCENARIO("A writer resumes after a failed write reported the closure") {
+Scenario writerResumes{"A writer resumes after a failed write reported the closure", [] {
     InjectableSocket::reset();
     InlineTaskScope            scope;
     vector<WebLinkEvent::Code> events;
@@ -520,18 +520,18 @@ SCENARIO("A writer resumes after a failed write reported the closure") {
         link->sendError(call, "queued");
     vector<WebLinkEvent::Code> seen{WebLinkEvent::Code::linked};  // replaced when the writer resumes
     networking::Spawn(scope, networking::ex::inline_scheduler{}, waitWritesSeeing(webfront::detail::WritesAtMost<WebLink<InjectableNetworking>>{link, 0}, events, seen));
-    WHEN("the write fails") {
+    when("the write fails", [&] {
         InjectableSocket::failWrites(make_error_code(errc::broken_pipe));
         InjectableSocket::deferWrites(false);
         InjectableSocket::completeDeferredWrites();
-        THEN("the writer resumes once the closure was reported") {
-            CHECK(seen == vector{WebLinkEvent::Code::closed});
-        }
-    }
+        then("the writer resumes once the closure was reported", [&] {
+            check(seen == vector{WebLinkEvent::Code::closed});
+        });
+    });
     InjectableSocket::reset();
-}
+}};
 
-SCENARIO("WebLink never logs the payload of an incoming message") {
+Scenario webLinkNever{"WebLink never logs the payload of an incoming message", [] {
     InjectableSocket::reset();
     InlineTaskScope               scope;
     WebLink<InjectableNetworking> link{InjectableSocket{}, 7, [](WebLinkEvent) { }, scope};
@@ -551,9 +551,9 @@ SCENARIO("WebLink never logs the payload of an incoming message") {
         frame.freeze();
     });
     InjectableSocket::receive(response);
-    REQUIRE(result.get().starts_with("/webfront/services/files/"));
+    require(result.get().starts_with("/webfront/services/files/"));
     restore_sink.run();
     std::scoped_lock lock{loggedMutex};
-    REQUIRE(logged.find("QQQQ") == string::npos);
-    REQUIRE(logged.find("51 51") == string::npos);
-}
+    require(logged.find("QQQQ") == string::npos);
+    require(logged.find("51 51") == string::npos);
+}};

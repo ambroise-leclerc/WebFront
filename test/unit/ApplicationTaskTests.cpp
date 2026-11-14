@@ -1,5 +1,5 @@
 #include "InjectableNetworking.hpp"
-#include <catch2/catch_test_macros.hpp>
+#include "Bdd.hpp"
 #include <webfront/WebFront.hpp>
 
 #include <atomic>
@@ -12,6 +12,8 @@
 #include <stdexcept>
 #include <thread>
 #include <type_traits>
+
+using namespace webfront::bdd;
 
 namespace {
 namespace ex = webfront::networking::ex;
@@ -77,11 +79,11 @@ struct PausedStartSender {
 };
 }  // namespace
 
-SCENARIO("Scope drain waits for a concurrent spawn to finish starting") {
+Scenario scopeDrain{"Scope drain waits for a concurrent spawn to finish starting", [] {
     webfront::networking::TaskScope     scope;
     webfront::networking::IoContextMock context;
     std::latch                          started(1), release(1);
-    GIVEN("a task associated with the scope but paused inside start") {
+    given("a task associated with the scope but paused inside start", [&] {
         std::atomic<bool> accepted{false};
         std::jthread      caller([&] {
             accepted = scope.spawn(PausedStartSender{started, release});
@@ -107,23 +109,23 @@ SCENARIO("Scope drain waits for a concurrent spawn to finish starting") {
         release.count_down();
         caller.join();
         drainer.join();
-        THEN("the empty context is not mistaken for a stalled task") {
-            CHECK(accepted.load());
-            CHECK(status == std::future_status::timeout);
-            CHECK_NOTHROW(finished.get());
-            CHECK_NOTHROW(scope.drain(context));
-        }
-    }
-    GIVEN("a sender that throws while connecting") {
-        CHECK_THROWS_AS(scope.spawn(PausedStartSender{started, release, true}), std::runtime_error);
-        THEN("draining does not wait for the failed spawn") {
-            CHECK_NOTHROW(scope.drain(context));
-        }
-    }
-}
+        then("the empty context is not mistaken for a stalled task", [&] {
+            check(accepted.load());
+            check(status == std::future_status::timeout);
+            checkNothrow([&] { finished.get(); });
+            checkNothrow([&] { scope.drain(context); });
+        });
+    });
+    given("a sender that throws while connecting", [&] {
+        checkThrows<std::runtime_error>([&] { scope.spawn(PausedStartSender{started, release, true}); });
+        then("draining does not wait for the failed spawn", [&] {
+            checkNothrow([&] { scope.drain(context); });
+        });
+    });
+}};
 
-SCENARIO("Applications own spawned coroutines and expose individual cancellation") {
-    GIVEN("two application coroutines suspended on cancellable operations") {
+Scenario applicationsOwn{"Applications own spawned coroutines and expose individual cancellation", [] {
+    given("two application coroutines suspended on cancellable operations", [&] {
         App                app(webfront::WebFrontConfig{.port = "0"});
         auto               first       = std::make_shared<int>(1);
         auto               second      = std::make_shared<int>(2);
@@ -132,39 +134,39 @@ SCENARIO("Applications own spawned coroutines and expose individual cancellation
         auto               handle      = app.spawn(pendingTask(std::move(first)));
         App::UI            ui(app, 0, 1);
         ui.spawn(pendingTask(std::move(second)));
-        REQUIRE_FALSE(firstFrame.expired());
-        REQUIRE_FALSE(secondFrame.expired());
-        WHEN("one task is cancelled through its handle") {
+        require(!firstFrame.expired());
+        require(!secondFrame.expired());
+        when("one task is cancelled through its handle", [&] {
             handle.requestStop();
-            THEN("only that coroutine unwinds") {
-                CHECK(firstFrame.expired());
-                CHECK_FALSE(secondFrame.expired());
-                CHECK(handle.stopRequested());
-            }
-        }
-        WHEN("the application shuts down") {
+            then("only that coroutine unwinds", [&] {
+                check(firstFrame.expired());
+                check(!secondFrame.expired());
+                check(handle.stopRequested());
+            });
+        });
+        when("the application shuts down", [&] {
             app.shutdown();
-            THEN("both frames are destroyed before it returns") {
-                CHECK(firstFrame.expired());
-                CHECK(secondFrame.expired());
-                CHECK_NOTHROW(app.shutdown());
+            then("both frames are destroyed before it returns", [&] {
+                check(firstFrame.expired());
+                check(secondFrame.expired());
+                checkNothrow([&] { app.shutdown(); });
                 bool ran      = false;
                 auto rejected = app.spawn(finishedTask(ran));
-                CHECK(rejected.stopRequested());
-                CHECK_FALSE(ran);
-            }
-        }
-    }
-    GIVEN("a coroutine that completes normally") {
+                check(rejected.stopRequested());
+                check(!ran);
+            });
+        });
+    });
+    given("a coroutine that completes normally", [&] {
         App  app(webfront::WebFrontConfig{.port = "0"});
         bool ran    = false;
         auto handle = app.spawn(finishedTask(ran));
-        THEN("it runs without an explicit scope or context") {
-            CHECK(ran);
-            CHECK_FALSE(handle.stopRequested());
-        }
-    }
-    GIVEN("a handle retained beyond its application") {
+        then("it runs without an explicit scope or context", [&] {
+            check(ran);
+            check(!handle.stopRequested());
+        });
+    });
+    given("a handle retained beyond its application", [&] {
         webfront::TaskHandle handle;
         std::weak_ptr<int>   frame;
         {
@@ -173,29 +175,29 @@ SCENARIO("Applications own spawned coroutines and expose individual cancellation
             frame         = lifetime;
             handle        = app.spawn(pendingTask(std::move(lifetime)));
         }
-        THEN("destruction drained its task and the handle remains safe") {
-            CHECK(frame.expired());
-            CHECK_NOTHROW(handle.requestStop());
-        }
-    }
-}
+        then("destruction drained its task and the handle remains safe", [&] {
+            check(frame.expired());
+            checkNothrow([&] { handle.requestStop(); });
+        });
+    });
+}};
 
-SCENARIO("A stalled scope reports absent context work without abandoning its join") {
-    GIVEN("a task suspended on an external operation that ignores cancellation") {
+Scenario stalledScope{"A stalled scope reports absent context work without abandoning its join", [] {
+    given("a task suspended on an external operation that ignores cancellation", [&] {
         std::function<void()>               complete;
         webfront::testing::InlineTaskScope  scope;
         webfront::networking::IoContextMock context;
         webfront::networking::Spawn(scope, ex::inline_scheduler{}, externalTask(complete));
-        WHEN("drain finds no context completion capable of advancing the task") {
-            CHECK_THROWS_AS(scope.drain(context), std::logic_error);
-            THEN("the join remains alive and can finish after external completion") {
-                REQUIRE(complete);
+        when("drain finds no context completion capable of advancing the task", [&] {
+            checkThrows<std::logic_error>([&] { scope.drain(context); });
+            then("the join remains alive and can finish after external completion", [&] {
+                require(complete);
                 complete();
-                CHECK_NOTHROW(scope.drain(context));
-            }
-        }
-    }
-}
+                checkNothrow([&] { scope.drain(context); });
+            });
+        });
+    });
+}};
 
 namespace {
 struct SpawnOnExit {
@@ -212,39 +214,39 @@ webfront::Task spawnDuringCleanup(App& app, bool& ran, std::optional<webfront::T
 }
 }  // namespace
 
-SCENARIO("Spawning during shutdown is rejected with a stopped handle") {
-    GIVEN("a coroutine whose cleanup tries to start another task") {
+Scenario spawningDuring{"Spawning during shutdown is rejected with a stopped handle", [] {
+    given("a coroutine whose cleanup tries to start another task", [&] {
         bool                                ran = false;
         std::optional<webfront::TaskHandle> handle;
         App                                 app(webfront::WebFrontConfig{.port = "0"});
         app.spawn(spawnDuringCleanup(app, ran, handle));
-        WHEN("the application stops its existing tasks") {
-            CHECK_NOTHROW(app.shutdown());
-            THEN("the nested spawn does not throw or start its body") {
-                REQUIRE(handle);
-                CHECK(handle->stopRequested());
-                CHECK_FALSE(ran);
-            }
-        }
-    }
-}
+        when("the application stops its existing tasks", [&] {
+            checkNothrow([&] { app.shutdown(); });
+            then("the nested spawn does not throw or start its body", [&] {
+                require(handle);
+                check(handle->stopRequested());
+                check(!ran);
+            });
+        });
+    });
+}};
 
-SCENARIO("Spawn and scope close agree on whether work was accepted") {
-    GIVEN("a scope closed before any stop request") {
+Scenario spawnScope{"Spawn and scope close agree on whether work was accepted", [] {
+    given("a scope closed before any stop request", [&] {
         bool                               ran = false;
         webfront::testing::InlineTaskScope scope;
         scope.close();
-        REQUIRE_FALSE(scope.stopRequested());
-        WHEN("a cold task is offered to it") {
+        require(!scope.stopRequested());
+        when("a cold task is offered to it", [&] {
             auto accepted = webfront::networking::Spawn(scope, ex::inline_scheduler{}, finishedTask(ran));
-            THEN("association rejection is reported without executing the task") {
-                CHECK_FALSE(accepted);
-                CHECK_FALSE(ran);
-            }
-        }
-    }
+            then("association rejection is reported without executing the task", [&] {
+                check(!accepted);
+                check(!ran);
+            });
+        });
+    });
 
-    GIVEN("a caller starting tasks while another thread shuts the application down") {
+    given("a caller starting tasks while another thread shuts the application down", [&] {
         App               app(webfront::WebFrontConfig{.port = "0"});
         std::atomic<bool> go{false};
         std::atomic<bool> invalid{false};
@@ -259,31 +261,31 @@ SCENARIO("Spawn and scope close agree on whether work was accepted") {
         });
         go = true;
         go.notify_one();
-        CHECK_NOTHROW(app.shutdown());
+        checkNothrow([&] { app.shutdown(); });
         caller.join();
-        THEN("every rejected task returns a stopped handle") {
-            CHECK_FALSE(invalid.load());
-        }
-    }
-}
+        then("every rejected task returns a stopped handle", [&] {
+            check(!invalid.load());
+        });
+    });
+}};
 
-SCENARIO("Destruction waits safely after an explicit shutdown reports a pending external task") {
-    GIVEN("a task that cannot finish until an external operation completes") {
+Scenario destructionWaits{"Destruction waits safely after an explicit shutdown reports a pending external task", [] {
+    given("a task that cannot finish until an external operation completes", [&] {
         std::function<void()> complete;
         auto                  app = std::make_unique<App>(webfront::WebFrontConfig{.port = "0"});
         app->spawn(externalTask(complete));
-        CHECK_THROWS_AS(app->shutdown(), std::logic_error);
-        REQUIRE(complete);
+        checkThrows<std::logic_error>([&] { app->shutdown(); });
+        require(complete);
         std::jthread finishing([complete] {
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
             complete();
         });
-        WHEN("the application is destroyed before that completion arrives") {
+        when("the application is destroyed before that completion arrives", [&] {
             app.reset();
             finishing.join();
-            THEN("its destructor joins instead of allowing a drain exception to escape") {
-                CHECK_FALSE(app);
-            }
-        }
-    }
-}
+            then("its destructor joins instead of allowing a drain exception to escape", [&] {
+                check(!app);
+            });
+        });
+    });
+}};

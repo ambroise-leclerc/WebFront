@@ -1,6 +1,6 @@
 #include "InjectableNetworking.hpp"
 #include "Mocks.hpp"
-#include <catch2/catch_test_macros.hpp>
+#include "Bdd.hpp"
 #include <webfront/http/HTTPServer.hpp>
 #include <webfront/networking/NetworkingMock.hpp>
 #include <webfront/system/DefaultFS.hpp>
@@ -14,63 +14,65 @@
 #include <string_view>
 #include <vector>
 
+using namespace webfront::bdd;
+
 using namespace webfront;
 using namespace webfront::http;
 using namespace std;
 using Net = networking::NetworkingMock;
 
-SCENARIO("HTTP Request") {
-    GIVEN("A request with % encoded characters") {
+Scenario hTTPRequest{"HTTP Request", [] {
+    given("A request with % encoded characters", [&] {
         Request request;
         request.uri = "http://aaa.bbb.ccc/bozo%20le%20clown";
 
-        WHEN("decoding url") {
-            THEN("% are expanded and decoded") { REQUIRE(uri::decode(request.uri) == "http://aaa.bbb.ccc/bozo le clown"); }
-        }
-    }
+        when("decoding url", [&] {
+            then("% are expanded and decoded", [&] { require(uri::decode(request.uri) == "http://aaa.bbb.ccc/bozo le clown"); });
+        });
+    });
 
-    REQUIRE(Request::getMethodFromString("GET") == Request::Method::Get);
-    REQUIRE(Request::getMethodFromString("HEAD") == Request::Method::Head);
-    REQUIRE(Request::getMethodFromString("CONNECT") == Request::Method::Connect);
-    REQUIRE(Request::getMethodFromString("DELETE") == Request::Method::Delete);
-    REQUIRE(Request::getMethodFromString("OPTIONS") == Request::Method::Options);
-    REQUIRE(Request::getMethodFromString("PATCH") == Request::Method::Patch);
-    REQUIRE(Request::getMethodFromString("POST") == Request::Method::Post);
-    REQUIRE(Request::getMethodFromString("PUT") == Request::Method::Put);
-    REQUIRE(Request::getMethodFromString("TRACE") == Request::Method::Trace);
-    REQUIRE(Request::getMethodFromString("test") == Request::Method::Undefined);
-}
+    require(Request::getMethodFromString("GET") == Request::Method::Get);
+    require(Request::getMethodFromString("HEAD") == Request::Method::Head);
+    require(Request::getMethodFromString("CONNECT") == Request::Method::Connect);
+    require(Request::getMethodFromString("DELETE") == Request::Method::Delete);
+    require(Request::getMethodFromString("OPTIONS") == Request::Method::Options);
+    require(Request::getMethodFromString("PATCH") == Request::Method::Patch);
+    require(Request::getMethodFromString("POST") == Request::Method::Post);
+    require(Request::getMethodFromString("PUT") == Request::Method::Put);
+    require(Request::getMethodFromString("TRACE") == Request::Method::Trace);
+    require(Request::getMethodFromString("test") == Request::Method::Undefined);
+}};
 
-SCENARIO("HTTP Response") {
-    GIVEN("Ok Response") {
+Scenario hTTPResponse{"HTTP Response", [] {
+    given("Ok Response", [&] {
         auto ok = Response::getStatusResponse(Response::ok);
-        THEN("Fields should be") {
-            REQUIRE(ok.content == "<html><head><title>OK</title></head><body><h1>200 OK</h1></body></html>");
-            REQUIRE(ok.headers[0].name == "Content-Length");
-            REQUIRE(ok.headers[1].name == "Content-Type");
-            REQUIRE(ok.headers[0].value == "71");
-            REQUIRE(ok.headers[1].value == "text/html");
-        }
-    }
+        then("Fields should be", [&] {
+            require(ok.content == "<html><head><title>OK</title></head><body><h1>200 OK</h1></body></html>");
+            require(ok.headers[0].name == "Content-Length");
+            require(ok.headers[1].name == "Content-Type");
+            require(ok.headers[0].value == "71");
+            require(ok.headers[1].value == "text/html");
+        });
+    });
 
-    GIVEN("notFound Response") {
+    given("notFound Response", [&] {
         auto notFound = Response::getStatusResponse(Response::notFound);
-        THEN("Fields should be") {
-            REQUIRE(notFound.content ==
+        then("Fields should be", [&] {
+            require(notFound.content ==
                     "<html><head><title>Not Found</title></head><body><h1>404 Not Found</h1></body></html>");
-            REQUIRE(notFound.headers[0].name == "Content-Length");
-            REQUIRE(notFound.headers[1].name == "Content-Type");
-            REQUIRE(notFound.headers[0].value == "85");
-            REQUIRE(notFound.headers[1].value == "text/html");
-        }
-    }
+            require(notFound.headers[0].name == "Content-Length");
+            require(notFound.headers[1].name == "Content-Type");
+            require(notFound.headers[0].value == "85");
+            require(notFound.headers[1].value == "text/html");
+        });
+    });
 
-    GIVEN("badRequest Response") {
+    given("badRequest Response", [&] {
         auto bad = Response::getStatusResponse(Response::badRequest);
-        WHEN("extracting buffers") {
+        when("extracting buffers", [&] {
             auto buffers = bad.toBuffers<Net>();
-            THEN("buffer contents should be") {
-                REQUIRE(buffers.size() == 12);
+            then("buffer contents should be", [&] {
+                require(buffers.size() == 12);
                 using Buffer = decltype(buffers[0]);
                 auto compare = [](Buffer b, std::string s) {
                     auto data = reinterpret_cast<const char*>(b.data());
@@ -78,25 +80,25 @@ SCENARIO("HTTP Response") {
                         if (data[index] != s[index]) return false;
                     return true;
                 };
-                REQUIRE(compare(buffers[0], "HTTP/1.1 400 Bad Request"));
-                REQUIRE(compare(buffers[1], "Content-Length"));
-                REQUIRE(compare(buffers[2], ": "));
-                REQUIRE(compare(buffers[3], "89"));
-                REQUIRE(compare(buffers[4], "\r\n"));
-                REQUIRE(compare(buffers[5], "Content-Type"));
-                REQUIRE(compare(buffers[6], ": "));
-                REQUIRE(compare(buffers[7], "text/html"));
-                REQUIRE(compare(buffers[8], "\r\n"));
-                REQUIRE(compare(buffers[9], "Connection: close\r\n"));
-                REQUIRE(compare(buffers[10], "\r\n"));
-                REQUIRE(compare(buffers[11],
+                require(compare(buffers[0], "HTTP/1.1 400 Bad Request"));
+                require(compare(buffers[1], "Content-Length"));
+                require(compare(buffers[2], ": "));
+                require(compare(buffers[3], "89"));
+                require(compare(buffers[4], "\r\n"));
+                require(compare(buffers[5], "Content-Type"));
+                require(compare(buffers[6], ": "));
+                require(compare(buffers[7], "text/html"));
+                require(compare(buffers[8], "\r\n"));
+                require(compare(buffers[9], "Connection: close\r\n"));
+                require(compare(buffers[10], "\r\n"));
+                require(compare(buffers[11],
                                 "<html><head><title>Bad Request</title></head><body><h1>400 Bad Request</h1></body></html>"));
-            }
-        }
-    }
-}
+            });
+        });
+    });
+}};
 
-SCENARIO("Pending HTTP response buffers remain independent and announce connection closure") {
+Scenario pendingHTTP{"Pending HTTP response buffers remain independent and announce connection closure", [] {
     const auto text = [](const auto& buffers) {
         std::string result;
         for (const auto& buffer : buffers)
@@ -107,76 +109,76 @@ SCENARIO("Pending HTTP response buffers remain independent and announce connecti
     auto firstBuffers = first.toBuffers<Net>();
     auto second = Response::getStatusResponse(Response::ok);
     auto secondBuffers = second.toBuffers<Net>();
-    THEN("another pending send cannot replace the first status line") {
-        REQUIRE(text(firstBuffers).starts_with("HTTP/1.1 500 Internal Server Error\r\n"));
-        REQUIRE(text(secondBuffers).starts_with("HTTP/1.1 200 OK\r\n"));
-    }
-    THEN("ordinary responses tell clients that the server will close the connection") {
-        REQUIRE(text(firstBuffers).find("\r\nConnection: close\r\n") != std::string::npos);
-        REQUIRE(text(secondBuffers).find("\r\nConnection: close\r\n") != std::string::npos);
-    }
-    GIVEN("a WebSocket upgrade") {
+    then("another pending send cannot replace the first status line", [&] {
+        require(text(firstBuffers).starts_with("HTTP/1.1 500 Internal Server Error\r\n"));
+        require(text(secondBuffers).starts_with("HTTP/1.1 200 OK\r\n"));
+    });
+    then("ordinary responses tell clients that the server will close the connection", [&] {
+        require(text(firstBuffers).find("\r\nConnection: close\r\n") != std::string::npos);
+        require(text(secondBuffers).find("\r\nConnection: close\r\n") != std::string::npos);
+    });
+    given("a WebSocket upgrade", [&] {
         Response upgrade;
         upgrade.statusCode = Response::switchingProtocols;
         upgrade.headers.emplace_back("Connection", "Upgrade");
         const auto response = text(upgrade.toBuffers<Net>());
-        REQUIRE(response.find("\r\nConnection: Upgrade\r\n") != std::string::npos);
-        REQUIRE(response.find("Connection: close") == std::string::npos);
-        REQUIRE(text(firstBuffers).starts_with("HTTP/1.1 500 Internal Server Error\r\n"));
-    }
-}
+        require(response.find("\r\nConnection: Upgrade\r\n") != std::string::npos);
+        require(response.find("Connection: close") == std::string::npos);
+        require(text(firstBuffers).starts_with("HTTP/1.1 500 Internal Server Error\r\n"));
+    });
+}};
 
-SCENARIO("RequestParser") {
-    GIVEN("A valid HTTP request") {
+Scenario requestParser{"RequestParser", [] {
+    given("A valid HTTP request", [&] {
         string input{"GET /hello.htm HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
                      "www.tutorialspoint.com\r\nAccept-Language: en-us\r\nAccept-Encoding: gzip\r\n"
                      "Accept-Encoding: deflate\r\nConnection: Keep-Alive\r\n\r\n"};
-        WHEN("parsing it") {
+        when("parsing it", [&] {
             Request request;
-            REQUIRE_NOTHROW(request.parseSomeData(input.cbegin(), input.cend()));
-            THEN("It should fill correctly the Request structure") {
-                REQUIRE(request.completed());
-                REQUIRE(request.uri == "/hello.htm");
-                REQUIRE(request.method == Request::Method::Get);
+            requireNothrow([&] { request.parseSomeData(input.cbegin(), input.cend()); });
+            then("It should fill correctly the Request structure", [&] {
+                require(request.completed());
+                require(request.uri == "/hello.htm");
+                require(request.method == Request::Method::Get);
 
                 auto language = request.getHeaderValue("Accept-Language");
-                REQUIRE(language == "en-us");
+                require(language == "en-us");
 
-                REQUIRE(!request.getHeaderValue("Bozo le clown"));
+                require(!request.getHeaderValue("Bozo le clown"));
 
                 auto encodings = request.getHeadersValues("Accept-Encoding");
-                REQUIRE(encodings.size() == 2);
+                require(encodings.size() == 2);
 
-                REQUIRE(request.headersContain("Accept-Encoding", "deflate"));
-                REQUIRE(request.headersContain("Accept-Encoding", "gzip"));
-            }
-        }
-    }
+                require(request.headersContain("Accept-Encoding", "deflate"));
+                require(request.headersContain("Accept-Encoding", "gzip"));
+            });
+        });
+    });
 
-    GIVEN("An invalid HTTP request") {
+    given("An invalid HTTP request", [&] {
         string input{"GET /hello.htm HTTP/1.1\r\nUser - Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
                      "www.tutorialspoint.com\r\nAccept-Language: en-us\r\nAccept-Encoding: gzip, deflate\r\nConnection: "
                      "Keep-Alive\r\n\r\n"};
-        WHEN("parsing it") {
+        when("parsing it", [&] {
             Request request;
-            REQUIRE_THROWS(request.parseSomeData(input.cbegin(), input.cend()));
-        }
-    }
+            requireThrows([&] { request.parseSomeData(input.cbegin(), input.cend()); });
+        });
+    });
 
-    GIVEN("An upgrade request") {
+    given("An upgrade request", [&] {
         string input{"GET / HTTP/1.1\r\nOrigin: localhost\r\nSec-WebSocket-Protocol: WebFront_0.1\r\nSec-WebSocket-Extensions: "
                      "permessage-deflate\r\nSec-WebSocket-Key: Dh54KYbN4sDdk6ejeVPqXQ==\r\nConnection: keep-alive, "
                      "Upgrade\r\nUpgrade: websocket\r\n\r\n"};
-        WHEN("parsing it") {
+        when("parsing it", [&] {
             Request request;
-            REQUIRE_NOTHROW(request.parseSomeData(input.cbegin(), input.cend()));
-            THEN("An upgrade request should be detected") {
-                REQUIRE(request.completed());
-                REQUIRE(request.isUpgradeRequest("websocket"));
-            }
-        }
-    }
-}
+            requireNothrow([&] { request.parseSomeData(input.cbegin(), input.cend()); });
+            then("An upgrade request should be detected", [&] {
+                require(request.completed());
+                require(request.isUpgradeRequest("websocket"));
+            });
+        });
+    });
+}};
 
 struct ResourceAndFile {
     static inline list names{"ressource.txt", "file.txt", "compressed.txt"};
@@ -189,140 +191,140 @@ bool compare(auto& buffer, std::string text) {
     return true;
 };
 
-SCENARIO("Request parsing") {
-    GIVEN("A valid HTTP request with an unimplemented method") {
+Scenario requestParsing{"Request parsing", [] {
+    given("A valid HTTP request with an unimplemented method", [&] {
         string input{"DELETE /ressource.txt HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
                      "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\n\r\n"};
         Request request;
-        REQUIRE_NOTHROW(request.parseSomeData(input.cbegin(), input.cend()));
-        REQUIRE(request.completed());
-        REQUIRE(request.uri == "/ressource.txt");
-        REQUIRE(request.method == Request::Method::Delete);
-        WHEN("A RequestHandler process it") {
+        requireNothrow([&] { request.parseSomeData(input.cbegin(), input.cend()); });
+        require(request.completed());
+        require(request.uri == "/ressource.txt");
+        require(request.method == Request::Method::Delete);
+        when("A RequestHandler process it", [&] {
             RequestHandler<Net, MockFileSystem<ResourceAndFile>> handler{"."};
             auto response = handler.handleRequest(request);
 
-            THEN("It should respond with a 'Not Implemented' http response") {
+            then("It should respond with a 'Not Implemented' http response", [&] {
                 auto buffers = response.toBuffers<Net>();
-                REQUIRE(compare(buffers[0], "HTTP/1.1 501 Not Implemented"));
-            }
-        }
-    }
+                require(compare(buffers[0], "HTTP/1.1 501 Not Implemented"));
+            });
+        });
+    });
 
-    GIVEN("A valid HTTP upgrade request to websocket protocol") {
+    given("A valid HTTP upgrade request to websocket protocol", [&] {
         string input{
           "GET /chat HTTP/1.1\r\nHost: server.example.com\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: "
           "x3JJHMbDL1EzLkh9GBhXDw==\r\nSec-WebSocket-Protocol: chat, superchat\r\nSec-WebSocket-Version: 13\r\nOrigin: "
           "http://example.com\r\n\r\n"};
         Request request;
-        REQUIRE_NOTHROW(request.parseSomeData(input.cbegin(), input.cend()));
-        REQUIRE(request.completed());
-        REQUIRE(request.uri == "/chat");
-        REQUIRE(request.method == Request::Method::Get);
-        WHEN("A RequestHandler process it") {
+        requireNothrow([&] { request.parseSomeData(input.cbegin(), input.cend()); });
+        require(request.completed());
+        require(request.uri == "/chat");
+        require(request.method == Request::Method::Get);
+        when("A RequestHandler process it", [&] {
             RequestHandler<Net, MockFileSystem<>> handler{".", detail::BoundContentPolicy{"http://example.com"}};
             auto response = handler.handleRequest(request);
 
-            THEN("It should respond with a 'Switching Protocols' http response") {
+            then("It should respond with a 'Switching Protocols' http response", [&] {
                 auto buffers = response.toBuffers<Net>();
-                REQUIRE(compare(buffers[0], "HTTP/1.1 101 Switching Protocols"));
-                REQUIRE(compare(buffers[1], "Upgrade"));
-                REQUIRE(compare(buffers[3], "websocket"));
-                REQUIRE(compare(buffers[9], "Sec-WebSocket-Accept"));
-                REQUIRE(compare(buffers[11], "HSmrc0sMlYUkAGmm5OPpG2HaGWk="));
-            }
-        }
-    }
+                require(compare(buffers[0], "HTTP/1.1 101 Switching Protocols"));
+                require(compare(buffers[1], "Upgrade"));
+                require(compare(buffers[3], "websocket"));
+                require(compare(buffers[9], "Sec-WebSocket-Accept"));
+                require(compare(buffers[11], "HSmrc0sMlYUkAGmm5OPpG2HaGWk="));
+            });
+        });
+    });
 
-    GIVEN("A HTTP HEAD request") {
+    given("A HTTP HEAD request", [&] {
         string  input{"HEAD /file.txt HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
                       "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\nAccept-Encoding: br\r\n\r\n"};
         Request request;
-        REQUIRE_NOTHROW(request.parseSomeData(input.cbegin(), input.cend()));
-        REQUIRE(request.completed());
-        REQUIRE(request.uri == "/file.txt");
-        REQUIRE(request.method == Request::Method::Head);
-        WHEN("A RequestHandler process it") {
+        requireNothrow([&] { request.parseSomeData(input.cbegin(), input.cend()); });
+        require(request.completed());
+        require(request.uri == "/file.txt");
+        require(request.method == Request::Method::Head);
+        when("A RequestHandler process it", [&] {
             RequestHandler<Net, MockFileSystem<ResourceAndFile>> handler{"."};
             auto response = handler.handleRequest(request);
 
-            THEN("It should find the file") { REQUIRE(response.statusCode == Response::ok); }
-        }
-    }
+            then("It should find the file", [&] { require(response.statusCode == Response::ok); });
+        });
+    });
 
-    GIVEN("A HTTP HEAD request with an empty URL") {
+    given("A HTTP HEAD request with an empty URL", [&] {
         string input{"HEAD HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
                      "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\n\r\n"};
 
         Request request;
-        REQUIRE_THROWS_AS(request.parseSomeData(input.cbegin(), input.cend()), BadRequestException);
-    }
-}
+        requireThrows<BadRequestException>([&] { request.parseSomeData(input.cbegin(), input.cend()); });
+    });
+}};
 
-SCENARIO("Asynchronous Request parsing") {
-    GIVEN("A HTTP HEAD request received asynchronously") {
+Scenario asynchronousRequest{"Asynchronous Request parsing", [] {
+    given("A HTTP HEAD request received asynchronously", [&] {
         string chunk1{"HEAD /file.txt HTTP/1.1\r\nUser-Agent:"};
         string chunk2{" Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "};
         string  chunk3{"www.bernardlehacker.com\r\nConnection: Keep-Alive\r\nAccept-Encoding: br\r\n\r\n"};
         Request request;
-        REQUIRE_NOTHROW(request.parseSomeData(chunk1.cbegin(), chunk1.cend()));
-        REQUIRE(!request.completed());
-        REQUIRE_NOTHROW(request.parseSomeData(chunk2.cbegin(), chunk2.cend()));
-        REQUIRE(!request.completed());
-        REQUIRE_NOTHROW(request.parseSomeData(chunk3.cbegin(), chunk3.cend()));
-        REQUIRE(request.completed());
-        REQUIRE(request.uri == "/file.txt");
-        REQUIRE(request.method == Request::Method::Head);
-        WHEN("A RequestHandler process it") {
+        requireNothrow([&] { request.parseSomeData(chunk1.cbegin(), chunk1.cend()); });
+        require(!request.completed());
+        requireNothrow([&] { request.parseSomeData(chunk2.cbegin(), chunk2.cend()); });
+        require(!request.completed());
+        requireNothrow([&] { request.parseSomeData(chunk3.cbegin(), chunk3.cend()); });
+        require(request.completed());
+        require(request.uri == "/file.txt");
+        require(request.method == Request::Method::Head);
+        when("A RequestHandler process it", [&] {
             RequestHandler<Net, MockFileSystem<ResourceAndFile>> handler{"."};
             auto response = handler.handleRequest(request);
 
-            THEN("It should find the file") { REQUIRE(response.statusCode == Response::ok); }
-        }
-    }
-}
+            then("It should find the file", [&] { require(response.statusCode == Response::ok); });
+        });
+    });
+}};
 
-SCENARIO("RequestHandler on a HTTP GET") {
-    GIVEN("A valid HTTP GET request on a compressed file with no supported encoding") {
+Scenario requestHandlerHTTP{"RequestHandler on a HTTP GET", [] {
+    given("A valid HTTP GET request on a compressed file with no supported encoding", [&] {
         string input{"GET /compressed.txt HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
                      "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\n\r\n"};
         Request request;
-        REQUIRE_NOTHROW(request.parseSomeData(input.cbegin(), input.cend()));
-        REQUIRE(request.completed());
-        REQUIRE(request.uri == "/compressed.txt");
-        REQUIRE(request.method == Request::Method::Get);
-        WHEN("A RequestHandler process it") {
+        requireNothrow([&] { request.parseSomeData(input.cbegin(), input.cend()); });
+        require(request.completed());
+        require(request.uri == "/compressed.txt");
+        require(request.method == Request::Method::Get);
+        when("A RequestHandler process it", [&] {
             RequestHandler<Net, MockFileSystem<ResourceAndFile>> handler{"."};
             auto response = handler.handleRequest(request);
 
-            THEN("It should reject an unavailable custom encoding") {
+            then("It should reject an unavailable custom encoding", [&] {
                 auto buffers = response.toBuffers<Net>();
-                REQUIRE(compare(buffers[0], "HTTP/1.1 406 Not Acceptable"));
-            }
-        }
-    }
+                require(compare(buffers[0], "HTTP/1.1 406 Not Acceptable"));
+            });
+        });
+    });
 
-    GIVEN("A valid HTTP GET request on a compressed file with supported encoding") {
+    given("A valid HTTP GET request on a compressed file with supported encoding", [&] {
         string input{"GET /compressed.txt HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
                      "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\nAccept-encoding: gzip, br, deflate\r\n\r\n"};
         Request request;
-        REQUIRE_NOTHROW(request.parseSomeData(input.cbegin(), input.cend()));
-        REQUIRE(request.completed());
-        REQUIRE(request.uri == "/compressed.txt");
-        REQUIRE(request.method == Request::Method::Get);
-        WHEN("A RequestHandler process it") {
+        requireNothrow([&] { request.parseSomeData(input.cbegin(), input.cend()); });
+        require(request.completed());
+        require(request.uri == "/compressed.txt");
+        require(request.method == Request::Method::Get);
+        when("A RequestHandler process it", [&] {
             RequestHandler<Net, MockFileSystem<ResourceAndFile>> handler{"."};
             auto response = handler.handleRequest(request);
-            THEN("It should respond ok with a brotli encoded (empty) file") {
-                REQUIRE(response.statusCode == Response::ok);
-                REQUIRE(response.getHeaderValue("Content-Encoding") == "br");
-                REQUIRE(response.getHeaderValue("Content-Type") == "text/plain");
-                REQUIRE(response.getHeaderValue("Content-Length") == "0");
-            }
-        }
-    }
+            then("It should respond ok with a brotli encoded (empty) file", [&] {
+                require(response.statusCode == Response::ok);
+                require(response.getHeaderValue("Content-Encoding") == "br");
+                require(response.getHeaderValue("Content-Type") == "text/plain");
+                require(response.getHeaderValue("Content-Length") == "0");
+            });
+        });
+    });
 
-}
+}};
 
 namespace {
 
@@ -364,33 +366,33 @@ struct UpgradingNet : networking::NetworkingMock {
 
 }  // namespace
 
-SCENARIO("A stopped server hands no connection over") {
-    GIVEN("A connection asking for an upgrade, whose response write is still in progress") {
+Scenario stoppedServer{"A stopped server hands no connection over", [] {
+    given("A connection asking for an upgrade, whose response write is still in progress", [&] {
         int upgrades = 0;
         UpgradingNet::reset(false);
         {
             http::Server<UpgradingNet, fs::DefaultFS> server("127.0.0.1", "0");
             server.onUpgrade([&upgrades](UpgradingNet::Socket&&) { ++upgrades; });
-            REQUIRE(UpgradingNet::heldSend.complete);
+            require(UpgradingNet::heldSend.complete);
 
-            WHEN("the server is stopped before the response is written") {
+            when("the server is stopped before the response is written", [&] {
                 server.stop();
                 UpgradingNet::heldSend.complete({}, 0);
 
-                THEN("the connection is closed instead of being upgraded") { REQUIRE(upgrades == 0); }
-            }
+                then("the connection is closed instead of being upgraded", [&] { require(upgrades == 0); });
+            });
         }
-    }
-}
+    });
+}};
 
-SCENARIO("A failed accept does not stop the server from accepting") {
-    GIVEN("A first accept which fails, then a connection") {
+Scenario failedAccept{"A failed accept does not stop the server from accepting", [] {
+    given("A first accept which fails, then a connection", [&] {
         UpgradingNet::reset(true);
         http::Server<UpgradingNet, fs::DefaultFS> server("127.0.0.1", "0");
 
-        THEN("the connection is served") { REQUIRE(UpgradingNet::heldSend.complete); }
-    }
-}
+        then("the connection is served", [&] { require(UpgradingNet::heldSend.complete); });
+    });
+}};
 
 // Serves "index.html", "app.js" and "a?b.txt", and records every path it is asked to open.
 struct RecordingFS {
@@ -407,7 +409,7 @@ struct RecordingFS {
     }
 };
 
-SCENARIO("RequestHandler ignores the query string of a request") {
+Scenario requestHandlerIgnores{"RequestHandler ignores the query string of a request", [] {
     RecordingFS::opened.clear();
     RequestHandler<Net, RecordingFS> handler{"."};
     const auto get = [&](string uri, Request::Method method = Request::Method::Get) {
@@ -417,81 +419,81 @@ SCENARIO("RequestHandler ignores the query string of a request") {
         return handler.handleRequest(request).statusCode;
     };
 
-    GIVEN("A GET request with a query") {
-        THEN("The file is looked up without it") {
-            REQUIRE(get("/app.js?v=2&debug=1") == Response::ok);
-            REQUIRE(RecordingFS::opened == vector<string>{"app.js"});
-        }
-    }
-    GIVEN("A query on a file that does not exist") {
-        THEN("The request fails with not found") {
-            REQUIRE(get("/missing.js?v=2") == Response::notFound);
-            REQUIRE(RecordingFS::opened == vector<string>{"missing.js"});
-        }
-    }
-    GIVEN("A query on the root") {
-        THEN("The default page is served") {
-            REQUIRE(get("/?x=1") == Response::ok);
-            REQUIRE(RecordingFS::opened == vector<string>{"index.html"});
-        }
-    }
-    GIVEN("A HEAD request with a query") {
-        THEN("The file is found") {
-            REQUIRE(get("/app.js?v=2", Request::Method::Head) == Response::ok);
-        }
-    }
-    GIVEN("A percent-encoded question mark") {
-        THEN("It is part of the file name, not a query") {
-            REQUIRE(get("/a%3Fb.txt") == Response::ok);
-            REQUIRE(RecordingFS::opened == vector<string>{"a?b.txt"});
-        }
-    }
-    GIVEN("Encoded dots in the path, or a question mark in the query") {
-        THEN("The '..' check applies to the decoded path only") {
-            REQUIRE(get("/%2E%2E/secret.txt") == Response::badRequest);
-            REQUIRE(get("/app.js?path=../x") == Response::ok);
-        }
-    }
-}
+    given("A GET request with a query", [&] {
+        then("The file is looked up without it", [&] {
+            require(get("/app.js?v=2&debug=1") == Response::ok);
+            require(RecordingFS::opened == vector<string>{"app.js"});
+        });
+    });
+    given("A query on a file that does not exist", [&] {
+        then("The request fails with not found", [&] {
+            require(get("/missing.js?v=2") == Response::notFound);
+            require(RecordingFS::opened == vector<string>{"missing.js"});
+        });
+    });
+    given("A query on the root", [&] {
+        then("The default page is served", [&] {
+            require(get("/?x=1") == Response::ok);
+            require(RecordingFS::opened == vector<string>{"index.html"});
+        });
+    });
+    given("A HEAD request with a query", [&] {
+        then("The file is found", [&] {
+            require(get("/app.js?v=2", Request::Method::Head) == Response::ok);
+        });
+    });
+    given("A percent-encoded question mark", [&] {
+        then("It is part of the file name, not a query", [&] {
+            require(get("/a%3Fb.txt") == Response::ok);
+            require(RecordingFS::opened == vector<string>{"a?b.txt"});
+        });
+    });
+    given("Encoded dots in the path, or a question mark in the query", [&] {
+        then("The '..' check applies to the decoded path only", [&] {
+            require(get("/%2E%2E/secret.txt") == Response::badRequest);
+            require(get("/app.js?path=../x") == Response::ok);
+        });
+    });
+}};
 
-SCENARIO("HTTP version digits cannot overflow their integer fields") {
+Scenario hTTPVersion{"HTTP version digits cannot overflow their integer fields", [] {
     for (const std::string version : {"99999999999999999999.1", "1.99999999999999999999"}) {
         const auto input = "GET / HTTP/" + version + "\r\n\r\n";
         Request    request;
-        REQUIRE_THROWS_AS(request.parseSomeData(input.begin(), input.end()), BadRequestException);
+        requireThrows<BadRequestException>([&] { request.parseSomeData(input.begin(), input.end()); });
     }
-}
+}};
 
-SCENARIO("Unknown HTTP methods have a safe display name") {
+Scenario unknownHTTP{"Unknown HTTP methods have a safe display name", [] {
     const std::string input = "CUSTOM / HTTP/1.1\r\n\r\n";
     Request           request;
-    REQUIRE(request.parseSomeData(input.begin(), input.end()));
-    REQUIRE(request.getMethodName() == "Undefined");
-}
+    require(request.parseSomeData(input.begin(), input.end()));
+    require(request.getMethodName() == "Undefined");
+}};
 
-SCENARIO("HTTP requests keep method parsing state across interleaved receives") {
-    GIVEN("two connections whose method names arrive in separate reads") {
+Scenario hTTPRequests{"HTTP requests keep method parsing state across interleaved receives", [] {
+    given("two connections whose method names arrive in separate reads", [&] {
         Request           first;
         Request           second;
         const std::string firstStart  = "G";
         const std::string secondStart = "PO";
-        REQUIRE_FALSE(first.parseSomeData(firstStart.begin(), firstStart.end()));
-        REQUIRE_FALSE(second.parseSomeData(secondStart.begin(), secondStart.end()));
+        require(!first.parseSomeData(firstStart.begin(), firstStart.end()));
+        require(!second.parseSomeData(secondStart.begin(), secondStart.end()));
 
-        WHEN("the first request completes before the second") {
+        when("the first request completes before the second", [&] {
             const std::string firstRest  = "ET /first HTTP/1.1\r\n\r\n";
             const std::string secondRest = "ST /second HTTP/1.1\r\n\r\n";
-            REQUIRE(first.parseSomeData(firstRest.begin(), firstRest.end()));
-            REQUIRE(second.parseSomeData(secondRest.begin(), secondRest.end()));
+            require(first.parseSomeData(firstRest.begin(), firstRest.end()));
+            require(second.parseSomeData(secondRest.begin(), secondRest.end()));
 
-            THEN("the first request retains its method and URI") {
-                CHECK(first.method == Request::Method::Get);
-                CHECK(first.uri == "/first");
-            }
-            AND_THEN("the second request retains its method and URI") {
-                CHECK(second.method == Request::Method::Post);
-                CHECK(second.uri == "/second");
-            }
-        }
-    }
-}
+            then("the first request retains its method and URI", [&] {
+                check(first.method == Request::Method::Get);
+                check(first.uri == "/first");
+            });
+            andThen("the second request retains its method and URI", [&] {
+                check(second.method == Request::Method::Post);
+                check(second.uri == "/second");
+            });
+        });
+    });
+}};

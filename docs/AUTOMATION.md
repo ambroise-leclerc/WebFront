@@ -385,7 +385,7 @@ control need their own reviewed authorization/isolation design.
 
 ## Validation
 
-Catch2 covers native grants, cross-session rejection, path/option refusal, cancellation races,
+The unit tests cover native grants, cross-session rejection, path/option refusal, cancellation races,
 deadline revocation, MCP lifecycle/IDs and hostile JSON. Browser Jasmine specs cover shared
 dispatch arbitration and the runner. `AutomationMcpWindow` drives a real embedded window through
 stdio: structured errors, file correction, check/build/test, preview inspection/actions,

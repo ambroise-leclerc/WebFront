@@ -155,8 +155,8 @@ member that is not a number (a `bool`, a string, an enumeration) and a repeated 
 do not compile; the `C++26.FormsReflectionRejects` tests check each message. The
 result is an ordinary `Description<T>`: forms, inspectors and declarations do not depend on how it
 was produced. The `FormsReflectionTests` executable checks that the reflected description, its
-declaration and its form batch equal the hand-written ones; it links a Catch2 compiled with the
-same C++26 flags, so that no executable mixes objects of both standards. CMake builds it only when the compiler
+declaration and its form batch equal the hand-written ones; its test framework, the header
+`test/unit/Bdd.hpp`, is compiled with the same C++26 flags, so that no executable mixes objects of both standards. CMake builds it only when the compiler
 supports reflection; the Linux CI job sets `-DWEBFRONT_REQUIRE_REFLECTION_TESTS=ON`, so that it
 cannot be skipped there.
 

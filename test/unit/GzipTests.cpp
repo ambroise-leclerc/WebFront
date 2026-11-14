@@ -1,9 +1,11 @@
 #include "GzipFixtures.hpp"
-#include <catch2/catch_test_macros.hpp>
+#include "Bdd.hpp"
 #include <webfront/http/Gzip.hpp>
 #include <webfront/http/GzipCache.hpp>
 
 #include <string>
+
+using namespace webfront::bdd;
 
 using webfront::http::gzip::decodeGzip;
 
@@ -19,76 +21,76 @@ std::string payload() {
 }
 }  // namespace
 
-SCENARIO("Gzip decoding validates complete bounded members") {
+Scenario gzipDecoding{"Gzip decoding validates complete bounded members", [] {
     const auto expected = payload();
-    GIVEN("fixed and dynamic Huffman blocks, with optional gzip fields") {
+    given("fixed and dynamic Huffman blocks, with optional gzip fields", [&] {
         for (const auto bytes : {gzipfixtures::fixed, gzipfixtures::dynamic, gzipfixtures::optional}) {
-            WHEN("decoding a complete member of " << bytes.size() << " bytes") {
-                THEN("the exact binary content is returned") {
-                    REQUIRE(decodeGzip(bytes) == expected);
-                    REQUIRE(decodeGzip(bytes, expected.size()) == expected);
-                    REQUIRE_FALSE(decodeGzip(bytes, expected.size() - 1));
-                }
-            }
-            WHEN("truncating a member of " << bytes.size() << " bytes at every byte boundary") {
-                THEN("every prefix is rejected") {
+            when("decoding a complete member of ", bytes.size(), " bytes", [&] {
+                then("the exact binary content is returned", [&] {
+                    require(decodeGzip(bytes) == expected);
+                    require(decodeGzip(bytes, expected.size()) == expected);
+                    require(!decodeGzip(bytes, expected.size() - 1));
+                });
+            });
+            when("truncating a member of ", bytes.size(), " bytes at every byte boundary", [&] {
+                then("every prefix is rejected", [&] {
                     for (std::size_t length = 0; length < bytes.size(); ++length) {
-                        INFO(length);
-                        REQUIRE_FALSE(decodeGzip(bytes.substr(0, length)));
+                        auto scope = info("length ", length);
+                        require(!decodeGzip(bytes.substr(0, length)));
                     }
-                }
-            }
+                });
+            });
         }
-    }
-    GIVEN("a gzip member with a stored DEFLATE block") {
+    });
+    given("a gzip member with a stored DEFLATE block", [&] {
         // A final, byte-aligned stored block containing 'abc', CRC32 and ISIZE.
         const std::string bytes("\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03"
                                 "\x01\x03\x00\xfc\xff"
                                 "abc"
                                 "\xc2\x41\x24\x35\x03\x00\x00\x00",
                                 26);
-        THEN("stored bytes and their complement are checked") {
-            REQUIRE(decodeGzip(bytes) == "abc");
+        then("stored bytes and their complement are checked", [&] {
+            require(decodeGzip(bytes) == "abc");
             auto corrupt = bytes;
             corrupt[13] ^= 1;
-            REQUIRE_FALSE(decodeGzip(corrupt));
-            REQUIRE_FALSE(decodeGzip(bytes, 2));
+            require(!decodeGzip(corrupt));
+            require(!decodeGzip(bytes, 2));
             for (std::size_t length = 0; length < bytes.size(); ++length)
-                REQUIRE_FALSE(decodeGzip(std::string_view(bytes).substr(0, length)));
-        }
-    }
-    GIVEN("empty and concatenated members") {
+                require(!decodeGzip(std::string_view(bytes).substr(0, length)));
+        });
+    });
+    given("empty and concatenated members", [&] {
         const auto bytes = std::string(gzipfixtures::dynamic) + std::string(gzipfixtures::empty) + std::string(gzipfixtures::fixed);
-        THEN("members are decoded independently under one total budget") {
-            REQUIRE(decodeGzip(gzipfixtures::empty, 0) == "");
-            REQUIRE(decodeGzip(bytes) == expected + expected);
-            REQUIRE_FALSE(decodeGzip(bytes, expected.size()));
-            REQUIRE_FALSE(decodeGzip(std::string(gzipfixtures::dynamic) + "garbage"));
-        }
-    }
-    GIVEN("corrupt gzip metadata, trailer or block type") {
+        then("members are decoded independently under one total budget", [&] {
+            require(decodeGzip(gzipfixtures::empty, 0) == "");
+            require(decodeGzip(bytes) == expected + expected);
+            require(!decodeGzip(bytes, expected.size()));
+            require(!decodeGzip(std::string(gzipfixtures::dynamic) + "garbage"));
+        });
+    });
+    given("corrupt gzip metadata, trailer or block type", [&] {
         for (const auto offset : {0u, 1u, 2u, 3u, 10u}) {
             auto bytes    = std::string(gzipfixtures::dynamic);
             bytes[offset] = static_cast<char>(0xff);
-            REQUIRE_FALSE(decodeGzip(bytes));
+            require(!decodeGzip(bytes));
         }
         for (std::size_t offset = gzipfixtures::dynamic.size() - 8; offset < gzipfixtures::dynamic.size(); ++offset) {
             auto bytes     = std::string(gzipfixtures::dynamic);
             bytes[offset] ^= 1;
-            REQUIRE_FALSE(decodeGzip(bytes));
+            require(!decodeGzip(bytes));
         }
         auto bytes = std::string(gzipfixtures::optional);
         bytes[10]  = static_cast<char>(0xff);  // Invalid extra-field length.
-        REQUIRE_FALSE(decodeGzip(bytes));
+        require(!decodeGzip(bytes));
         bytes      = gzipfixtures::optional;
         bytes[17] ^= 1;  // Header CRC covers the optional name, too.
-        REQUIRE_FALSE(decodeGzip(bytes));
-    }
-}
+        require(!decodeGzip(bytes));
+    });
+}};
 
-SCENARIO("Gzip rejects invalid Huffman codes and match distances") {
-    GIVEN("malformed DEFLATE blocks") {
-        THEN("decoding rejects the blocks without accessing missing history or table entries") {
+Scenario gzipRejects{"Gzip rejects invalid Huffman codes and match distances", [] {
+    given("malformed DEFLATE blocks", [&] {
+        then("decoding rejects the blocks without accessing missing history or table entries", [&] {
             for (const auto bytes : {gzipfixtures::invalidDistance,
                                      gzipfixtures::reservedLiteral,
                                      gzipfixtures::reservedDistance,
@@ -96,133 +98,133 @@ SCENARIO("Gzip rejects invalid Huffman codes and match distances") {
                                      gzipfixtures::repeatWithoutPrevious,
                                      gzipfixtures::repeatOverflow,
                                      gzipfixtures::missingEnd}) {
-                REQUIRE_FALSE(decodeGzip(bytes));
+                require(!decodeGzip(bytes));
             }
-        }
-    }
-}
+        });
+    });
+}};
 
-SCENARIO("Gzip rejects reserved distance declarations and trailing padding") {
-    GIVEN("dynamic blocks declaring 31 or 32 distance symbols") {
-        THEN("the declarations are rejected even when no distance is used") {
-            REQUIRE_FALSE(decodeGzip(gzipfixtures::distanceCount31));
-            REQUIRE_FALSE(decodeGzip(gzipfixtures::distanceCount32));
-        }
-    }
-    GIVEN("zero padding after a complete member") {
+Scenario gzipRejectsReserved{"Gzip rejects reserved distance declarations and trailing padding", [] {
+    given("dynamic blocks declaring 31 or 32 distance symbols", [&] {
+        then("the declarations are rejected even when no distance is used", [&] {
+            require(!decodeGzip(gzipfixtures::distanceCount31));
+            require(!decodeGzip(gzipfixtures::distanceCount32));
+        });
+    });
+    given("zero padding after a complete member", [&] {
         const auto bytes = std::string(gzipfixtures::empty) + std::string(8, '\0');
-        THEN("strict member parsing rejects the padding") {
-            REQUIRE_FALSE(decodeGzip(bytes));
-        }
-    }
-}
+        then("strict member parsing rejects the padding", [&] {
+            require(!decodeGzip(bytes));
+        });
+    });
+}};
 
-SCENARIO("Gzip default output budget is four MiB across concatenated members") {
+Scenario gzipDefault{"Gzip default output budget is four MiB across concatenated members", [] {
     const auto  memberSize  = payload().size();
     const auto  memberCount = (4 * 1024 * 1024) / memberSize + 1;
     std::string bytes;
     for (std::size_t index = 0; index < memberCount; ++index)
         bytes += gzipfixtures::fixed;
-    THEN("the default rejects a response just above four MiB") {
-        REQUIRE_FALSE(decodeGzip(bytes));
-    }
-    THEN("an explicitly larger budget can permit the same valid content") {
+    then("the default rejects a response just above four MiB", [&] {
+        require(!decodeGzip(bytes));
+    });
+    then("an explicitly larger budget can permit the same valid content", [&] {
         const auto decoded = decodeGzip(bytes, memberCount * memberSize);
-        REQUIRE(decoded);
-        REQUIRE(decoded->size() == memberCount * memberSize);
-    }
-}
+        require(decoded);
+        require(decoded->size() == memberCount * memberSize);
+    });
+}};
 
-SCENARIO("Gzip match copies preserve overlapping history across string growth") {
+Scenario gzipMatch{"Gzip match copies preserve overlapping history across string growth", [] {
     using webfront::http::gzip::InflateContext;
-    GIVEN("a periodic match longer than its distance") {
+    given("a periodic match longer than its distance", [&] {
         std::string    output = "abc";
         InflateContext context{output, 0, 1000};
         context.copyMatch(258, 3);
-        THEN("newly written bytes extend the same periodic sequence") {
-            REQUIRE(output.size() == 261);
+        then("newly written bytes extend the same periodic sequence", [&] {
+            require(output.size() == 261);
             for (std::size_t index = 0; index < output.size(); ++index)
-                REQUIRE(output[index] == "abc"[index % 3]);
-        }
-    }
-    GIVEN("a repeated byte and an exact output budget") {
+                require(output[index] == "abc"[index % 3]);
+        });
+    });
+    given("a repeated byte and an exact output budget", [&] {
         std::string    output = "x";
         InflateContext context{output, 0, 259};
         context.copyMatch(258, 1);
-        THEN("the copy grows safely and the next copy fails without modifying output") {
-            REQUIRE(output == std::string(259, 'x'));
-            REQUIRE_THROWS_AS(context.copyMatch(3, 1), webfront::http::gzip::InvalidGzip);
-            REQUIRE(output == std::string(259, 'x'));
-        }
-    }
-}
+        then("the copy grows safely and the next copy fails without modifying output", [&] {
+            require(output == std::string(259, 'x'));
+            requireThrows<webfront::http::gzip::InvalidGzip>([&] { context.copyMatch(3, 1); });
+            require(output == std::string(259, 'x'));
+        });
+    });
+}};
 
-SCENARIO("Gzip bulk reads require alignment and complete input") {
+Scenario gzipBulk{"Gzip bulk reads require alignment and complete input", [] {
     webfront::http::gzip::GzipReader reader("abc");
-    GIVEN("an unaligned reader") {
+    given("an unaligned reader", [&] {
         reader.bits(1);
-        REQUIRE_THROWS_AS(reader.readBytes(1), webfront::http::gzip::InvalidGzip);
+        requireThrows<webfront::http::gzip::InvalidGzip>([&] { reader.readBytes(1); });
         reader.align();
-        THEN("aligned reads consume only available bytes") {
-            REQUIRE(reader.readBytes(2) == "bc");
-            REQUIRE(reader.done());
-            REQUIRE(reader.readBytes(0).empty());
-            REQUIRE_THROWS_AS(reader.readBytes(1), webfront::http::gzip::InvalidGzip);
-        }
-    }
-    GIVEN("a truncated read") {
-        REQUIRE_THROWS_AS(reader.readBytes(4), webfront::http::gzip::InvalidGzip);
-        THEN("failure leaves the reader position unchanged") {
-            REQUIRE(reader.readBytes(3) == "abc");
-        }
-    }
-}
+        then("aligned reads consume only available bytes", [&] {
+            require(reader.readBytes(2) == "bc");
+            require(reader.done());
+            require(reader.readBytes(0).empty());
+            requireThrows<webfront::http::gzip::InvalidGzip>([&] { reader.readBytes(1); });
+        });
+    });
+    given("a truncated read", [&] {
+        requireThrows<webfront::http::gzip::InvalidGzip>([&] { reader.readBytes(4); });
+        then("failure leaves the reader position unchanged", [&] {
+            require(reader.readBytes(3) == "abc");
+        });
+    });
+}};
 
-SCENARIO("Gzip CRC32 matches standard and binary reference vectors") {
+Scenario gzipCRC32{"Gzip CRC32 matches standard and binary reference vectors", [] {
     using webfront::http::gzip::gzipCrc;
-    GIVEN("the empty input and the standard check vector") {
-        THEN("the IEEE CRC32 values match") {
-            REQUIRE(gzipCrc("") == 0u);
-            REQUIRE(gzipCrc("123456789") == 0xcbf43926u);
-        }
-    }
-    GIVEN("every byte value, including bytes with the high bit set") {
+    given("the empty input and the standard check vector", [&] {
+        then("the IEEE CRC32 values match", [&] {
+            require(gzipCrc("") == 0u);
+            require(gzipCrc("123456789") == 0xcbf43926u);
+        });
+    });
+    given("every byte value, including bytes with the high bit set", [&] {
         std::string bytes;
         for (unsigned byte = 0; byte < 256; ++byte)
             bytes.push_back(static_cast<char>(byte));
-        THEN("the result matches the independent zlib reference") {
-            REQUIRE(gzipCrc(bytes) == 0x29058c73u);
-        }
-    }
-}
+        then("the result matches the independent zlib reference", [&] {
+            require(gzipCrc(bytes) == 0x29058c73u);
+        });
+    });
+}};
 
-SCENARIO("Validated gzip cache shares GET content and HEAD metadata within the current output budget") {
+Scenario validatedGzip{"Validated gzip cache shares GET content and HEAD metadata within the current output budget", [] {
     using webfront::http::gzip::ValidatedCache;
     ValidatedCache cache(100000);
     auto           bytes = std::string(gzipfixtures::fixed);
-    GIVEN("HEAD validates a revision before GET") {
-        REQUIRE(cache.resolve(bytes, 23768, true) == 23768);
-        REQUIRE(bytes.empty());
+    given("HEAD validates a revision before GET", [&] {
+        require(cache.resolve(bytes, 23768, true) == 23768);
+        require(bytes.empty());
         bytes = gzipfixtures::fixed;
-        REQUIRE(cache.resolve(bytes, 23768) == 23768);
-        REQUIRE(bytes == payload());
-        THEN("GET reuses the validated bytes and length") {
-            REQUIRE(cache.statistics().decodes == 1);
-            REQUIRE(cache.statistics().hits == 1);
-        }
-        THEN("a smaller active output budget cannot reuse the larger result") {
+        require(cache.resolve(bytes, 23768) == 23768);
+        require(bytes == payload());
+        then("GET reuses the validated bytes and length", [&] {
+            require(cache.statistics().decodes == 1);
+            require(cache.statistics().hits == 1);
+        });
+        then("a smaller active output budget cannot reuse the larger result", [&] {
             for (const bool head : {false, true}) {
                 bytes = gzipfixtures::fixed;
-                REQUIRE_FALSE(cache.resolve(bytes, 23767, head));
+                require(!cache.resolve(bytes, 23767, head));
             }
-            REQUIRE(cache.statistics().decodes == 1);
+            require(cache.statistics().decodes == 1);
             bytes = gzipfixtures::fixed;
-            REQUIRE(cache.resolve(bytes, 23768, true) == 23768);
-        }
-    }
-}
+            require(cache.resolve(bytes, 23768, true) == 23768);
+        });
+    });
+}};
 
-SCENARIO("Validated gzip cache bounds keys and data and evicts the least recently used revision") {
+Scenario validatedGzipCache{"Validated gzip cache bounds keys and data and evicts the least recently used revision", [] {
     using webfront::http::gzip::ValidatedCache;
     auto first  = std::string(gzipfixtures::fixed);
     auto second = first;
@@ -232,55 +234,55 @@ SCENARIO("Validated gzip cache bounds keys and data and evicts the least recentl
     third[4]  = 2;
     ValidatedCache probe(100000);
     auto           bytes = first;
-    REQUIRE(probe.resolve(bytes, 23768));
+    require(probe.resolve(bytes, 23768));
     const auto charge = probe.statistics().retainedBytes;
-    REQUIRE(charge >= first.size() + 23768);
-    GIVEN("room for exactly two revisions") {
+    require(charge >= first.size() + 23768);
+    given("room for exactly two revisions", [&] {
         ValidatedCache cache(2 * charge);
         for (const auto& revision : {first, second, first, third, first}) {
             bytes = revision;
-            REQUIRE(cache.resolve(bytes, 23768));
-            REQUIRE(cache.statistics().retainedBytes <= 2 * charge);
+            require(cache.resolve(bytes, 23768));
+            require(cache.statistics().retainedBytes <= 2 * charge);
         }
-        THEN("the touched first revision survives while the second is evicted") {
-            REQUIRE(cache.statistics().decodes == 3);
-            REQUIRE(cache.statistics().hits == 2);
-            REQUIRE(cache.statistics().entries == 2);
+        then("the touched first revision survives while the second is evicted", [&] {
+            require(cache.statistics().decodes == 3);
+            require(cache.statistics().hits == 2);
+            require(cache.statistics().entries == 2);
             bytes = second;
-            REQUIRE(cache.resolve(bytes, 23768));
-            REQUIRE(cache.statistics().decodes == 4);
-        }
-    }
-    GIVEN("a budget one byte below a complete entry, or disabled caching") {
+            require(cache.resolve(bytes, 23768));
+            require(cache.statistics().decodes == 4);
+        });
+    });
+    given("a budget one byte below a complete entry, or disabled caching", [&] {
         for (const auto budget : {std::size_t{0}, charge - 1}) {
             ValidatedCache cache(budget);
             for (const bool head : {false, true}) {
                 bytes = first;
-                REQUIRE(cache.resolve(bytes, 23768, head));
+                require(cache.resolve(bytes, 23768, head));
             }
-            THEN("both requests succeed without retaining partial keys or metadata") {
-                REQUIRE(cache.statistics().retainedBytes == 0);
-                REQUIRE(cache.statistics().entries == 0);
-                REQUIRE(cache.statistics().decodes == 2);
-            }
+            then("both requests succeed without retaining partial keys or metadata", [&] {
+                require(cache.statistics().retainedBytes == 0);
+                require(cache.statistics().entries == 0);
+                require(cache.statistics().decodes == 2);
+            });
         }
-    }
-    GIVEN("an oversized revision alongside a retained asset") {
+    });
+    given("an oversized revision alongside a retained asset", [&] {
         ValidatedCache cache(charge);
         bytes = first;
-        REQUIRE(cache.resolve(bytes, 23768));
+        require(cache.resolve(bytes, 23768));
         bytes = first + first;
-        REQUIRE(cache.resolve(bytes, 47536));
+        require(cache.resolve(bytes, 47536));
         bytes = first;
-        REQUIRE(cache.resolve(bytes, 23768));
-        REQUIRE(cache.statistics().decodes == 2);
-        REQUIRE(cache.statistics().hits == 1);
-    }
-}
+        require(cache.resolve(bytes, 23768));
+        require(cache.statistics().decodes == 2);
+        require(cache.statistics().hits == 1);
+    });
+}};
 
-SCENARIO("Validated gzip cache never promotes invalid streams or trusts ISIZE alone") {
+Scenario validatedGzipCacheNever{"Validated gzip cache never promotes invalid streams or trusts ISIZE alone", [] {
     webfront::http::gzip::ValidatedCache cache(100000);
-    GIVEN("corrupt CRC, invalid trailer, truncated and concatenated invalid members") {
+    given("corrupt CRC, invalid trailer, truncated and concatenated invalid members", [&] {
         auto corrupt                 = std::string(gzipfixtures::fixed);
         corrupt[corrupt.size() - 8] ^= 1;
         auto wrongSize               = std::string(gzipfixtures::fixed);
@@ -288,87 +290,87 @@ SCENARIO("Validated gzip cache never promotes invalid streams or trusts ISIZE al
         for (const auto& invalid : {corrupt, wrongSize, std::string(gzipfixtures::fixed.substr(0, 498)), std::string(gzipfixtures::fixed) + corrupt}) {
             for (const bool head : {false, true}) {
                 auto bytes = invalid;
-                REQUIRE_FALSE(cache.resolve(bytes, 100000, head));
+                require(!cache.resolve(bytes, 100000, head));
             }
         }
-        THEN("every attempt validates again and nothing is retained") {
-            REQUIRE(cache.statistics().decodes == 8);
-            REQUIRE(cache.statistics().entries == 0);
-            REQUIRE(cache.statistics().retainedBytes == 0);
-        }
-    }
-    GIVEN("an initial decode failing its output budget") {
+        then("every attempt validates again and nothing is retained", [&] {
+            require(cache.statistics().decodes == 8);
+            require(cache.statistics().entries == 0);
+            require(cache.statistics().retainedBytes == 0);
+        });
+    });
+    given("an initial decode failing its output budget", [&] {
         auto bytes = std::string(gzipfixtures::fixed);
-        REQUIRE_FALSE(cache.resolve(bytes, 1));
+        require(!cache.resolve(bytes, 1));
         bytes = gzipfixtures::fixed;
-        REQUIRE(cache.resolve(bytes, 23768));
-        REQUIRE(cache.statistics().decodes == 2);
-        REQUIRE(cache.statistics().entries == 1);
-    }
-}
+        require(cache.resolve(bytes, 23768));
+        require(cache.statistics().decodes == 2);
+        require(cache.statistics().entries == 1);
+    });
+}};
 
-SCENARIO("Validated gzip cache lifetime is owned and copies do not share application state") {
+Scenario validatedGzipCacheLifetime{"Validated gzip cache lifetime is owned and copies do not share application state", [] {
     using webfront::http::gzip::ValidatedCache;
     std::string response(gzipfixtures::fixed);
-    GIVEN("a populated cache") {
+    given("a populated cache", [&] {
         {
             ValidatedCache cache(100000);
-            REQUIRE(cache.resolve(response, 23768));
+            require(cache.resolve(response, 23768));
             auto copy = cache;
-            REQUIRE(copy.statistics().entries == 0);
+            require(copy.statistics().entries == 0);
             auto bytes = std::string(gzipfixtures::fixed);
-            REQUIRE(copy.resolve(bytes, 23768));
-            REQUIRE(copy.statistics().decodes == 1);
+            require(copy.resolve(bytes, 23768));
+            require(copy.statistics().decodes == 1);
         }
-        THEN("the response survives destruction and a new application starts cold") {
-            REQUIRE(response == payload());
+        then("the response survives destruction and a new application starts cold", [&] {
+            require(response == payload());
             ValidatedCache next(100000);
             response = gzipfixtures::fixed;
-            REQUIRE(next.resolve(response, 23768, true));
-            REQUIRE(next.statistics().decodes == 1);
-            REQUIRE(next.statistics().hits == 0);
-        }
-    }
-}
+            require(next.resolve(response, 23768, true));
+            require(next.statistics().decodes == 1);
+            require(next.statistics().hits == 0);
+        });
+    });
+}};
 
-SCENARIO("Validated gzip cache permits empty streams under a zero output budget") {
+Scenario validatedGzipCachePermits{"Validated gzip cache permits empty streams under a zero output budget", [] {
     // Empty stored block, with a validated CRC32 and ISIZE of zero.
     const std::string                    empty("\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03"
                                                "\x01\x00\x00\xff\xff"
                                                "\x00\x00\x00\x00\x00\x00\x00\x00",
                             23);
     webfront::http::gzip::ValidatedCache cache(1000);
-    GIVEN("GET then HEAD of a valid empty asset") {
+    given("GET then HEAD of a valid empty asset", [&] {
         for (const bool head : {false, true}) {
             auto bytes = empty;
-            REQUIRE(cache.resolve(bytes, 0, head) == 0);
-            REQUIRE(bytes.empty());
+            require(cache.resolve(bytes, 0, head) == 0);
+            require(bytes.empty());
         }
-        REQUIRE(cache.statistics().decodes == 1);
-        REQUIRE(cache.statistics().hits == 1);
-        REQUIRE(cache.statistics().retainedBytes <= 1000);
-    }
-}
+        require(cache.statistics().decodes == 1);
+        require(cache.statistics().hits == 1);
+        require(cache.statistics().retainedBytes <= 1000);
+    });
+}};
 
-SCENARIO("Gzip decoding fills a preallocated bounded worker buffer without growing it") {
+Scenario gzipDecodingFills{"Gzip decoding fills a preallocated bounded worker buffer without growing it", [] {
     std::string output;
     output.reserve(23768);
     const auto capacity = output.capacity();
     for (const auto bytes : {gzipfixtures::fixed, gzipfixtures::dynamic, gzipfixtures::optional}) {
-        REQUIRE(webfront::http::gzip::decodeGzipInto(bytes, output, 23768));
-        REQUIRE(output == payload());
-        REQUIRE(output.capacity() == capacity);
-        REQUIRE_FALSE(webfront::http::gzip::decodeGzipInto(bytes, output, 23767));
-        REQUIRE(output.empty());
+        require(webfront::http::gzip::decodeGzipInto(bytes, output, 23768));
+        require(output == payload());
+        require(output.capacity() == capacity);
+        require(!webfront::http::gzip::decodeGzipInto(bytes, output, 23767));
+        require(output.empty());
     }
-}
+}};
 
-SCENARIO("Gzip buffered reads preserve logical byte offsets and exact member boundaries") {
+Scenario gzipBuffered{"Gzip buffered reads preserve logical byte offsets and exact member boundaries", [] {
     using webfront::http::gzip::GzipReader;
     using webfront::http::gzip::InvalidGzip;
-    GIVEN("a binary stream read with every supported width and initial bit alignment") {
+    given("a binary stream read with every supported width and initial bit alignment", [&] {
         const std::string bytes("\x81\x72\xe3\x54\xa5\x96", 6);
-        THEN("every value and offset counts consumed bits without consuming later bytes") {
+        then("every value and offset counts consumed bits without consuming later bytes", [&] {
             for (unsigned alignment = 0; alignment < 8; ++alignment) {
                 for (unsigned width = 0; width <= 32; ++width) {
                     GzipReader reader(bytes);
@@ -378,102 +380,102 @@ SCENARIO("Gzip buffered reads preserve logical byte offsets and exact member bou
                         const auto offset = alignment + bit;
                         expected         |= ((static_cast<unsigned char>(bytes[offset / 8]) >> (offset % 8)) & 1u) << bit;
                     }
-                    INFO(alignment << ", " << width);
-                    REQUIRE(reader.bits(width) == expected);
-                    REQUIRE(reader.offset() == (alignment + width) / 8);
-                    REQUIRE_FALSE(reader.done());
+                    auto scope = info("alignment ", alignment, ", width ", width);
+                    require(reader.bits(width) == expected);
+                    require(reader.offset() == (alignment + width) / 8);
+                    require(!reader.done());
                     reader.align();
                     const auto consumed = (alignment + width + 7) / 8;
-                    REQUIRE(reader.offset() == consumed);
-                    REQUIRE(reader.readBytes(bytes.size() - consumed) == std::string_view(bytes).substr(consumed));
-                    REQUIRE(reader.done());
-                    REQUIRE(reader.bits(0) == 0);
-                    REQUIRE_THROWS_AS(reader.bits(1), InvalidGzip);
+                    require(reader.offset() == consumed);
+                    require(reader.readBytes(bytes.size() - consumed) == std::string_view(bytes).substr(consumed));
+                    require(reader.done());
+                    require(reader.bits(0) == 0);
+                    requireThrows<InvalidGzip>([&] { reader.bits(1); });
                 }
             }
-        }
-    }
-    GIVEN("a one-byte input and a partially consumed final byte") {
+        });
+    });
+    given("a one-byte input and a partially consumed final byte", [&] {
         GzipReader reader(std::string_view("\xff", 1));
-        REQUIRE(reader.bits(1) == 1);
-        REQUIRE(reader.offset() == 0);
-        REQUIRE_FALSE(reader.done());
-        REQUIRE(reader.bits(7) == 127);
-        REQUIRE(reader.offset() == 1);
-        REQUIRE(reader.done());
-        REQUIRE_THROWS_AS(reader.bits(1), InvalidGzip);
-        REQUIRE_THROWS_AS(reader.bits(33), InvalidGzip);
-    }
-    GIVEN("optional header checksums and empty members between Huffman members") {
+        require(reader.bits(1) == 1);
+        require(reader.offset() == 0);
+        require(!reader.done());
+        require(reader.bits(7) == 127);
+        require(reader.offset() == 1);
+        require(reader.done());
+        requireThrows<InvalidGzip>([&] { reader.bits(1); });
+        requireThrows<InvalidGzip>([&] { reader.bits(33); });
+    });
+    given("optional header checksums and empty members between Huffman members", [&] {
         const auto bytes = std::string(gzipfixtures::optional) + std::string(gzipfixtures::empty) + std::string(gzipfixtures::fixed);
-        THEN("header CRC ranges and every member trailer stay exact") {
-            REQUIRE(decodeGzip(bytes) == payload() + payload());
+        then("header CRC ranges and every member trailer stay exact", [&] {
+            require(decodeGzip(bytes) == payload() + payload());
             for (std::size_t size = bytes.size() - 8; size < bytes.size(); ++size)
-                REQUIRE_FALSE(decodeGzip(std::string_view(bytes).substr(0, size)));
-            REQUIRE_FALSE(decodeGzip(bytes + std::string(1, '\0')));
-        }
-    }
-}
+                require(!decodeGzip(std::string_view(bytes).substr(0, size)));
+            require(!decodeGzip(bytes + std::string(1, '\0')));
+        });
+    });
+}};
 
-SCENARIO("Gzip lookahead retains prefetched bytes through alignment and bulk reads") {
+Scenario gzipLookahead{"Gzip lookahead retains prefetched bytes through alignment and bulk reads", [] {
     using webfront::http::gzip::GzipReader;
     using webfront::http::gzip::InvalidGzip;
     GzipReader reader("abcdef");
     unsigned   prefix;
-    GIVEN("lookahead across four bytes without consuming them") {
-        REQUIRE(reader.peek(32, prefix));
-        REQUIRE(prefix == 0x64636261u);
-        REQUIRE(reader.offset() == 0);
-        REQUIRE(reader.readBytes(2) == "ab");
-        REQUIRE(reader.bits(8) == 'c');
-        REQUIRE(reader.peek(16, prefix));
-        REQUIRE(prefix == 0x6564u);
-        THEN("alignment keeps complete prefetched bytes") {
+    given("lookahead across four bytes without consuming them", [&] {
+        require(reader.peek(32, prefix));
+        require(prefix == 0x64636261u);
+        require(reader.offset() == 0);
+        require(reader.readBytes(2) == "ab");
+        require(reader.bits(8) == 'c');
+        require(reader.peek(16, prefix));
+        require(prefix == 0x6564u);
+        then("alignment keeps complete prefetched bytes", [&] {
             reader.bits(1);
             reader.align();
-            REQUIRE(reader.offset() == 4);
-            REQUIRE(reader.readBytes(2) == "ef");
-            REQUIRE(reader.done());
-        }
-    }
-    GIVEN("lookahead beyond the end of an exact input span") {
-        REQUIRE(reader.readBytes(5) == "abcde");
-        REQUIRE_FALSE(reader.peek(16, prefix));
-        THEN("a failed probe preserves the last byte for a shorter code") {
-            REQUIRE(reader.offset() == 5);
-            REQUIRE(reader.bits(8) == 'f');
-            REQUIRE(reader.done());
-            REQUIRE_THROWS_AS(reader.consume(1), InvalidGzip);
-        }
-    }
-}
+            require(reader.offset() == 4);
+            require(reader.readBytes(2) == "ef");
+            require(reader.done());
+        });
+    });
+    given("lookahead beyond the end of an exact input span", [&] {
+        require(reader.readBytes(5) == "abcde");
+        require(!reader.peek(16, prefix));
+        then("a failed probe preserves the last byte for a shorter code", [&] {
+            require(reader.offset() == 5);
+            require(reader.bits(8) == 'f');
+            require(reader.done());
+            requireThrows<InvalidGzip>([&] { reader.consume(1); });
+        });
+    });
+}};
 
-SCENARIO("Gzip Huffman lookup preserves short tails, long codes and empty distance trees") {
+Scenario gzipHuffman{"Gzip Huffman lookup preserves short tails, long codes and empty distance trees", [] {
     using namespace webfront::http::gzip;
-    GIVEN("a single-symbol incomplete alphabet at the very last input bit") {
+    given("a single-symbol incomplete alphabet at the very last input bit", [&] {
         const std::array<unsigned, 1> lengths{1};
         DeflateTree                   tree(lengths);
         GzipReader                    reader(std::string_view("\x7f", 1));
         reader.bits(7);
-        REQUIRE(tree.decode(reader) == 0);
-        REQUIRE(reader.done());
-    }
-    GIVEN("a complete tree with codes longer than the direct table") {
+        require(tree.decode(reader) == 0);
+        require(reader.done());
+    });
+    given("a complete tree with codes longer than the direct table", [&] {
         std::array<unsigned, 512> tooMany{};
-        REQUIRE_THROWS_AS(DeflateTree(tooMany), InvalidGzip);
+        requireThrows<InvalidGzip>([&] { (void)DeflateTree(tooMany); });
         // One code at each length 1..8 and two at length 9 make a complete alphabet.
         const std::array<unsigned, 10> lengths{1, 2, 3, 4, 5, 6, 7, 8, 9, 9};
         DeflateTree                    tree(lengths);
         GzipReader                     reader(std::string_view("\xff\x01", 2));
-        REQUIRE(tree.decode(reader) == 9);
-        REQUIRE(reader.offset() == 1);
-        REQUIRE(reader.bits(7) == 0);
-        REQUIRE(reader.done());
-    }
-    GIVEN("an empty distance alphabet and a full input byte") {
+        require(tree.decode(reader) == 9);
+        require(reader.offset() == 1);
+        require(reader.bits(7) == 0);
+        require(reader.done());
+    });
+    given("an empty distance alphabet and a full input byte", [&] {
         const std::array<unsigned, 1> lengths{0};
         DeflateTree                   tree(lengths);
         GzipReader                    reader(std::string_view("\0\0", 2));
-        REQUIRE_THROWS_AS(tree.decode(reader), InvalidGzip);
-    }
-}
+        requireThrows<InvalidGzip>([&] { tree.decode(reader); });
+    });
+}};

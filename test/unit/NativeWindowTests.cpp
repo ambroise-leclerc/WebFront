@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
 /// @brief Typed access to the native window of an embedded frontend, and its link to a connection (#463, ADR-020).
 #include "InjectableNetworking.hpp"
-#include <catch2/catch_test_macros.hpp>
+#include "Bdd.hpp"
 #include <webfront/frontend/NativeWindow.hpp>
 #include <webfront/networking/TCPNetworkingStdnet.hpp>
 #include <webfront/system/DefaultFS.hpp>
@@ -13,6 +13,8 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+using namespace webfront::bdd;
 
 using namespace webfront;
 using namespace webfront::frontend;
@@ -45,7 +47,7 @@ struct Session {
 };
 
 NativeWindowError errorOf(const NativeWindowResult& result) {
-    REQUIRE_FALSE(result.has_value());
+    require(!result.has_value());
     return result.error();
 }
 
@@ -94,70 +96,70 @@ typename Application::UI connect(Application& app, const std::string& proof) {
     for (const char c : proof)
         payload.push_back(static_cast<std::byte>(c));
     BrowserSocket::receive(testing::clientFrame(payload));
-    REQUIRE(browser);
+    require(browser);
     return *browser;
 }
 }  // namespace
 
-SCENARIO("The native window is given on the interface thread while it is published", "[native-window]") {
-    GIVEN("a handle that belongs to no frontend") {
-        THEN("it answers unsupported") {
-            REQUIRE(errorOf(NativeWindow{}.get()) == NativeWindowError::unsupported);
-        }
-    }
-    GIVEN("a frontend whose window is not created yet") {
+Scenario nativeWindowGiven{"The native window is given on the interface thread while it is published", {"native-window"}, [] {
+    given("a handle that belongs to no frontend", [&] {
+        then("it answers unsupported", [&] {
+            require(errorOf(NativeWindow{}.get()) == NativeWindowError::unsupported);
+        });
+    });
+    given("a frontend whose window is not created yet", [&] {
         const auto handle = nativeWindowHostOf<LifecycleTag>().window();
-        THEN("it answers notOpen") {
-            REQUIRE(errorOf(handle.get()) == NativeWindowError::notOpen);
-        }
-        AND_WHEN("the loop is attached but nothing is published") {
+        then("it answers notOpen", [&] {
+            require(errorOf(handle.get()) == NativeWindowError::notOpen);
+        });
+        andWhen("the loop is attached but nothing is published", [&] {
             Session<LifecycleTag> session;
-            THEN("it still answers notOpen") {
-                REQUIRE(errorOf(handle.get()) == NativeWindowError::notOpen);
-            }
-        }
-    }
-    GIVEN("a published window") {
+            then("it still answers notOpen", [&] {
+                require(errorOf(handle.get()) == NativeWindowError::notOpen);
+            });
+        });
+    });
+    given("a published window", [&] {
         Session<PlainTag> session;
         const auto        handle = nativeWindowHostOf<PlainTag>().window();
         const auto generation = session.publish("x11:1a2b");
-        WHEN("it is read on the interface thread") {
+        when("it is read on the interface thread", [&] {
             const auto window = handle.get();
-            THEN("it is the toolkit object, with its portal identifier") {
-                REQUIRE(window.has_value());
-                CHECK(window->kind == NativeWindowKind::gtk);
-                CHECK(window->pointer == &windowObject);
-                CHECK(window->portalParent == "x11:1a2b");
-            }
-        }
-        WHEN("it is read from another thread") {
+            then("it is the toolkit object, with its portal identifier", [&] {
+                require(window.has_value());
+                check(window->kind == NativeWindowKind::gtk);
+                check(window->pointer == &windowObject);
+                check(window->portalParent == "x11:1a2b");
+            });
+        });
+        when("it is read from another thread", [&] {
             const auto answer = std::async(std::launch::async, [&] { return handle.get(); }).get();
-            THEN("it is refused: a toolkit object belongs to the interface thread") {
-                REQUIRE(errorOf(answer) == NativeWindowError::wrongThread);
-            }
-        }
-        WHEN("the portal identifier becomes known later") {
+            then("it is refused: a toolkit object belongs to the interface thread", [&] {
+                require(errorOf(answer) == NativeWindowError::wrongThread);
+            });
+        });
+        when("the portal identifier becomes known later", [&] {
             session.window.setPortalParent("wayland:handle", generation);
-            THEN("the window carries it") {
-                REQUIRE(handle.get()->portalParent == "wayland:handle");
-            }
-        }
-        WHEN("the window is withdrawn") {
+            then("the window carries it", [&] {
+                require(handle.get()->portalParent == "wayland:handle");
+            });
+        });
+        when("the window is withdrawn", [&] {
             session.window.retract();
-            THEN("it answers closed, and a late portal identifier is dropped") {
-                REQUIRE(errorOf(handle.get()) == NativeWindowError::closed);
+            then("it answers closed, and a late portal identifier is dropped", [&] {
+                require(errorOf(handle.get()) == NativeWindowError::closed);
                 session.window.setPortalParent("wayland:late", generation);
-                REQUIRE(errorOf(handle.get()) == NativeWindowError::closed);
-            }
-        }
-        WHEN("the loop closes without the window being withdrawn") {
+                require(errorOf(handle.get()) == NativeWindowError::closed);
+            });
+        });
+        when("the loop closes without the window being withdrawn", [&] {
             session.executor.close();
-            THEN("it is not given to a thread that is no longer the interface thread") {
-                REQUIRE(errorOf(handle.get()) == NativeWindowError::wrongThread);
-            }
-        }
-    }
-    GIVEN("an asynchronous portal export that answers after its window was replaced") {
+            then("it is not given to a thread that is no longer the interface thread", [&] {
+                require(errorOf(handle.get()) == NativeWindowError::wrongThread);
+            });
+        });
+    });
+    given("an asynchronous portal export that answers after its window was replaced", [&] {
         const auto handle = nativeWindowHostOf<PlainTag>().window();
         std::uint64_t first{};
         {
@@ -166,92 +168,92 @@ SCENARIO("The native window is given on the interface thread while it is publish
         }
         Session<PlainTag> b;
         const auto        second = b.publish("x11:b");
-        REQUIRE(second != first);
-        WHEN("the answer about window A arrives") {
+        require(second != first);
+        when("the answer about window A arrives", [&] {
             b.window.setPortalParent("wayland:stale-a", first);
-            THEN("window B keeps its own identifier") {
-                REQUIRE(handle.get()->portalParent == "x11:b");
-            }
-        }
-        WHEN("the answer about window B arrives") {
+            then("window B keeps its own identifier", [&] {
+                require(handle.get()->portalParent == "x11:b");
+            });
+        });
+        when("the answer about window B arrives", [&] {
             b.window.setPortalParent("wayland:b", second);
-            THEN("window B takes it") {
-                REQUIRE(handle.get()->portalParent == "wayland:b");
-            }
-        }
-        WHEN("window B is withdrawn and the answer about window A arrives") {
-            THEN("it is dropped as well") {
+            then("window B takes it", [&] {
+                require(handle.get()->portalParent == "wayland:b");
+            });
+        });
+        when("window B is withdrawn and the answer about window A arrives", [&] {
+            then("it is dropped as well", [&] {
                 b.window.retract();
                 b.window.setPortalParent("wayland:stale-a", first);
-                REQUIRE(errorOf(handle.get()) == NativeWindowError::closed);
-            }
-        }
-    }
-    GIVEN("a window that was published and withdrawn") {
+                require(errorOf(handle.get()) == NativeWindowError::closed);
+            });
+        });
+    });
+    given("a window that was published and withdrawn", [&] {
         const auto handle = nativeWindowHostOf<PlainTag>().window();
         {
             Session<PlainTag> first;
             first.publish();
         }
-        REQUIRE(errorOf(handle.get()) == NativeWindowError::closed);
-        WHEN("a new session publishes a window") {
+        require(errorOf(handle.get()) == NativeWindowError::closed);
+        when("a new session publishes a window", [&] {
             Session<PlainTag> second;
             second.publish();
-            THEN("the same handle gives it") {
-                REQUIRE(handle.get().has_value());
-            }
-        }
-    }
-}
+            then("the same handle gives it", [&] {
+                require(handle.get().has_value());
+            });
+        });
+    });
+}};
 
-SCENARIO("A connection is given a window only when it is the view of the frontend's window", "[native-window][view-association]") {
+Scenario connectionGiven{"A connection is given a window only when it is the view of the frontend's window", {"native-window", "view-association"}, [] {
     freshNetwork();
     App<WindowFrontend> app{WebFrontConfig{.port = "0"}};
     const auto          secret = testing::LaunchSecret<App<WindowFrontend>>::of(app);
     Session<WindowFrontend> session;
     session.publish();
 
-    WHEN("the connection presents the secret of the launch") {
+    when("the connection presents the secret of the launch", [&] {
         const auto ui = connect(app, secret);
-        THEN("its window is the frontend's") {
+        then("its window is the frontend's", [&] {
             const auto window = ui.nativeWindow();
-            REQUIRE(window.has_value());
-            CHECK(window->pointer == &windowObject);
-        }
-        AND_WHEN("the window is withdrawn") {
+            require(window.has_value());
+            check(window->pointer == &windowObject);
+        });
+        andWhen("the window is withdrawn", [&] {
             session.window.retract();
-            THEN("the connection no longer has one") {
-                REQUIRE(errorOf(ui.nativeWindow()) == NativeWindowError::closed);
-            }
-        }
-        AND_WHEN("the UI is used from another thread") {
+            then("the connection no longer has one", [&] {
+                require(errorOf(ui.nativeWindow()) == NativeWindowError::closed);
+            });
+        });
+        andWhen("the UI is used from another thread", [&] {
             const auto answer = std::async(std::launch::async, [&] { return ui.nativeWindow(); }).get();
-            THEN("it is refused") {
-                REQUIRE(errorOf(answer) == NativeWindowError::wrongThread);
-            }
-        }
-    }
-    WHEN("the connection is a browser without the secret, whatever its address") {
+            then("it is refused", [&] {
+                require(errorOf(answer) == NativeWindowError::wrongThread);
+            });
+        });
+    });
+    when("the connection is a browser without the secret, whatever its address", [&] {
         const auto ui = connect(app, {});
-        THEN("it has no window to parent a dialog to") {
-            REQUIRE(errorOf(ui.nativeWindow()) == NativeWindowError::notEmbedded);
-        }
-    }
-}
+        then("it has no window to parent a dialog to", [&] {
+            require(errorOf(ui.nativeWindow()) == NativeWindowError::notEmbedded);
+        });
+    });
+}};
 
-SCENARIO("A frontend without a native window gives none, even to its embedded view", "[native-window]") {
+Scenario frontendWithout{"A frontend without a native window gives none, even to its embedded view", {"native-window"}, [] {
     freshNetwork();
     App<NoWindowFrontend> app{WebFrontConfig{.port = "0"}};
-    CHECK(errorOf(app.nativeWindow().get()) == NativeWindowError::unsupported);
+    check(errorOf(app.nativeWindow().get()) == NativeWindowError::unsupported);
     const auto ui = connect(app, testing::LaunchSecret<App<NoWindowFrontend>>::of(app));
-    REQUIRE(ui.isEmbeddedView());
-    THEN("the answer is unsupported") {
-        REQUIRE(errorOf(ui.nativeWindow()) == NativeWindowError::unsupported);
-    }
-}
+    require(ui.isEmbeddedView());
+    then("the answer is unsupported", [&] {
+        require(errorOf(ui.nativeWindow()) == NativeWindowError::unsupported);
+    });
+}};
 
-SCENARIO("The browser fallback has no native window", "[native-window]") {
+Scenario browserFallback{"The browser fallback has no native window", {"native-window"}, [] {
     using Fallback = NativeOrBrowserFrontendFor<DefaultBrowserFrontend, DefaultBrowserFrontend>;
     Fallback::initialize();
-    REQUIRE(errorOf(Fallback::nativeWindow().get()) == NativeWindowError::unsupported);
-}
+    require(errorOf(Fallback::nativeWindow().get()) == NativeWindowError::unsupported);
+}};

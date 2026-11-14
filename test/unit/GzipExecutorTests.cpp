@@ -1,5 +1,5 @@
 #include "GzipFixtures.hpp"
-#include <catch2/catch_test_macros.hpp>
+#include "Bdd.hpp"
 #include <webfront/http/HTTPServer.hpp>
 #include <webfront/networking/TCPNetworkingStdnet.hpp>
 
@@ -8,6 +8,8 @@
 #include <mutex>
 #include <optional>
 #include <thread>
+
+using namespace webfront::bdd;
 
 namespace {
 namespace ex   = webfront::networking::ex;
@@ -171,7 +173,7 @@ std::string receive(Net::Socket& socket, bool head = false) {
 }
 }  // namespace
 
-SCENARIO("Gzip CPU work coalesces revisions and bounds jobs, bytes and response leases") {
+Scenario gzipCPU{"Gzip CPU work coalesces revisions and bounds jobs, bytes and response leases", [] {
     auto       gate = std::make_shared<Gate>();
     Executor   executor({1, 2, 200000, 1000}, {gate});
     Completion first, head, full;
@@ -185,39 +187,39 @@ SCENARIO("Gzip CPU work coalesces revisions and bounds jobs, bytes and response 
         executor.stop();
         executor.join();
     }};
-    REQUIRE_FALSE(executor.statistics().workerStarted);
+    require(!executor.statistics().workerStarted);
     ex::start(a);
     gate->wait();
     ex::start(b);
     ex::start(c);
     full.wait();
-    REQUIRE_FALSE(static_cast<bool>(*full.result));
-    REQUIRE(c.encoded.empty());
-    REQUIRE(c.encoded.capacity() < gzipfixtures::fixed.size());
-    REQUIRE(executor.statistics().jobs == 1);
-    REQUIRE(executor.statistics().waiters == 2);
-    REQUIRE(executor.statistics().bytes <= 200000);
-    REQUIRE(executor.statistics().decodes == 1);
+    require(!static_cast<bool>(*full.result));
+    require(c.encoded.empty());
+    require(c.encoded.capacity() < gzipfixtures::fixed.size());
+    require(executor.statistics().jobs == 1);
+    require(executor.statistics().waiters == 2);
+    require(executor.statistics().bytes <= 200000);
+    require(executor.statistics().decodes == 1);
     gate->release();
     first.wait();
     head.wait();
-    REQUIRE(first.result->valid());
-    REQUIRE(first.result->decoded().size() == 23768);
-    REQUIRE(first.result->takeBody().size() == 23768);
-    REQUIRE(head.result->takeBody().empty());
+    require(first.result->valid());
+    require(first.result->decoded().size() == 23768);
+    require(first.result->takeBody().size() == 23768);
+    require(head.result->takeBody().empty());
     // Reservations survive completion and continue limiting slow HTTP sends.
-    REQUIRE(executor.statistics().waiters == 2);
-    REQUIRE_FALSE(executor.reserveResponse(1));
+    require(executor.statistics().waiters == 2);
+    require(!executor.reserveResponse(1));
     first.result.reset();
     head.result.reset();
     executor.stop();
     executor.join();
-    REQUIRE(executor.statistics().jobs == 0);
-    REQUIRE(executor.statistics().waiters == 0);
-    REQUIRE(executor.statistics().bytes == 0);
-}
+    require(executor.statistics().jobs == 0);
+    require(executor.statistics().waiters == 0);
+    require(executor.statistics().bytes == 0);
+}};
 
-SCENARIO("Gzip work skips cancelled queued jobs and drains an active decode on stop") {
+Scenario gzipWork{"Gzip work skips cancelled queued jobs and drains an active decode on stop", [] {
     auto                    gate = std::make_shared<Gate>();
     Executor                executor({2, 3, 200000, 1000}, {gate});
     Completion              active, queued;
@@ -234,32 +236,32 @@ SCENARIO("Gzip work skips cancelled queued jobs and drains an active decode on s
     ex::start(a);
     gate->wait();
     ex::start(b);
-    REQUIRE(executor.statistics().jobs == 2);
+    require(executor.statistics().jobs == 2);
     cancellation.request_stop();
-    GIVEN("only the queued request is cancelled") {
+    given("only the queued request is cancelled", [&] {
         gate->release();
         active.wait();
         queued.wait();
-        REQUIRE(active.result->valid());
-        REQUIRE(queued.stopped);
-        REQUIRE(executor.statistics().decodes == 1);
-    }
-    GIVEN("the server stops while the first decode is running") {
+        require(active.result->valid());
+        require(queued.stopped);
+        require(executor.statistics().decodes == 1);
+    });
+    given("the server stops while the first decode is running", [&] {
         executor.stop();
-        REQUIRE(executor.statistics().jobs == 2);
+        require(executor.statistics().jobs == 2);
         gate->release();
         executor.join();
         active.wait();
         queued.wait();
-        REQUIRE(active.stopped);
-        REQUIRE(queued.stopped);
-        REQUIRE(executor.statistics().decodes == 1);
-        REQUIRE(executor.statistics().bytes == 0);
-    }
-}
+        require(active.stopped);
+        require(queued.stopped);
+        require(executor.statistics().decodes == 1);
+        require(executor.statistics().bytes == 0);
+    });
+}};
 
-SCENARIO("Gzip work rejects saturation without starting a worker and preserves decode failures") {
-    GIVEN("zero job, waiter, byte or encoded-input capacity") {
+Scenario gzipWorkRejects{"Gzip work rejects saturation without starting a worker and preserves decode failures", [] {
+    given("zero job, waiter, byte or encoded-input capacity", [&] {
         for (const auto limits : {
                  gzip::DecodeLimits{0, 2, 100000, 1000},
                  {2, 0, 100000, 1000},
@@ -272,12 +274,12 @@ SCENARIO("Gzip work rejects saturation without starting a worker and preserves d
             auto       op = ex::connect(executor.submit(std::string(gzipfixtures::fixed), 23768), Receiver{result, {}});
             ex::start(op);
             result.wait();
-            REQUIRE_FALSE(static_cast<bool>(*result.result));
-            REQUIRE_FALSE(executor.statistics().workerStarted);
-            REQUIRE(executor.statistics().bytes == 0);
+            require(!static_cast<bool>(*result.result));
+            require(!executor.statistics().workerStarted);
+            require(executor.statistics().bytes == 0);
         }
-    }
-    GIVEN("corrupt gzip or a decoded output budget one byte too small") {
+    });
+    given("corrupt gzip or a decoded output budget one byte too small", [&] {
         for (const bool corrupt : {false, true}) {
             auto       gate = std::make_shared<Gate>();
             Executor   executor({}, {gate});
@@ -295,13 +297,13 @@ SCENARIO("Gzip work rejects saturation without starting a worker and preserves d
             gate->wait();
             gate->release();
             result.wait();
-            REQUIRE_FALSE(result.result->valid());
-            REQUIRE(result.result->decoded().empty());
+            require(!result.result->valid());
+            require(result.result->decoded().empty());
         }
-    }
-}
+    });
+}};
 
-SCENARIO("A gated cold gzip decode leaves HTTP and WebSocket upgrades responsive on the I/O thread") {
+Scenario gatedCold{"A gated cold gzip decode leaves HTTP and WebSocket upgrades responsive on the I/O thread", [] {
     const auto                                   port = freePort();
     auto                                         gate = std::make_shared<Gate>();
     Server<Net, NeutralFS, OneJob, GatedDecoder> server("127.0.0.1", port, ".", {}, {gate});
@@ -318,31 +320,31 @@ SCENARIO("A gated cold gzip decode leaves HTTP and WebSocket upgrades responsive
     }};
     send(cold, port, "/asset.js");
     gate->wait();
-    REQUIRE(gate->worker != io.get_id());
+    require(gate->worker != io.get_id());
     send(plain, port, "/plain.txt");
-    REQUIRE(receive(plain).ends_with("progress"));
+    require(receive(plain).ends_with("progress"));
     send(upgrade, port, "/", "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n");
-    REQUIRE(receive(upgrade).starts_with("HTTP/1.1 101"));
+    require(receive(upgrade).starts_with("HTTP/1.1 101"));
     send(saturated, port, "/other.js");
     const auto rejected = receive(saturated);
-    REQUIRE(rejected.starts_with("HTTP/1.1 503"));
-    REQUIRE(rejected.find("Vary: Accept-Encoding") != std::string::npos);
+    require(rejected.starts_with("HTTP/1.1 503"));
+    require(rejected.find("Vary: Accept-Encoding") != std::string::npos);
     send(pass, port, "/alias.js", "Accept-Encoding: gzip\r\n");
     const auto encoded = receive(pass);
-    REQUIRE(encoded.find("Content-Encoding: x-gzip") != std::string::npos);
-    REQUIRE(encoded.ends_with(gzipfixtures::fixed));
+    require(encoded.find("Content-Encoding: x-gzip") != std::string::npos);
+    require(encoded.ends_with(gzipfixtures::fixed));
     gate->release();
     const auto decoded = receive(cold);
-    REQUIRE(decoded.starts_with("HTTP/1.1 200"));
-    REQUIRE(decoded.find("Content-Length: 23768") != std::string::npos);
+    require(decoded.starts_with("HTTP/1.1 200"));
+    require(decoded.find("Content-Length: 23768") != std::string::npos);
     send(warm, port, "/asset.js", {}, true);
     const auto metadata = receive(warm, true);
-    REQUIRE(metadata.find("Content-Length: 23768") != std::string::npos);
-    REQUIRE(metadata.ends_with("\r\n\r\n"));
-    REQUIRE(server.fallbackDecodeStatistics().decodes == 1);
-}
+    require(metadata.find("Content-Length: 23768") != std::string::npos);
+    require(metadata.ends_with("\r\n\r\n"));
+    require(server.fallbackDecodeStatistics().decodes == 1);
+}};
 
-SCENARIO("HTTP stop and disconnected clients cannot outlive the owned gzip worker") {
+Scenario hTTPStop{"HTTP stop and disconnected clients cannot outlive the owned gzip worker", [] {
     const auto                                                 port = freePort();
     auto                                                       gate = std::make_shared<Gate>();
     Server<Net, NeutralFS, DefaultBuffersPolicy, GatedDecoder> server("127.0.0.1", port, ".", {}, {gate});
@@ -363,21 +365,21 @@ SCENARIO("HTTP stop and disconnected clients cannot outlive the owned gzip worke
     client.close();
     server.stop();
     io.join();
-    REQUIRE(server.fallbackDecodeStatistics().jobs == 1);
+    require(server.fallbackDecodeStatistics().jobs == 1);
     gate->release();
     server.drainUntilJoined();
-    REQUIRE(server.fallbackDecodeStatistics().jobs == 0);
-    REQUIRE(server.fallbackDecodeStatistics().waiters == 0);
-    REQUIRE(server.fallbackDecodeStatistics().bytes == 0);
-}
+    require(server.fallbackDecodeStatistics().jobs == 0);
+    require(server.fallbackDecodeStatistics().waiters == 0);
+    require(server.fallbackDecodeStatistics().bytes == 0);
+}};
 
-SCENARIO("Gzip coalescing isolates consumer cancellation and different output budgets") {
+Scenario gzipCoalescing{"Gzip coalescing isolates consumer cancellation and different output budgets", [] {
     auto                    gate = std::make_shared<Gate>();
     Executor                executor({2, 3, 200000, 1000}, {gate});
     Completion              first, second;
     ex::inplace_stop_source cancellation;
     const auto              bytes = std::string(gzipfixtures::fixed);
-    GIVEN("one of two consumers of a revision cancels locally") {
+    given("one of two consumers of a revision cancels locally", [&] {
         auto    a = ex::connect(executor.submit(bytes, 23768), Receiver{first, cancellation.get_token()});
         auto    b = ex::connect(executor.submit(bytes, 23768, true), Receiver{second, {}});
         Finally cleanup{[&] {
@@ -392,11 +394,11 @@ SCENARIO("Gzip coalescing isolates consumer cancellation and different output bu
         gate->release();
         first.wait();
         second.wait();
-        REQUIRE(first.stopped);
-        REQUIRE(second.result->valid());
-        REQUIRE(executor.statistics().decodes == 1);
-    }
-    GIVEN("a smaller output budget fails before a larger one validates the same bytes") {
+        require(first.stopped);
+        require(second.result->valid());
+        require(executor.statistics().decodes == 1);
+    });
+    given("a smaller output budget fails before a larger one validates the same bytes", [&] {
         auto    a = ex::connect(executor.submit(bytes, 23767), Receiver{first, {}});
         auto    b = ex::connect(executor.submit(bytes, 23768), Receiver{second, {}});
         Finally cleanup{[&] {
@@ -407,17 +409,17 @@ SCENARIO("Gzip coalescing isolates consumer cancellation and different output bu
         ex::start(a);
         gate->wait();
         ex::start(b);
-        REQUIRE(executor.statistics().jobs == 2);
+        require(executor.statistics().jobs == 2);
         gate->release();
         first.wait();
         second.wait();
-        REQUIRE_FALSE(first.result->valid());
-        REQUIRE(second.result->valid());
-        REQUIRE(executor.statistics().decodes == 2);
-    }
-}
+        require(!first.result->valid());
+        require(second.result->valid());
+        require(executor.statistics().decodes == 2);
+    });
+}};
 
-SCENARIO("Gzip response leases enforce exact capacity accounting after CPU completion") {
+Scenario gzipResponse{"Gzip response leases enforce exact capacity accounting after CPU completion", [] {
     auto        gate  = std::make_shared<Gate>();
     const auto  bytes = std::string(gzipfixtures::fixed);
     std::string buffer;
@@ -434,21 +436,21 @@ SCENARIO("Gzip response leases enforce exact capacity accounting after CPU compl
     }};
     ex::start(a);
     gate->wait();
-    REQUIRE(executor.statistics().bytes == budget);
+    require(executor.statistics().bytes == budget);
     ex::start(b);
     rejected.wait();
-    REQUIRE_FALSE(static_cast<bool>(*rejected.result));
+    require(!static_cast<bool>(*rejected.result));
     gate->release();
     first.wait();
-    REQUIRE(executor.statistics().bytes == budget);
-    REQUIRE_FALSE(executor.reserveResponse(1));
+    require(executor.statistics().bytes == budget);
+    require(!executor.reserveResponse(1));
     first.result.reset();
     executor.stop();
     executor.join();
-    REQUIRE(executor.statistics().bytes == 0);
-}
+    require(executor.statistics().bytes == 0);
+}};
 
-SCENARIO("Failed gzip responses retain their job slot until the response lease is released") {
+Scenario failedGzip{"Failed gzip responses retain their job slot until the response lease is released", [] {
     for (const bool throws : {false, true}) {
         auto gate = std::make_shared<Gate>();
         gate->release();
@@ -464,23 +466,23 @@ SCENARIO("Failed gzip responses retain their job slot until the response lease i
         }};
         ex::start(a);
         first.wait();
-        REQUIRE(static_cast<bool>(*first.result));
-        REQUIRE_FALSE(first.result->valid());
+        require(static_cast<bool>(*first.result));
+        require(!first.result->valid());
         // Completion and the consumer's receipt of a response do not release its reservation.
         ex::start(b);
         next.wait();
-        REQUIRE_FALSE(static_cast<bool>(*next.result));
-        REQUIRE(executor.statistics().decodes == 1);
-        REQUIRE(executor.statistics().jobs == 1);
+        require(!static_cast<bool>(*next.result));
+        require(executor.statistics().decodes == 1);
+        require(executor.statistics().jobs == 1);
         first.result.reset();
         executor.stop();
         executor.join();
-        REQUIRE(executor.statistics().jobs == 0);
-        REQUIRE(executor.statistics().bytes == 0);
+        require(executor.statistics().jobs == 0);
+        require(executor.statistics().bytes == 0);
     }
-}
+}};
 
-SCENARIO("Gzip completion resumes on the supplied I/O scheduler") {
+Scenario gzipCompletion{"Gzip completion resumes on the supplied I/O scheduler", [] {
     auto           gate = std::make_shared<Gate>();
     Executor       executor({}, {gate});
     Net::IoContext context;
@@ -502,12 +504,12 @@ SCENARIO("Gzip completion resumes on the supplied I/O scheduler") {
     gate->wait();
     gate->release();
     result.wait();
-    REQUIRE(result.thread == ioThread);
-    REQUIRE(result.thread != gate->worker);
-    REQUIRE(result.result->valid());
-}
+    require(result.thread == ioThread);
+    require(result.thread != gate->worker);
+    require(result.result->valid());
+}};
 
-SCENARIO("A disconnected gzip requester leaves the shared decode usable by another browser") {
+Scenario disconnectedGzip{"A disconnected gzip requester leaves the shared decode usable by another browser", [] {
     const auto                                   port = freePort();
     auto                                         gate = std::make_shared<Gate>();
     Server<Net, NeutralFS, OneJob, GatedDecoder> server("127.0.0.1", port, ".", {}, {gate});
@@ -526,20 +528,20 @@ SCENARIO("A disconnected gzip requester leaves the shared decode usable by anoth
     gate->wait();
     lost.close();
     send(plain, port, "/plain.txt");
-    REQUIRE(receive(plain).ends_with("progress"));
+    require(receive(plain).ends_with("progress"));
     gate->release();
     send(next, port, "/asset.js");
     const auto response = receive(next);
-    REQUIRE(response.starts_with("HTTP/1.1 200"));
-    REQUIRE(response.find("Content-Length: 23768") != std::string::npos);
-    REQUIRE(server.fallbackDecodeStatistics().decodes == 1);
-}
+    require(response.starts_with("HTTP/1.1 200"));
+    require(response.find("Content-Length: 23768") != std::string::npos);
+    require(server.fallbackDecodeStatistics().decodes == 1);
+}};
 
-SCENARIO("HTTP gzip workers preserve failure statuses and remain lazy on pass-through") {
+Scenario hTTPGzip{"HTTP gzip workers preserve failure statuses and remain lazy on pass-through", [] {
     const auto port = freePort();
     auto       gate = std::make_shared<Gate>();
     gate->release();
-    GIVEN("ordinary and pass-through responses need no worker") {
+    given("ordinary and pass-through responses need no worker", [&] {
         Server<Net, NeutralFS, OneJob, GatedDecoder> server("127.0.0.1", port, ".", {}, {gate});
         std::jthread                                 io([&] {
             server.run();
@@ -552,14 +554,14 @@ SCENARIO("HTTP gzip workers preserve failure statuses and remain lazy on pass-th
             server.drainUntilJoined();
         }};
         send(allocationFailure, port, "/allocation-failure.js");
-        REQUIRE(receive(allocationFailure).starts_with("HTTP/1.1 503"));
+        require(receive(allocationFailure).starts_with("HTTP/1.1 503"));
         send(plain, port, "/plain.txt");
-        REQUIRE(receive(plain).ends_with("progress"));
+        require(receive(plain).ends_with("progress"));
         send(encoded, port, "/asset.js", "Accept-Encoding: gzip\r\n");
-        REQUIRE(receive(encoded).ends_with(gzipfixtures::fixed));
-        REQUIRE_FALSE(server.fallbackDecodeStatistics().workerStarted);
-    }
-    GIVEN("invalid gzip and exceptions from the worker") {
+        require(receive(encoded).ends_with(gzipfixtures::fixed));
+        require(!server.fallbackDecodeStatistics().workerStarted);
+    });
+    given("invalid gzip and exceptions from the worker", [&] {
         for (const bool fail : {false, true}) {
             for (const bool head : {false, true}) {
                 // A received response can precede release of its server-side lease. Give each
@@ -577,13 +579,13 @@ SCENARIO("HTTP gzip workers preserve failure statuses and remain lazy on pass-th
                 }};
                 send(client, port, fail ? "/asset.js" : "/corrupt.js", {}, head);
                 const auto response = receive(client, head);
-                CAPTURE(fail, head, response);
-                REQUIRE(response.starts_with("HTTP/1.1 500"));
-                REQUIRE(response.find("Vary: Accept-Encoding") != std::string::npos);
+                auto scope = info("fail ", fail, ", head ", head, ", response ", response);
+                require(response.starts_with("HTTP/1.1 500"));
+                require(response.find("Vary: Accept-Encoding") != std::string::npos);
             }
         }
-    }
-}
+    });
+}};
 
 namespace {
 struct SmallInput : DefaultBuffersPolicy {
@@ -594,19 +596,19 @@ struct ShrinkingBudget : DefaultBuffersPolicy {
 };
 }  // namespace
 
-SCENARIO("HTTP rejects oversized fallback input before enqueue while preserving gzip pass-through") {
+Scenario hTTPRejects{"HTTP rejects oversized fallback input before enqueue while preserving gzip pass-through", [] {
     RequestHandler<Net, NeutralFS, SmallInput> handler(".");
     Request                                    request;
     request.method = Request::Method::Get;
     request.uri    = "/asset.js";
-    REQUIRE(handler.handleRequest(request).statusCode == Response::ok);
-    REQUIRE(handler.fallbackCacheStatistics().entries == 1);
+    require(handler.handleRequest(request).statusCode == Response::ok);
+    require(handler.fallbackCacheStatistics().entries == 1);
     for (const auto method : {Request::Method::Get, Request::Method::Head}) {
         request.method      = method;
         const auto prepared = handler.prepareRequest(request);
-        REQUIRE(prepared.response.statusCode == Response::internalServerError);
-        REQUIRE_FALSE(prepared.needsDecode);
-        REQUIRE(prepared.response.getHeaderValue("Vary") == "Accept-Encoding");
+        require(prepared.response.statusCode == Response::internalServerError);
+        require(!prepared.needsDecode);
+        require(prepared.response.getHeaderValue("Vary") == "Accept-Encoding");
     }
     const auto                         port = freePort();
     Server<Net, NeutralFS, SmallInput> server("127.0.0.1", port);
@@ -621,13 +623,13 @@ SCENARIO("HTTP rejects oversized fallback input before enqueue while preserving 
         server.drainUntilJoined();
     }};
     send(fallback, port, "/asset.js");
-    REQUIRE(receive(fallback).starts_with("HTTP/1.1 500"));
+    require(receive(fallback).starts_with("HTTP/1.1 500"));
     send(encoded, port, "/asset.js", "Accept-Encoding: gzip\r\n");
-    REQUIRE(receive(encoded).ends_with(gzipfixtures::fixed));
-    REQUIRE_FALSE(server.fallbackDecodeStatistics().workerStarted);
-}
+    require(receive(encoded).ends_with(gzipfixtures::fixed));
+    require(!server.fallbackDecodeStatistics().workerStarted);
+}};
 
-SCENARIO("HTTP rechecks the output budget after a suspended worker finishes") {
+Scenario hTTPRechecks{"HTTP rechecks the output budget after a suspended worker finishes", [] {
     const auto oldLimit = ShrinkingBudget::maxDecodedAssetSize;
     Finally    restore{[oldLimit] {
         ShrinkingBudget::maxDecodedAssetSize = oldLimit;
@@ -640,7 +642,7 @@ SCENARIO("HTTP rechecks the output budget after a suspended worker finishes") {
     request.method = Request::Method::Get;
     request.uri    = "/asset.js";
     auto prepared  = handler.prepareRequest(request);
-    REQUIRE(prepared.needsDecode);
+    require(prepared.needsDecode);
     Completion result;
     auto       op = ex::connect(executor.submit(std::move(prepared.response.content), prepared.limit), Receiver{result, {}});
     Finally    cleanup{[&] {
@@ -653,11 +655,11 @@ SCENARIO("HTTP rechecks the output budget after a suspended worker finishes") {
     ShrinkingBudget::maxDecodedAssetSize = 23767;
     gate->release();
     result.wait();
-    REQUIRE(handler.finish(std::move(prepared), *result.result).statusCode == Response::internalServerError);
-    REQUIRE(handler.fallbackCacheStatistics().entries == 0);
-}
+    require(handler.finish(std::move(prepared), *result.result).statusCode == Response::internalServerError);
+    require(handler.fallbackCacheStatistics().entries == 0);
+}};
 
-SCENARIO("New gzip consumers retry work skipped or interrupted by a decoder exception") {
+Scenario newGzip{"New gzip consumers retry work skipped or interrupted by a decoder exception", [] {
     for (const bool failed : {false, true}) {
         auto                    gate = std::make_shared<Gate>();
         Executor                executor({4, 4, 400000, 1000}, {gate, false, std::make_shared<std::atomic_bool>(failed)});
@@ -688,8 +690,8 @@ SCENARIO("New gzip consumers retry work skipped or interrupted by a decoder exce
         gate->release();
         first.wait();
         retry.wait();
-        REQUIRE(static_cast<bool>(*retry.result));
-        REQUIRE(executor.statistics().decodes == 2);
-        REQUIRE(retry.result->valid());
+        require(static_cast<bool>(*retry.result));
+        require(executor.statistics().decodes == 2);
+        require(retry.result->valid());
     }
-}
+}};

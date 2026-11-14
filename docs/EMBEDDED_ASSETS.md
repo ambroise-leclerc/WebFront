@@ -43,7 +43,7 @@ with CRLF line ends is stale). It assembles bounded lines and joins them once, a
 core assets take a fraction of a second. Generation and checking share one renderer, without intermediate files.
 `EmbeddedAssetGenerator` (`test/cmake/CheckEmbedAsset.cmake`) covers the exact format, empty and binary inputs, word
 boundaries, padding, a path with spaces, a checkout reached through a symbolic link and a nonzero status for stale or missing
-files; a per-asset `*AssetFresh` test attributes each stale header, and a Catch2 scenario decodes every header with the C++
+files; a per-asset `*AssetFresh` test attributes each stale header, and a unit-test scenario decodes every header with the C++
 data it declares and compares it with the source file. `.gitattributes` keeps sources and headers at LF. The choice of CMake
 over a script run by `wf` is recorded in [ADR-016](adr/ADR-016-bootstrap-comme-socle.md): the headers must be checkable by a
 build that has no browser.
@@ -55,7 +55,7 @@ when a source changed without rebuilding them, and `BundleInputsRejectsChange` p
 `webfront-embedded-assets` target for the headers that embed the bootstrap bundle.
 
 Applications that embed gzip-compressed resources use `wf embed`, which compresses in the environment with the locked
-`fflate` (level 9, mem 8, mtime 0, no filename, fixed OS byte), so the streams are identical across platforms. Catch2 covers the serving of
+`fflate` (level 9, mem 8, mtime 0, no filename, fixed OS byte), so the streams are identical across platforms. The unit tests cover the serving of
 gzip assets with a neutral fixture module: clients accepting gzip
 receive the stored representation, other clients accepting identity receive decoded bytes with their
 decoded `Content-Length`. See [HTTP asset encoding](HTTP_ASSETS.md) for negotiation, decoding limits

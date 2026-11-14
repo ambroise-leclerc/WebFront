@@ -1,0 +1,968 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+/// @file
+/// @brief A minimal behaviour-driven test framework, without macros.
+///
+/// A scenario is a named object that registers itself; its sections are lambdas:
+/// @code
+/// Scenario jsFunction{"JsFunction", [] {
+///     WebFrontMock webFront;
+///     given("A print JsFunction", [&] {
+///         when("print is called", [&] {
+///             then("the call is encoded", [&] { require(encoded.size() == 8); });
+///         });
+///     });
+/// }};
+/// @endcode
+/// As in Catch2, a scenario runs again from its start until each of its leaf sections has run once, a single new leaf
+/// per pass, and a section is identified by its name and by where it is written. `require` ends the scenario at the
+/// first failure, `check` records it and goes on.
+///
+/// The header includes only light standard headers, and the code that runs sections and catches exceptions is compiled
+/// once, behind a pointer no optimizer follows, rather than once per lambda: both keep the tests quick to compile.
+#pragma once
+
+#include <atomic>
+#include <charconv>
+#include <concepts>
+#include <cstdint>
+#include <cstdio>
+#include <ctime>
+#include <exception>
+#include <initializer_list>
+#include <memory>
+#include <source_location>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+namespace webfront::bdd {
+
+/// Thrown by a fatal failure. It does not derive from std::exception, so the `catch (const std::exception&)` of a test does
+/// not swallow it.
+struct AssertionFailure { };
+/// Thrown by skip().
+struct Skipped { };
+/// The type requireThrows() accepts when it is not given one: any exception.
+struct AnyException { };
+
+/// A predicate on a string with a description of what it expects.
+template <typename M>
+concept Matcher = requires(const M& matcher, std::string_view text) {
+    { matcher(text) } -> std::convertible_to<bool>;
+    { matcher.describe() } -> std::convertible_to<std::string>;
+};
+
+/// Matches a string that contains a text.
+struct Contains {
+    std::string text;
+    bool        operator()(std::string_view value) const {
+        return value.find(text) != std::string_view::npos;
+    }
+    std::string describe() const {
+        return "contains \"" + text + '"';
+    }
+};
+/// Matches a string that ends with a text.
+struct EndsWith {
+    std::string text;
+    bool        operator()(std::string_view value) const {
+        return value.ends_with(text);
+    }
+    std::string describe() const {
+        return "ends with \"" + text + '"';
+    }
+};
+/// Matches a string equal to a text.
+struct Equals {
+    std::string text;
+    bool        operator()(std::string_view value) const {
+        return value == text;
+    }
+    std::string describe() const {
+        return "equals \"" + text + '"';
+    }
+};
+/// Matches what another matcher does not.
+template <Matcher M>
+struct Not {
+    M    matcher;
+    bool operator()(std::string_view value) const {
+        return !matcher(value);
+    }
+    std::string describe() const {
+        return "not " + matcher.describe();
+    }
+};
+template <Matcher M>
+Not<M> operator!(M matcher) {
+    return {std::move(matcher)};
+}
+inline Contains contains(std::string text) {
+    return {std::move(text)};
+}
+inline EndsWith endsWith(std::string text) {
+    return {std::move(text)};
+}
+inline Equals equals(std::string text) {
+    return {std::move(text)};
+}
+
+namespace impl {
+
+/// Appends the text of a value: a string, a character, a boolean, a number or an enumeration.
+template <typename T>
+void append(std::string& text, const T& value) {
+    if constexpr (std::is_convertible_v<const T&, std::string_view>)
+        text += std::string_view{value};
+    else if constexpr (std::is_same_v<T, bool>)
+        text += value ? "true" : "false";
+    else if constexpr (std::is_same_v<T, char>)
+        text += value;
+    else if constexpr (std::is_enum_v<T>)
+        append(text, static_cast<std::underlying_type_t<T>>(value));
+    else if constexpr (std::is_floating_point_v<T>) {
+        char buffer[64];
+        auto length = std::snprintf(buffer, sizeof buffer, "%.17g", static_cast<double>(value));
+        text.append(buffer, length > 0 ? static_cast<std::size_t>(length) : 0);
+    } else if constexpr (std::is_integral_v<T>) {
+        char buffer[64];
+        auto [end, error] = std::to_chars(buffer, buffer + sizeof buffer, value);
+        text.append(buffer, error == std::errc{} ? end : buffer);
+    } else
+        static_assert(std::is_arithmetic_v<T>, "a message accepts strings, characters, booleans, numbers and enumerations");
+}
+
+template <typename... Args>
+std::string concat(const Args&... args) {
+    std::string text;
+    (append(text, args), ...);
+    return text;
+}
+
+inline void print(std::string_view text) {
+    std::fwrite(text.data(), 1, text.size(), stdout);
+    std::fflush(stdout);
+}
+
+/// One section of a scenario, and whether every branch under it has run. A section is identified, as in Catch2, by
+/// its name and by where it is written: two sibling sections of the same name are two sections.
+struct Node {
+    std::string                        name;
+    const void*                        site = nullptr;
+    std::uint_least32_t                line = 0;
+    std::vector<std::unique_ptr<Node>> children;
+    std::uint64_t                      enteredChildPass = 0;
+    bool                               complete         = false;
+
+    Node* child(std::string_view childName, const void* childSite, std::uint_least32_t childLine) {
+        for (auto& node : children)
+            if (node->line == childLine && node->site == childSite && node->name == childName)
+                return node.get();
+        children.push_back(std::make_unique<Node>());
+        auto& node = *children.back();
+        node.name  = childName;
+        node.site  = childSite;
+        node.line  = childLine;
+        return &node;
+    }
+    bool childrenComplete() const {
+        for (const auto& node : children)
+            if (!node->complete)
+                return false;
+        return true;
+    }
+};
+
+struct Entry {
+    std::string              title;
+    std::vector<std::string> tags;
+    void (*body)();
+    std::string_view    file;
+    std::uint_least32_t line;
+};
+
+struct Listeners {
+    std::vector<void (*)()> runStarting;
+    std::vector<void (*)()> scenarioStarting;
+};
+
+/// The state of the scenario being run.
+struct State {
+    Node*                                                      current   = nullptr;
+    std::uint64_t                                              pass      = 0;
+    bool                                                       unwinding = false;
+    std::vector<std::pair<std::string_view, std::string_view>> path;  ///< The kind and the name of the sections entered.
+    std::string_view                                           title;
+    std::atomic<std::uint64_t>                                 assertions{0};
+    std::atomic<std::uint64_t>                                 failures{0};
+    std::string                                                report;  ///< The failures of the scenario, for JUnit.
+    std::atomic_flag                                           reporting;
+};
+
+inline std::vector<Entry>& registry() {
+    static std::vector<Entry> entries;
+    return entries;
+}
+inline Listeners& listeners() {
+    static Listeners all;
+    return all;
+}
+inline State& state() {
+    static State current;
+    return current;
+}
+/// The messages of the info() objects alive on this thread.
+inline std::vector<std::string>& infos() {
+    thread_local std::vector<std::string> messages;
+    return messages;
+}
+
+/// The text of a line of a source file, read once per file and only to report a failure.
+inline std::string sourceLine(const std::source_location& location) {
+    static std::vector<std::pair<std::string, std::vector<std::string>>> files;
+    std::vector<std::string>*                                            lines = nullptr;
+    for (auto& [name, content] : files)
+        if (name == location.file_name())
+            lines = &content;
+    if (!lines) {
+        lines = &files.emplace_back(location.file_name(), std::vector<std::string>{}).second;
+        if (auto* file = std::fopen(location.file_name(), "rb")) {
+            std::string line;
+            for (int character; (character = std::fgetc(file)) != EOF;)
+                if (character == '\n')
+                    lines->push_back(std::exchange(line, {}));
+                else if (character != '\r')
+                    line += static_cast<char>(character);
+            lines->push_back(std::move(line));
+            std::fclose(file);
+        }
+    }
+    if (location.line() == 0 || location.line() > lines->size())
+        return {};
+    std::string_view line  = (*lines)[location.line() - 1];
+    auto             first = line.find_first_not_of(" \t");
+    return first == std::string_view::npos ? std::string{} : std::string{line.substr(first)};
+}
+
+/// Reports a failure with its location, its source line, the sections that lead to it and the messages in scope.
+inline void reportFailure(const std::source_location& location, std::string_view what) {
+    auto&       current = state();
+    std::string text;
+    if (location.line() != 0)
+        text += concat(location.file_name(), ':', location.line(), ": ");
+    text += "FAILED";
+    if (auto line = sourceLine(location); !line.empty())
+        text += concat("\n    ", line);
+    if (!what.empty())
+        text += concat("\n  ", what);
+    text += concat("\n  in Scenario: ", current.title);
+    for (const auto& [kind, name] : current.path)
+        text += concat("\n     ", kind, name);
+    for (const auto& message : infos())
+        text += concat("\n  with: ", message);
+    text += '\n';
+    while (current.reporting.test_and_set(std::memory_order_acquire))
+        current.reporting.wait(true, std::memory_order_relaxed);
+    current.failures.fetch_add(1, std::memory_order_relaxed);
+    current.report += text;
+    print(text);
+    current.reporting.clear(std::memory_order_release);
+    current.reporting.notify_one();
+}
+
+inline void count() {
+    state().assertions.fetch_add(1, std::memory_order_relaxed);
+}
+
+inline std::string exceptionMessage(std::exception_ptr exception) {
+    try {
+        std::rethrow_exception(std::move(exception));
+    } catch (const std::exception& error) {
+        return error.what();
+    } catch (...) {
+        return "an exception that is not a std::exception";
+    }
+}
+
+template <typename F>
+void invoke(void* target) {
+    (*static_cast<F*>(target))();
+}
+
+/// A reference to a callable that is not copied, made implicitly from a lambda: the functions that take one are not
+/// templates, so that a section or an operation costs the compiler one small instantiation, not a family of them.
+struct Body {
+    void* object        = nullptr;
+    void (*call)(void*) = nullptr;
+
+    Body() = default;
+    template <typename F>
+        requires(std::invocable<F&> && !std::same_as<std::remove_cvref_t<F>, Body>)
+    Body(F&& callable) : object{const_cast<void*>(static_cast<const void*>(std::addressof(callable)))}, call{&invoke<std::remove_reference_t<F>>} { }
+    void operator()() const {
+        call(object);
+    }
+};
+
+/// Runs a section if this pass may enter it: a section is entered when it still has a branch to run and no sibling was
+/// entered during this pass.
+inline void runSection(std::string_view kind, std::string_view name, const void* site, std::uint_least32_t line, Body body) {
+    auto& current = state();
+    Node* parent  = current.current;
+    Node* node    = parent->child(name, site, line);
+    if (node->complete || parent->enteredChildPass == current.pass)
+        return;
+    parent->enteredChildPass = current.pass;
+    current.current          = node;
+    current.path.emplace_back(kind, node->name);
+    struct Restore {
+        State& owner;
+        Node*  previous;
+        ~Restore() {
+            owner.current = previous;
+            owner.path.pop_back();
+        }
+    } restore{current, parent};
+    try {
+        body();
+    } catch (const AssertionFailure&) {
+        // The section that failed is done; its ancestors run again, to find the sections the failure kept hidden.
+        node->complete    = !current.unwinding;
+        current.unwinding = true;
+        throw;
+    } catch (const Skipped&) {
+        node->complete    = !current.unwinding;
+        current.unwinding = true;
+        throw;
+    } catch (...) {
+        node->complete    = true;
+        current.unwinding = true;
+        reportFailure(std::source_location{}, concat("unexpected exception: ", exceptionMessage(std::current_exception())));
+        throw AssertionFailure{};
+    }
+    node->complete = node->childrenComplete();
+}
+
+/// Called through a volatile pointer, which no optimizer follows: inlining every section, and the lambdas it calls,
+/// into its scenario makes functions so large that an optimized build takes minutes per file.
+inline void (*volatile sectionRunner)(std::string_view, std::string_view, const void*, std::uint_least32_t, Body) = runSection;
+
+inline void section(std::string_view kind, std::string_view name, Body body, const std::source_location& location) {
+    sectionRunner(kind, name, location.file_name(), location.line(), body);
+}
+
+/// A section whose name is made of several parts: given("q=", value, [&] { ... }). The function its lambda compiles to
+/// tells where it is written.
+template <typename... Args>
+void composedSection(std::string_view kind, Args&... arguments) {
+    std::string name;
+    Body        body{};
+    auto        take = [&]<typename T>(T& argument) {
+        if constexpr (std::invocable<T&>)
+            body = Body{argument};
+        else
+            append(name, argument);
+    };
+    (take(arguments), ...);
+    sectionRunner(kind, name, reinterpret_cast<const void*>(body.call), 0, body);
+}
+
+/// What a condition may be: anything convertible to bool except a string, which would always be true.
+template <typename T>
+concept Testable = !std::is_same_v<std::remove_cv_t<std::remove_pointer_t<std::decay_t<T>>>, char> && requires(const T& value) { static_cast<bool>(value); };
+
+/// Whether the last argument is the body of a section whose name has several parts.
+template <typename... Args>
+concept ComposedSection = sizeof...(Args) >= 3 && std::invocable<std::remove_reference_t<decltype((std::declval<Args&>(), ...))>&>;
+
+}  // namespace impl
+
+/// Registers a scenario. Its title names it in the reports and in CTest, prefixed with "Scenario: ". The body is a
+/// lambda without captures.
+class Scenario {
+public:
+    template <std::convertible_to<void (*)()> F>
+    Scenario(std::string_view title, F body, std::source_location location = std::source_location::current()) : Scenario(title, {}, body, location) { }
+
+    template <std::convertible_to<void (*)()> F>
+    Scenario(std::string_view title, std::initializer_list<std::string_view> tags, F body, std::source_location location = std::source_location::current()) {
+        impl::registry().push_back(
+            {std::string{title}, std::vector<std::string>(tags.begin(), tags.end()), static_cast<void (*)()>(body), location.file_name(), location.line()});
+    }
+};
+
+/// Registers functions, lambdas without captures, called before the first scenario and before each scenario.
+class Listener {
+public:
+    Listener(void (*runStarting)(), void (*scenarioStarting)()) {
+        if (runStarting)
+            impl::listeners().runStarting.push_back(runStarting);
+        if (scenarioStarting)
+            impl::listeners().scenarioStarting.push_back(scenarioStarting);
+    }
+};
+
+inline void given(std::string_view name, impl::Body body, std::source_location location = std::source_location::current()) {
+    impl::section("Given: ", name, body, location);
+}
+inline void andGiven(std::string_view name, impl::Body body, std::source_location location = std::source_location::current()) {
+    impl::section("And given: ", name, body, location);
+}
+inline void when(std::string_view name, impl::Body body, std::source_location location = std::source_location::current()) {
+    impl::section("When: ", name, body, location);
+}
+inline void andWhen(std::string_view name, impl::Body body, std::source_location location = std::source_location::current()) {
+    impl::section("And when: ", name, body, location);
+}
+inline void then(std::string_view name, impl::Body body, std::source_location location = std::source_location::current()) {
+    impl::section("Then: ", name, body, location);
+}
+inline void andThen(std::string_view name, impl::Body body, std::source_location location = std::source_location::current()) {
+    impl::section("And: ", name, body, location);
+}
+inline void section(std::string_view name, impl::Body body, std::source_location location = std::source_location::current()) {
+    impl::section("", name, body, location);
+}
+
+/// Sections whose name is made of several parts, the body coming last: when("the value ", value, [&] { ... }).
+template <typename... Args>
+    requires impl::ComposedSection<Args...>
+void given(Args&&... arguments) {
+    impl::composedSection("Given: ", arguments...);
+}
+template <typename... Args>
+    requires impl::ComposedSection<Args...>
+void when(Args&&... arguments) {
+    impl::composedSection("When: ", arguments...);
+}
+template <typename... Args>
+    requires impl::ComposedSection<Args...>
+void then(Args&&... arguments) {
+    impl::composedSection("Then: ", arguments...);
+}
+template <typename... Args>
+    requires impl::ComposedSection<Args...>
+void section(Args&&... arguments) {
+    impl::composedSection("", arguments...);
+}
+
+/// Adds a message to the failures reported while the returned object lives.
+class [[nodiscard]] Info {
+public:
+    explicit Info(std::string message) {
+        impl::infos().push_back(std::move(message));
+    }
+    Info(const Info&)            = delete;
+    Info& operator=(const Info&) = delete;
+    ~Info() {
+        impl::infos().pop_back();
+    }
+};
+template <typename... Args>
+Info info(const Args&... args) {
+    return Info{impl::concat(args...)};
+}
+
+/// Checks a condition and records a failure if it is false.
+template <impl::Testable T>
+bool check(const T& condition, std::source_location location = std::source_location::current()) {
+    impl::count();
+    if (static_cast<bool>(condition)) [[likely]]
+        return true;
+    impl::reportFailure(location, {});
+    return false;
+}
+/// Checks a condition and ends the scenario if it is false.
+template <impl::Testable T>
+void require(const T& condition, std::source_location location = std::source_location::current()) {
+    if (!check(condition, location)) [[unlikely]]
+        throw AssertionFailure{};
+}
+
+/// Checks a string against a matcher.
+template <typename T, Matcher M>
+    requires std::convertible_to<const T&, std::string_view>
+bool check(const T& value, const M& matcher, std::source_location location = std::source_location::current()) {
+    impl::count();
+    std::string_view text{value};
+    if (matcher(text)) [[likely]]
+        return true;
+    impl::reportFailure(location, impl::concat('"', text, "\" ", matcher.describe()));
+    return false;
+}
+template <typename T, Matcher M>
+    requires std::convertible_to<const T&, std::string_view>
+void require(const T& value, const M& matcher, std::source_location location = std::source_location::current()) {
+    if (!check(value, matcher, location)) [[unlikely]]
+        throw AssertionFailure{};
+}
+
+namespace impl {
+
+/// Runs an operation and returns what it threw, if anything. A failure or a skip of an assertion inside it goes on.
+inline std::exception_ptr runCaught(Body operation) {
+    try {
+        operation();
+        return nullptr;
+    } catch (const AssertionFailure&) {
+        throw;
+    } catch (const Skipped&) {
+        throw;
+    } catch (...) {
+        return std::current_exception();
+    }
+}
+/// Called through a volatile pointer for the reason sectionRunner is.
+inline std::exception_ptr (*volatile caughtRunner)(Body) = runCaught;
+
+/// A matcher seen through its type: empty when an exception is not matched.
+struct Predicate {
+    const void* matcher                         = nullptr;
+    bool (*test)(const void*, std::string_view) = nullptr;
+    std::string (*describe)(const void*)        = nullptr;
+
+    template <Matcher M>
+    static Predicate of(const M& matcher) {
+        return {&matcher,
+                [](const void* target, std::string_view text) {
+                    return static_cast<bool>((*static_cast<const M*>(target))(text));
+                },
+                [](const void* target) {
+                    return std::string{static_cast<const M*>(target)->describe()};
+                }};
+    }
+};
+
+/// Whether an exception is an E whose message matches.
+template <typename E>
+bool thrown(std::exception_ptr exception, Predicate matcher, const std::source_location& location) {
+    count();
+    if (!exception) {
+        reportFailure(location, "no exception was thrown");
+        return false;
+    }
+    std::string message;
+    if constexpr (std::is_same_v<E, AnyException>)
+        message = exceptionMessage(exception);
+    else {
+        try {
+            std::rethrow_exception(exception);
+        } catch (const E& error) {
+            if constexpr (requires { error.what(); })
+                message = error.what();
+        } catch (...) {
+            reportFailure(location, concat("an exception of another type was thrown: ", exceptionMessage(exception)));
+            return false;
+        }
+    }
+    if (!matcher.test || matcher.test(matcher.matcher, message))
+        return true;
+    reportFailure(location, concat("the exception \"", message, "\" does not match: ", matcher.describe(matcher.matcher)));
+    return false;
+}
+
+}  // namespace impl
+
+/// Checks that an operation throws an E (any exception by default), whose message matches if a matcher is given.
+template <typename E = AnyException>
+bool checkThrows(impl::Body operation, std::source_location location = std::source_location::current()) {
+    return impl::thrown<E>(impl::caughtRunner(operation), {}, location);
+}
+template <typename E = AnyException, Matcher M>
+bool checkThrows(impl::Body operation, const M& matcher, std::source_location location = std::source_location::current()) {
+    return impl::thrown<E>(impl::caughtRunner(operation), impl::Predicate::of(matcher), location);
+}
+template <typename E = AnyException>
+void requireThrows(impl::Body operation, std::source_location location = std::source_location::current()) {
+    if (!checkThrows<E>(operation, location)) [[unlikely]]
+        throw AssertionFailure{};
+}
+template <typename E = AnyException, Matcher M>
+void requireThrows(impl::Body operation, const M& matcher, std::source_location location = std::source_location::current()) {
+    if (!checkThrows<E>(operation, matcher, location)) [[unlikely]]
+        throw AssertionFailure{};
+}
+
+/// Checks that an operation does not throw.
+inline bool checkNothrow(impl::Body operation, std::source_location location = std::source_location::current()) {
+    impl::count();
+    if (auto exception = impl::caughtRunner(operation); exception) [[unlikely]] {
+        impl::reportFailure(location, impl::concat("unexpected exception: ", impl::exceptionMessage(exception)));
+        return false;
+    }
+    return true;
+}
+inline void requireNothrow(impl::Body operation, std::source_location location = std::source_location::current()) {
+    if (!checkNothrow(operation, location)) [[unlikely]]
+        throw AssertionFailure{};
+}
+
+/// A message and the location it comes from: the functions that take a variable message cannot default a location.
+struct Located {
+    std::string_view     text;
+    std::source_location location;
+    template <typename T>
+        requires std::convertible_to<const T&, std::string_view>
+    Located(const T& message, std::source_location where = std::source_location::current()) : text{message}, location{where} { }
+};
+
+/// Records a failure and goes on; the message is the concatenation of the arguments.
+template <typename... Args>
+void failCheck(Located message, const Args&... more) {
+    impl::count();
+    impl::reportFailure(message.location, impl::concat(message.text, more...));
+}
+/// Records a failure and ends the scenario.
+template <typename... Args>
+[[noreturn]] void fail(Located message, const Args&... more) {
+    failCheck(message, more...);
+    throw AssertionFailure{};
+}
+/// Ends the scenario, which is reported as skipped unless it has already failed.
+template <typename... Args>
+[[noreturn]] void skip(Located message, const Args&... more) {
+    impl::print(impl::concat(message.location.file_name(), ':', message.location.line(), ": SKIPPED: ", message.text, more..., '\n'));
+    throw Skipped{};
+}
+/// Prints a warning, which does not fail the scenario.
+template <typename... Args>
+void warn(Located message, const Args&... more) {
+    impl::print(impl::concat(message.location.file_name(), ':', message.location.line(), ": warning: ", message.text, more..., '\n'));
+}
+/// Records a successful assertion.
+inline void succeed(Located) {
+    impl::count();
+}
+
+namespace impl {
+
+inline double now() {
+    std::timespec time{};
+    std::timespec_get(&time, TIME_UTC);
+    return static_cast<double>(time.tv_sec) + static_cast<double>(time.tv_nsec) / 1e9;
+}
+
+struct Options {
+    std::vector<std::string_view> filters;
+    std::string_view              exact;
+    std::string_view              junit;
+    bool                          list        = false;
+    bool                          randomOrder = true;
+    std::uint64_t                 seed        = 0;
+    std::uint64_t                 shardCount  = 1;
+    std::uint64_t                 shardIndex  = 0;
+};
+
+enum class Outcome { passed, failed, skipped };
+
+struct Result {
+    const Entry* entry;
+    Outcome      outcome;
+    double       seconds;
+    std::string  report;
+};
+
+/// Whether a scenario matches a filter: "[a][b]" requires every tag, otherwise the title, with or without "Scenario: ",
+/// may start or end with a '*' wildcard.
+inline bool matches(const Entry& entry, std::string_view filter) {
+    if (filter.starts_with('[')) {
+        while (filter.starts_with('[')) {
+            auto end = filter.find(']');
+            if (end == std::string_view::npos)
+                return false;
+            auto tag   = filter.substr(1, end - 1);
+            bool found = false;
+            for (const auto& entryTag : entry.tags)
+                found = found || entryTag == tag;
+            if (!found)
+                return false;
+            filter.remove_prefix(end + 1);
+        }
+        return filter.empty();
+    }
+    if (filter.starts_with("Scenario: "))
+        filter.remove_prefix(10);
+    std::string_view title  = entry.title;
+    bool             prefix = filter.ends_with('*'), suffix = filter.starts_with('*');
+    if (prefix)
+        filter.remove_suffix(1);
+    if (suffix && !filter.empty())
+        filter.remove_prefix(1);
+    if (prefix && suffix)
+        return title.find(filter) != std::string_view::npos;
+    if (prefix)
+        return title.starts_with(filter);
+    if (suffix)
+        return title.ends_with(filter);
+    return title == filter;
+}
+
+/// Whether a scenario is selected: each argument is a comma-separated list of alternatives.
+inline bool selected(const Entry& entry, const Options& options) {
+    if (!options.exact.empty())
+        return entry.title == options.exact;
+    if (options.filters.empty())
+        return true;
+    for (auto rest : options.filters)
+        while (true) {
+            auto comma = rest.find(',');
+            if (matches(entry, rest.substr(0, comma)))
+                return true;
+            if (comma == std::string_view::npos)
+                break;
+            rest.remove_prefix(comma + 1);
+        }
+    return false;
+}
+
+/// Runs every pass of a scenario.
+inline Result runScenario(const Entry& entry) {
+    auto& current = state();
+    for (auto listener : listeners().scenarioStarting)
+        listener();
+    Node root;
+    current.title = entry.title;
+    current.report.clear();
+    auto failuresBefore = current.failures.load();
+    bool skipped        = false;
+    auto start          = now();
+    for (current.pass = 1;; ++current.pass) {
+        current.current   = &root;
+        current.unwinding = false;
+        current.path.clear();
+        bool aborted = false;
+        try {
+            entry.body();
+        } catch (const AssertionFailure&) {
+            aborted = !current.unwinding;
+        } catch (const Skipped&) {
+            skipped = true;
+        } catch (...) {
+            reportFailure(std::source_location{}, concat("unexpected exception: ", exceptionMessage(std::current_exception())));
+            aborted = true;
+        }
+        root.complete = root.childrenComplete();
+        // A failure outside any section, a skip, a pass that entered no section or the end of every branch ends the
+        // scenario. After a failure in a section, another pass looks for the sections that follow it.
+        if (aborted || skipped || root.enteredChildPass != current.pass || (root.complete && !current.unwinding))
+            break;
+    }
+    auto outcome = current.failures.load() != failuresBefore ? Outcome::failed : skipped ? Outcome::skipped : Outcome::passed;
+    return {&entry, outcome, now() - start, current.report};
+}
+
+inline std::string xmlEscape(std::string_view text) {
+    std::string escaped;
+    for (char character : text)
+        switch (character) {
+            case '&':
+                escaped += "&amp;";
+                break;
+            case '<':
+                escaped += "&lt;";
+                break;
+            case '>':
+                escaped += "&gt;";
+                break;
+            case '"':
+                escaped += "&quot;";
+                break;
+            default:
+                escaped += character;
+        }
+    return escaped;
+}
+
+inline bool writeJUnit(std::string_view path, const std::vector<Result>& results, double seconds) {
+    std::size_t failed = 0, skipped = 0;
+    for (const auto& result : results) {
+        failed  += result.outcome == Outcome::failed;
+        skipped += result.outcome == Outcome::skipped;
+    }
+    auto xml = concat("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites>\n  <testsuite name=\"tests\" tests=\"",
+                      results.size(),
+                      "\" failures=\"",
+                      failed,
+                      "\" errors=\"0\" skipped=\"",
+                      skipped,
+                      "\" time=\"",
+                      seconds,
+                      "\">\n");
+    for (const auto& result : results) {
+        xml += concat("    <testcase classname=\"tests\" name=\"Scenario: ", xmlEscape(result.entry->title), "\" time=\"", result.seconds, '"');
+        if (result.outcome == Outcome::passed)
+            xml += "/>\n";
+        else if (result.outcome == Outcome::failed)
+            xml += concat(">\n      <failure message=\"failed\">", xmlEscape(result.report), "</failure>\n    </testcase>\n");
+        else
+            xml += ">\n      <skipped/>\n    </testcase>\n";
+    }
+    xml       += "  </testsuite>\n</testsuites>\n";
+    auto* file = std::fopen(std::string{path}.c_str(), "wb");
+    if (!file)
+        return false;
+    bool written = std::fwrite(xml.data(), 1, xml.size(), file) == xml.size();
+    return std::fclose(file) == 0 && written;
+}
+
+inline bool number(std::string_view text, std::uint64_t& value) {
+    auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    return error == std::errc{} && end == text.data() + text.size();
+}
+
+/// Reads the options; returns an error, or "help" when the usage was printed.
+inline std::string parse(int argc, char** argv, Options& options) {
+    for (int index = 1; index < argc; ++index) {
+        std::string_view argument = argv[index];
+        std::string_view value;
+        bool takesValue = argument == "--exact" || argument == "--junit" || argument == "--order" || argument == "--rng-seed" || argument == "--shard-count"
+                          || argument == "--shard-index";
+        if (takesValue) {
+            if (index + 1 >= argc)
+                return concat(argument, " needs a value");
+            value = argv[++index];
+        }
+        if (argument == "--list")
+            options.list = true;
+        else if (argument == "--exact")
+            options.exact = value;
+        else if (argument == "--junit")
+            options.junit = value;
+        else if (argument == "--order") {
+            if (value != "decl" && value != "rand")
+                return "--order is decl or rand";
+            options.randomOrder = value == "rand";
+        } else if (argument == "--rng-seed") {
+            if (!number(value, options.seed))
+                return "--rng-seed needs a number";
+        } else if (argument == "--shard-count") {
+            if (!number(value, options.shardCount))
+                return "--shard-count needs a number";
+        } else if (argument == "--shard-index") {
+            if (!number(value, options.shardIndex))
+                return "--shard-index needs a number";
+        } else if (argument == "--help" || argument == "-h") {
+            print(concat("usage: ",
+                         argv[0],
+                         " [filter...] [--exact <title>] [--list] [--order decl|rand] [--rng-seed <n>]\n"
+                         "       [--shard-count <n> --shard-index <i>] [--junit <file>]\n"
+                         "A filter is a title (\"Scenario: \" optional, '*' at either end) or tags \"[a][b]\"; commas separate "
+                         "alternatives.\n"));
+            return "help";
+        } else if (argument.starts_with("--"))
+            return concat("unknown option ", argument);
+        else
+            options.filters.push_back(argument);
+    }
+    if (options.shardCount == 0 || options.shardIndex >= options.shardCount)
+        return "--shard-index must be lower than --shard-count";
+    return {};
+}
+
+/// A small generator for the random order (splitmix64).
+inline std::uint64_t nextRandom(std::uint64_t& seed) {
+    std::uint64_t value = (seed += 0x9e3779b97f4a7c15u);
+    value               = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9u;
+    value               = (value ^ (value >> 27)) * 0x94d049bb133111ebu;
+    return value ^ (value >> 31);
+}
+
+}  // namespace impl
+
+/// Runs the selected scenarios. Returns 0 when they pass, 1 when one fails, 2 for a usage error or when nothing is
+/// selected, and 4 when every selected scenario was skipped.
+inline int run(int argc, char** argv) {
+    using namespace impl;
+    Options options;
+    options.seed = static_cast<std::uint64_t>(now() * 1e9);
+    if (auto error = parse(argc, argv, options); !error.empty()) {
+        if (error == "help")
+            return 0;
+        std::fprintf(stderr, "%s\n", error.c_str());
+        return 2;
+    }
+
+    std::vector<const Entry*> selection;
+    const auto&               entries = registry();
+    for (std::size_t index = 0; index != entries.size(); ++index) {
+        for (std::size_t previous = 0; previous != index; ++previous)
+            if (entries[previous].title == entries[index].title) {
+                std::fprintf(stderr,
+                             "%s\n",
+                             concat(entries[index].file,
+                                    ':',
+                                    entries[index].line,
+                                    ": the scenario \"",
+                                    entries[index].title,
+                                    "\" is already declared at ",
+                                    entries[previous].file,
+                                    ':',
+                                    entries[previous].line)
+                                 .c_str());
+                return 2;
+            }
+        if (selected(entries[index], options))
+            selection.push_back(&entries[index]);
+    }
+    if (options.list) {
+        std::string titles;
+        for (const auto* entry : selection)
+            titles += concat(entry->title, '\n');
+        print(titles);
+        return 0;
+    }
+    if (options.shardCount > 1) {
+        std::vector<const Entry*> shard;
+        for (auto index = options.shardIndex; index < selection.size(); index += options.shardCount)
+            shard.push_back(selection[static_cast<std::size_t>(index)]);
+        selection = std::move(shard);
+    }
+    if (selection.empty()) {
+        std::fprintf(stderr, "No scenario matches the filters\n");
+        return options.shardCount > 1 ? 0 : 2;
+    }
+    if (options.randomOrder) {
+        print(concat("Randomized with seed ", options.seed, '\n'));
+        auto seed = options.seed;
+        for (auto index = selection.size(); index > 1; --index)
+            std::swap(selection[index - 1], selection[static_cast<std::size_t>(nextRandom(seed) % index)]);
+    }
+
+    for (auto listener : listeners().runStarting)
+        listener();
+    std::vector<Result> results;
+    results.reserve(selection.size());
+    auto start = now();
+    for (const auto* entry : selection)
+        results.push_back(runScenario(*entry));
+    auto seconds = now() - start;
+
+    std::size_t failed = 0, skipped = 0;
+    for (const auto& result : results) {
+        failed  += result.outcome == Outcome::failed;
+        skipped += result.outcome == Outcome::skipped;
+    }
+    print(concat(failed ? "FAILED" : "All scenarios passed",
+                 " (",
+                 state().assertions.load(),
+                 " assertions in ",
+                 results.size(),
+                 " scenarios: ",
+                 results.size() - failed - skipped,
+                 " passed, ",
+                 failed,
+                 " failed, ",
+                 skipped,
+                 " skipped)\n"));
+    if (!options.junit.empty() && !writeJUnit(options.junit, results, seconds)) {
+        std::fprintf(stderr, "Cannot write %s\n", std::string{options.junit}.c_str());
+        return 1;
+    }
+    if (failed)
+        return 1;
+    return skipped == results.size() ? 4 : 0;
+}
+
+}  // namespace webfront::bdd

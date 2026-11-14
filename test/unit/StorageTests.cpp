@@ -1,5 +1,4 @@
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
+#include "Bdd.hpp"
 #include <webfront/system/MemoryStorage.hpp>
 
 #include <algorithm>
@@ -10,6 +9,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+using namespace webfront::bdd;
 
 using namespace std;
 using namespace webfront;
@@ -42,8 +43,7 @@ fs::StorageErrc errorOf(Operation&& operation) {
     } catch (const fs::StorageError& error) {
         return error.errc();
     }
-    FAIL("The operation did not fail");
-    return fs::StorageErrc::ioError;
+    fail("The operation did not fail");
 }
 
 template <fs::Storage S>
@@ -62,53 +62,40 @@ vector<string> allNames(S& storage, string_view directory, size_t pageSize) {
 
 }  // namespace
 
-SCENARIO("SafePath refuses the names Windows reserves, on every platform") {
-    GIVEN("a reserved device name, whatever its case and extension, or a name Windows would alter") {
-        auto name = GENERATE(as<string>{},
-                             "con",
-                             "CON",
-                             "Con.txt",
-                             "nul",
-                             "nul.tar.gz",
-                             "aux",
-                             "prn",
-                             "com1",
-                             "COM9.log",
-                             "lpt1",
-                             "LPT9",
-                             "com\xC2\xB9",
-                             "conin$",
-                             "CONOUT$",
-                             "con .txt",
-                             "a.",
-                             "a ",
-                             "dir/nul/x");
-        THEN("safeRelativePath, safePathComponents and isSafeFileName reject it") {
-            REQUIRE_THROWS_AS(fs::safeRelativePath(name), invalid_argument);
-            REQUIRE_THROWS_AS(fs::safePathComponents(name), invalid_argument);
-            REQUIRE_FALSE(fs::isSafeFileName(name));
-        }
-    }
-    GIVEN("names that only resemble them") {
-        auto name = GENERATE(as<string>{}, "console", "com10", "lpt0", "com", "nullable.txt", "a.b", "auxiliary", ".hidden");
-        THEN("they are accepted") {
-            REQUIRE(fs::isSafeFileName(name));
-            REQUIRE(fs::safePathComponents("dir/" + name) == vector<string>{"dir", name});
-        }
-    }
-    GIVEN("the empty path") {
-        THEN("it names the root of a storage") {
-            REQUIRE(fs::safePathComponents("").empty());
-        }
-    }
-}
+Scenario safePathRefuses{"SafePath refuses the names Windows reserves, on every platform", [] {
+    given("a reserved device name, whatever its case and extension, or a name Windows would alter", [&] {
+        then("safeRelativePath, safePathComponents and isSafeFileName reject it", [&] {
+            for (string name : {"con", "CON", "Con.txt", "nul", "nul.tar.gz", "aux", "prn", "com1", "COM9.log",
+                                "lpt1", "LPT9", "com\xC2\xB9", "conin$", "CONOUT$", "con .txt", "a.", "a ", "dir/nul/x"}) {
+                auto scope = info(name);
+                requireThrows<invalid_argument>([&] { fs::safeRelativePath(name); });
+                requireThrows<invalid_argument>([&] { fs::safePathComponents(name); });
+                require(!fs::isSafeFileName(name));
+            }
+        });
+    });
+    given("names that only resemble them", [&] {
+        then("they are accepted", [&] {
+            for (string name : {"console", "com10", "lpt0", "com", "nullable.txt", "a.b", "auxiliary", ".hidden"}) {
+                auto scope = info(name);
+                require(fs::isSafeFileName(name));
+                require(fs::safePathComponents("dir/" + name) == vector<string>{"dir", name});
+            }
+        });
+    });
+    given("the empty path", [&] {
+        then("it names the root of a storage", [&] {
+            require(fs::safePathComponents("").empty());
+        });
+    });
+}};
 
-SCENARIO("A storage error is a bridge error with a storage code") {
+Scenario storageError{"A storage error is a bridge error with a storage code", [] {
     const fs::StorageError error(fs::StorageErrc::rootMoved, "moved");
     const BridgeError&     bridge = error;
-    REQUIRE(bridge.code() == "storage.rootMoved");
-    REQUIRE(string(bridge.what()) == "moved");
-    REQUIRE(fs::storageErrorCode(fs::StorageErrc::confinementViolated) == "storage.confinementViolated");
+    require(bridge.code() == "storage.rootMoved");
+    require(string(bridge.what()) == "moved");
+    require(fs::storageErrorCode(fs::StorageErrc::confinementViolated) == "storage.confinementViolated");
     for (auto errc : {fs::StorageErrc::notFound,
                       fs::StorageErrc::alreadyExists,
                       fs::StorageErrc::notDirectory,
@@ -122,10 +109,10 @@ SCENARIO("A storage error is a bridge error with a storage code") {
                       fs::StorageErrc::confinementViolated,
                       fs::StorageErrc::busy,
                       fs::StorageErrc::ioError})
-        REQUIRE(BridgeError::isValidCode(fs::storageErrorCode(errc)));
-}
+        require(BridgeError::isValidCode(fs::storageErrorCode(errc)));
+}};
 
-SCENARIO("A file reads its bytes through a provider's byte source") {
+Scenario fileReads{"A file reads its bytes through a provider's byte source", [] {
     struct Source : fs::ByteSource {
         string bytes{"0123456789"};
         size_t position{};
@@ -144,238 +131,240 @@ SCENARIO("A file reads its bytes through a provider's byte source") {
         }
     };
     fs::File file{make_unique<Source>()};
-    REQUIRE(file.knownSize() == 10u);
-    REQUIRE(readAll(std::move(file)) == "0123456789");
+    require(file.knownSize() == 10u);
+    require(readAll(std::move(file)) == "0123456789");
 
     fs::File again{make_unique<Source>()};
-    REQUIRE(again.seek(7));
+    require(again.seek(7));
     array<char, 16> buffer{};
-    REQUIRE(again.read(buffer) == 3);
-    REQUIRE(again.eof());
-    REQUIRE(again.seek(2));
-    REQUIRE_FALSE(again.eof());
-    REQUIRE_THROWS_AS(fs::File{unique_ptr<fs::ByteSource>{}}, invalid_argument);
-}
+    require(again.read(buffer) == 3);
+    require(again.eof());
+    require(again.seek(2));
+    require(!again.eof());
+    requireThrows<invalid_argument>([&] { fs::File{unique_ptr<fs::ByteSource>{}}; });
+}};
 
-SCENARIO("The simulated storage follows the storage contract") {
+Scenario simulatedStorage{"The simulated storage follows the storage contract", [] {
     fs::MemoryStorage storage;
 
-    GIVEN("files and directories created through it") {
+    given("files and directories created through it", [&] {
         storage.createDirectory("docs");
         writeFile(storage, "docs/a.txt", "alpha");
         writeFile(storage, "b.txt", "beta");
 
-        THEN("they are listed, inspected and read") {
+        then("they are listed, inspected and read", [&] {
             auto page = storage.list("", {}, 10);
-            REQUIRE(page.entries.size() == 2);
-            REQUIRE(page.entries[0].name == "b.txt");
-            REQUIRE(page.entries[0].type == fs::EntryType::file);
-            REQUIRE(page.entries[0].size == 4);
-            REQUIRE(page.entries[1].name == "docs");
-            REQUIRE(page.entries[1].type == fs::EntryType::directory);
-            REQUIRE_FALSE(page.next);
-            REQUIRE(storage.status("docs/a.txt").size == 5);
-            REQUIRE(storage.status("").type == fs::EntryType::directory);
-            REQUIRE(readAll(storage.openRead("docs/a.txt")) == "alpha");
-        }
-        THEN("a write creating a name that exists is refused, a replacing one replaces it") {
-            REQUIRE(errorOf([&] {
+            require(page.entries.size() == 2);
+            require(page.entries[0].name == "b.txt");
+            require(page.entries[0].type == fs::EntryType::file);
+            require(page.entries[0].size == 4);
+            require(page.entries[1].name == "docs");
+            require(page.entries[1].type == fs::EntryType::directory);
+            require(!page.next);
+            require(storage.status("docs/a.txt").size == 5);
+            require(storage.status("").type == fs::EntryType::directory);
+            require(readAll(storage.openRead("docs/a.txt")) == "alpha");
+        });
+        then("a write creating a name that exists is refused, a replacing one replaces it", [&] {
+            require(errorOf([&] {
                         writeFile(storage, "b.txt", "other");
                     })
                     == fs::StorageErrc::alreadyExists);
             writeFile(storage, "b.txt", "gamma", fs::WriteMode::replace);
-            REQUIRE(readAll(storage.openRead("b.txt")) == "gamma");
-            REQUIRE(errorOf([&] {
+            require(readAll(storage.openRead("b.txt")) == "gamma");
+            require(errorOf([&] {
                         writeFile(storage, "docs", "x", fs::WriteMode::replace);
                     })
                     == fs::StorageErrc::isDirectory);
-        }
-        THEN("an opened file keeps its bytes when the file is replaced") {
+        });
+        then("an opened file keeps its bytes when the file is replaced", [&] {
             auto file = storage.openRead("b.txt");
             writeFile(storage, "b.txt", "replaced", fs::WriteMode::replace);
-            REQUIRE(readAll(std::move(file)) == "beta");
-        }
-        THEN("removing and renaming follow the contract") {
-            REQUIRE(errorOf([&] {
+            require(readAll(std::move(file)) == "beta");
+        });
+        then("removing and renaming follow the contract", [&] {
+            require(errorOf([&] {
                         storage.remove("docs");
                     })
                     == fs::StorageErrc::notEmpty);
-            REQUIRE(errorOf([&] {
+            require(errorOf([&] {
                         storage.rename("docs", "docs/inner");
                     })
                     == fs::StorageErrc::invalidPath);
-            REQUIRE(errorOf([&] {
+            require(errorOf([&] {
                         storage.rename("b.txt", "docs/a.txt");
                     })
                     == fs::StorageErrc::alreadyExists);
             storage.rename("b.txt", "docs/b.txt");
-            REQUIRE(errorOf([&] {
+            require(errorOf([&] {
                         storage.status("b.txt");
                     })
                     == fs::StorageErrc::notFound);
             storage.remove("docs/a.txt");
             storage.remove("docs/b.txt");
             storage.remove("docs");
-            REQUIRE(storage.list("").entries.empty());
-        }
-        THEN("operations through a file or a missing directory fail with their reason") {
-            REQUIRE(errorOf([&] {
+            require(storage.list("").entries.empty());
+        });
+        then("operations through a file or a missing directory fail with their reason", [&] {
+            require(errorOf([&] {
                         storage.list("b.txt");
                     })
                     == fs::StorageErrc::notDirectory);
-            REQUIRE(errorOf([&] {
+            require(errorOf([&] {
                         storage.openRead("missing/x");
                     })
                     == fs::StorageErrc::notFound);
-            REQUIRE(errorOf([&] {
+            require(errorOf([&] {
                         storage.openRead("docs");
                     })
                     == fs::StorageErrc::isDirectory);
-            REQUIRE(errorOf([&] {
+            require(errorOf([&] {
                         storage.createDirectory("docs");
                     })
                     == fs::StorageErrc::alreadyExists);
-        }
-    }
+        });
+    });
 
-    GIVEN("a write in progress") {
+    given("a write in progress", [&] {
         auto writer = make_unique<fs::MemoryStorage::Writer>(storage.beginWrite("draft.txt", fs::WriteMode::createNew));
         writer->write(span<const char>("partial", 7));
-        THEN("nothing is visible before the commit") {
-            REQUIRE(errorOf([&] {
+        then("nothing is visible before the commit", [&] {
+            require(errorOf([&] {
                         storage.status("draft.txt");
                     })
                     == fs::StorageErrc::notFound);
-        }
-        WHEN("the writer is destroyed without committing, as an interrupted write") {
+        });
+        when("the writer is destroyed without committing, as an interrupted write", [&] {
             writer.reset();
-            THEN("no partial file exists") {
-                REQUIRE(storage.list("").entries.empty());
-            }
-        }
-        WHEN("it commits") {
+            then("no partial file exists", [&] {
+                require(storage.list("").entries.empty());
+            });
+        });
+        when("it commits", [&] {
             writer->commit();
-            THEN("the whole file appears at once") {
-                REQUIRE(readAll(storage.openRead("draft.txt")) == "partial");
-                REQUIRE_THROWS_AS(writer->commit(), logic_error);
-            }
-        }
-    }
+            then("the whole file appears at once", [&] {
+                require(readAll(storage.openRead("draft.txt")) == "partial");
+                requireThrows<logic_error>([&] { writer->commit(); });
+            });
+        });
+    });
 
-    GIVEN("rights refused by the simulated system") {
+    given("rights refused by the simulated system", [&] {
         storage.createDirectory("locked");
         writeFile(storage, "locked/secret.txt", "s");
         writeFile(storage, "readonly.txt", "r");
         storage.setAccess("locked", false, false);
         storage.setAccess("readonly.txt", true, false);
-        THEN("operations needing them fail with accessDenied") {
-            REQUIRE(errorOf([&] {
+        then("operations needing them fail with accessDenied", [&] {
+            require(errorOf([&] {
                         storage.list("locked");
                     })
                     == fs::StorageErrc::accessDenied);
-            REQUIRE(errorOf([&] {
+            require(errorOf([&] {
                         storage.openRead("locked/secret.txt");
                     })
                     == fs::StorageErrc::accessDenied);
-            REQUIRE(errorOf([&] {
+            require(errorOf([&] {
                         writeFile(storage, "locked/new.txt", "n");
                     })
                     == fs::StorageErrc::accessDenied);
-            REQUIRE(errorOf([&] {
+            require(errorOf([&] {
                         writeFile(storage, "readonly.txt", "w", fs::WriteMode::replace);
                     })
                     == fs::StorageErrc::accessDenied);
-            REQUIRE(readAll(storage.openRead("readonly.txt")) == "r");
+            require(readAll(storage.openRead("readonly.txt")) == "r");
             auto info = storage.status("readonly.txt");
-            REQUIRE(info.readable);
-            REQUIRE_FALSE(info.writable);
-        }
-    }
+            require(info.readable);
+            require(!info.writable);
+        });
+    });
 
-    GIVEN("paths that leave the root or that SafePath rejects") {
-        auto path = GENERATE(as<string>{}, "../x", "/etc/passwd", "a/../b", "a//b", "C:/x", "a\\b", "nul.txt", "a/./b", "..");
-        THEN("every operation refuses them with invalidPath") {
-            REQUIRE(errorOf([&] {
-                        storage.status(path);
-                    })
-                    == fs::StorageErrc::invalidPath);
-            REQUIRE(errorOf([&] {
-                        storage.list(path);
-                    })
-                    == fs::StorageErrc::invalidPath);
-            REQUIRE(errorOf([&] {
-                        storage.openRead(path);
-                    })
-                    == fs::StorageErrc::invalidPath);
-            REQUIRE(errorOf([&] {
-                        (void)storage.beginWrite(path, fs::WriteMode::replace);
-                    })
-                    == fs::StorageErrc::invalidPath);
-            REQUIRE(errorOf([&] {
-                        storage.createDirectory(path);
-                    })
-                    == fs::StorageErrc::invalidPath);
-            REQUIRE(errorOf([&] {
-                        storage.remove(path);
-                    })
-                    == fs::StorageErrc::invalidPath);
-            REQUIRE(errorOf([&] {
-                        storage.rename("x", path);
-                    })
-                    == fs::StorageErrc::invalidPath);
-        }
-    }
-    GIVEN("names starting with the prefix reserved to temporary files") {
-        THEN("they are refused, so that a listing never hides a committed file") {
-            REQUIRE(errorOf([&] {
+    given("paths that leave the root or that SafePath rejects", [&] {
+        then("every operation refuses them with invalidPath", [&] {
+            for (string path : {"../x", "/etc/passwd", "a/../b", "a//b", "C:/x", "a\\b", "nul.txt", "a/./b", ".."}) {
+                auto scope = info(path);
+                require(errorOf([&] {
+                            storage.status(path);
+                        })
+                        == fs::StorageErrc::invalidPath);
+                require(errorOf([&] {
+                            storage.list(path);
+                        })
+                        == fs::StorageErrc::invalidPath);
+                require(errorOf([&] {
+                            storage.openRead(path);
+                        })
+                        == fs::StorageErrc::invalidPath);
+                require(errorOf([&] {
+                            (void)storage.beginWrite(path, fs::WriteMode::replace);
+                        })
+                        == fs::StorageErrc::invalidPath);
+                require(errorOf([&] {
+                            storage.createDirectory(path);
+                        })
+                        == fs::StorageErrc::invalidPath);
+                require(errorOf([&] {
+                            storage.remove(path);
+                        })
+                        == fs::StorageErrc::invalidPath);
+                require(errorOf([&] {
+                            storage.rename("x", path);
+                        })
+                        == fs::StorageErrc::invalidPath);
+            }
+        });
+    });
+    given("names starting with the prefix reserved to temporary files", [&] {
+        then("they are refused, so that a listing never hides a committed file", [&] {
+            require(errorOf([&] {
                         writeFile(storage, ".wf-tmp-report.txt", "report");
                     })
                     == fs::StorageErrc::invalidPath);
-            REQUIRE(errorOf([&] {
+            require(errorOf([&] {
                         storage.createDirectory("dir/.wf-tmp-x");
                     })
                     == fs::StorageErrc::invalidPath);
-            REQUIRE(errorOf([&] {
+            require(errorOf([&] {
                         storage.status(".wf-tmp-report.txt");
                     })
                     == fs::StorageErrc::invalidPath);
-            REQUIRE(fs::isSafeFileName(".wf-tmp-report.txt"));  // SafePath alone accepts it: the reservation is the storage's
+            require(fs::isSafeFileName(".wf-tmp-report.txt"));  // SafePath alone accepts it: the reservation is the storage's
             for (auto name : {".WF-TMP-report.txt", ".Wf-Tmp-x", ".wF-tMp-"})
-                REQUIRE(errorOf([&] {
+                require(errorOf([&] {
                             storage.status(name);
                         })
                         == fs::StorageErrc::invalidPath);
-            REQUIRE(fs::isTemporaryName(".WF-tmp-a"));
-            REQUIRE_FALSE(fs::isTemporaryName(".wf-tmp"));
-            REQUIRE_FALSE(fs::isTemporaryName("x.wf-tmp-a"));
-        }
-    }
-    GIVEN("operations that need an entry") {
-        THEN("the root is refused") {
-            REQUIRE(errorOf([&] {
+            require(fs::isTemporaryName(".WF-tmp-a"));
+            require(!fs::isTemporaryName(".wf-tmp"));
+            require(!fs::isTemporaryName("x.wf-tmp-a"));
+        });
+    });
+    given("operations that need an entry", [&] {
+        then("the root is refused", [&] {
+            require(errorOf([&] {
                         storage.remove("");
                     })
                     == fs::StorageErrc::invalidPath);
-            REQUIRE(errorOf([&] {
+            require(errorOf([&] {
                         storage.openRead("");
                     })
                     == fs::StorageErrc::invalidPath);
-        }
-    }
-}
+        });
+    });
+}};
 
-SCENARIO("Listing pages are stable while the directory changes") {
+Scenario listingPages{"Listing pages are stable while the directory changes", [] {
     fs::MemoryStorage storage;
     for (int index = 10; index < 40; ++index)
         writeFile(storage, "f" + to_string(index), "x");
 
-    GIVEN("a listing read page by page") {
+    given("a listing read page by page", [&] {
         auto first = storage.list("", {}, 10);
-        REQUIRE(first.entries.size() == 10);
-        REQUIRE(first.entries.front().name == "f10");
-        REQUIRE(first.next == "f19");
+        require(first.entries.size() == 10);
+        require(first.entries.front().name == "f10");
+        require(first.next == "f19");
 
-        WHEN("entries are added before and after the cursor and removed after it") {
+        when("entries are added before and after the cursor and removed after it", [&] {
             writeFile(storage, "f05", "x");
             writeFile(storage, "f195", "x");
             writeFile(storage, "f99", "x");
@@ -387,34 +376,34 @@ SCENARIO("Listing pages are stable while the directory changes") {
             while (true) {
                 auto page = storage.list("", after, 10);
                 for (auto& entry : page.entries)
-                    REQUIRE(seen.insert(entry.name).second);
+                    require(seen.insert(entry.name).second);
                 if (!page.next)
                     break;
                 after = *page.next;
             }
-            THEN("every entry present during the whole listing appears exactly once") {
+            then("every entry present during the whole listing appears exactly once", [&] {
                 for (int index = 10; index < 40; ++index)
                     if (index != 30)
-                        REQUIRE(seen.contains("f" + to_string(index)));
-                REQUIRE(seen.contains("f195"));
-                REQUIRE(seen.contains("f99"));
-                REQUIRE_FALSE(seen.contains("f05"));
-            }
-        }
-    }
-    GIVEN("a page size out of bounds") {
-        THEN("it is brought back into [1, maxStoragePageSize]") {
-            REQUIRE(storage.list("", {}, 0).entries.size() == 1);
-            REQUIRE(storage.list("", {}, 1'000'000).entries.size() == 30);
-            REQUIRE(allNames(storage, "", 7).size() == 30);
-        }
-    }
-    GIVEN("an invalid cursor") {
-        THEN("the listing is refused") {
-            REQUIRE(errorOf([&] {
+                        require(seen.contains("f" + to_string(index)));
+                require(seen.contains("f195"));
+                require(seen.contains("f99"));
+                require(!seen.contains("f05"));
+            });
+        });
+    });
+    given("a page size out of bounds", [&] {
+        then("it is brought back into [1, maxStoragePageSize]", [&] {
+            require(storage.list("", {}, 0).entries.size() == 1);
+            require(storage.list("", {}, 1'000'000).entries.size() == 30);
+            require(allNames(storage, "", 7).size() == 30);
+        });
+    });
+    given("an invalid cursor", [&] {
+        then("the listing is refused", [&] {
+            require(errorOf([&] {
                         storage.list("", "../f10");
                     })
                     == fs::StorageErrc::invalidPath);
-        }
-    }
-}
+        });
+    });
+}};

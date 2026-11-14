@@ -1,6 +1,6 @@
 #include <webfront/system/FileSystem.hpp>
 
-#include <catch2/catch_test_macros.hpp>
+#include "Bdd.hpp"
 #include "Mocks.hpp"
 
 #include <algorithm>
@@ -9,6 +9,8 @@
 #include <filesystem>
 #include <string>
 #include <vector>
+
+using namespace webfront::bdd;
 
 using namespace std;
 using namespace webfront;
@@ -27,102 +29,102 @@ using MockIndexFS = MockFileSystem<IndexNames>;
 using MockJsLibFS = MockFileSystem<JsLibNames>;
 using MockMixFS = MockFileSystem<MixNames>;
 
-SCENARIO("filesystem::Multi can combine multiple FileSystems") {
-    GIVEN("IndexFS") {
+Scenario filesystemMulti{"filesystem::Multi can combine multiple FileSystems", [] {
+    given("IndexFS", [&] {
         MockIndexFS indexFS(".");
-        WHEN("opening known filenames") {
-            THEN("should return corresponding File objects") {
-                REQUIRE(indexFS.open("index.html").has_value());
-                REQUIRE(indexFS.open("WebFront.js").has_value());
-                REQUIRE(indexFS.open("favicon.ico").has_value());
-            }
-        }
-        WHEN("opening unknown filenames") {
-            THEN("should return nothing") {
-                REQUIRE(!indexFS.open("lib.js").has_value());
-                REQUIRE(!indexFS.open("bootstrap.js").has_value());
-                REQUIRE(!indexFS.open("dummy.file").has_value());
-            }
-        }
-    }
+        when("opening known filenames", [&] {
+            then("should return corresponding File objects", [&] {
+                require(indexFS.open("index.html").has_value());
+                require(indexFS.open("WebFront.js").has_value());
+                require(indexFS.open("favicon.ico").has_value());
+            });
+        });
+        when("opening unknown filenames", [&] {
+            then("should return nothing", [&] {
+                require(!indexFS.open("lib.js").has_value());
+                require(!indexFS.open("bootstrap.js").has_value());
+                require(!indexFS.open("dummy.file").has_value());
+            });
+        });
+    });
 
-    GIVEN("JsLibFS") {
+    given("JsLibFS", [&] {
         MockJsLibFS jsFS(".");
-        WHEN("opening known filenames") {
-            THEN("should return file objects") {
-                REQUIRE(jsFS.open("lib.js").has_value());
-                REQUIRE(jsFS.open("bootstrap.js").has_value());
-            }
-        }
-        WHEN("opening unknown filenames") {
-            THEN("should return nothing") {
-                REQUIRE(!jsFS.open("index.html").has_value());
-                REQUIRE(!jsFS.open("WebFront.js").has_value());
-                REQUIRE(!jsFS.open("favicon.ico").has_value());
-                REQUIRE(!jsFS.open("dummy.file").has_value());
-            }
-        }
-    }
+        when("opening known filenames", [&] {
+            then("should return file objects", [&] {
+                require(jsFS.open("lib.js").has_value());
+                require(jsFS.open("bootstrap.js").has_value());
+            });
+        });
+        when("opening unknown filenames", [&] {
+            then("should return nothing", [&] {
+                require(!jsFS.open("index.html").has_value());
+                require(!jsFS.open("WebFront.js").has_value());
+                require(!jsFS.open("favicon.ico").has_value());
+                require(!jsFS.open("dummy.file").has_value());
+            });
+        });
+    });
 
-    GIVEN("A Multi filesystem combining IndexFS and JsLibFS") {
+    given("A Multi filesystem combining IndexFS and JsLibFS", [&] {
         using MockIndexJsFS = fs::Multi<MockIndexFS, MockJsLibFS>;
         MockIndexJsFS indexJsFS(".");
 
-        WHEN("opening known filenames") {
-            THEN("should return file objects") {
-                REQUIRE(indexJsFS.open("lib.js").has_value());
-                REQUIRE(indexJsFS.open("bootstrap.js").has_value());
-                REQUIRE(indexJsFS.open("index.html").has_value());
-                REQUIRE(indexJsFS.open("WebFront.js").has_value());
-                REQUIRE(indexJsFS.open("favicon.ico").has_value());
-            }
-        }
-        WHEN("opening unknown filenames") {
-            THEN("should return nothing") { REQUIRE(!indexJsFS.open("dummy.file").has_value()); }
-        }
-    }
+        when("opening known filenames", [&] {
+            then("should return file objects", [&] {
+                require(indexJsFS.open("lib.js").has_value());
+                require(indexJsFS.open("bootstrap.js").has_value());
+                require(indexJsFS.open("index.html").has_value());
+                require(indexJsFS.open("WebFront.js").has_value());
+                require(indexJsFS.open("favicon.ico").has_value());
+            });
+        });
+        when("opening unknown filenames", [&] {
+            then("should return nothing", [&] { require(!indexJsFS.open("dummy.file").has_value()); });
+        });
+    });
 
-    GIVEN("A Multi filesystem combining IndexFS, JsLibFS and MixFS with names which can be served by multiple filesystems") {
+    given("A Multi filesystem combining IndexFS, JsLibFS and MixFS with names which can be served by multiple filesystems", [&] {
         using FS = fs::Multi<MockIndexFS, MockJsLibFS, MockMixFS>;
         FS fs("testPath");
         MockIndexFS::openingsCounter = 0;
         MockJsLibFS::openingsCounter = 0;
         MockMixFS::openingsCounter = 0;
 
-        REQUIRE(MockIndexFS::root == "testPath");
-        REQUIRE(MockJsLibFS::root == "testPath");
-        REQUIRE(MockMixFS::root == "testPath");
+        require(MockIndexFS::root == "testPath");
+        require(MockJsLibFS::root == "testPath");
+        require(MockMixFS::root == "testPath");
 
-        WHEN("opening ambiguous filenames") {
-            THEN("First FS in the parameter list should serve the file") {
-                REQUIRE(fs.open("lib.js").has_value());
-                REQUIRE(MockIndexFS::openingsCounter == 0);
-                REQUIRE(MockJsLibFS::openingsCounter == 1);
-                REQUIRE(MockMixFS::openingsCounter == 0);
-                REQUIRE(fs.open("lib2.js").has_value());
-                REQUIRE(MockIndexFS::openingsCounter == 0);
-                REQUIRE(MockJsLibFS::openingsCounter == 1);
-                REQUIRE(MockMixFS::openingsCounter == 1);
-                REQUIRE(fs.open("bootstrap.js").has_value());
-                REQUIRE(MockIndexFS::openingsCounter == 0);
-                REQUIRE(MockJsLibFS::openingsCounter == 2);
-                REQUIRE(MockMixFS::openingsCounter == 1);
-                REQUIRE(fs.open("index.html").has_value());
-                REQUIRE(MockIndexFS::openingsCounter == 1);
-                REQUIRE(MockJsLibFS::openingsCounter == 2);
-                REQUIRE(MockMixFS::openingsCounter == 1);
-                REQUIRE(fs.open("WebFront.js").has_value());
-                REQUIRE(MockIndexFS::openingsCounter == 2);
-                REQUIRE(MockJsLibFS::openingsCounter == 2);
-                REQUIRE(MockMixFS::openingsCounter == 1);
-                REQUIRE(fs.open("favicon.ico").has_value());
-                REQUIRE(MockIndexFS::openingsCounter == 3);
-                REQUIRE(MockJsLibFS::openingsCounter == 2);
-                REQUIRE(MockMixFS::openingsCounter == 1);
-            }
-        }
-    }
-}
+        when("opening ambiguous filenames", [&] {
+            then("First FS in the parameter list should serve the file", [&] {
+                require(fs.open("lib.js").has_value());
+                require(MockIndexFS::openingsCounter == 0);
+                require(MockJsLibFS::openingsCounter == 1);
+                require(MockMixFS::openingsCounter == 0);
+                require(fs.open("lib2.js").has_value());
+                require(MockIndexFS::openingsCounter == 0);
+                require(MockJsLibFS::openingsCounter == 1);
+                require(MockMixFS::openingsCounter == 1);
+                require(fs.open("bootstrap.js").has_value());
+                require(MockIndexFS::openingsCounter == 0);
+                require(MockJsLibFS::openingsCounter == 2);
+                require(MockMixFS::openingsCounter == 1);
+                require(fs.open("index.html").has_value());
+                require(MockIndexFS::openingsCounter == 1);
+                require(MockJsLibFS::openingsCounter == 2);
+                require(MockMixFS::openingsCounter == 1);
+                require(fs.open("WebFront.js").has_value());
+                require(MockIndexFS::openingsCounter == 2);
+                require(MockJsLibFS::openingsCounter == 2);
+                require(MockMixFS::openingsCounter == 1);
+                require(fs.open("favicon.ico").has_value());
+                require(MockIndexFS::openingsCounter == 3);
+                require(MockJsLibFS::openingsCounter == 2);
+                require(MockMixFS::openingsCounter == 1);
+            });
+        });
+    });
+}};
 
 // "0123456789abcdefghi" packed like the generated asset headers: big-endian 64-bit words, the last
 // one padded with zeros.
@@ -139,12 +141,12 @@ static string readAll(fs::File file, size_t bufferSize) {
     return content;
 }
 
-SCENARIO("An embedded file reads the same bytes whatever the buffer size") {
+Scenario embeddedFile{"An embedded file reads the same bytes whatever the buffer size", [] {
     for (const size_t bufferSize : array<size_t, 6>{1, 3, 7, 8, 13, 4096}) {
-        GIVEN("A buffer of " + to_string(bufferSize) + " bytes") {
-            THEN("Embedded data reads back unchanged, across its 64-bit words") {
-                REQUIRE(readAll(fs::File{DigitsAndLetters{}}, bufferSize) == "0123456789abcdefghi");
-            }
-        }
+        given("A buffer of " + to_string(bufferSize) + " bytes", [&] {
+            then("Embedded data reads back unchanged, across its 64-bit words", [&] {
+                require(readAll(fs::File{DigitsAndLetters{}}, bufferSize) == "0123456789abcdefghi");
+            });
+        });
     }
-}
+}};

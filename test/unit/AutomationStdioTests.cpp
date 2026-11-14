@@ -3,20 +3,22 @@
 #include <webfront/automation/Stdio.hpp>
 #include <webfront/automation/Channel.hpp>
 // clang-format on
-#include <catch2/catch_test_macros.hpp>
+#include "Bdd.hpp"
 #include <webfront/automation/Interrupt.hpp>
 
-SCENARIO("Native interrupt handlers record catchable signals without doing shutdown work") {
+using namespace webfront::bdd;
+
+Scenario nativeInterrupt{"Native interrupt handlers record catchable signals without doing shutdown work", [] {
     webfront::automation::Interrupt interrupt;
-    REQUIRE(interrupt.signal() == 0);
-    REQUIRE(std::raise(SIGINT) == 0);
-    REQUIRE(interrupt.signal() == SIGINT);
-    REQUIRE(std::raise(SIGTERM) == 0);
-    REQUIRE(interrupt.signal() == SIGTERM);
-}
+    require(interrupt.signal() == 0);
+    require(std::raise(SIGINT) == 0);
+    require(interrupt.signal() == SIGINT);
+    require(std::raise(SIGTERM) == 0);
+    require(interrupt.signal() == SIGTERM);
+}};
 
 #ifdef _WIN32
-SCENARIO("Windows MCP stdin drains a final unterminated line after its pipe closes") {
+Scenario windowsMCP{"Windows MCP stdin drains a final unterminated line after its pipe closes", [] {
     struct Pipe {
         HANDLE saved = GetStdHandle(STD_INPUT_HANDLE), reader = nullptr, writer = nullptr;
         ~Pipe() {
@@ -27,22 +29,22 @@ SCENARIO("Windows MCP stdin drains a final unterminated line after its pipe clos
                 CloseHandle(writer);
         }
     } pipe;
-    REQUIRE(CreatePipe(&pipe.reader, &pipe.writer, nullptr, 0));
-    REQUIRE(SetStdHandle(STD_INPUT_HANDLE, pipe.reader));
+    require(CreatePipe(&pipe.reader, &pipe.writer, nullptr, 0));
+    require(SetStdHandle(STD_INPUT_HANDLE, pipe.reader));
     DWORD written = 0;
-    REQUIRE(WriteFile(pipe.writer, "one\ntwo\npart", 12, &written, nullptr));
-    REQUIRE(written == 12);
+    require(WriteFile(pipe.writer, "one\ntwo\npart", 12, &written, nullptr));
+    require(written == 12);
     webfront::automation::StdioInput input;
     std::string                      line;
-    REQUIRE(input.read(line) == webfront::automation::StdioInput::Status::line);
-    REQUIRE(line == "one");
-    REQUIRE(input.read(line) == webfront::automation::StdioInput::Status::line);
-    REQUIRE(line == "two");
-    REQUIRE(input.read(line) == webfront::automation::StdioInput::Status::waiting);
-    REQUIRE(CloseHandle(pipe.writer));
+    require(input.read(line) == webfront::automation::StdioInput::Status::line);
+    require(line == "one");
+    require(input.read(line) == webfront::automation::StdioInput::Status::line);
+    require(line == "two");
+    require(input.read(line) == webfront::automation::StdioInput::Status::waiting);
+    require(CloseHandle(pipe.writer));
     pipe.writer = nullptr;
-    REQUIRE(input.read(line) == webfront::automation::StdioInput::Status::line);
-    REQUIRE(line == "part");
-    REQUIRE(input.read(line) == webfront::automation::StdioInput::Status::closed);
-}
+    require(input.read(line) == webfront::automation::StdioInput::Status::line);
+    require(line == "part");
+    require(input.read(line) == webfront::automation::StdioInput::Status::closed);
+}};
 #endif

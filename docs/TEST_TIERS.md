@@ -5,7 +5,7 @@ to the standard tier.
 
 | Tier | Label | Content | When it runs |
 | --- | --- | --- | --- |
-| Fast | `fast` | Catch2 unit tests and the Python tool tests; no browser, no nested build | Locally on demand, and as the first test step of every Linux/Windows/macOS desktop job |
+| Fast | `fast` | C++ unit tests (`test/unit/Bdd.hpp`) and the Python tool tests; no browser, no nested build | Locally on demand, and as the first test step of every Linux/Windows/macOS desktop job |
 | Standard | none, or `web-integration` | Everything but the portability tests: unit tests, real-browser integration, `wf` commands, embedded builds | Every pull request and every push to `develop` or `master` |
 | Portability | `portability` | The library consumed from another project: `AddSubdirectoryConsumer` | Weekly, and on every pull request into `master` |
 
@@ -20,9 +20,9 @@ cmake -DBUILD_DIR=build -DLABEL_EXCLUDE=portability -P test/cmake/RunTestSuite.c
 standard tier passes `^(portability|fast)$`, because its fast step has just run the fast tier. A local run before a
 change is declared complete (see `AGENTS.md`) runs everything.
 
-By default every Catch2 scenario is a CTest case of its own, which `ctest -R` selects by name, and a process of its
+By default every unit-test scenario is a CTest case of its own, which `ctest -R` selects by name, and a process of its
 own: more than 500 of them. `-DWEBFRONT_TEST_UNIT_SHARDS=4`, which the desktop CI jobs pass, registers four cases
-`UnitTests-0` to `UnitTests-3` instead, each a Catch2 shard that runs a quarter of the scenarios in one process and
+`UnitTests-0` to `UnitTests-3` instead, each a shard that runs a quarter of the scenarios in one process and
 writes the result of each to `unit-results-<shard>.xml` in the build directory. The shards run the scenarios in their
 declaration order, which is what makes four processes started separately split them without overlap. Scenarios then
 share a process: `test/unit/ScenarioIsolation.cpp` restores the process-wide state a scenario may change. Run directly,

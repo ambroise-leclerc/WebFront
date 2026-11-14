@@ -164,7 +164,7 @@ jobs:
       # ENABLE_CACHE controls automatic ccache discovery; the explicit sccache launcher stays enabled.
       # The heavy unit tests are compiled four to a file (docs/BUILD_TIME_STUDY.md); the portability and sanitizer jobs keep one object per test file.
       # No job relies on a default of the test options: the defaults are those of a quick local build (docs/TEST_TIERS.md).
-      # The unit tests run as four Catch2 shards instead of one process per scenario (docs/TEST_TIERS.md).
+      # The unit tests run as four shards instead of one process per scenario (docs/TEST_TIERS.md).
       - name: Configure
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}

@@ -1,11 +1,13 @@
 #include <webfront/utils/TypeErasedFunction.hpp>
 
-#include <catch2/catch_test_macros.hpp>
+#include "Bdd.hpp"
 
 #include <map>
 #include <string>
 
 #include <iostream>
+
+using namespace webfront::bdd;
 
 using namespace std;
 using namespace webfront;
@@ -20,8 +22,8 @@ void function4(const char* text, int plusValue, int minusValue) {
     testCounter -= static_cast<size_t>(minusValue);
 }
 
-SCENARIO("TypeErasedFunctions") {
-    GIVEN("Different free functions, member functions and lambdas") {
+Scenario typeErasedFunctions{"TypeErasedFunctions", [] {
+    given("Different free functions, member functions and lambdas", [&] {
 
         auto function1 = [&](int value) {
             testCounter += static_cast<size_t>(value);
@@ -45,7 +47,7 @@ SCENARIO("TypeErasedFunctions") {
         };
 
 
-        WHEN("Stored in a map") {
+        when("Stored in a map", [&] {
             std::map<std::string, utils::TypeErasedFunction> functions;
 
             functions.try_emplace("function1", function1);
@@ -58,26 +60,26 @@ SCENARIO("TypeErasedFunctions") {
 
             functions.try_emplace("function4", function4);
 
-            THEN("They can be retrieved uniformly"){
+            then("They can be retrieved uniformly", [&] {
                 functions.at("function1")(5);
-                REQUIRE(testCounter == 5);
+                require(testCounter == 5);
 
                 functions.at("function2")(8, std::string("Sponge"));
-                REQUIRE(testCounter == 13);
-                REQUIRE(testString == "Sponge");
+                require(testCounter == 13);
+                require(testString == "Sponge");
 
-                REQUIRE_THROWS_AS(functions.at("function2")(8, "Bob"), std::invalid_argument);
+                requireThrows<std::invalid_argument>([&] { functions.at("function2")(8, "Bob"); });
 
                 functions.at("function3")(3, std::string_view("Bob"));
-                REQUIRE(testCounter == 16);
-                REQUIRE(testString == "SpongeBob");
+                require(testCounter == 16);
+                require(testString == "SpongeBob");
 
                 functions.at("function4")(reinterpret_cast<const char*>(" Square"), 100, 33);
-                REQUIRE(testCounter == 83);
-                REQUIRE(testString == "SpongeBob Square");
+                require(testCounter == 83);
+                require(testString == "SpongeBob Square");
 
 
-            }
-        }
-    }
-}
+            });
+        });
+    });
+}};
