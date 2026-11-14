@@ -247,8 +247,18 @@ inline std::string sourceLine(const std::source_location& location) {
 }
 
 /// Reports a failure with its location, its source line, the sections that lead to it and the messages in scope.
+/// Several threads may fail at once: the lock covers the whole report, the cache of the source lines included.
 inline void reportFailure(const std::source_location& location, std::string_view what) {
-    auto&       current = state();
+    auto& current = state();
+    while (current.reporting.test_and_set(std::memory_order_acquire))
+        current.reporting.wait(true, std::memory_order_relaxed);
+    struct Unlock {
+        std::atomic_flag& flag;
+        ~Unlock() {
+            flag.clear(std::memory_order_release);
+            flag.notify_one();
+        }
+    } unlock{current.reporting};
     std::string text;
     if (location.line() != 0)
         text += concat(location.file_name(), ':', location.line(), ": ");
@@ -263,13 +273,9 @@ inline void reportFailure(const std::source_location& location, std::string_view
     for (const auto& message : infos())
         text += concat("\n  with: ", message);
     text += '\n';
-    while (current.reporting.test_and_set(std::memory_order_acquire))
-        current.reporting.wait(true, std::memory_order_relaxed);
     current.failures.fetch_add(1, std::memory_order_relaxed);
     current.report += text;
     print(text);
-    current.reporting.clear(std::memory_order_release);
-    current.reporting.notify_one();
 }
 
 inline void count() {
@@ -753,6 +759,8 @@ inline Result runScenario(const Entry& entry) {
     return {&entry, outcome, now() - start, current.report};
 }
 
+/// Escapes a text for XML 1.0, which forbids the control characters other than tab, line feed and carriage return:
+/// they are written as \xNN.
 inline std::string xmlEscape(std::string_view text) {
     std::string escaped;
     for (char character : text)
@@ -770,7 +778,13 @@ inline std::string xmlEscape(std::string_view text) {
                 escaped += "&quot;";
                 break;
             default:
-                escaped += character;
+                if (auto code = static_cast<unsigned char>(character); code < 0x20 && code != '\t' && code != '\n' && code != '\r') {
+                    constexpr std::string_view digits = "0123456789abcdef";
+                    escaped                          += "\\x";
+                    escaped                          += digits[code >> 4];
+                    escaped                          += digits[code & 0xf];
+                } else
+                    escaped += character;
         }
     return escaped;
 }

@@ -3,10 +3,14 @@
 /// Some scenarios fail on purpose: main() runs each one and compares what it did with what is expected.
 #include "Bdd.hpp"
 
+#include <cstdio>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace webfront::bdd;
@@ -145,6 +149,22 @@ Scenario assertionsPass{
       }
 };
 
+Scenario controlCharacters{"a failure with a control character", [] {
+                               auto scope = info(std::string("a\0b", 3));
+                               check(false);
+                           }};
+
+Scenario concurrentFailures{"failures on several threads", [] {
+                                std::vector<std::thread> threads;
+                                for (int index = 0; index != 4; ++index)
+                                    threads.emplace_back([] {
+                                        for (int repeat = 0; repeat != 50; ++repeat)
+                                            check(false);
+                                    });
+                                for (auto& thread : threads)
+                                    thread.join();
+                            }};
+
 Scenario throwsMismatch{"throws of another type", [] {
                             requireThrows<std::invalid_argument>([] {
                                 throw std::logic_error{"bad"};
@@ -199,6 +219,19 @@ int main() {
     expectExit({"Scenario: assertions pass"}, 0);
     expectExit({"assertions*", "--order", "rand", "--rng-seed", "7"}, 0);
     expectExit({"[unknown]"}, 2);
+    expectExit({"--exact", "failures on several threads"}, 1);
+
+    // XML 1.0 forbids the control characters a message may hold: the JUnit report writes them as \xNN.
+    std::string report = "bdd_self_test_report.xml";
+    expectExit({"--exact", "a failure with a control character", "--junit", report}, 1);
+    std::ifstream     file{report};
+    const std::string xml{std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
+    if (xml.find('\0') != std::string::npos || xml.find("a\\x00b") == std::string::npos) {
+        ++failures;
+        std::cerr << "MISMATCH: the JUnit report does not escape a NUL\n";
+    }
+    file.close();
+    std::remove(report.c_str());
     expectExit({"--shard-count", "2", "--shard-index", "2"}, 2);
     expectExit({"--unknown"}, 2);
     expectExit({"[passing]", "--list"}, 0);

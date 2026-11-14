@@ -97,7 +97,8 @@ if(WEBFRONT_TEST_UNIT_SHARDS GREATER 0)
     add_test(NAME UnitTests-${_shard} COMMAND tests --order decl --shard-count ${WEBFRONT_TEST_UNIT_SHARDS} --shard-index ${_shard}
         --junit "${CMAKE_BINARY_DIR}/unit-results-${_shard}.xml")
     # The scenarios of a shard share its time limit; the slowest of them takes a few seconds.
-    set_tests_properties(UnitTests-${_shard} PROPERTIES TIMEOUT 600 LABELS fast)
+    # A shard whose every scenario is skipped exits with 4, as a single scenario does (BddDiscoverTests.cmake).
+    set_tests_properties(UnitTests-${_shard} PROPERTIES TIMEOUT 600 LABELS fast SKIP_RETURN_CODE 4)
   endforeach()
 else()
   bdd_discover_tests(tests PROPERTIES TIMEOUT 60 LABELS fast)
