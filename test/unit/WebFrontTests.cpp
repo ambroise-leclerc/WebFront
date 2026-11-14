@@ -234,98 +234,56 @@ Scenario selectingNative{"Selecting the native web view without support preserve
 }};
 #endif
 
+Scenario selectingFrontend{"Selecting a frontend the build does not support fails clearly", [] {
 #if !defined(WEBFRONT_EMBED_WKWEBVIEW) || !defined(__APPLE__)
-Scenario selectingWKWebView{"Selecting WKWebView without support fails clearly", [] {
-    given("a build without macOS WKWebView support", [&] {
-        then("initialization and opening name the enabling option", [&] {
-            requireThrows([&] { frontend::WKWebViewFrontend::initialize(); }, equals("WKWebViewFrontend is unavailable. Configure on macOS with -DWEBFRONT_EMBED_WKWEBVIEW=ON"));
-            requireThrows([&] { frontend::WKWebViewFrontend::open("9200", "index.html"); }, equals("WKWebViewFrontend is unavailable. Configure on macOS with -DWEBFRONT_EMBED_WKWEBVIEW=ON"));
-            requireThrows<std::runtime_error>([&] { frontend::WKWebViewFrontend::open("127.0.0.1", "9200", "index.html", ContentPolicy{}); });
-        });
+    then("WKWebView's initialization and opening name the enabling option", [&] {
+        requireThrows([&] { frontend::WKWebViewFrontend::initialize(); }, equals("WKWebViewFrontend is unavailable. Configure on macOS with -DWEBFRONT_EMBED_WKWEBVIEW=ON"));
+        requireThrows([&] { frontend::WKWebViewFrontend::open("9200", "index.html"); }, equals("WKWebViewFrontend is unavailable. Configure on macOS with -DWEBFRONT_EMBED_WKWEBVIEW=ON"));
+        requireThrows<std::runtime_error>([&] { frontend::WKWebViewFrontend::open("127.0.0.1", "9200", "index.html", ContentPolicy{}); });
     });
-}};
 #endif
-
 #if !defined(WEBFRONT_EMBED_WEBVIEW2) || !defined(_WIN32)
-Scenario selectingWebView2{"Selecting WebView2 without support fails clearly", [] {
-    given("a build without Windows WebView2 support", [&] {
+    then("opening WebView2 explains which option to enable", [&] {
         using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, frontend::WebView2Frontend>;
         App app("9200");
-        then("opening the frontend explains which option to enable", [&] {
-            requireThrows([&] { app.openWindow("index.html"); }, equals("WebView2Frontend is unavailable. Configure on Windows with -DWEBFRONT_EMBED_WEBVIEW2=ON"));
-        });
+        requireThrows([&] { app.openWindow("index.html"); }, equals("WebView2Frontend is unavailable. Configure on Windows with -DWEBFRONT_EMBED_WEBVIEW2=ON"));
     });
-}};
 #endif
-
 #ifndef WEBFRONT_EMBED_WEBKITGTK
-Scenario selectingWebKitGTK{"Selecting WebKitGTK without support fails clearly", [] {
-    then("initialization names the enabling option", [&] {
+    then("WebKitGTK's initialization names the enabling option", [&] {
         requireThrows([&] { frontend::WebKitGTKFrontend::initialize(); }, equals("WebKitGTKFrontend is unavailable. Configure on Linux with -DWEBFRONT_EMBED_WEBKITGTK=ON"));
     });
-}};
 #endif
-
-Scenario selectingCEFFrontend{"Selecting CEFFrontend without CEF support fails clearly", [] {
-    given("a build without CEF support", [&] {
-        when("a CEF-fronted WebFront is constructed", [&] {
-            then("construction throws a clear diagnostic instead of silently doing nothing", [&] {
-                if constexpr (!cef::webfrontEmbedCEF) {
-                    using CEFWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, frontend::CEFFrontend>;
-                    requireThrows<std::runtime_error>([&] { CEFWF("9200"); });
-                }
-            });
+    if constexpr (!cef::webfrontEmbedCEF) {
+        then("constructing a CEF-fronted application throws instead of silently doing nothing, and opening CEF explains how to "
+             "enable it", [&] {
+            using CEFWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, frontend::CEFFrontend>;
+            requireThrows<std::runtime_error>([&] { CEFWF("9200"); });
+            requireThrows([&] { frontend::CEFFrontend::open("9200", "index.html"); }, equals("webfront::frontend::CEFFrontend requires CEF support, but this build was configured with "
+                                "WEBFRONT_EMBED_CEF=OFF. Reconfigure with -DWEBFRONT_EMBED_CEF=ON to use the embedded CEF frontend."));
+            requireThrows<std::runtime_error>([&] { frontend::CEFFrontend::open("127.0.0.1", "9200", "index.html", ContentPolicy{}); });
         });
-    });
-
-    given("a build without CEF support", [&] {
-        when("the CEF frontend is opened directly", [&] {
-            then("the diagnostic explains how to enable CEF", [&] {
-                if constexpr (!cef::webfrontEmbedCEF) {
-                    requireThrows([&] { frontend::CEFFrontend::open("9200", "index.html"); }, equals("webfront::frontend::CEFFrontend requires CEF support, but this build was configured with "
-                                        "WEBFRONT_EMBED_CEF=OFF. Reconfigure with -DWEBFRONT_EMBED_CEF=ON to use the embedded CEF frontend."));
-                    requireThrows<std::runtime_error>([&] { frontend::CEFFrontend::open("127.0.0.1", "9200", "index.html", ContentPolicy{}); });
-                }
-            });
-        });
-    });
+    }
 }};
 
 Scenario cEFSubprocess{"CEF subprocess exits preserve their status and diagnostic", [] {
-    given("a CEF subprocess that completed successfully", [&] {
-        const cef::CEFSubprocessExit exit{0};
-
-        then("the frontend can propagate a successful process status", [&] {
-            require(exit.exit_code() == 0);
-        });
-    });
-
-    given("a CEF subprocess that failed", [&] {
-        const cef::CEFSubprocessExit exit{7};
-
-        then("the frontend can propagate the failure status and report the exit request", [&] {
-            require(exit.exit_code() == 7);
-            require(std::string_view(exit.what()) == "CEF subprocess should exit");
-        });
+    then("a subprocess that completed successfully propagates its status, and a failed one its status and the exit request", [&] {
+        require(cef::CEFSubprocessExit{0}.exit_code() == 0);
+        const cef::CEFSubprocessExit failed{7};
+        require(failed.exit_code() == 7);
+        require(std::string_view(failed.what()) == "CEF subprocess should exit");
     });
 }};
 
-Scenario basicWFInitializes{"BasicWF initializes a custom frontend once", [] {
+Scenario frontendInitialized{"A frontend is initialized once per process, and a failed initialization is retried", [] {
     given("two BasicWF instances sharing the same frontend type", [&] {
         using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
-
-        when("they are constructed", [&] {
-            FrontendWF first("8080");
-            FrontendWF second("8081");
-
-            then("the frontend initialization runs only once", [&] {
-                require(InitializingFrontend::initializeCalls == 1);
-            });
+        FrontendWF first("8080");
+        FrontendWF second("8081");
+        then("the frontend initialization runs only once", [&] {
+            require(InitializingFrontend::initializeCalls == 1);
         });
     });
-}};
-
-Scenario failedFrontend{"Failed frontend initialization is retried and success is shared across application types", [] {
     given("a frontend whose first initialization fails", [&] {
         using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, RetryingFrontend>;
         using OtherApp = BasicWFWithFrontend<WebFrontNetworkingMock, fs::DefaultFS, RetryingFrontend>;
@@ -342,21 +300,28 @@ Scenario failedFrontend{"Failed frontend initialization is retried and success i
     });
 }};
 
-Scenario frontendStartupFailure{"A frontend startup failure stops the server before propagating", [] {
+Scenario frontendContract{"The frontend contract: a failing open() stops the server before propagating, whatever its action", [] {
     given("an embedded frontend that fails to open", [&] {
         using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, FailingFrontend>;
         App app("9200");
         const auto previousStopCalls = WebFrontIoContextMock::stopCalls.load();
-        when("the application opens the frontend", [&] {
-            then("show requests server shutdown before propagating the diagnostic", [&] {
-                requireThrows([&] { app.show(); }, equals("frontend startup failed"));
-                require(WebFrontIoContextMock::stopCalls.load() > previousStopCalls);
-            });
+        then("show requests server shutdown before propagating the diagnostic", [&] {
+            requireThrows([&] { app.show(); }, equals("frontend startup failed"));
+            require(WebFrontIoContextMock::stopCalls.load() > previousStopCalls);
+        });
+    });
+    given("a frontend that only launches an external program and fails to do so", [&] {
+        using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, FailingNonBlockingFrontend>;
+        App app("9202");
+        const auto previousStopCalls = WebFrontIoContextMock::stopCalls.load();
+        then("the exception propagates and the server is stopped", [&] {
+            requireThrows([&] { app.show(); }, equals("launcher failed"));
+            require(WebFrontIoContextMock::stopCalls.load() > previousStopCalls);
         });
     });
 }};
 
-Scenario frontendContract{"The frontend contract: open() runs on the calling thread and a closing frontend stops the server", [] {
+Scenario frontendContractThread{"The frontend contract: open() runs on the calling thread and a closing frontend stops the server", [] {
     given("an embedded frontend that records the thread it is opened on", [&] {
         using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, ThreadRecordingFrontend>;
         App app("9201");
@@ -507,18 +472,6 @@ Scenario embeddedFrontendDeclared{"The embedded frontend is declared in every co
     }
 }};
 
-Scenario frontendContractFailing{"The frontend contract: a failing open() stops the server whatever its action", [] {
-    given("a frontend that only launches an external program and fails to do so", [&] {
-        using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, FailingNonBlockingFrontend>;
-        App app("9202");
-        const auto previousStopCalls = WebFrontIoContextMock::stopCalls.load();
-        then("the exception propagates and the server is stopped", [&] {
-            requireThrows([&] { app.show(); }, equals("launcher failed"));
-            require(WebFrontIoContextMock::stopCalls.load() > previousStopCalls);
-        });
-    });
-}};
-
 Scenario basicWFDelegates{"BasicWF delegates window opening to the selected frontend", [] {
     given("a frontend that keeps the server running after open", [&] {
         using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, OpeningFrontend>;
@@ -554,17 +507,17 @@ Scenario basicWFDelegates{"BasicWF delegates window opening to the selected fron
             });
         });
     });
-}};
 
-Scenario basicWFForwards{"BasicWF forwards the configured address to address-aware frontends", [] {
-    using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, AddressFrontend>;
-    App app{
-        WebFrontConfig{.address = "127.0.0.2", .port = "9010"}
-    };
-    app.openWindow("index.html?x=1#result");
-    require(AddressFrontend::lastAddress == "127.0.0.2");
-    require(AddressFrontend::lastPort == "9010");
-    require(AddressFrontend::lastFile == "index.html?x=1#result");
+    given("a frontend that takes the configured address", [&] {
+        using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, AddressFrontend>;
+        App app{WebFrontConfig{.address = "127.0.0.2", .port = "9010"}};
+        app.openWindow("index.html?x=1#result");
+        then("it receives the address, the port and the page with its query and fragment", [&] {
+            require(AddressFrontend::lastAddress == "127.0.0.2");
+            require(AddressFrontend::lastPort == "9010");
+            require(AddressFrontend::lastFile == "index.html?x=1#result");
+        });
+    });
 }};
 
 Scenario registeredC{"Registered C++ function handlers own and invoke their callable", [] {

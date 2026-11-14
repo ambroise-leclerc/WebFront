@@ -1,7 +1,11 @@
 # Verify the archive prepared by wf for js/<DIRECTORY> contains the package's actual maintained sources.
 # Usage: cmake -DROOT=<checkout> -DPROJECT=<self-build project> -DWORK=<scratch> -DDIRECTORY=<react|services>
-#              -DLABEL=<name for messages> "-DFILES=<declared files>" -P CheckPackage.cmake
+#              -DLABEL=<name for messages> ["-DFILES=<declared files>"] -P CheckPackage.cmake
+# FILES defaults to the files that every optional package declares.
 cmake_minimum_required(VERSION 3.31)
+if(NOT DEFINED FILES)
+    set(FILES index.mjs index.d.ts README.md LICENSE)
+endif()
 file(REMOVE_RECURSE "${WORK}")
 file(READ "${ROOT}/js/${DIRECTORY}/package.json" manifest)
 string(JSON package_version GET "${manifest}" version)

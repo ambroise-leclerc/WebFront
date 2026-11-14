@@ -2,6 +2,14 @@ import {withTimers, untilReady} from './timers.mjs';
 // Autonomous real-engine test: compiled WASM, npm graph, Life bridge, preview, cache and embedding.
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
+// Checks `predicate` (which may be async) every `every` ms until it holds; after `attempts` failed checks, throws `message`, or
+// what the function `message` returns.
+const eventually = async (predicate, message, {attempts = 200, every = 25} = {}) => {
+    for (let attempt = 0; !(await predicate()); ++attempt) {
+        if (attempt === attempts) throw new Error(typeof message === 'function' ? await message() : message);
+        await delay(every);
+    }
+};
 const profileNow = performance.now.bind(performance);
 let lastPhase;
 const progress = async message => {
@@ -155,6 +163,17 @@ try {
         assert(Object.keys(lock.packages).length === 3, 'React, React DOM and scheduler must be resolved');
         const listed = await execute(['list'], context);
         assert(listed.split('\n').length === 3 && listed.includes('react@19.3.1'), 'wf list must name the installed packages');
+        // The graph of the lock: react-dom brings scheduler and its peer react.
+        const graph = await execute(['list', '--tree'], context);
+        assert(/^react-dom@19\.3\.1  \(19\.3\.1\)$/m.test(graph) && /── scheduler@\S+  \(\S+\)$/m.test(graph) && /── react@19\.3\.1  \(peer \S+\)$/m.test(graph) &&
+            graph.endsWith('2 roots, 3 packages'), `wf list --tree must show the packages under their roots: ${graph}`);
+        assert(/^scheduler@\S+\n  react-dom@19\.3\.1 \(root, 19\.3\.1\) > scheduler@/.test(await execute(['why', 'scheduler'], context)), 'wf why must give the chain from a root');
+        const described = await execute(['info', 'react-dom'], context);
+        assert(/^  license +MIT$/m.test(described) && /^  dependents +none$/m.test(described) && /^  files +\d+ in \.webfront\/developer\/packages\//m.test(described),
+            `wf info must describe a locked package: ${described}`);
+        const refusal = promise => promise.then(() => '', error => error.message);
+        assert(/vue is not installed/.test(await refusal(execute(['why', 'vue'], context))) &&
+            /Usage: wf list \[--tree\]/.test(await refusal(execute(['list', '--all'], context))), 'wf why and wf list must refuse what they do not know');
     }
     const historyLength = history.length;
     const frame = context.preview;
@@ -195,12 +214,7 @@ try {
             'wf build must leave the preview alone');
         assert((await readFile('.webfront/developer/build/app.js')).length > 0, 'wf build must publish compiled JS');
         assert(new TextDecoder().decode(await readFile('.webfront/developer/build/index.html')).includes('./app.js'), 'wf build must publish HTML and JS');
-        const waitDev = async (predicate, message) => {
-            for (let attempt = 0; !predicate(); ++attempt) {
-                if (attempt === 300) throw new Error(message);
-                await delay(30);
-            }
-        };
+        const waitDev = (predicate, message) => eventually(predicate, message, {attempts: 300, every: 30});
         await writeFile('watch/main.ts', "import {value} from './value'; document.getElementById('root').textContent = value;\n");
         await writeFile('watch/value.ts', "export const value: string = 'watch-one';\n");
         let devOutput = '';
@@ -259,19 +273,11 @@ try {
         await progress('Life preview and bridge');
         // Exercise the maintained public application rather than the retired PI demo.
         await execute(['preview'], context);
-        for (let attempt = 0; !frame.contentDocument?.querySelector('[data-testid="pattern-blinker"]'); ++attempt) {
-            if (attempt === 200) throw new Error('Life preview did not mount');
-            await delay(50);
-        }
+        await eventually(() => frame.contentDocument?.querySelector('[data-testid="pattern-blinker"]'), 'Life preview did not mount', {every: 50});
         assert(history.length === historyLength, 'Preview rebuilds must not accumulate session history');
         const life = frame.contentDocument;
         const button = name => life.querySelector(`[data-testid="${name}"]`);
-        const waitFor = async (predicate, message) => {
-            for (let attempt = 0; !predicate(); ++attempt) {
-                if (attempt === 100) throw new Error(message);
-                await delay(30);
-            }
-        };
+        const waitFor = (predicate, message) => eventually(predicate, message, {attempts: 100, every: 30});
         const packed = new Uint8Array(128);
         for (const i of [330, 331, 332]) packed[i >> 3] |= 1 << (i & 7);
         const next = await webFront.cppFunction('life.step')(packed);
@@ -375,10 +381,8 @@ try {
         await writeFile('restore/main.js', "import value from 'webfront-fixture-lib'; document.getElementById('root').textContent = value;\n");
         await execute(['preview', 'restore/main.js'], context);
         const restoredMounted = () => frame.contentDocument?.getElementById('root')?.textContent === 'webfront-fixture-lib@1.0.0';
-        for (let attempt = 0; frame.contentWindow.location.href === previous || !restoredMounted(); ++attempt) {
-            if (attempt === 300) throw new Error('The preview did not build from the restored cache');
-            await delay(50);
-        }
+        await eventually(() => frame.contentWindow.location.href !== previous && restoredMounted(), 'The preview did not build from the restored cache',
+            {attempts: 300, every: 50});
         const absent = await execute(['install', 'webfront-fixture-absent'], context).then(() => '', error => error.message);
         assert(/HTTP 404/.test(absent), 'A package absent from the registry must reject');
         const failed = await execute(['install', 'INVALID-NPM-NAME'], context).then(() => false, () => true);
@@ -818,12 +822,7 @@ try {
         await progress('page layout');
         // The layout of the page (#539): the terminal alone, then the interface over the whole window, with the terminal
         // in a floating window behind an icon.
-        const until = async (predicate, message) => {
-            for (let attempt = 0; !(await predicate()); ++attempt) {
-                if (attempt === 400) throw new Error(message);
-                await delay(25);
-            }
-        };
+        const until = (predicate, message) => eventually(predicate, message, {attempts: 400});
         const layout = page => {
             const view = page.defaultView, root = page.documentElement;
             const box = selector => page.querySelector(selector).getBoundingClientRect();
@@ -1180,12 +1179,8 @@ try {
         assert(['echo', 'fail', 'linger', 'status', 'stream', 'wait'].every(name => cppCommands.has(name)) && cppCommands.get('echo') === 'Write its arguments',
             `The C++ commands must be discovered with their help: ${[...cppCommands.keys()]}`);
         const commandState = tag => webFront.cppFunction('test.command')(tag);
-        const waitState = async (tag, state) => {
-            for (let attempt = 0; (await commandState(tag)) !== state; ++attempt) {
-                if (attempt === 200) throw new Error(`Command ${tag} did not reach ${state}: ${await commandState(tag)}`);
-                await delay(25);
-            }
-        };
+        const waitState = (tag, state) => eventually(async () => (await commandState(tag)) === state,
+            async () => `Command ${tag} did not reach ${state}: ${await commandState(tag)}`);
         const lineContext = (signal = new AbortController().signal, chunks = []) => ({...context, cppCommands, signal, write: text => chunks.push(text)});
         const streamed = [];
         assert(await runtime.runLine('stream', lineContext(undefined, streamed)) === '', 'A C++ command resolves once it returns');
@@ -1198,6 +1193,33 @@ try {
         const exitCode = await failure(runtime.runLine('status 3', lineContext()));
         assert(exitCode?.exitCode === 3 && /exited with code 3/.test(exitCode.message), `A C++ exit code must be reported: ${exitCode}`);
         assert(/Unknown command: absent/.test((await failure(runtime.runLine('absent', lineContext())))?.message), 'An unknown command must be refused');
+        // The project commands keep their prefix: a bare one is not run, the line to type is given.
+        const bare = await failure(runtime.runLine('install react', lineContext()));
+        assert(bare?.message === 'Unknown command: install. Did you mean: wf install react?', `A wf command typed without wf must name the line to type: ${bare?.message}`);
+        // The file commands of the terminal read the project through the application's callbacks, Store::entries included.
+        const names = await runtime.runLine('ls', lineContext());
+        assert(/\bui\/( |\r\n|$)/.test(names) && names.includes('webfront.project.json') && !names.includes('.webfront'), `ls must list the project without its hidden entries: ${names}`);
+        const long = await runtime.runLine('ls -la', lineContext());
+        assert(/^- +\d+  \d{4}-\d\d-\d\d \d\d:\d\d  webfront\.project\.json  \[manifest\]\r?$/m.test(long) && /^d +-  \S+ \S+  \.webfront\/  \[managed by wf\]\r?$/m.test(long),
+            `ls -l must give sizes, dates and natures: ${long}`);
+        assert(/\[entry main\]/.test(await runtime.runLine('ls -l ui/main.tsx', lineContext())), 'ls -l must name an entry of the manifest');
+        // ls -l recognizes a library without Store::entries by the bridge's own error for a callback that is not registered.
+        const unregistered = await failure(webFront.cppFunction('webfront.developer.absent')());
+        assert(String(unregistered?.message).includes("C++ function 'webfront.developer.absent' was not found"),
+            `The bridge must name a callback that is not registered the way the environment reads it: ${unregistered?.message}`);
+        assert((await runtime.runLine('cat webfront.project.json', lineContext())).includes('"entries"'), 'cat must print a project file');
+        assert(/is not a text file|is larger than 1 MiB/.test((await failure(runtime.runLine('cat .webfront/developer/environment/esbuild.wasm', lineContext())))?.message), 'cat must refuse a binary file');
+        assert(/^\.\r\n(.*\r\n)*[├└]── ui\/\r\n/.test(await runtime.runLine('tree -L 1', lineContext())), 'tree must draw the project');
+        const served = await runtime.runLine('mounts', lineContext());
+        assert(/\/webfront\/developer\/environment\/ +\.webfront\/developer\/environment\/ of the project \(published\)/.test(served) && served.includes('sha512-'),
+            `mounts must describe the served layers and the environment: ${served}`);
+        assert(/relative to the project directory/.test((await failure(runtime.runLine('cat ../outside', lineContext())))?.message), 'A file command must not leave the project');
+        for (const name of ['rm', 'cd', 'edit'])
+            assert(new RegExp(`^${name} is not provided: `).test((await failure(runtime.runLine(`${name} ui`, lineContext())))?.message), `${name} must be withheld with a reason`);
+        const firstWords = (await runtime.complete('', {bridge: webFront, cppCommands})).candidates;
+        assert(['ls', 'cat', 'tree', 'mounts', 'wf', 'echo'].every(name => firstWords.includes(name)) && !firstWords.includes('rm'), `Completion must offer the commands that exist: ${firstWords}`);
+        assert((await runtime.complete('wf li', {bridge: webFront})).candidates.join() === 'list' && (await runtime.complete('wf list ', {bridge: webFront})).candidates.join() === '--tree',
+            'Completion must offer wf list and its option');
         // Ctrl+C: the terminal stops waiting at once, the next command answers while the first is still ending in C++.
         const interruptLinger = new AbortController();
         const lingering = failure(runtime.runLine('linger first', lineContext(interruptLinger.signal)));
@@ -1216,10 +1238,8 @@ try {
         const sessionFrame = document.createElement('iframe');
         sessionFrame.src = '/fixtures/session.html';
         document.body.append(sessionFrame);
-        for (let attempt = 0; !sessionFrame.contentWindow?.session; ++attempt) {
-            if (attempt === 200) throw new Error('The second session did not load');
-            await delay(25);
-        }
+        // The session is a promise: its presence is checked, not its resolution.
+        await eventually(() => Boolean(sessionFrame.contentWindow?.session), 'The second session did not load');
         const second = await sessionFrame.contentWindow.session;
         const secondWait = failure(second.runtime.runLine('wait second', {bridge: second.bridge, cppCommands: second.cppCommands, signal: new AbortController().signal}));
         await waitState('second', 'running');
@@ -1240,9 +1260,7 @@ try {
         assert(lost?.exitCode === 1 && /connection to the application closed/.test(lost.message),
             `A command of a closed connection must reject: ${lost?.message}`);
         await waitState('second', 'cancelled');
-        for (let attempt = 0; await webFront.cppFunction('test.browsers')() !== browsers - 1; ++attempt)
-            if (attempt === 200) throw new Error('The connection of a closed browser must be released');
-            else await delay(25);
+        await eventually(async () => await webFront.cppFunction('test.browsers')() === browsers - 1, 'The connection of a closed browser must be released');
         sessionFrame.remove();
         // The terminal itself, mounted in this page with a real xterm.js.
         const host = document.createElement('div');
@@ -1287,8 +1305,7 @@ try {
             try {
                 terminal.input('wf dev\r');
                 await delay(10);
-                for (let attempt = 0; attempt < 200 && editor.busy; ++attempt) await delay(10);
-                assert(!editor.busy, 'An invalid wf dev invocation must finish without Ctrl+C');
+                await eventually(() => !editor.busy, 'An invalid wf dev invocation must finish without Ctrl+C', {every: 10});
                 await editor.whenIdle();
                 await rendered();
                 assert(editor.status === 1 && rows().some(row => row.includes(message)) && lastRows(1)[0] === '> ',
@@ -1434,10 +1451,8 @@ try {
         terminal.input('\x03');
         await waitState('replay', 'stopping');
         await webFront.cppFunction('test.release')('replay');
-        for (let attempt = 0; editor.busy; ++attempt) {
-            if (attempt === 100) throw new Error(`Ctrl+C typed during a completion must interrupt the replayed command: ${lastRows(3)}`);
-            await delay(20);
-        }
+        await eventually(() => !editor.busy, () => `Ctrl+C typed during a completion must interrupt the replayed command: ${lastRows(3)}`,
+            {attempts: 100, every: 20});
         assert(editor.status === 130 && lastRows(3)[0] === '> linger replay', `The replayed command must be interrupted: ${lastRows(3)} ${editor.status}`);
         // The history is kept per project: a new terminal recalls it.
         await runtime.historySaved();
@@ -1477,10 +1492,7 @@ try {
         const historyFrame = document.createElement('iframe');
         historyFrame.src = '/fixtures/session.html';
         document.body.append(historyFrame);
-        for (let attempt = 0; !historyFrame.contentWindow?.session; ++attempt) {
-            if (attempt === 200) throw new Error('The second page did not load');
-            await delay(25);
-        }
+        await eventually(() => Boolean(historyFrame.contentWindow?.session), 'The second page did not load');
         const page = await historyFrame.contentWindow.session;
         const pageTerminal = await page.runtime.mount({bridge: page.bridge, config, terminal: historyFrame.contentDocument.getElementById('terminal'),
             preview: context.preview, onExit: () => {}, fitToElement: false});

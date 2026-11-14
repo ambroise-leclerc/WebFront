@@ -207,6 +207,12 @@ Scenario commandsRegister{"Commands register their bridge functions and list the
             for (const auto* name : {"", "two words", "quo'te", "back\\slash", "tab\t", "wf", "clear", "exit", "help", "history", "greet"})
                 checkThrows<invalid_argument>([&] { fixture.commands.add(name, "", greet); });
         });
+        then("every name the terminal keeps for itself is refused, the file commands it does not provide included", [&] {
+            for (const auto name : webfront::commands::reservedNames)
+                checkThrows<invalid_argument>([&] { fixture.commands.add(std::string(name), "", greet); });
+            for (const auto* name : {"ls", "cat", "tree", "mounts", "rm", "cd", "edit"})
+                check(std::ranges::find(webfront::commands::reservedNames, std::string_view{name}) != webfront::commands::reservedNames.end());
+        });
     });
     given("an application where only webfront.commands.cancel is taken", [&] {
         FakeApp app;

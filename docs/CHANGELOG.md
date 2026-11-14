@@ -10,8 +10,13 @@ these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
+### Breaking
+
+- Reserve more command names for the terminal: an application command named `ls`, `cat`, `tree`, `mounts`, `cd`, `pwd`, `cp`, `mv`, `rm`, `mkdir`, `rmdir`, `touch`, `edit`, `find`, `grep`, `head`, `tail`, `less`, `stat`, `du` or `df` is now refused by `webfront::Commands::add` and must be renamed (#575, ADR-023).
+
 ### Added
 
+- Look at the project from the terminal with `ls`, `cat`, `tree` and `mounts` (read-only), and at the installed packages with `wf list --tree`, `wf why <package>` and `wf info <package>`; a `wf` command typed without its prefix answers with the line to type. The `wf` prefix stays (#575, ADR-023, `docs/DEVELOPER_ENVIRONMENT.md`).
 - Add WebFront to an application that keeps its own loop: `app.start()` opens the system browser and returns at once, `app.requestClose()` ends an embedded window's `show()` from any thread, and `webfront::UIThread<App>` runs an application on a secondary thread where the frontend allows it (WebView2). New `WebFrontHostLoop` example (#567, `docs/HOST_INTEGRATION.md`, ADR-007).
 - Tell an agent at first contact how an application is developed (C++ with a TypeScript/TSX interface in `ui/`, `wf dev`) and that it can run `wf` itself in JSON or MCP: a README section before the tutorial, `webfront_write_agent_guide()`, and notices at configuration, in the terminal and at startup (#561, `docs/DEVELOPING_WITH_AGENTS.md`).
 - Add the `app` starter (`wf create app`: a minimal TypeScript interface without dependency), `wf help <command>` and `wf help agents`, and make a missing manifest, a missing entry and an unknown starter answer with the next steps. Environment 0.9.2 (#561, `docs/DEVELOPER_ENVIRONMENT.md`).

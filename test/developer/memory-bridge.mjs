@@ -20,6 +20,13 @@ export function memoryBridge(storage = new Map()) {
             if (!names.size) throw new Error('Cannot list project directory: ' + directory);
             return new TextEncoder().encode(JSON.stringify([...names].sort()));
         },
+        // Like Store::entries: the same entries with their type and size; the memory project keeps no dates.
+        entries: directory => {
+            const prefix = directory ? directory + '/' : '';
+            return new TextEncoder().encode(JSON.stringify(JSON.parse(new TextDecoder().decode(operations.list(directory))).map(name =>
+                name.endsWith('/') ? {name: name.slice(0, -1), type: 'directory', size: 0, modified: 0}
+                    : {name, type: 'file', size: storage.get(prefix + name).length, modified: 0})));
+        },
         begin: (destination, directory) => { transactions.set(String(++next), {destination, directory, files: new Map(), replace: true}); return String(next); },
         beginNew: (destination, directory) => { transactions.set(String(++next), {destination, directory, files: new Map(), replace: false}); return String(next); },
         write: (id, path, offset, bytes) => {
