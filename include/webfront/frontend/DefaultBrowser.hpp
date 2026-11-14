@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -12,6 +13,16 @@
 #include <string_view>
 #ifdef _WIN32
     #include <shellapi.h>
+#else
+    #include <spawn.h>
+    #include <sys/wait.h>
+    #include <unistd.h>
+
+    #include <cerrno>
+    #include <cstdio>
+    #include <functional>
+    #include <thread>
+extern char** environ;
 #endif
 
 namespace webfront::browser {
@@ -102,6 +113,50 @@ inline void launch(const std::string& url) {
     const auto invocation = commandForUrl(url);
     if (::system(invocation.c_str()) != 0)
         throw std::runtime_error("Failed to open browser with command: " + invocation);
+#endif
+}
+// LCOV_EXCL_STOP
+
+#ifndef _WIN32
+namespace detail {
+/// Runs `shellCommand` with `/bin/sh -c` and returns once it is spawned, without waiting for it: `xdg-open` and the WSL
+/// bridge may live as long as the browser they start. A spawn that fails throws; the end of the command is awaited by a
+/// thread of its own (so that no zombie is left), which calls `finished(status)` with the wait status, or -1 when it
+/// cannot be known (the host reaps its children itself).
+inline void spawnWithoutWaiting(const std::string& shellCommand, std::function<void(int)> finished) {
+    const char* const arguments[] = {"sh", "-c", shellCommand.c_str(), nullptr};
+    pid_t             child       = 0;
+    if (const int error = ::posix_spawn(&child, "/bin/sh", nullptr, nullptr, const_cast<char* const*>(arguments), environ))
+        throw std::runtime_error("Failed to start the system browser command: " + std::string(std::strerror(error)));
+    std::thread([child, finished = std::move(finished)] {
+        int status = 0;
+        int result = 0;
+        do {
+            result = ::waitpid(child, &status, 0);
+        } while (result < 0 && errno == EINTR);
+        finished(result < 0 ? -1 : status);
+    }).detach();
+}
+
+inline void reportBrowserCommand(const std::string& invocation, int status) {
+    if (status != 0)  // plain stdio: the thread may outlive the C++ streams at process exit
+        std::fprintf(stderr, "WebFront: the system browser command did not succeed (status %d): %s\n", status, invocation.c_str());
+}
+}  // namespace detail
+#endif
+
+/// Opens the page in the system browser and returns at once, whatever the opener does afterwards (BasicWF::start() runs
+/// it on the host's own thread). A command that cannot be spawned throws; one that fails later is reported on stderr,
+/// since nobody waits for it. On Windows ShellExecute already returns at once.
+// LCOV_EXCL_START
+inline void launchWithoutWaiting(const std::string& url) {
+#ifdef _WIN32
+    launch(url);
+#else
+    const auto invocation = commandForUrl(url);
+    detail::spawnWithoutWaiting(invocation, [invocation](int status) {
+        detail::reportBrowserCommand(invocation, status);
+    });
 #endif
 }
 // LCOV_EXCL_STOP

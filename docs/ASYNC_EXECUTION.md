@@ -197,8 +197,9 @@ app.cppFunction("slowSquare", [&app](int value) -> webfront::ResultTask<int> {
 
 ## Threads
 
-WebFront runs its HTTP/WebSocket server on one thread: the thread `show()` starts, or the thread
-that calls `run()` or `runOne()`. That server thread is the only one that runs:
+WebFront runs its HTTP/WebSocket server on one thread: the thread `show()` or `start()` starts, or
+the thread that calls `run()` or `runOne()`. An application that keeps its own loop instead of
+giving its thread to `show()` follows [host integration](HOST_INTEGRATION.md). That server thread is the only one that runs:
 
 - `cppFunction` callbacks, `onUIStarted`, `subscribeUIStarted` and `subscribeUIClosed` handlers;
 - DOM event callbacks and the bodies of tasks started with `app.spawn` or `ui.spawn`.
@@ -210,7 +211,8 @@ From any thread, while the application lives, you can call:
 
 - `ui.jsFunction(name)(...)`, `ui.jsFunction<R>(name)(...)` and starting a `jsFunctionSender`;
 - `ui.addScript`, `ui.pendingWrites`, `ui.writesAtMost` and `ui.spawn`;
-- `app.broadcast(name)(...)`, `app.forEachUI`, `app.connectedBrowsers`, `app.spawn` and `app.stop`.
+- `app.broadcast(name)(...)`, `app.forEachUI`, `app.connectedBrowsers`, `app.spawn`, `app.stop`
+  and `app.requestClose`.
 
 These calls never wait for the server thread. They take short internal locks, queue the frame,
 and the server thread writes it. Only `ui.document()` and its nodes are confined to the server

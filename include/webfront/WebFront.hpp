@@ -201,6 +201,12 @@ public:
 };
 
 namespace detail {
+/// The application that currently shows a window through `Frontend`, process-wide like the frontend itself: only one
+/// show() at a time can own it, so a second application's request never reaches the first's window.
+template <typename Frontend>
+struct FrontendSessionOwner {
+    static inline std::atomic<const void*> owner{nullptr};
+};
 
 /// True for the loopback address of either family, including an IPv4 loopback seen through a dual-stack socket (::ffff:127.0.0.1).
 template <typename Address>
@@ -1006,6 +1012,34 @@ public:
     #pragma warning(disable : 4702)
 #endif
     WindowAction openWindow(std::string_view htmlFilename) {
+        // The thread of this application's show(): requestClose() recognizes the session that is its own by it.
+        // Only the show() that takes the frontend's session ownership can be asked to close; one that finds it taken (another
+        // application's window, or its own interface thread calling show() again) is refused below, before the frontend.
+        struct Showing {
+            BasicWF& self;
+            bool     owns;
+            explicit Showing(BasicWF& owner) : self(owner), owns(false) {
+                const void* none = nullptr;
+                owns             = detail::FrontendSessionOwner<Frontend>::owner.compare_exchange_strong(none, &self);
+                if (owns) {
+                    self.showThread = std::this_thread::get_id();
+                    ++self.showEpoch;  // odd: owns the session
+                }
+            }
+            ~Showing() {
+                if (owns) {
+                    ++self.showEpoch;  // even: a reader that saw the odd value and sees this one reads nothing
+                    self.showThread = std::thread::id{};
+                    detail::FrontendSessionOwner<Frontend>::owner = nullptr;
+                }
+            }
+        } showing{*this};
+        // A frontend that can be asked to close shows one window at a time: a show() that did not take the ownership must
+        // not open one that nobody could close (the first may end before this one attaches, and the frontend would accept it).
+        if constexpr (frontend::endsOnRequest<Frontend>) {
+            if (!showing.owns)
+                throw std::logic_error("webfront::BasicWF::show(): another application is already showing a window through this frontend");
+        }
         if constexpr (requires(const ViewLaunch& launch) { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, launch); })
             Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, ViewLaunch{viewSecret, detail::browserOrigin(httpAddress, httpPort)});
         else if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions); })
@@ -1027,13 +1061,20 @@ public:
     // Starts the server in a background thread and opens the frontend. An embedded window's close
     // or a frontend exception stops and joins the server. An external browser keeps it running.
     void openAndRun(std::string_view htmlFilename) {
-        // The constructor has already bound and listened; this thread services the queued I/O.
-        // Launch server only once or restart if previous thread ended
-        if (!serverThread.joinable()) {
-            serverThread = std::thread([this] {
-                run();
-            });
-        }
+        if (launched)
+            throw std::logic_error("webfront::BasicWF::show(): this application was started with start(); it has no window loop to run");
+        // One show() at a time per application: a second call (from another thread, or re-entrantly from the interface
+        // thread) is refused before it touches anything. Its error path stops the server, which belongs to the first call.
+        if (showRunning.exchange(true))
+            throw std::logic_error("webfront::BasicWF::show(): this application is already showing; its server and window are left untouched");
+        struct ShowDone {
+            std::atomic<bool>& running;
+            ~ShowDone() {
+                running = false;
+            }
+        } showDone{showRunning};
+        shown = true;
+        startServerThread();
         WindowAction action;
         try {
             action = openWindow(htmlFilename);
@@ -1062,6 +1103,89 @@ public:
         openAndRun(page);
     }
 
+    /** @brief Starts the server on its own thread, opens the page and returns at once: the calling thread keeps its
+     * own loop (docs/HOST_INTEGRATION.md). Nothing is read from the console and nothing waits for the interface.
+     *
+     * Only for a frontend that can open without running a loop, which it declares with `launch()`: the system browser
+     * (the default `webfront::WebFront`). An embedded window lives in the loop of `show()`; such a frontend is refused at
+     * compile time. Call it once per application, on the thread that owns it, instead of show(): a second start(), or
+     * a start() or show() after the other (also once show() has stopped its server), throws std::logic_error and leaves the running server untouched.
+     * If the opening throws, the server is stopped and joined before the exception propagates, as for show(); that
+     * application cannot be started again (the stopped server is not re-armed): construct another. Otherwise the
+     * server runs until stop(), shutdown() or destruction; register callbacks and handlers before the call.
+     *
+     * The frontend receives the address, the port, the page and, when its launch() takes it, the content policy. It gets
+     * no WindowOptions and no view-association proof: an interface that is launched and left is an external browser,
+     * which show() does not give them either (ADR-020).
+     */
+    void start(std::string_view page = "index.html") {
+        static_assert(requires { Frontend::launch(std::string_view{}, std::string_view{}, std::string_view{}); },
+                      "webfront::BasicWF::start(): this frontend opens its window inside the loop of show(), which keeps the "
+                      "calling thread. Call show() on the interface thread and end it with requestClose(), or run the "
+                      "application in a webfront::UIThread when the frontend allows a secondary thread "
+                      "(docs/HOST_INTEGRATION.md).");
+        if constexpr (requires { Frontend::launch(std::string_view{}, std::string_view{}, std::string_view{}); }) {
+            if (shown || serverThread.joinable() || launched.exchange(true))
+                throw std::logic_error("webfront::BasicWF::start(): the application is already started; call start() once, instead of show()");
+            if (!httpDocRoot.empty() && !developerEnvironment)
+                detail::noteDevelopmentPath();
+            startServerThread();
+            try {
+                if constexpr (requires { Frontend::launch(httpAddress, httpPort, page, contentPolicy); })
+                    Frontend::launch(httpAddress, httpPort, page, contentPolicy);
+                else
+                    Frontend::launch(httpAddress, httpPort, page);
+            } catch (...) {
+                stopAndJoinServer();  // stopped for good: the server is not re-armed, so `launched` stays set
+                throw;
+            }
+        }
+    }
+
+    /** @brief Asks the interface that show() is running to end, as if the user had closed the window; show() then
+     * returns on its own thread. Callable from any thread while the application lives, never blocking.
+     *
+     * Returns false when the request reached nothing: this application is not showing a window (the frontend's
+     * session, if any, belongs to another application), the frontend has no window of its own to close (the system
+     * browser), no window is open yet, or it already closed. A caller that must end a session whose window may still be
+     * opening repeats the request until show() has returned, as webfront::UIThread::stop() does.
+     */
+    bool requestClose() {
+        if constexpr (frontend::CanRequestClose<Frontend>) {
+            // The frontend is process-wide: a window it shows may belong to another application. Only the show() that took
+            // the session's ownership (an odd epoch) asks; and a frontend that publishes its interface thread must also
+            // be running a session on that show()'s thread. A second open() refused for another session owns nothing.
+            const auto epoch = showEpoch.load();
+            if (epoch % 2 == 0)
+                return false;
+            if constexpr (requires { { Frontend::uiExecutor() } -> std::same_as<frontend::UIExecutor>; }) {
+                bool publishesSessions = true;  // false: the frontend in use has no executor (an empty handle), so no session to name
+                if constexpr (requires { { Frontend::publishesUIExecutor() } -> std::same_as<bool>; })
+                    publishesSessions = Frontend::publishesUIExecutor();
+                if (publishesSessions) {
+                    const auto shows   = showThread.load();
+                    const auto session = Frontend::uiExecutor().session();
+                    // The same epoch after the reads: this show() owned the session throughout, and its thread is busy
+                    // inside open(), so a session on that thread is this application's.
+                    if (!session || session->thread != shows || showEpoch.load() != epoch)
+                        return false;
+                    // Another application may open a window between this check and the toolkit call: a frontend that
+                    // takes the session checks it again where the request runs, so that it never closes a later one.
+                    if constexpr (requires { { Frontend::requestClose(session) } -> std::same_as<bool>; })
+                        return Frontend::requestClose(session);
+                }
+            }
+            if (showEpoch.load() != epoch)
+                return false;
+            if constexpr (requires { { Frontend::requestClose() } -> std::same_as<bool>; })
+                return Frontend::requestClose();
+            else
+                return Frontend::requestClose(std::nullopt);  // only the form that takes a session, and none is published
+        } else {
+            return false;
+        }
+    }
+
 protected:
     /// For the developer application: its document root is the project that wf builds, which is the development path.
     void useDeveloperEnvironment() noexcept {
@@ -1069,6 +1193,16 @@ protected:
     }
 
 private:
+    // The constructor has already bound and listened; this thread services the queued I/O.
+    // Launch server only once or restart if previous thread ended
+    void startServerThread() {
+        if (!serverThread.joinable()) {
+            serverThread = std::thread([this] {
+                run();
+            });
+        }
+    }
+
     void stopAndJoinServer() {
         stop();
         if (serverThread.joinable())
@@ -1246,6 +1380,11 @@ private:
     const std::string                                                        viewSecret = detail::newViewSecret();  // this launch's proof of an embedded view
     const bool                                                               trustLoopbackClients;
     bool                                                                     developerEnvironment = false;
+    std::atomic<bool>                                                        launched{false};  // start() was called
+    std::atomic<std::thread::id>                                             showThread{};  // the thread inside this application's Frontend::open(), if any
+    std::atomic<std::uint64_t>                                               showEpoch{0};  // odd while show() runs its frontend, changes at each entry and exit
+    std::atomic<bool>                                                        showRunning{false};  // a show() of this application is in progress
+    std::atomic<bool>                                                        shown{false};     // show() was called, whether or not its server still runs
     mutable std::mutex                                                       linksMutex;  // guards webLinks, read from any thread
     struct Connection {
         std::shared_ptr<WebLink<Net, Policy>> link;

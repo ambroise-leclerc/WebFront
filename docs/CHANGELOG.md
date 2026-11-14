@@ -12,6 +12,7 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Added
 
+- Add WebFront to an application that keeps its own loop: `app.start()` opens the system browser and returns at once, `app.requestClose()` ends an embedded window's `show()` from any thread, and `webfront::UIThread<App>` runs an application on a secondary thread where the frontend allows it (WebView2). New `WebFrontHostLoop` example (#567, `docs/HOST_INTEGRATION.md`, ADR-007).
 - Tell an agent at first contact how an application is developed (C++ with a TypeScript/TSX interface in `ui/`, `wf dev`) and that it can run `wf` itself in JSON or MCP: a README section before the tutorial, `webfront_write_agent_guide()`, and notices at configuration, in the terminal and at startup (#561, `docs/DEVELOPING_WITH_AGENTS.md`).
 - Add the `app` starter (`wf create app`: a minimal TypeScript interface without dependency), `wf help <command>` and `wf help agents`, and make a missing manifest, a missing entry and an unknown starter answer with the next steps. Environment 0.9.2 (#561, `docs/DEVELOPER_ENVIRONMENT.md`).
 - Build and test with GCC 13 on a hosted Linux aarch64 runner in the weekly and `master` checks (`gcc13-arm64`), and let `setup-cmake` install CMake on aarch64 (#548, `docs/TEST_TIERS.md`).

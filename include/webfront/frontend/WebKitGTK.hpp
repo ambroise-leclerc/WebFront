@@ -4,6 +4,7 @@
 #include "../tooling/Logger.hpp"
 #include "Action.hpp"
 #include "Capture.hpp"
+#include "CloseRequest.hpp"
 #include "DefaultBrowser.hpp"
 #include "Downloads.hpp"
 #include "NativeWindow.hpp"
@@ -22,6 +23,7 @@
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -833,6 +835,18 @@ struct WebKitGTKFrontend {
     }
 
     static constexpr Action action{Action::closeServerAfterOpen};
+    static constexpr bool   requiresMainThread = true;  // GTK is initialized and run on the process main thread
+
+    /// Asks the window to close, from any thread; false when no window is open (see CloseRequest.hpp).
+    static bool requestClose([[maybe_unused]] std::optional<UISession> session = std::nullopt) noexcept {
+#if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
+        return detail::requestWindowClose(uiExecutor(), nativeWindow(), [](const NativeWindowHandle& window) {
+            detail::webkitgtk::api().windowClose(window.pointer);  // emits close-request, as the window's button does
+        }, session);
+#else
+        return false;
+#endif
+    }
     static void             initialize() {
 #if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
         detail::webkitgtk::initialize();

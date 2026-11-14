@@ -3,6 +3,7 @@
 #include "../ContentPolicy.hpp"
 #include "Action.hpp"
 #include "Capture.hpp"
+#include "CloseRequest.hpp"
 #include "Downloads.hpp"
 #include "../ViewAssociation.hpp"
 #include "ScriptDialogs.hpp"
@@ -19,6 +20,7 @@
 #include <functional>
 #include <map>
 #include <stdexcept>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -1099,6 +1101,12 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
     window.run();
 }
 
+/// A host's close request, on the main thread: the session ends as it does for the Quit menu item, through the
+/// window's delegate (none once the session is being released).
+inline void requestSessionClose(void* window) {
+    send<void>(send(static_cast<id>(window), "delegate"), "webfrontQuit:", static_cast<id>(nullptr));
+}
+
 }  // namespace webfront::frontend::detail::wkwebview
 #endif
 
@@ -1107,6 +1115,18 @@ namespace webfront::frontend {
 /** @brief Optional macOS embedded window. Main thread only; see docs/WKWEBVIEW.md. */
 struct WKWebViewFrontend {
     static constexpr Action action{Action::closeServerAfterOpen};
+    static constexpr bool   requiresMainThread = true;  // AppKit
+
+    /// Asks the window to close, from any thread; false when no window is open (see CloseRequest.hpp).
+    static bool requestClose([[maybe_unused]] std::optional<UISession> session = std::nullopt) noexcept {
+#if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
+        return detail::requestWindowClose(uiExecutor(), nativeWindow(), [](const NativeWindowHandle& window) {
+            detail::wkwebview::requestSessionClose(window.pointer);
+        }, session);
+#else
+        return false;
+#endif
+    }
 
     static void initialize() {
 #if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
