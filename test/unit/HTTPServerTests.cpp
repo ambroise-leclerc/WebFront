@@ -21,7 +21,7 @@ using namespace webfront::http;
 using namespace std;
 using Net = networking::NetworkingMock;
 
-Scenario hTTPRequest{"HTTP Request", [] {
+const Scenario hTTPRequest{"HTTP Request", [] {
     given("A request with % encoded characters", [&] {
         Request request;
         request.uri = "http://aaa.bbb.ccc/bozo%20le%20clown";
@@ -43,7 +43,7 @@ Scenario hTTPRequest{"HTTP Request", [] {
     require(Request::getMethodFromString("test") == Request::Method::Undefined);
 }};
 
-Scenario hTTPResponse{"HTTP Response", [] {
+const Scenario hTTPResponse{"HTTP Response", [] {
     given("Ok Response", [&] {
         auto ok = Response::getStatusResponse(Response::ok);
         then("Fields should be", [&] {
@@ -98,7 +98,7 @@ Scenario hTTPResponse{"HTTP Response", [] {
     });
 }};
 
-Scenario pendingHTTP{"Pending HTTP response buffers remain independent and announce connection closure", [] {
+const Scenario pendingHTTP{"Pending HTTP response buffers remain independent and announce connection closure", [] {
     const auto text = [](const auto& buffers) {
         std::string result;
         for (const auto& buffer : buffers)
@@ -128,7 +128,7 @@ Scenario pendingHTTP{"Pending HTTP response buffers remain independent and annou
     });
 }};
 
-Scenario requestParser{"RequestParser", [] {
+const Scenario requestParser{"RequestParser", [] {
     given("A valid HTTP request", [&] {
         string input{"GET /hello.htm HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
                      "www.tutorialspoint.com\r\nAccept-Language: en-us\r\nAccept-Encoding: gzip\r\n"
@@ -191,7 +191,7 @@ bool compare(auto& buffer, std::string text) {
     return true;
 };
 
-Scenario requestParsing{"Request parsing", [] {
+const Scenario requestParsing{"Request parsing", [] {
     given("A valid HTTP request with an unimplemented method", [&] {
         string input{"DELETE /ressource.txt HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
                      "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\n\r\n"};
@@ -261,7 +261,7 @@ Scenario requestParsing{"Request parsing", [] {
     });
 }};
 
-Scenario asynchronousRequest{"Asynchronous Request parsing", [] {
+const Scenario asynchronousRequest{"Asynchronous Request parsing", [] {
     given("A HTTP HEAD request received asynchronously", [&] {
         string chunk1{"HEAD /file.txt HTTP/1.1\r\nUser-Agent:"};
         string chunk2{" Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "};
@@ -284,7 +284,7 @@ Scenario asynchronousRequest{"Asynchronous Request parsing", [] {
     });
 }};
 
-Scenario requestHandlerHTTP{"RequestHandler on a HTTP GET", [] {
+const Scenario requestHandlerHTTP{"RequestHandler on a HTTP GET", [] {
     given("A valid HTTP GET request on a compressed file with no supported encoding", [&] {
         string input{"GET /compressed.txt HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
                      "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\n\r\n"};
@@ -366,7 +366,7 @@ struct UpgradingNet : networking::NetworkingMock {
 
 }  // namespace
 
-Scenario stoppedServer{"A stopped server hands no connection over", [] {
+const Scenario stoppedServer{"A stopped server hands no connection over", [] {
     given("A connection asking for an upgrade, whose response write is still in progress", [&] {
         int upgrades = 0;
         UpgradingNet::reset(false);
@@ -385,7 +385,7 @@ Scenario stoppedServer{"A stopped server hands no connection over", [] {
     });
 }};
 
-Scenario failedAccept{"A failed accept does not stop the server from accepting", [] {
+const Scenario failedAccept{"A failed accept does not stop the server from accepting", [] {
     given("A first accept which fails, then a connection", [&] {
         UpgradingNet::reset(true);
         http::Server<UpgradingNet, fs::DefaultFS> server("127.0.0.1", "0");
@@ -409,7 +409,7 @@ struct RecordingFS {
     }
 };
 
-Scenario requestHandlerIgnores{"RequestHandler ignores the query string of a request", [] {
+const Scenario requestHandlerIgnores{"RequestHandler ignores the query string of a request", [] {
     RecordingFS::opened.clear();
     RequestHandler<Net, RecordingFS> handler{"."};
     const auto get = [&](string uri, Request::Method method = Request::Method::Get) {
@@ -456,7 +456,7 @@ Scenario requestHandlerIgnores{"RequestHandler ignores the query string of a req
     });
 }};
 
-Scenario hTTPVersion{"HTTP version digits cannot overflow their integer fields", [] {
+const Scenario hTTPVersion{"HTTP version digits cannot overflow their integer fields", [] {
     for (const std::string version : {"99999999999999999999.1", "1.99999999999999999999"}) {
         const auto input = "GET / HTTP/" + version + "\r\n\r\n";
         Request    request;
@@ -464,14 +464,14 @@ Scenario hTTPVersion{"HTTP version digits cannot overflow their integer fields",
     }
 }};
 
-Scenario unknownHTTP{"Unknown HTTP methods have a safe display name", [] {
+const Scenario unknownHTTP{"Unknown HTTP methods have a safe display name", [] {
     const std::string input = "CUSTOM / HTTP/1.1\r\n\r\n";
     Request           request;
     require(request.parseSomeData(input.begin(), input.end()));
     require(request.getMethodName() == "Undefined");
 }};
 
-Scenario hTTPRequests{"HTTP requests keep method parsing state across interleaved receives", [] {
+const Scenario hTTPRequests{"HTTP requests keep method parsing state across interleaved receives", [] {
     given("two connections whose method names arrive in separate reads", [&] {
         Request           first;
         Request           second;

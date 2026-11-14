@@ -21,7 +21,7 @@ using Subscribers = detail::UISubscribers<FakeUI>;
 
 }  // namespace
 
-Scenario severalHandlers{"Several handlers subscribe to connected browsers", [] {
+const Scenario severalHandlers{"Several handlers subscribe to connected browsers", [] {
     given("two subscriptions", [&] {
         auto           subscribers = make_shared<Subscribers>();
         vector<string> calls;
@@ -59,7 +59,7 @@ Scenario severalHandlers{"Several handlers subscribe to connected browsers", [] 
     });
 }};
 
-Scenario subscriptionsMove{"Subscriptions are move-only handles", [] {
+const Scenario subscriptionsMove{"Subscriptions are move-only handles", [] {
     given("a subscription moved into another one", [&] {
         auto           subscribers = make_shared<Subscribers>();
         int            calls       = 0;
@@ -83,7 +83,7 @@ Scenario subscriptionsMove{"Subscriptions are move-only handles", [] {
     });
 }};
 
-Scenario subscriptionMay{"A subscription may outlive its application", [] {
+const Scenario subscriptionMay{"A subscription may outlive its application", [] {
     given("a subscription whose subscribers were destroyed", [&] {
         auto subscribers  = make_shared<Subscribers>();
         auto subscription = subscribers->subscribe([](FakeUI) {});
@@ -96,7 +96,7 @@ Scenario subscriptionMay{"A subscription may outlive its application", [] {
     });
 }};
 
-Scenario handlersMay{"Handlers may change the subscriptions while being notified", [] {
+const Scenario handlersMay{"Handlers may change the subscriptions while being notified", [] {
     given("a handler that subscribes another handler and drops its own subscription", [&] {
         auto           subscribers = make_shared<Subscribers>();
         vector<string> calls;
@@ -120,7 +120,7 @@ Scenario handlersMay{"Handlers may change the subscriptions while being notified
     });
 }};
 
-Scenario handlerMayOwn{"A handler may own another subscription to the same browsers", [] {
+const Scenario handlerMayOwn{"A handler may own another subscription to the same browsers", [] {
     given("a handler whose capture owns a second subscription", [&] {
         auto subscribers = make_shared<Subscribers>();
         auto inner       = make_shared<UISubscription>(subscribers->subscribe([](FakeUI) {}));

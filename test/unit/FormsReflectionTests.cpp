@@ -36,7 +36,7 @@ private:
 };
 }  // namespace reflected
 
-Scenario reflectionProduces{"Reflection produces the descriptors written by hand", {"forms", "reflection"}, [] {
+const Scenario reflectionProduces{"Reflection produces the descriptors written by hand", {"forms", "reflection"}, [] {
     const auto reflectedDescription = forms::describe<reflected::Settings>();
     const auto handWritten          = forms_fixture::settingsDescription();
     then("names, labels, kinds, bounds and choices match, private members aside", [&] {
@@ -72,7 +72,7 @@ Scenario reflectionProduces{"Reflection produces the descriptors written by hand
     });
 }};
 
-Scenario reflectedForm{"A reflected form is the hand-written form", {"forms", "reflection", "dom"}, [] {
+const Scenario reflectedForm{"A reflected form is the hand-written form", {"forms", "reflection", "dom"}, [] {
     forms_fixture::Recorder byHand, byReflection;
     auto                    handSettings      = std::make_shared<forms_fixture::Settings>();
     auto                    reflectedSettings = std::make_shared<reflected::Settings>();

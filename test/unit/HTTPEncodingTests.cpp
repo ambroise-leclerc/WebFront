@@ -95,7 +95,7 @@ Request assetRequest() {
 }  // namespace
 
 
-Scenario hTTPDecodes{"HTTP decodes gzip when the stored encoding is unavailable", [] {
+const Scenario hTTPDecodes{"HTTP decodes gzip when the stored encoding is unavailable", [] {
     RequestHandler<Net, EncodedAssetFS> handler{"."};
     for (const auto header : {"", "br", "gzip;q=0", "gzip;q=0.000, *;q=1", "xgzip", "gzip2", "gzip;q=invalid"}) {
         given("Accept-Encoding: ", header, [&] {
@@ -119,7 +119,7 @@ Scenario hTTPDecodes{"HTTP decodes gzip when the stored encoding is unavailable"
     }
 }};
 
-Scenario hTTPPreserves{"HTTP preserves accepted gzip bytes", [] {
+const Scenario hTTPPreserves{"HTTP preserves accepted gzip bytes", [] {
     RequestHandler<Net, EncodedAssetFS> handler{"."};
     for (const auto header : {"gzip", "GZIP", "x-gzip", "X-GZIP;q=0.5", "br, gzip;q=0.5", "gzip;q=1.000", "*;q=0.1", "gzip;q=1, *;q=0"}) {
         given("Accept-Encoding: ", header, [&] {
@@ -139,7 +139,7 @@ Scenario hTTPPreserves{"HTTP preserves accepted gzip bytes", [] {
     }
 }};
 
-Scenario hTTPConsiders{"HTTP considers explicit encoding preferences across fields", [] {
+const Scenario hTTPConsiders{"HTTP considers explicit encoding preferences across fields", [] {
     RequestHandler<Net, EncodedAssetFS> handler{"."};
     auto                                request = assetRequest();
     given("multiple Accept-Encoding fields", [&] {
@@ -157,7 +157,7 @@ Scenario hTTPConsiders{"HTTP considers explicit encoding preferences across fiel
     });
 }};
 
-Scenario hTTPRejectsUnavailable{"HTTP rejects unavailable representations", [] {
+const Scenario hTTPRejectsUnavailable{"HTTP rejects unavailable representations", [] {
     RequestHandler<Net, EncodedAssetFS> handler{"."};
     auto                                request = assetRequest();
     for (const auto header : {"gzip;q=0, identity;q=0", "*;q=0"}) {
@@ -178,7 +178,7 @@ Scenario hTTPRejectsUnavailable{"HTTP rejects unavailable representations", [] {
     });
 }};
 
-Scenario hTTPHEAD{"HTTP HEAD describes the negotiated representation", [] {
+const Scenario hTTPHEAD{"HTTP HEAD describes the negotiated representation", [] {
     RequestHandler<Net, EncodedAssetFS> handler{"."};
     for (const auto& [header, length] : {
              std::pair{    "",                       std::string("23768")},
@@ -202,7 +202,7 @@ Scenario hTTPHEAD{"HTTP HEAD describes the negotiated representation", [] {
     }
 }};
 
-Scenario hTTPFallback{"HTTP fallback rejects corrupt and truncated streams", [] {
+const Scenario hTTPFallback{"HTTP fallback rejects corrupt and truncated streams", [] {
     RequestHandler<Net, EncodedAssetFS> handler{"."};
     for (const auto path : {"/corrupt.js", "/empty.js", "/truncated.js"}) {
         given(path, [&] {
@@ -221,7 +221,7 @@ Scenario hTTPFallback{"HTTP fallback rejects corrupt and truncated streams", [] 
     }
 }};
 
-Scenario hTTPGzipFallback{"HTTP gzip fallback respects the configured decoded byte budget", [] {
+const Scenario hTTPGzipFallback{"HTTP gzip fallback respects the configured decoded byte budget", [] {
     using Limited = CustomBuffersPolicy<8192, 8192, 32768, defaultMaxMessageSize, 23767>;
     RequestHandler<Net, EncodedAssetFS, Limited> handler{"."};
     auto                                         request = assetRequest();
@@ -248,14 +248,14 @@ Scenario hTTPGzipFallback{"HTTP gzip fallback respects the configured decoded by
     });
 }};
 
-Scenario gzipFallback{"Gzip fallback budgets preserve legacy buffer policy compatibility", [] {
+const Scenario gzipFallback{"Gzip fallback budgets preserve legacy buffer policy compatibility", [] {
     then("an older policy inherits the 4 MiB fallback limit", [&] {
         require(maxDecodedAssetSize<LegacyPolicy>() == 4 * 1024 * 1024);
         require(maxDecodedAssetSize<DefaultBuffersPolicy>() == defaultMaxDecodedAssetSize);
     });
 }};
 
-Scenario hTTPServer{"HTTP Server forwards the application policy to gzip fallback", [] {
+const Scenario hTTPServer{"HTTP Server forwards the application policy to gzip fallback", [] {
     AssetServerNet::accepts = 0;
     AssetServerNet::statusLine.clear();
     using Limited = CustomBuffersPolicy<8192, 8192, 32768, defaultMaxMessageSize, 23767>;
@@ -267,7 +267,7 @@ Scenario hTTPServer{"HTTP Server forwards the application policy to gzip fallbac
     });
 }};
 
-Scenario hTTPTreats{"HTTP treats stored x-gzip assets as gzip for fallback and pass-through", [] {
+const Scenario hTTPTreats{"HTTP treats stored x-gzip assets as gzip for fallback and pass-through", [] {
     RequestHandler<Net, EncodedAssetFS> handler{"."};
     auto                                request = assetRequest();
     request.uri                                 = "/legacy.js";
@@ -290,7 +290,7 @@ Scenario hTTPTreats{"HTTP treats stored x-gzip assets as gzip for fallback and p
     });
 }};
 
-Scenario hTTPGET{"HTTP GET and HEAD reuse validated gzip revisions across paths and aliases", [] {
+const Scenario hTTPGET{"HTTP GET and HEAD reuse validated gzip revisions across paths and aliases", [] {
     RequestHandler<Net, EncodedAssetFS> handler{"."};
     auto                                request = assetRequest();
     given("a cold HEAD followed by GET, another path and the x-gzip alias", [&] {
@@ -327,7 +327,7 @@ struct MutableAssetFS : EncodedAssetFS {
 };
 }  // namespace
 
-Scenario hTTPMutable{"HTTP mutable providers cannot reuse stale identity content or HEAD lengths", [] {
+const Scenario hTTPMutable{"HTTP mutable providers cannot reuse stale identity content or HEAD lengths", [] {
     RequestHandler<Net, MutableAssetFS> handler{"."};
     auto                                request = assetRequest();
     MutableAssetFS::revision                    = gzipfixtures::fixed;
@@ -354,7 +354,7 @@ Scenario hTTPMutable{"HTTP mutable providers cannot reuse stale identity content
     });
 }};
 
-Scenario hTTPCache{"HTTP cache ownership and policy remain local to the application", [] {
+const Scenario hTTPCache{"HTTP cache ownership and policy remain local to the application", [] {
     using Disabled = CustomBuffersPolicy<8192, 8192, 32768, defaultMaxMessageSize, defaultMaxDecodedAssetSize, 0>;
     RequestHandler<Net, EncodedAssetFS, Disabled> handler{"."};
     const auto                                    request = assetRequest();
@@ -376,7 +376,7 @@ Scenario hTTPCache{"HTTP cache ownership and policy remain local to the applicat
     });
 }};
 
-Scenario hTTPServerDrains{"HTTP server drains and destroys a populated fallback cache", [] {
+const Scenario hTTPServerDrains{"HTTP server drains and destroys a populated fallback cache", [] {
     given("successive applications serving an identity fallback", [&] {
         for (unsigned instance = 0; instance < 2; ++instance) {
             AssetServerNet::accepts = 0;
@@ -408,7 +408,7 @@ private:
 };
 }  // namespace
 
-Scenario hTTPCached{"HTTP cached GET and HEAD recheck the active application output budget", [] {
+const Scenario hTTPCached{"HTTP cached GET and HEAD recheck the active application output budget", [] {
     const ActiveAssetBudget                                initialBudget{23768};
     RequestHandler<Net, EncodedAssetFS, ActiveAssetBudget> handler{"."};
     auto                                                   request = assetRequest();

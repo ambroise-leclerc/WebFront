@@ -22,7 +22,7 @@
 
 using namespace webfront::bdd;
 
-Scenario webFrontCompiles{"WebFront compiles after CEF's compiler macros", [] {
+const Scenario webFrontCompiles{"WebFront compiles after CEF's compiler macros", [] {
     given("the stdexec headers included before CEF's NO_UNIQUE_ADDRESS, ALWAYS_INLINE and NOINLINE", [&] {
         then("every stdexec header WebFront.hpp includes was already included", [&] {
             static_assert(std::is_default_constructible_v<webfront::WebFront>);

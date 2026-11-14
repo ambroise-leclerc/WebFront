@@ -10,7 +10,7 @@ using namespace webfront::bdd;
 using namespace std;
 using namespace webfront;
 
-Scenario pathsBrowser{"Paths from the browser stay inside their directory", [] {
+const Scenario pathsBrowser{"Paths from the browser stay inside their directory", [] {
     given("a relative path of plain components", [&] {
         then("it is accepted, component by component", [&] {
             require(fs::safeRelativePath("dist/assets/app.js") == filesystem::path("dist") / "assets" / "app.js");

@@ -10,7 +10,7 @@ using namespace webfront::bdd;
 using webfront::demo::LifeGrid;
 using webfront::demo::nextLife;
 
-Scenario lifeGenerations{"Life generations follow B3/S23 synchronously", [] {
+const Scenario lifeGenerations{"Life generations follow B3/S23 synchronously", [] {
     given("an empty grid and a stable block", [&] {
         require(nextLife({}).none());
         LifeGrid block;
@@ -42,7 +42,7 @@ Scenario lifeGenerations{"Life generations follow B3/S23 synchronously", [] {
     });
 }};
 
-Scenario lifeWraps{"Life wraps both axes without treating adjacent rows as neighbors", [] {
+const Scenario lifeWraps{"Life wraps both axes without treating adjacent rows as neighbors", [] {
     LifeGrid horizontal, vertical;
     for (const auto i : {31, 0, 1})
         horizontal.set(static_cast<std::size_t>(i));
@@ -59,7 +59,7 @@ Scenario lifeWraps{"Life wraps both axes without treating adjacent rows as neigh
 using webfront::demo::parseLifeDeveloperOptions;
 using webfront::demo::prepareLifeProject;
 
-Scenario webFrontLifeDeveloperStarts{"WebFrontLifeDeveloper starts without arguments", [] {
+const Scenario webFrontLifeDeveloperStarts{"WebFrontLifeDeveloper starts without arguments", [] {
     given("an empty command line", [&] {
         const char* argv[] = {"WebFrontLifeDeveloper"};
         const auto  options = parseLifeDeveloperOptions(1, argv);
@@ -100,7 +100,7 @@ Scenario webFrontLifeDeveloperStarts{"WebFrontLifeDeveloper starts without argum
     });
 }};
 
-Scenario defaultLife{"The default Life project is created once and then reused", [] {
+const Scenario defaultLife{"The default Life project is created once and then reused", [] {
     webfront::test::TemporaryDirectory work;
     const auto                         project = work.path() / "life-project";
     given("a missing project directory", [&] {

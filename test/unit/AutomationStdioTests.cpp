@@ -8,7 +8,7 @@
 
 using namespace webfront::bdd;
 
-Scenario nativeInterrupt{"Native interrupt handlers record catchable signals without doing shutdown work", [] {
+const Scenario nativeInterrupt{"Native interrupt handlers record catchable signals without doing shutdown work", [] {
     webfront::automation::Interrupt interrupt;
     require(interrupt.signal() == 0);
     require(std::raise(SIGINT) == 0);
@@ -18,7 +18,7 @@ Scenario nativeInterrupt{"Native interrupt handlers record catchable signals wit
 }};
 
 #ifdef _WIN32
-Scenario windowsMCP{"Windows MCP stdin drains a final unterminated line after its pipe closes", [] {
+const Scenario windowsMCP{"Windows MCP stdin drains a final unterminated line after its pipe closes", [] {
     struct Pipe {
         HANDLE saved = GetStdHandle(STD_INPUT_HANDLE), reader = nullptr, writer = nullptr;
         ~Pipe() {

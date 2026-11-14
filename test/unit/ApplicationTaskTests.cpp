@@ -79,7 +79,7 @@ struct PausedStartSender {
 };
 }  // namespace
 
-Scenario scopeDrain{"Scope drain waits for a concurrent spawn to finish starting", [] {
+const Scenario scopeDrain{"Scope drain waits for a concurrent spawn to finish starting", [] {
     webfront::networking::TaskScope     scope;
     webfront::networking::IoContextMock context;
     std::latch                          started(1), release(1);
@@ -124,7 +124,7 @@ Scenario scopeDrain{"Scope drain waits for a concurrent spawn to finish starting
     });
 }};
 
-Scenario applicationsOwn{"Applications own spawned coroutines and expose individual cancellation", [] {
+const Scenario applicationsOwn{"Applications own spawned coroutines and expose individual cancellation", [] {
     given("two application coroutines suspended on cancellable operations", [&] {
         App                app(webfront::WebFrontConfig{.port = "0"});
         auto               first       = std::make_shared<int>(1);
@@ -182,7 +182,7 @@ Scenario applicationsOwn{"Applications own spawned coroutines and expose individ
     });
 }};
 
-Scenario stalledScope{"A stalled scope reports absent context work without abandoning its join", [] {
+const Scenario stalledScope{"A stalled scope reports absent context work without abandoning its join", [] {
     given("a task suspended on an external operation that ignores cancellation", [&] {
         std::function<void()>               complete;
         webfront::testing::InlineTaskScope  scope;
@@ -214,7 +214,7 @@ webfront::Task spawnDuringCleanup(App& app, bool& ran, std::optional<webfront::T
 }
 }  // namespace
 
-Scenario spawningDuring{"Spawning during shutdown is rejected with a stopped handle", [] {
+const Scenario spawningDuring{"Spawning during shutdown is rejected with a stopped handle", [] {
     given("a coroutine whose cleanup tries to start another task", [&] {
         bool                                ran = false;
         std::optional<webfront::TaskHandle> handle;
@@ -231,7 +231,7 @@ Scenario spawningDuring{"Spawning during shutdown is rejected with a stopped han
     });
 }};
 
-Scenario spawnScope{"Spawn and scope close agree on whether work was accepted", [] {
+const Scenario spawnScope{"Spawn and scope close agree on whether work was accepted", [] {
     given("a scope closed before any stop request", [&] {
         bool                               ran = false;
         webfront::testing::InlineTaskScope scope;
@@ -269,7 +269,7 @@ Scenario spawnScope{"Spawn and scope close agree on whether work was accepted", 
     });
 }};
 
-Scenario destructionWaits{"Destruction waits safely after an explicit shutdown reports a pending external task", [] {
+const Scenario destructionWaits{"Destruction waits safely after an explicit shutdown reports a pending external task", [] {
     given("a task that cannot finish until an external operation completes", [&] {
         std::function<void()> complete;
         auto                  app = std::make_unique<App>(webfront::WebFrontConfig{.port = "0"});

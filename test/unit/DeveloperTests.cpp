@@ -46,7 +46,7 @@ std::string read(developer::Store& store, std::string path) {
 }
 }  // namespace
 
-Scenario developerPublication{"Developer publication preserves the installed files until commit", [] {
+const Scenario developerPublication{"Developer publication preserves the installed files until commit", [] {
     TemporaryDirectory project;
     developer::Store   store{project.path()};
     given("an installed output", [&] {
@@ -73,7 +73,7 @@ Scenario developerPublication{"Developer publication preserves the installed fil
     });
 }};
 
-Scenario publicationWaits{"A publication waits for a file that another reader is about to release", [] {
+const Scenario publicationWaits{"A publication waits for a file that another reader is about to release", [] {
     TemporaryDirectory project;
     developer::Store   store{project.path()};
     given("a published directory with a file held open, as a scan of what was just written holds it on Windows", [&] {
@@ -98,7 +98,7 @@ Scenario publicationWaits{"A publication waits for a file that another reader is
     });
 }};
 
-Scenario publishedHTTP{"A published HTTP source remains readable across directory replacement", [] {
+const Scenario publishedHTTP{"A published HTTP source remains readable across directory replacement", [] {
     TemporaryDirectory project;
     developer::Store   store{project.path()};
     fs::DeveloperFS    filesystem{project.path()};
@@ -143,7 +143,7 @@ Scenario publishedHTTP{"A published HTTP source remains readable across director
     require(std::string_view(content.data(), content.size()) == "new-body");
 }};
 
-Scenario developerWrites{"Developer writes are bounded and paths stay inside the explicit project", [] {
+const Scenario developerWrites{"Developer writes are bounded and paths stay inside the explicit project", [] {
     TemporaryDirectory project;
     developer::Store   store{project.path()};
     given("a staged preview", [&] {
@@ -186,7 +186,7 @@ Scenario developerWrites{"Developer writes are bounded and paths stay inside the
     });
 }};
 
-Scenario developerFilesystem{"Developer filesystem serves only published resources and protects the bridge", [] {
+const Scenario developerFilesystem{"Developer filesystem serves only published resources and protects the bridge", [] {
     TemporaryDirectory project;
     developer::Store   store{project.path()};
     fs::DeveloperFS    filesystem{project.path()};
@@ -212,7 +212,7 @@ Scenario developerFilesystem{"Developer filesystem serves only published resourc
     });
 }};
 
-Scenario downloadedStarter{"A downloaded starter never replaces a developer's existing project", [] {
+const Scenario downloadedStarter{"A downloaded starter never replaces a developer's existing project", [] {
     TemporaryDirectory project;
     developer::Store   store{project.path()};
     given("an existing project directory", [&] {
@@ -242,7 +242,7 @@ Scenario downloadedStarter{"A downloaded starter never replaces a developer's ex
     });
 }};
 
-Scenario transactionsAbandoned{"Transactions abandoned by a disconnected browser never lock the project", [] {
+const Scenario transactionsAbandoned{"Transactions abandoned by a disconnected browser never lock the project", [] {
     TemporaryDirectory project;
     const auto         stagingRoot = project.path() / ".webfront/developer/staging";
     given("the maximum number of unfinished transactions", [&] {
@@ -298,7 +298,7 @@ Scenario transactionsAbandoned{"Transactions abandoned by a disconnected browser
     });
 }};
 
-Scenario linkNever{"A link never turns the staging area into a destination or leads its cleanup outside the project", [] {
+const Scenario linkNever{"A link never turns the staging area into a destination or leads its cleanup outside the project", [] {
     TemporaryDirectory project;
     given("a symbolic link to the staging area inside the project", [&] {
         developer::Store store{project.path()};
@@ -333,7 +333,7 @@ Scenario linkNever{"A link never turns the staging area into a destination or le
     });
 }};
 
-Scenario developerBridge{"The developer bridge refuses WebSocket clients without an Origin", [] {
+const Scenario developerBridge{"The developer bridge refuses WebSocket clients without an Origin", [] {
     given("the default application configuration", [&] {
         require(WebFrontConfig{}.contentPolicy.allowMissingOrigin);
         when("it is prepared for a developer project", [&] {
@@ -346,7 +346,7 @@ Scenario developerBridge{"The developer bridge refuses WebSocket clients without
     });
 }};
 
-Scenario developerStore{"The developer store refuses malformed requests without changing the project", [] {
+const Scenario developerStore{"The developer store refuses malformed requests without changing the project", [] {
     TemporaryDirectory project;
     developer::Store   store{project.path()};
     given("a staged directory holding LICENSE", [&] {
@@ -388,7 +388,7 @@ Scenario developerStore{"The developer store refuses malformed requests without 
     });
 }};
 
-Scenario developerApplication{"A developer application is not told to use the developer environment", [] {
+const Scenario developerApplication{"A developer application is not told to use the developer environment", [] {
     using App = BasicDeveloperApp<ClosingQuietFrontend>;
     TemporaryDirectory project;
     std::ostringstream captured;
@@ -420,7 +420,7 @@ Scenario developerApplication{"A developer application is not told to use the de
     });
 }};
 
-Scenario developerApplicationNeeds{"The developer application needs an explicit project and a trusted environment", [] {
+const Scenario developerApplicationNeeds{"The developer application needs an explicit project and a trusted environment", [] {
     using App = BasicDeveloperApp<QuietFrontend>;
     const DeveloperBootstrapOptions trusted{.environment = "https://example.test/env.tgz", .integrity = "sha512-abc"};
     given("no project directory", [&] {
@@ -463,7 +463,7 @@ Scenario developerApplicationNeeds{"The developer application needs an explicit 
     });
 }};
 
-Scenario environmentLearns{"The environment learns which registry and manifest directory the application chose", [] {
+const Scenario environmentLearns{"The environment learns which registry and manifest directory the application chose", [] {
     const DeveloperBootstrapOptions trusted{.environment = "https://example.test/env.tgz", .integrity = "sha512-abc"};
     given("neither option", [&] {
         then("the default registry is passed and marked as not chosen, so the manifest's applies, and the manifest is in the "
@@ -540,7 +540,7 @@ void publishPair(developer::Store& store, std::string_view manifest, std::string
 }
 }  // namespace
 
-Scenario manifestLock{"A manifest and its lock are published together or not at all", [] {
+const Scenario manifestLock{"A manifest and its lock are published together or not at all", [] {
     TemporaryDirectory project;
     {
         developer::Store store{project.path()};
@@ -638,7 +638,7 @@ Scenario manifestLock{"A manifest and its lock are published together or not at 
     });
 }};
 
-Scenario committedPublication{"A committed publication that cannot be completed does not prevent opening the project", [] {
+const Scenario committedPublication{"A committed publication that cannot be completed does not prevent opening the project", [] {
     TemporaryDirectory project;
     const auto         journal = project.path() / ".webfront/developer/journal";
     {
@@ -713,7 +713,7 @@ Scenario committedPublication{"A committed publication that cannot be completed 
     });
 }};
 
-Scenario publicationPrepared{"A publication prepared from stale state is refused", [] {
+const Scenario publicationPrepared{"A publication prepared from stale state is refused", [] {
     TemporaryDirectory project;
     developer::Store   store{project.path()};
     publishFile(store, manifestPath, "manifest-1");
@@ -762,7 +762,7 @@ Scenario publicationPrepared{"A publication prepared from stale state is refused
     });
 }};
 
-Scenario newDirectories{"New directories are durable once their parents are synchronized", [] {
+const Scenario newDirectories{"New directories are durable once their parents are synchronized", [] {
     TemporaryDirectory project;
     const auto         root = std::filesystem::canonical(project.path());
     given("a project without the journal directory", [&] {
@@ -814,7 +814,7 @@ struct OpenOnExit {
 };
 }  // namespace
 
-Scenario secondOpener{"A second opener of the project waits for a publication in progress instead of abandoning it", [] {
+const Scenario secondOpener{"A second opener of the project waits for a publication in progress instead of abandoning it", [] {
     TemporaryDirectory project;
     {
         developer::Store store{project.path()};
@@ -875,7 +875,7 @@ Scenario secondOpener{"A second opener of the project waits for a publication in
     });
 }};
 
-Scenario projectDirectoryListed{"A project directory is listed without leaving the project", [] {
+const Scenario projectDirectoryListed{"A project directory is listed without leaving the project", [] {
     TemporaryDirectory project;
     TemporaryDirectory outside;
     developer::Store   store{project.path()};
@@ -929,7 +929,7 @@ Scenario projectDirectoryListed{"A project directory is listed without leaving t
     });
 }};
 
-Scenario projectPaths{"Project paths beyond the 260 characters of Windows are published, grouped and read like any other", [] {
+const Scenario projectPaths{"Project paths beyond the 260 characters of Windows are published, grouped and read like any other", [] {
     TemporaryDirectory project;
     developer::Store   store{project.path()};
     std::string        directory = "deep";  // absolute paths below it exceed MAX_PATH; none of its directories exists yet
@@ -958,7 +958,7 @@ Scenario projectPaths{"Project paths beyond the 260 characters of Windows are pu
     });
 }};
 
-Scenario projectWhose{"A project whose own directory exceeds the 260 characters of Windows can be opened", [] {
+const Scenario projectWhose{"A project whose own directory exceeds the 260 characters of Windows can be opened", [] {
     TemporaryDirectory outer;
     auto               root = outer.path();
     while (root.native().size() < 302)

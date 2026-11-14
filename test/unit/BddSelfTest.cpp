@@ -20,116 +20,116 @@ namespace {
 
 std::vector<std::string> trace;
 
-Scenario sections{"sections", [] {
-                      trace.push_back("start");
-                      given("a", [&] {
-                          trace.push_back("a");
-                          when("a1", [&] {
-                              trace.push_back("a1");
-                              then("x", [&] {
-                                  trace.push_back("x");
-                              });
-                              then("y", [&] {
-                                  trace.push_back("y");
-                              });
-                          });
-                          when("a2", [&] {
-                              trace.push_back("a2");
-                          });
-                      });
-                      given("b", [&] {
-                          trace.push_back("b");
-                      });
-                  }};
+const Scenario sectionsScenario{"sections", [] {
+                                    trace.push_back("start");
+                                    given("a", [&] {
+                                        trace.push_back("a");
+                                        when("a1", [&] {
+                                            trace.push_back("a1");
+                                            then("x", [&] {
+                                                trace.push_back("x");
+                                            });
+                                            then("y", [&] {
+                                                trace.push_back("y");
+                                            });
+                                        });
+                                        when("a2", [&] {
+                                            trace.push_back("a2");
+                                        });
+                                    });
+                                    given("b", [&] {
+                                        trace.push_back("b");
+                                    });
+                                }};
 
-Scenario sameNames{"sections of the same name", [] {
-                       given("data", [&] {
-                           trace.push_back("first");
-                       });
-                       given("data", [&] {
-                           trace.push_back("second");
-                       });
-                       for (int value : {1, 2})
-                           when("value ", value, [&] {
-                               trace.push_back("value " + std::to_string(value));
-                           });
-                   }};
+const Scenario sameNames{"sections of the same name", [] {
+                             given("data", [&] {
+                                 trace.push_back("first");
+                             });
+                             given("data", [&] {
+                                 trace.push_back("second");
+                             });
+                             for (int value : {1, 2})
+                                 when("value ", value, [&] {
+                                     trace.push_back("value " + std::to_string(value));
+                                 });
+                         }};
 
 // Sections of the same name and the same body, as an identical code folding linker would merge, stay two sections.
-Scenario sameComposed{"composed sections of the same name", [] {
-                          given("same ", 1, [&] {
-                              trace.push_back("x");
-                          });
-                          given("same ", 1, [&] {
-                              trace.push_back("x");
-                          });
-                      }};
+const Scenario sameComposed{"composed sections of the same name", [] {
+                                given("same ", 1, [&] {
+                                    trace.push_back("x");
+                                });
+                                given("same ", 1, [&] {
+                                    trace.push_back("x");
+                                });
+                            }};
 
-Scenario checkGoesOn{"check goes on", [] {
-                         given("a failed check", [&] {
-                             check(false);
-                             trace.push_back("after check");
-                         });
-                         given("another section", [&] {
-                             trace.push_back("other");
-                         });
-                     }};
-
-Scenario requireStops{"require stops", [] {
-                          given("a failed require", [&] {
-                              try {
-                                  require(1 + 1 == 3);
-                              } catch (const std::exception&) {
-                                  trace.push_back("swallowed");
-                              }
-                              trace.push_back("after require");
-                          });
-                          given("another section", [&] {
-                              trace.push_back("other");
-                          });
-                      }};
-
-Scenario nestedFailure{"a nested failure", [] {
-                           given("a", [&] {
-                               trace.push_back("a");
-                               when("a1", [&] {
-                                   then("fails", [&] {
-                                       require(false);
-                                   });
+const Scenario checkGoesOn{"check goes on", [] {
+                               given("a failed check", [&] {
+                                   check(false);
+                                   trace.push_back("after check");
                                });
-                               when("a2", [&] {
-                                   trace.push_back("a2");
-                               });
-                               require(true);
-                           });
-                       }};
-
-Scenario failureAfterSections{"a failure after the sections", [] {
-                                  given("a", [&] {
-                                      when("a1", [&] {
-                                          trace.push_back("a1");
-                                      });
-                                      when("a2", [&] {
-                                          trace.push_back("a2");
-                                      });
-                                      fail("after the sections");
-                                  });
-                              }};
-
-Scenario exceptionReported{"an exception is a failure", [] {
-                               when("a section throws", [&] {
-                                   throw std::runtime_error{"boom"};
-                               });
-                               when("another section", [&] {
+                               given("another section", [&] {
                                    trace.push_back("other");
                                });
                            }};
 
-Scenario skipped{"skip", {"skipping"}, [] {
-                     skip("not here");
-                 }};
+const Scenario requireStops{"require stops", [] {
+                                given("a failed require", [&] {
+                                    try {
+                                        require(1 + 1 == 3);
+                                    } catch (const std::exception&) {
+                                        trace.push_back("swallowed");
+                                    }
+                                    trace.push_back("after require");
+                                });
+                                given("another section", [&] {
+                                    trace.push_back("other");
+                                });
+                            }};
 
-Scenario assertionsPass{
+const Scenario nestedFailure{"a nested failure", [] {
+                                 given("a", [&] {
+                                     trace.push_back("a");
+                                     when("a1", [&] {
+                                         then("fails", [&] {
+                                             require(false);
+                                         });
+                                     });
+                                     when("a2", [&] {
+                                         trace.push_back("a2");
+                                     });
+                                     require(true);
+                                 });
+                             }};
+
+const Scenario failureAfterSections{"a failure after the sections", [] {
+                                        given("a", [&] {
+                                            when("a1", [&] {
+                                                trace.push_back("a1");
+                                            });
+                                            when("a2", [&] {
+                                                trace.push_back("a2");
+                                            });
+                                            fail("after the sections");
+                                        });
+                                    }};
+
+const Scenario exceptionReported{"an exception is a failure", [] {
+                                     when("a section throws", [&] {
+                                         throw std::runtime_error{"boom"};
+                                     });
+                                     when("another section", [&] {
+                                         trace.push_back("other");
+                                     });
+                                 }};
+
+const Scenario skippedScenario{"skip", {"skipping"}, [] {
+                                   skip("not here");
+                               }};
+
+const Scenario assertionsPass{
     "assertions pass",
     {"passing", "tagged"},
     [] {
@@ -160,32 +160,32 @@ Scenario assertionsPass{
       }
 };
 
-Scenario controlCharacters{"a failure with a control character", [] {
-                               auto scope = info(std::string("a\0b", 3));
+const Scenario controlCharacters{"a failure with a control character", [] {
+                                     auto scope = info(std::string("a\0b", 3));
+                                     check(false);
+                                 }};
+
+const Scenario invalidText{"a failure with invalid UTF-8", [] {
+                               auto scope = info("caf\xC3\xA9 ", std::string("\xC3"), " \xED\xA0\x80");
                                check(false);
                            }};
 
-Scenario invalidText{"a failure with invalid UTF-8", [] {
-                         auto scope = info("caf\xC3\xA9 ", std::string("\xC3"), " \xED\xA0\x80");
-                         check(false);
-                     }};
+const Scenario concurrentFailures{"failures on several threads", [] {
+                                      std::vector<std::thread> threads;
+                                      for (int index = 0; index != 4; ++index)
+                                          threads.emplace_back([] {
+                                              for (int repeat = 0; repeat != 50; ++repeat)
+                                                  check(false);
+                                          });
+                                      for (auto& thread : threads)
+                                          thread.join();
+                                  }};
 
-Scenario concurrentFailures{"failures on several threads", [] {
-                                std::vector<std::thread> threads;
-                                for (int index = 0; index != 4; ++index)
-                                    threads.emplace_back([] {
-                                        for (int repeat = 0; repeat != 50; ++repeat)
-                                            check(false);
-                                    });
-                                for (auto& thread : threads)
-                                    thread.join();
-                            }};
-
-Scenario throwsMismatch{"throws of another type", [] {
-                            requireThrows<std::invalid_argument>([] {
-                                throw std::logic_error{"bad"};
-                            });
-                        }};
+const Scenario throwsMismatch{"throws of another type", [] {
+                                  requireThrows<std::invalid_argument>([] {
+                                      throw std::logic_error{"bad"};
+                                  });
+                              }};
 
 int failures = 0;
 

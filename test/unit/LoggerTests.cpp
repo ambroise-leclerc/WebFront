@@ -14,7 +14,7 @@ using namespace webfront::bdd;
 using namespace webfront;
 using namespace std;
 
-Scenario loggerScenario{"Logger", [] {
+const Scenario loggerScenario{"Logger", [] {
     std::list<std::string> logs;
     auto testSink = [&logs](std::string_view text) { logs.emplace_back(text); };
 
@@ -80,7 +80,7 @@ Scenario loggerScenario{"Logger", [] {
 }};
 
 #if !defined(WEBFRONT_USE_MDDLOG) || !WEBFRONT_USE_MDDLOG
-Scenario fallbackLogger{"Fallback logger removal waits for active delivery", [] {
+const Scenario fallbackLogger{"Fallback logger removal waits for active delivery", [] {
     using namespace std::chrono_literals;
     log::setLogLevel(log::Info);
     std::promise<void> entered, release;
@@ -111,7 +111,7 @@ Scenario fallbackLogger{"Fallback logger removal waits for active delivery", [] 
     log::setLogLevel(log::Error);
 }};
 
-Scenario secondRemoval{"A second removal of the same fallback sink also waits for the active delivery (#542)", [] {
+const Scenario secondRemoval{"A second removal of the same fallback sink also waits for the active delivery (#542)", [] {
     using namespace std::chrono_literals;
     log::setLogLevel(log::Info);
     std::promise<void> entered, release;
@@ -154,7 +154,7 @@ Scenario secondRemoval{"A second removal of the same fallback sink also waits fo
     log::setLogLevel(log::Error);
 }};
 
-Scenario fallbackLoggerRegistration{"Fallback logger registration and delivery may run on different threads", [] {
+const Scenario fallbackLoggerRegistration{"Fallback logger registration and delivery may run on different threads", [] {
     log::setLogLevel(log::Info);
     std::atomic<unsigned> seen{0};
     const auto            sink = log::addSinks([&](std::string_view line) {
@@ -185,7 +185,7 @@ Scenario fallbackLoggerRegistration{"Fallback logger registration and delivery m
 }};
 #endif
 
-Scenario requestLog{"The request log keeps what the HTTP layer says about a request (#542)", [] {
+const Scenario requestLog{"The request log keeps what the HTTP layer says about a request (#542)", [] {
     using webfront::testdriver::isRequestLine;
     // The wording of HTTPServer.hpp: a renamed message must fail here instead of emptying the transcript of a failed case.
     given("the lines of an answered request", [&] {

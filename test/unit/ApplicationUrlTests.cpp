@@ -3,7 +3,7 @@
 
 using namespace webfront::bdd;
 
-Scenario frontendURLs{"Frontend URLs use the configured listening address", [] {
+const Scenario frontendURLs{"Frontend URLs use the configured listening address", [] {
     using webfront::frontend::detail::applicationUrl;
     then("IPv4 and IPv6 addresses are preserved and wildcard binds open loopback", [&] {
         require(applicationUrl("127.0.0.2", "9010", "index.html") == "http://127.0.0.2:9010/index.html");
@@ -21,7 +21,7 @@ Scenario frontendURLs{"Frontend URLs use the configured listening address", [] {
     });
 }};
 
-Scenario frontendURLsPreserve{"Frontend URLs preserve query and fragment syntax consistently", [] {
+const Scenario frontendURLsPreserve{"Frontend URLs preserve query and fragment syntax consistently", [] {
     using webfront::frontend::detail::applicationUrl;
     then("spaces and UTF-8 bytes are encoded without escaping URI delimiters", [&] {
         require(applicationUrl("127.0.0.1", "9002", "folder/a b.html?x=1&name=Ren\xc3\xa9#result")

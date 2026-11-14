@@ -13,7 +13,7 @@ struct Browser {
 };
 }  // namespace
 
-Scenario dOMDocuments{"DOM documents batch writes and preserve node identity", {"dom"}, [] {
+const Scenario dOMDocuments{"DOM documents batch writes and preserve node identity", {"dom"}, [] {
     auto                           state = std::make_shared<dom::detail::State>();
     dom::Document                  doc{Browser{state}};
     std::vector<msg::DomOperation> sent;
@@ -72,7 +72,7 @@ Scenario dOMDocuments{"DOM documents batch writes and preserve node identity", {
     });
 }};
 
-Scenario dOMEvents{"DOM events and island revocation release callbacks", {"dom"}, [] {
+const Scenario dOMEvents{"DOM events and island revocation release callbacks", {"dom"}, [] {
     auto state   = std::make_shared<dom::detail::State>();
     state->ready = true;
     state->send  = [](const auto&) { };
@@ -105,7 +105,7 @@ Scenario dOMEvents{"DOM events and island revocation release callbacks", {"dom"}
     requireThrows([&] { root.id(); });
 }};
 
-Scenario dOMConnections{"DOM connections have separate lifetimes and closed handles remain safe", {"dom"}, [] {
+const Scenario dOMConnections{"DOM connections have separate lifetimes and closed handles remain safe", {"dom"}, [] {
     auto          first  = std::make_shared<dom::detail::State>();
     auto          second = std::make_shared<dom::detail::State>();
     dom::Document a{Browser{first}}, b{Browser{second}};
@@ -127,7 +127,7 @@ Scenario dOMConnections{"DOM connections have separate lifetimes and closed hand
     requireThrows([&] { other.remove(); });
 }};
 
-Scenario dOMRejects{"DOM rejects off-thread access and retains a bounded pending batch on errors", {"dom"}, [] {
+const Scenario dOMRejects{"DOM rejects off-thread access and retains a bounded pending batch on errors", {"dom"}, [] {
     auto          state = std::make_shared<dom::detail::State>();
     dom::Document doc{Browser{state}};
     bool          rejected{};
@@ -164,7 +164,7 @@ struct ReadBrowser : Browser {
     }
 };
 }  // namespace
-Scenario dOMGrouped{"DOM grouped read results are bounded and structurally exact", {"dom"}, [] {
+const Scenario dOMGrouped{"DOM grouped read results are bounded and structurally exact", {"dom"}, [] {
     auto state   = std::make_shared<dom::detail::State>();
     state->ready = true;
     state->send  = [](const auto&) { };
@@ -200,7 +200,7 @@ Scenario dOMGrouped{"DOM grouped read results are bounded and structurally exact
     })); });
 }};
 
-Scenario dOMRejectsElement{"DOM rejects element-only operations before changing a pending batch", {"dom"}, [] {
+const Scenario dOMRejectsElement{"DOM rejects element-only operations before changing a pending batch", {"dom"}, [] {
     auto          state = std::make_shared<dom::detail::State>();
     dom::Document doc{Browser{state}};
     auto          text = doc.text("text"), island = doc.island();
@@ -220,7 +220,7 @@ Scenario dOMRejectsElement{"DOM rejects element-only operations before changing 
     require(doc.valid());
 }};
 
-Scenario dOMReports{"DOM reports batch identifier exhaustion exactly once", {"dom"}, [] {
+const Scenario dOMReports{"DOM reports batch identifier exhaustion exactly once", {"dom"}, [] {
     auto state     = std::make_shared<dom::detail::State>();
     state->batchId = std::numeric_limits<std::uint32_t>::max();
     state->pending = msg::DomBatch(state->batchId);
@@ -244,7 +244,7 @@ Scenario dOMReports{"DOM reports batch identifier exhaustion exactly once", {"do
     require(!node.valid());
 }};
 
-Scenario insertingDOM{"Inserting a DOM node before itself preserves its identity and pending batch", {"dom"}, [] {
+const Scenario insertingDOM{"Inserting a DOM node before itself preserves its identity and pending batch", {"dom"}, [] {
     auto          state = std::make_shared<dom::detail::State>();
     dom::Document doc{Browser{state}};
     auto          parent = doc.element("div"), child = doc.text("child");
@@ -256,7 +256,7 @@ Scenario insertingDOM{"Inserting a DOM node before itself preserves its identity
     require(state->get(child.id()).parent == parent.id());
 }};
 
-Scenario dOMValidity{"DOM validity predicates are nonthrowing and agree about the calling thread", {"dom"}, [] {
+const Scenario dOMValidity{"DOM validity predicates are nonthrowing and agree about the calling thread", {"dom"}, [] {
     auto          state = std::make_shared<dom::detail::State>();
     dom::Document doc{Browser{state}};
     auto          node = doc.text("valid");
@@ -291,7 +291,7 @@ Scenario dOMValidity{"DOM validity predicates are nonthrowing and agree about th
     require(!node.valid());
 }};
 
-Scenario dOMRejectsEmpty{"DOM rejects empty event callbacks without changing subscriptions or pending names", {"dom"}, [] {
+const Scenario dOMRejectsEmpty{"DOM rejects empty event callbacks without changing subscriptions or pending names", {"dom"}, [] {
     auto          state = std::make_shared<dom::detail::State>();
     dom::Document doc{Browser{state}};
     auto          button = doc.element("button");
@@ -310,7 +310,7 @@ Scenario dOMRejectsEmpty{"DOM rejects empty event callbacks without changing sub
     require(calls == 1);
 }};
 
-Scenario islandUnmount{"An island unmount with pending writes closes the entire document once", {"dom"}, [] {
+const Scenario islandUnmount{"An island unmount with pending writes closes the entire document once", {"dom"}, [] {
     auto state   = std::make_shared<dom::detail::State>();
     state->ready = true;
     state->send  = [](const auto&) { };
@@ -334,7 +334,7 @@ Scenario islandUnmount{"An island unmount with pending writes closes the entire 
 }};
 
 
-Scenario creatingGrouped{"Creating a grouped DOM read flushes writes even when its lazy read sender is discarded", {"dom"}, [] {
+const Scenario creatingGrouped{"Creating a grouped DOM read flushes writes even when its lazy read sender is discarded", {"dom"}, [] {
     auto state   = std::make_shared<dom::detail::State>();
     state->ready = true;
     unsigned writes{};
@@ -410,7 +410,7 @@ struct ReadyDocument {
 };
 }  // namespace
 
-Scenario awaitedDOM{"An awaited DOM event subscribes when started and delivers one value", {"dom"}, [] {
+const Scenario awaitedDOM{"An awaited DOM event subscribes when started and delivers one value", {"dom"}, [] {
     ReadyDocument document;
     auto&         state = document.state;
     auto          input = document.doc.element("input");
@@ -458,7 +458,7 @@ Scenario awaitedDOM{"An awaited DOM event subscribes when started and delivers o
     });
 }};
 
-Scenario awaitedDOMEvent{"An awaited DOM event completes stopped when it can no longer occur", {"dom"}, [] {
+const Scenario awaitedDOMEvent{"An awaited DOM event completes stopped when it can no longer occur", {"dom"}, [] {
     ReadyDocument document;
     auto&         state  = document.state;
     auto          island = document.doc.island("panel");
@@ -508,7 +508,7 @@ Scenario awaitedDOMEvent{"An awaited DOM event completes stopped when it can no 
     require(awaited.completions == 1);
 }};
 
-Scenario awaitedDOMEventCancelled{"An awaited DOM event is cancelled through its stop token", {"dom"}, [] {
+const Scenario awaitedDOMEventCancelled{"An awaited DOM event is cancelled through its stop token", {"dom"}, [] {
     ReadyDocument           document;
     auto&                   state  = document.state;
     auto                    button = document.doc.element("button");
@@ -556,7 +556,7 @@ Scenario awaitedDOMEventCancelled{"An awaited DOM event is cancelled through its
     });
 }};
 
-Scenario awaitedDOMEventRejects{"An awaited DOM event rejects conflicting subscriptions and invalid nodes", {"dom"}, [] {
+const Scenario awaitedDOMEventRejects{"An awaited DOM event rejects conflicting subscriptions and invalid nodes", {"dom"}, [] {
     ReadyDocument document;
     auto&         state  = document.state;
     auto          button = document.doc.element("button");
@@ -633,7 +633,7 @@ Task clicks(std::shared_ptr<dom::detail::State> state, std::vector<std::pair<dom
 }
 }  // namespace
 
-Scenario coroutineState{"A coroutine is the state machine of a sequential DOM dialog", {"dom"}, [] {
+const Scenario coroutineState{"A coroutine is the state machine of a sequential DOM dialog", {"dom"}, [] {
     ReadyDocument                                  document;
     auto                                           next = document.doc.element("button");
     auto                                           back = document.doc.element("button");
@@ -659,7 +659,7 @@ void fillBatch(dom::detail::State& state, std::uint32_t node) {
 }
 }  // namespace
 
-Scenario cancelledDOM{"A cancelled DOM event wait releases its browser subscription", {"dom"}, [] {
+const Scenario cancelledDOM{"A cancelled DOM event wait releases its browser subscription", {"dom"}, [] {
     ReadyDocument           document;
     auto&                   state  = document.state;
     auto                    button = document.doc.element("button");
@@ -744,7 +744,7 @@ Scenario cancelledDOM{"A cancelled DOM event wait releases its browser subscript
     });
 }};
 
-Scenario dOMUnsubscription{"A DOM unsubscription that does not fit a full batch opens the next one", {"dom"}, [] {
+const Scenario dOMUnsubscription{"A DOM unsubscription that does not fit a full batch opens the next one", {"dom"}, [] {
     ReadyDocument           document;
     auto&                   state  = document.state;
     auto                    button = document.doc.element("button");
@@ -772,7 +772,7 @@ Scenario dOMUnsubscription{"A DOM unsubscription that does not fit a full batch 
     require(operations[0].b == name);
 }};
 
-Scenario dOMEvent{"A DOM event wait that cannot be queued subscribes nothing", {"dom"}, [] {
+const Scenario dOMEvent{"A DOM event wait that cannot be queued subscribes nothing", {"dom"}, [] {
     ReadyDocument document;
     auto&         state  = document.state;
     auto          button = document.doc.element("button");

@@ -98,7 +98,7 @@ struct Fixture {
 
 }  // namespace
 
-Scenario readNeeds{"A read needs the token and the cookie of the client of the connection that owns it", {"read-binding"}, [] {
+const Scenario readNeeds{"A read needs the token and the cookie of the client of the connection that owns it", {"read-binding"}, [] {
     Fixture fixture;
     given("a local connection that exchanged its secret for a cookie", [&] {
         const auto bound = fixture.bind(1, true);
@@ -179,7 +179,7 @@ Scenario readNeeds{"A read needs the token and the cookie of the client of the c
     });
 }};
 
-Scenario connectionsOne{"The connections of one browser profile belong to one client", {"read-binding"}, [] {
+const Scenario connectionsOne{"The connections of one browser profile belong to one client", {"read-binding"}, [] {
     Fixture fixture;
     given("a first tab that exchanged and a second tab that presents the cookie it already holds", [&] {
         const auto cookie = cookiePair(headers(fixture.bind(1, true), "Set-Cookie").front());
@@ -232,7 +232,7 @@ Scenario connectionsOne{"The connections of one browser profile belong to one cl
     });
 }};
 
-Scenario exchangeSecret{"The exchange secret is single use and only the right one works", {"read-binding"}, [] {
+const Scenario exchangeSecret{"The exchange secret is single use and only the right one works", {"read-binding"}, [] {
     Fixture fixture;
     const auto secret = fixture.binding.open(1, true);
     const auto path   = std::string(ReadBinding::bindPath) + secret;
@@ -274,7 +274,7 @@ Scenario exchangeSecret{"The exchange secret is single use and only the right on
     });
 }};
 
-Scenario grantWorks{"A grant works only on the route registration that issued it", {"read-binding"}, [] {
+const Scenario grantWorks{"A grant works only on the route registration that issued it", {"read-binding"}, [] {
     Fixture fixture;
     const auto cookie = cookiePair(headers(fixture.bind(1, true), "Set-Cookie").front());
     const auto url    = fixture.url(1, "a.txt", {.context = std::string("secret-of-route-a")});
@@ -291,7 +291,7 @@ Scenario grantWorks{"A grant works only on the route registration that issued it
     then("the issuing route still accepts it", [&] { require(call(fixture.read, url, cookie).status == http::Response::ok); });
 }};
 
-Scenario transferableMode{"The transferable mode makes the token alone a short-lived bearer capability", {"read-binding"}, [] {
+const Scenario transferableMode{"The transferable mode makes the token alone a short-lived bearer capability", {"read-binding"}, [] {
     Fixture fixture;
     const auto cookie = cookiePair(headers(fixture.bind(1, true), "Set-Cookie").front());
     then("it needs an explicit short lifetime", [&] {
@@ -338,7 +338,7 @@ Scenario transferableMode{"The transferable mode makes the token alone a short-l
     });
 }};
 
-Scenario connectionNot{"A connection that is not the view of an embedded frontend reads only under a declared transport", {"read-binding"}, [] {
+const Scenario connectionNot{"A connection that is not the view of an embedded frontend reads only under a declared transport", {"read-binding"}, [] {
     given("the default declaration", [&] {
         Fixture fixture;
         const auto cookie = cookiePair(headers(fixture.bind(1, false), "Set-Cookie").front());
@@ -373,7 +373,7 @@ Scenario connectionNot{"A connection that is not the view of an embedded fronten
     });
 }};
 
-Scenario declarationLoopback{"A declaration of a loopback server is checked against the address it listens on", {"read-binding"}, [] {
+const Scenario declarationLoopback{"A declaration of a loopback server is checked against the address it listens on", {"read-binding"}, [] {
     for (const auto* address : {"127.0.0.1", "127.1.2.3", "::1", "[::1]", "0:0:0:0:0:0:0:1", "0000:0000:0000:0000:0000:0000:0000:0001", "0::1", "::0001", "[0:0::1]"})
         then("'", address, "' is a loopback address", [&] { require(detail::isLoopbackName(address)); });
     for (const auto* address : {"0.0.0.0", "::", "", "192.168.1.5", "10.0.0.1", "127.0.0", "127.0.0.1.5", "127.a.0.1", "127..0.1", "example.com", "localhost", "LocalHost", "127.0.0.1.", "127.256.0.1", "127.0.256.1", "127.0.0.1000", "127.0.0.010", "127.00.0.1", "127.0.0.", ":::1", "0:0:0:0:0:0:0:2", "1:0:0:0:0:0:0:1", "0:0:0:0:0:0:0:0:1", "::1::", "::12345", "::g"})
@@ -385,7 +385,7 @@ Scenario declarationLoopback{"A declaration of a loopback server is checked agai
     });
 }};
 
-Scenario readResponses{"Read responses neutralize active content", {"read-binding"}, [] {
+const Scenario readResponses{"Read responses neutralize active content", {"read-binding"}, [] {
     const auto present = [](std::string contentType, std::string rest = "dir/file.bin") {
         http::RouteReply reply;
         if (!contentType.empty())
@@ -567,7 +567,7 @@ struct OneRequest : CleanSocket {
 
 }  // namespace
 
-Scenario serverNever{"The server never writes a read token to its logs", {"read-binding"}, [] {
+const Scenario serverNever{"The server never writes a read token to its logs", {"read-binding"}, [] {
     OneRequest<> request;
     Fixture      fixture;
     const auto   cookie = cookiePair(headers(fixture.bind(1, true), "Set-Cookie").front());
@@ -587,7 +587,7 @@ Scenario serverNever{"The server never writes a read token to its logs", {"read-
     });
 }};
 
-Scenario noLog{"No log line holds the token of a services target, whatever answers it", {"read-binding"}, [] {
+const Scenario noLog{"No log line holds the token of a services target, whatever answers it", {"read-binding"}, [] {
     const std::string target = std::string(readPrefix) + "0123456789abcdef.TOKENSECRET/a.txt";
     then("a target unfit for route dispatch, plain or spelled with an encoded letter and doubled separators, falls to the "
          "file providers without being logged", [&] {
@@ -625,7 +625,7 @@ Scenario noLog{"No log line holds the token of a services target, whatever answe
     });
 }};
 
-Scenario answersServer{"The answers the server writes for a read route are hardened too", {"read-binding"}, [] {
+const Scenario answersServer{"The answers the server writes for a read route are hardened too", {"read-binding"}, [] {
     for (const auto* method : {"GET", "POST"}) {
         OneRequest<> request;
         auto route = request.server.addRoute(std::string(readPrefix), [](const http::RouteRequest&) -> http::RouteReply { throw std::runtime_error("boom"); }, true,
@@ -642,7 +642,7 @@ Scenario answersServer{"The answers the server writes for a read route are harde
     }
 }};
 
-Scenario frameNever{"A frame never logs the bytes of its payload", {"read-binding"}, [] {
+const Scenario frameNever{"A frame never logs the bytes of its payload", {"read-binding"}, [] {
     LogCapture             log;
     std::vector<std::byte> bytes(64, static_cast<std::byte>('q'));
     websocket::Frame<ReadNet> frame{std::string_view{}};
@@ -658,7 +658,7 @@ using ReadApp = BasicWF<ReadNet, fs::DefaultFS>;
 
 }  // namespace
 
-Scenario applicationRegisters{"An application registers read routes under the services path only", {"read-binding"}, [] {
+const Scenario applicationRegisters{"An application registers read routes under the services path only", {"read-binding"}, [] {
     testing::InjectableSocket::reset();
     ReadNet::accepts = 100;
     ReadApp app{WebFrontConfig{.port = "0"}};
@@ -690,7 +690,7 @@ Scenario applicationRegisters{"An application registers read routes under the se
     testing::InjectableSocket::reset();
 }};
 
-Scenario eachApplication{"Each application names its own cookies, and a namespace named after the port survives a restart", {"read-binding"}, [] {
+const Scenario eachApplication{"Each application names its own cookies, and a namespace named after the port survives a restart", {"read-binding"}, [] {
     given("a client bound to each of two applications on one host, whose cookies the browser shares", [&] {
         Fixture    first, second;
         const auto cookieA = cookiePair(headers(first.bind(1, true), "Set-Cookie").front());
@@ -721,7 +721,7 @@ Scenario eachApplication{"Each application names its own cookies, and a namespac
     });
 }};
 
-Scenario tokenOpens{"A token opens only the path it was issued for, and only a path the server would route", {"read-binding"}, [] {
+const Scenario tokenOpens{"A token opens only the path it was issued for, and only a path the server would route", {"read-binding"}, [] {
     Fixture fixture;
     const auto cookie = cookiePair(headers(fixture.bind(1, true), "Set-Cookie").front());
     const auto url    = fixture.url(1, "public.txt");
@@ -737,7 +737,7 @@ Scenario tokenOpens{"A token opens only the path it was issued for, and only a p
     requireNothrow([&] { fixture.url(1, "dir/report.v2.txt"); });
 }};
 
-Scenario grantContext{"A grant's context is released when the grant expires or the binding shuts down", {"read-binding"}, [] {
+const Scenario grantContext{"A grant's context is released when the grant expires or the binding shuts down", {"read-binding"}, [] {
     Fixture fixture;
     fixture.bind(1, true);
     auto               held  = std::make_shared<int>(7);
@@ -763,7 +763,7 @@ Scenario grantContext{"A grant's context is released when the grant expires or t
     });
 }};
 
-Scenario droppingGrant{"Dropping a grant never runs its context's destructor under the lock", {"read-binding"}, [] {
+const Scenario droppingGrant{"Dropping a grant never runs its context's destructor under the lock", {"read-binding"}, [] {
     Fixture fixture;
     fixture.bind(1, true);
     // A context whose deleter calls back into the binding would deadlock if it ran while the binding is locked.

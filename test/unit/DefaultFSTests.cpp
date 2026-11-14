@@ -42,7 +42,7 @@ string readAll(fs::File& file) {
 // The default composition is the protected bridge, the optional root and IndexFS, nothing else.
 static_assert(std::is_same_v<fs::DefaultFS, fs::Multi<fs::detail::ProtectedWebFrontJsFS, fs::detail::OptionalDevRootFS, fs::IndexFS>>);
 
-Scenario defaultFSServes{"DefaultFS serves only embedded assets when no document root is configured", [] {
+const Scenario defaultFSServes{"DefaultFS serves only embedded assets when no document root is configured", [] {
     given("a DefaultFS constructed with an empty document root", [&] {
         fs::DefaultFS defaultFS{filesystem::path{}};
 
@@ -59,7 +59,7 @@ Scenario defaultFSServes{"DefaultFS serves only embedded assets when no document
     });
 }};
 
-Scenario defaultFSLayers{"DefaultFS layers a configured document root over the embedded fallback", [] {
+const Scenario defaultFSLayers{"DefaultFS layers a configured document root over the embedded fallback", [] {
     given("a document root containing a custom index.html", [&] {
         TemporaryRoot root;
         root.write("index.html", "<!DOCTYPE html><title>Custom</title>");

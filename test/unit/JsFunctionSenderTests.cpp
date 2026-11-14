@@ -78,7 +78,7 @@ void stringReply(msg::CallId id, std::string value) {
 }
 }  // namespace
 
-Scenario typedBrowser{"Typed browser senders are lazy and own their arguments", [] {
+const Scenario typedBrowser{"Typed browser senders are lazy and own their arguments", [] {
     InjectableSocket::reset();
     InlineTaskScope               scope;
     WebLink<InjectableNetworking> link{InjectableSocket{}, 1, [](WebLinkEvent) { }, scope};
@@ -117,7 +117,7 @@ Scenario typedBrowser{"Typed browser senders are lazy and own their arguments", 
     });
 }};
 
-Scenario typedBrowserSenders{"Typed browser senders report errors without escaping the receive loop", [] {
+const Scenario typedBrowserSenders{"Typed browser senders report errors without escaping the receive loop", [] {
     InjectableSocket::reset();
     InlineTaskScope         scope;
     auto                    link = std::make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{1}, [](WebLinkEvent) { }, scope);
@@ -172,7 +172,7 @@ Scenario typedBrowserSenders{"Typed browser senders report errors without escapi
     });
 }};
 
-Scenario typedBrowserCalls{"Typed browser calls propagate receiver cancellation", [] {
+const Scenario typedBrowserCalls{"Typed browser calls propagate receiver cancellation", [] {
     InjectableSocket::reset();
     InlineTaskScope               scope;
     WebLink<InjectableNetworking> link{InjectableSocket{}, 1, [](WebLinkEvent) { }, scope};
@@ -227,7 +227,7 @@ Scenario typedBrowserCalls{"Typed browser calls propagate receiver cancellation"
     });
 }};
 
-Scenario browserResult{"Browser result and cancellation can race", [] {
+const Scenario browserResult{"Browser result and cancellation can race", [] {
     given("a dispatched call with a stoppable receiver", [&] {
         when("stop and a result arrive on different threads", [&] {
             then("exactly one terminal completion wins on repeated attempts", [&] {
@@ -261,7 +261,7 @@ networking::Task awaitBrowser(BasicUI<SenderApp> ui, SenderObserved& observed, s
     observed.done();
 }
 }  // namespace
-Scenario typedBrowserSendersCan{"Typed browser senders can be awaited in a tracked task", [] {
+const Scenario typedBrowserSendersCan{"Typed browser senders can be awaited in a tracked task", [] {
     InjectableSocket::reset();
     InlineTaskScope               transport;
     WebLink<InjectableNetworking> link{InjectableSocket{}, 1, [](WebLinkEvent) { }, transport};
@@ -293,7 +293,7 @@ Scenario typedBrowserSendersCan{"Typed browser senders can be awaited in a track
     });
 }};
 
-Scenario cancelledCorrelation{"Cancelled correlation IDs cannot be reused before a late reply", [] {
+const Scenario cancelledCorrelation{"Cancelled correlation IDs cannot be reused before a late reply", [] {
     given("a registry with one cancelled call", [&] {
         webfront::detail::PendingCalls<CorrelationPolicy> calls;
         auto                                    retained  = std::make_shared<int>(42);
@@ -321,7 +321,7 @@ Scenario cancelledCorrelation{"Cancelled correlation IDs cannot be reused before
     });
 }};
 
-Scenario serverScope{"A server scope can release the final owner of a WebSocket during cancellation", [] {
+const Scenario serverScope{"A server scope can release the final owner of a WebSocket during cancellation", [] {
     InjectableSocket::reset();
     InlineTaskScope scope;
     given("a WebSocket owned only by its pending read and write tasks", [&] {
@@ -342,7 +342,7 @@ Scenario serverScope{"A server scope can release the final owner of a WebSocket 
     });
 }};
 
-Scenario browserSenders{"Browser senders reject inconsistent return envelopes", [] {
+const Scenario browserSenders{"Browser senders reject inconsistent return envelopes", [] {
     InjectableSocket::reset();
     InlineTaskScope               scope;
     WebLink<InjectableNetworking> link{InjectableSocket{}, 1, [](WebLinkEvent) { }, scope};
@@ -406,7 +406,7 @@ Scenario browserSenders{"Browser senders reject inconsistent return envelopes", 
     });
 }};
 
-Scenario correlationExhaustion{"Correlation exhaustion fails until an outstanding reply releases an ID", [] {
+const Scenario correlationExhaustion{"Correlation exhaustion fails until an outstanding reply releases an ID", [] {
     given("a registry with every ID reserved by an unanswered cancelled call", [&] {
         webfront::detail::PendingCalls<CorrelationPolicy> calls;
         for (std::size_t i = 0; i < std::numeric_limits<msg::CallId>::max(); ++i) {
@@ -429,7 +429,7 @@ Scenario correlationExhaustion{"Correlation exhaustion fails until an outstandin
     });
 }};
 
-Scenario senderReports{"A sender reports a socket expiring independently of its correlation registry", [] {
+const Scenario senderReports{"A sender reports a socket expiring independently of its correlation registry", [] {
     given("an expired socket and a still-owned registry", [&] {
         auto                   calls = std::make_shared<webfront::detail::PendingCalls<http::DefaultBuffersPolicy>>();
         std::vector<std::byte> payload(sizeof(msg::FunctionCallHeader<msg::Command::callFunction>));
@@ -447,7 +447,7 @@ Scenario senderReports{"A sender reports a socket expiring independently of its 
     });
 }};
 
-Scenario obsoleteRegistration{"An obsolete registration cannot cancel a replacement with the same wire ID", [] {
+const Scenario obsoleteRegistration{"An obsolete registration cannot cancel a replacement with the same wire ID", [] {
     given("a completed call whose operation is still delivering an error", [&] {
         webfront::detail::PendingCalls<CorrelationPolicy> calls;
         int                                     originalOwner{};

@@ -93,7 +93,7 @@ struct WebFrontMock {
     }
 };
 
-Scenario jsFunctionScenario{"JsFunction", [] {
+const Scenario jsFunctionScenario{"JsFunction", [] {
     WebFrontMock webFront;
     WebLinkId    id{1};
 

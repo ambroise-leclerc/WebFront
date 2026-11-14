@@ -29,7 +29,7 @@ comme sous-projet constituent elles aussi des contrats observables.
 
 Que les tests unitaires, sous `test/unit/`, vérifient unités, états et erreurs à l’aide de simulacres déterministes.
 Ils emploient `test/unit/Bdd.hpp`, un cadre BDD tenant dans un seul en-tête : un
-scénario est un objet `Scenario` nommé, ses sections `given`/`when`/`then` sont des lambdas, et `require`/`check`
+scénario est un objet `const Scenario` nommé, ses sections `given`/`when`/`then` sont des lambdas, et `require`/`check`
 situent un échec par `std::source_location`. Le cadre rejoue un scénario jusqu’à avoir parcouru chacune de ses
 feuilles, une nouvelle par passe, comme le faisait Catch2, dont seul ce sous-ensemble servait et dont la
 compilation pesait sur chaque construction des tests.

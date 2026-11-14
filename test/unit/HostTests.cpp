@@ -79,7 +79,7 @@ std::string text(const std::vector<std::uint8_t>& bytes) {
 }
 }  // namespace
 
-Scenario programReceives{"A program receives its arguments literally, without a shell", [] {
+const Scenario programReceives{"A program receives its arguments literally, without a shell", [] {
     given("arguments with spaces, quotes, Unicode, shell metacharacters and an empty one", [&] {
         const std::vector<std::string>
              arguments{"two words", "", "a;b|c&d $HOME `id` $(id) *", "\"quoted\"", "back\\slash\\", "caf\xC3\xA9 \xE2\x82\xAC", "--flag=x y"};
@@ -97,7 +97,7 @@ Scenario programReceives{"A program receives its arguments literally, without a 
     });
 }};
 
-Scenario everyWay{"Every way a program can end has a structured result", [] {
+const Scenario everyWay{"Every way a program can end has a structured result", [] {
     when("it exits with a non-zero code", [&] {
         const auto result = run(probeSpec({"exit", "7"}));
         then("the code is reported", [&] {
@@ -154,7 +154,7 @@ Scenario everyWay{"Every way a program can end has a structured result", [] {
 #endif
 }};
 
-Scenario capturedOutput{"Captured output is bounded and the excess does not block the program", [] {
+const Scenario capturedOutput{"Captured output is bounded and the excess does not block the program", [] {
     auto spec           = probeSpec({"big", "5000000"});
     spec.maxOutputBytes = 1000;
     const auto result   = run(spec);
@@ -166,7 +166,7 @@ Scenario capturedOutput{"Captured output is bounded and the excess does not bloc
     });
 }};
 
-Scenario environmentExplicit{"The environment is explicit", [] {
+const Scenario environmentExplicit{"The environment is explicit", [] {
     when("it is not inherited", [&] {
         auto spec = probeSpec({"env", "HOME"});
         then("the program sees nothing of the caller's environment", [&] {
@@ -190,7 +190,7 @@ Scenario environmentExplicit{"The environment is explicit", [] {
     });
 }};
 
-Scenario programDescendants{"A program and its descendants end together", [] {
+const Scenario programDescendants{"A program and its descendants end together", [] {
     TempRoot root{"descendants"};
     std::filesystem::create_directories(root.path);
     const auto marker = root.path / "alive.txt";
@@ -214,7 +214,7 @@ Scenario programDescendants{"A program and its descendants end together", [] {
     });
 }};
 
-Scenario invalidRequests{"Invalid requests are refused before anything starts", [] {
+const Scenario invalidRequests{"Invalid requests are refused before anything starts", [] {
     requireThrows([&] { run(ProcessSpec{}); });
     auto nul = probeSpec({"args", std::string("a\0b", 3)});
     requireThrows([&] { run(nul); });
@@ -226,7 +226,7 @@ Scenario invalidRequests{"Invalid requests are refused before anything starts", 
     requireThrows([&] { run(environment); });
 }};
 
-Scenario hostConfigurationStrict{"The host configuration is strict", [] {
+const Scenario hostConfigurationStrict{"The host configuration is strict", [] {
     using webfront::testing::detail::hostConfiguration;
     const auto absolute = webfront::json::quote((std::filesystem::temp_directory_path() / "x").generic_string());
     requireNothrow([&] { hostConfiguration(R"({"programs":[],"temporary":)" + absolute + "}"); });
@@ -238,7 +238,7 @@ Scenario hostConfigurationStrict{"The host configuration is strict", [] {
         requireThrows([&] { hostConfiguration(bad); });
 }};
 
-Scenario onlyOwner{"Only the owner's programs run, whatever the spec writes", [] {
+const Scenario onlyOwner{"Only the owner's programs run, whatever the spec writes", [] {
     TempRoot    root{"authorization"};
     HostSession host{webfront::testing::detail::hostConfiguration(configurationFor(root, {probe}))};
     const auto  request = [](const std::string& program) {
@@ -265,13 +265,13 @@ Scenario onlyOwner{"Only the owner's programs run, whatever the spec writes", []
     });
 }};
 
-Scenario programAuthorized{"A program authorized by no configuration is never reachable", [] {
+const Scenario programAuthorized{"A program authorized by no configuration is never reachable", [] {
     TempRoot    root{"empty-grant"};
     HostSession host{webfront::testing::detail::hostConfiguration(configurationFor(root, {}))};
     requireThrows([&] { (void)host.runStart("{\"program\":" + webfront::json::quote(probe.generic_string()) + "}"); }, contains("not authorized"));
 }};
 
-Scenario temporarySpaces{"Temporary spaces are private, confined and removed", [] {
+const Scenario temporarySpaces{"Temporary spaces are private, confined and removed", [] {
     TempRoot    root{"spaces"};
     std::string first, second;
     {
@@ -333,7 +333,7 @@ Scenario temporarySpaces{"Temporary spaces are private, confined and removed", [
     });
 }};
 
-Scenario twoSessions{"Two sessions on one root keep separate spaces", [] {
+const Scenario twoSessions{"Two sessions on one root keep separate spaces", [] {
     TempRoot    root{"concurrent"};
     HostSession one{webfront::testing::detail::hostConfiguration(configurationFor(root, {probe}))};
     HostSession two{webfront::testing::detail::hostConfiguration(configurationFor(root, {probe}))};
@@ -343,7 +343,7 @@ Scenario twoSessions{"Two sessions on one root keep separate spaces", [] {
     requireThrows([&] { one.writeFile(b + "/x", 0, {}); });
 }};
 
-Scenario runsBounded{"Runs are bounded, cancellable and released", [] {
+const Scenario runsBounded{"Runs are bounded, cancellable and released", [] {
     TempRoot    root{"runs"};
     HostSession host{webfront::testing::detail::hostConfiguration(configurationFor(root, {probe}))};
     const auto  hang = "{\"program\":" + webfront::json::quote(probe.generic_string()) + ",\"args\":[\"hang\"],\"timeoutMs\":60000}";
@@ -375,7 +375,7 @@ Scenario runsBounded{"Runs are bounded, cancellable and released", [] {
 }};
 
 #ifndef _WIN32
-Scenario programStill{"A program is still bounded when the application ignores SIGCHLD", [] {
+const Scenario programStill{"A program is still bounded when the application ignores SIGCHLD", [] {
     const auto previous = std::signal(SIGCHLD, SIG_IGN);
     auto       spec     = probeSpec({"exit", "0"});
     spec.timeout        = 100ms;
@@ -389,7 +389,7 @@ Scenario programStill{"A program is still bounded when the application ignores S
     });
 }};
 
-Scenario temporarySpacesClosed{"Temporary spaces are closed to other users", [] {
+const Scenario temporarySpacesClosed{"Temporary spaces are closed to other users", [] {
     TempRoot    root{"private"};
     HostSession host{webfront::testing::detail::hostConfiguration(configurationFor(root, {probe}))};
     const auto  space = webfront::testing::detail::pathFromUtf8(host.makeTemp());
@@ -398,7 +398,7 @@ Scenario temporarySpacesClosed{"Temporary spaces are closed to other users", [] 
         require((fs::status(path).permissions() & (fs::perms::group_all | fs::perms::others_all)) == fs::perms::none);
 }};
 
-Scenario programCannot{"A program that cannot start through exec is reported, with a reason", [] {
+const Scenario programCannot{"A program that cannot start through exec is reported, with a reason", [] {
     ProcessSpec spec;
     spec.program      = probe.parent_path();  // A directory: exec fails with EACCES.
     const auto result = run(spec);
@@ -408,7 +408,7 @@ Scenario programCannot{"A program that cannot start through exec is reported, wi
 #endif
 
 #ifdef __linux__
-Scenario programDoes{"A program does not outlive an application killed without a destructor", [] {
+const Scenario programDoes{"A program does not outlive an application killed without a destructor", [] {
     TempRoot root{"orphan"};
     std::filesystem::create_directories(root.path);
     const auto marker = root.path / "alive.txt";
@@ -430,7 +430,7 @@ Scenario programDoes{"A program does not outlive an application killed without a
 }};
 #endif
 
-Scenario programKeeps{"A program that keeps its pipes full cannot hold off the deadline", [] {
+const Scenario programKeeps{"A program that keeps its pipes full cannot hold off the deadline", [] {
     for (const auto delay : {0, 1000}) {
         when("the child delays its first write by " + std::to_string(delay) + " milliseconds", [&] {
             auto spec           = probeSpec({"flood", std::to_string(delay)});
@@ -449,7 +449,7 @@ Scenario programKeeps{"A program that keeps its pipes full cannot hold off the d
     }
 }};
 
-Scenario finiteFlood{"A finite flood drains both pipes and truncates each captured stream", [] {
+const Scenario finiteFlood{"A finite flood drains both pipes and truncates each captured stream", [] {
     auto spec           = probeSpec({"flood-finite"});
     spec.maxOutputBytes = 1000;
     const auto result   = run(spec);
@@ -463,7 +463,7 @@ Scenario finiteFlood{"A finite flood drains both pipes and truncates each captur
     });
 }};
 
-Scenario authorizedProgram{"An authorized program that is missing cannot start, and is not called unauthorized", [] {
+const Scenario authorizedProgram{"An authorized program that is missing cannot start, and is not called unauthorized", [] {
     TempRoot    root{"missing-grant"};
     const auto  absent = probe.parent_path() / "not-built-yet";
     HostSession host{webfront::testing::detail::hostConfiguration(configurationFor(root, {absent}))};
@@ -478,7 +478,7 @@ Scenario authorizedProgram{"An authorized program that is missing cannot start, 
 }};
 
 #ifndef _WIN32
-Scenario temporarySpace{"A temporary space that cannot be removed is reported and stays registered", [] {
+const Scenario temporarySpace{"A temporary space that cannot be removed is reported and stays registered", [] {
     if (::geteuid() == 0)
         skip("permissions do not stop root");
     TempRoot    root{"locked"};
@@ -499,7 +499,7 @@ Scenario temporarySpace{"A temporary space that cannot be removed is reported an
 }};
 #endif
 
-Scenario requestProcess{"A request the process runner would refuse is refused before any run exists", [] {
+const Scenario requestProcess{"A request the process runner would refuse is refused before any run exists", [] {
     TempRoot    root{"early-validation"};
     HostSession host{webfront::testing::detail::hostConfiguration(configurationFor(root, {probe}))};
     const auto  base = "{\"program\":" + webfront::json::quote(probe.generic_string());
@@ -509,7 +509,7 @@ Scenario requestProcess{"A request the process runner would refuse is refused be
 }};
 
 #ifndef _WIN32
-Scenario programStarts{"A program starts with default signal dispositions, whatever the application ignores", [] {
+const Scenario programStarts{"A program starts with default signal dispositions, whatever the application ignores", [] {
     const auto pipe   = std::signal(SIGPIPE, SIG_IGN);
     const auto child  = std::signal(SIGCHLD, SIG_IGN);
     auto       spec   = probeSpec({"dispositions"});
@@ -524,7 +524,7 @@ Scenario programStarts{"A program starts with default signal dispositions, whate
 }};
 #endif
 
-Scenario fileLarger{"A file larger than the limit is not read", [] {
+const Scenario fileLarger{"A file larger than the limit is not read", [] {
     TempRoot    root{"large"};
     HostSession host{webfront::testing::detail::hostConfiguration(configurationFor(root, {probe}))};
     const auto  space = host.makeTemp();
@@ -537,7 +537,7 @@ Scenario fileLarger{"A file larger than the limit is not read", [] {
 }};
 
 #ifndef _WIN32
-Scenario programOutput{"A program's output is captured when the application closed its standard descriptors", [] {
+const Scenario programOutput{"A program's output is captured when the application closed its standard descriptors", [] {
     const auto child = ::fork();
     if (child == 0) {
         ::close(0);
@@ -555,7 +555,7 @@ Scenario programOutput{"A program's output is captured when the application clos
 #endif
 
 #ifdef __linux__
-Scenario failedLaunch{"A failed launch is reported as one when the application closed its standard descriptors", [] {
+const Scenario failedLaunch{"A failed launch is reported as one when the application closed its standard descriptors", [] {
     const auto child = ::fork();
     if (child == 0) {
         ::close(0);

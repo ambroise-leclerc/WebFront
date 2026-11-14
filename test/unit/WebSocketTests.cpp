@@ -19,7 +19,7 @@ using Net = networking::NetworkingMock;
 using webfront::testing::InjectableNetworking;
 using webfront::testing::InjectableSocket;
 
-Scenario stoppedWebSocket{"A stopped WebSocket does not read again", [] {
+const Scenario stoppedWebSocket{"A stopped WebSocket does not read again", [] {
     InjectableSocket::reset();
     int closeHandlerCalls = 0;
     webfront::testing::InlineTaskScope scope;
@@ -42,7 +42,7 @@ Scenario stoppedWebSocket{"A stopped WebSocket does not read again", [] {
     });
 }};
 
-Scenario failedWrite{"A failed write closes the WebSocket", [] {
+const Scenario failedWrite{"A failed write closes the WebSocket", [] {
     InjectableSocket::reset();
     int closeHandlerCalls = 0;
     webfront::testing::InlineTaskScope scope;
@@ -67,7 +67,7 @@ Scenario failedWrite{"A failed write closes the WebSocket", [] {
     });
 }};
 
-Scenario webSocketKeeps{"A WebSocket keeps only the latest frame of a key that has too many frames waiting", [] {
+const Scenario webSocketKeeps{"A WebSocket keeps only the latest frame of a key that has too many frames waiting", [] {
     InjectableSocket::reset();
     webfront::testing::InlineTaskScope scope;
     auto                               ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{}, scope);
@@ -120,7 +120,7 @@ Scenario webSocketKeeps{"A WebSocket keeps only the latest frame of a key that h
     InjectableSocket::reset();
 }};
 
-Scenario webSocketReassembles{"A WebSocket reassembles the messages a browser sends in several frames", [] {
+const Scenario webSocketReassembles{"A WebSocket reassembles the messages a browser sends in several frames", [] {
     InjectableSocket::reset();
     vector<vector<byte>> binaryMessages;
     vector<string>       textMessages;
@@ -181,7 +181,7 @@ Scenario webSocketReassembles{"A WebSocket reassembles the messages a browser se
     InjectableSocket::reset();
 }};
 
-Scenario webSocketLimits{"A WebSocket limits the size of the messages it reassembles", [] {
+const Scenario webSocketLimits{"A WebSocket limits the size of the messages it reassembles", [] {
     InjectableSocket::reset();
     vector<vector<byte>> messages;
     optional<uint16_t>   closeCode;
@@ -250,7 +250,7 @@ Scenario webSocketLimits{"A WebSocket limits the size of the messages it reassem
     InjectableSocket::reset();
 }};
 
-Scenario webSocketRejects{"A WebSocket rejects a frame announcing gigabytes before buffering it", [] {
+const Scenario webSocketRejects{"A WebSocket rejects a frame announcing gigabytes before buffering it", [] {
     InjectableSocket::reset();
     optional<uint16_t> closeCode;
     webfront::testing::InlineTaskScope scope;
@@ -270,7 +270,7 @@ Scenario webSocketRejects{"A WebSocket rejects a frame announcing gigabytes befo
     InjectableSocket::reset();
 }};
 
-Scenario webSocketHeaders{"WebSocket Headers decoding", [] {
+const Scenario webSocketHeaders{"WebSocket Headers decoding", [] {
     given("Some Header data", [&] {
         array<uint8_t, 14> data{0b10000001, 0b10000000 | 63, 0x10, 0x11, 0x12, 0x13};
         when("Casting to header", [&] {
@@ -313,7 +313,7 @@ Scenario webSocketHeaders{"WebSocket Headers decoding", [] {
     });
 }};
 
-Scenario webSocketFrame{"WebSocket frame encoding", [] {
+const Scenario webSocketFrame{"WebSocket frame encoding", [] {
 
   given("Some text to send", [&] {
 
@@ -348,7 +348,7 @@ when("Encoding it", [&] {
 }};
 ;
 
-Scenario webSocketFrames{"WebSocket frames can own payloads for asynchronous writes", [] {
+const Scenario webSocketFrames{"WebSocket frames can own payloads for asynchronous writes", [] {
     given("A frame assembled from temporary message buffers", [&] {
         array<byte, 2> header{byte{0x01}, byte{0x02}};
         array<byte, 3> payload{byte{0x03}, byte{0x04}, byte{0x05}};
@@ -377,7 +377,7 @@ Scenario webSocketFrames{"WebSocket frames can own payloads for asynchronous wri
     });
 }};
 
-Scenario webSocketDecoder{"WebSocket decoder", [] {
+const Scenario webSocketDecoder{"WebSocket decoder", [] {
     given("Some frame data and a decoder", [&] {
         array<uint8_t, 22> frame{0x1,
                                  0b10000000 | 8,
@@ -422,7 +422,7 @@ Scenario webSocketDecoder{"WebSocket decoder", [] {
     });
 }};
 
-Scenario webSocketDecoderPreserves{"WebSocket decoder preserves coalesced frames", [] {
+const Scenario webSocketDecoderPreserves{"WebSocket decoder preserves coalesced frames", [] {
     given("Two masked text frames received in one chunk", [&] {
         const array<uint8_t, 16> frames{0x81,
                                         0x82,
@@ -459,7 +459,7 @@ Scenario webSocketDecoderPreserves{"WebSocket decoder preserves coalesced frames
     });
 }};
 
-Scenario webSocketHeader{"WebSocket header completeness follows its encoded length and mask", [] {
+const Scenario webSocketHeader{"WebSocket header completeness follows its encoded length and mask", [] {
     given("An encoded WebSocket header", [&] {
         then("It becomes complete at exactly the header boundary", [&] {
             for (const auto lengthField : {125, 126, 127})
@@ -476,7 +476,7 @@ Scenario webSocketHeader{"WebSocket header completeness follows its encoded leng
     });
 }};
 
-Scenario shortWebSocket{"Short WebSocket headers do not interpret payload bytes as an extended length", [] {
+const Scenario shortWebSocket{"Short WebSocket headers do not interpret payload bytes as an extended length", [] {
     websocket::Header header;
     header.raw.fill(byte{0xff});
     header.raw[1] = byte{0x82};
@@ -490,7 +490,7 @@ Scenario shortWebSocket{"Short WebSocket headers do not interpret payload bytes 
     });
 }};
 
-Scenario webSocketDecoderPreservesSplit{"WebSocket decoder preserves split extended headers and the following frame", [] {
+const Scenario webSocketDecoderPreservesSplit{"WebSocket decoder preserves split extended headers and the following frame", [] {
     for (const size_t split : {1u, 2u, 7u, 8u, 9u, 13u})
         section("split after ", split, " bytes", [&] {
             // A masked 16-bit length frame followed by an empty masked text frame.
@@ -524,7 +524,7 @@ Scenario webSocketDecoderPreservesSplit{"WebSocket decoder preserves split exten
         });
 }};
 
-Scenario webSocketDecoderWaits{"WebSocket decoder waits for an entire split payload", [] {
+const Scenario webSocketDecoderWaits{"WebSocket decoder waits for an entire split payload", [] {
     given("A masked text frame split across three reads", [&] {
         const array<uint8_t, 14> frame{0x81,
                                        0x88,
@@ -561,7 +561,7 @@ Scenario webSocketDecoderWaits{"WebSocket decoder waits for an entire split payl
     });
 }};
 
-Scenario webSocketStop{"WebSocket stop() is idempotent", [] {
+const Scenario webSocketStop{"WebSocket stop() is idempotent", [] {
     InjectableSocket::reset();
     int  closeHandlerCalls = 0;
     webfront::testing::InlineTaskScope scope;
@@ -596,7 +596,7 @@ Scenario webSocketStop{"WebSocket stop() is idempotent", [] {
     });
 }};
 
-Scenario webSocketFramesEncode{"WebSocket frames encode extended payload lengths big-endian", [] {
+const Scenario webSocketFramesEncode{"WebSocket frames encode extended payload lengths big-endian", [] {
     struct Expected {
         size_t   size;
         unsigned lengthField;

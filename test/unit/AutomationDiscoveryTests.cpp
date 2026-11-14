@@ -69,7 +69,7 @@ discovery::Entry entry(std::string session, long pid = discovery::currentProcess
 constexpr long deadProcess = 2147483000L;
 }  // namespace
 
-Scenario recordReader{"A record that a reader holds open is still withdrawn", [] {
+const Scenario recordReader{"A record that a reader holds open is still withdrawn", [] {
     webfront::test::TemporaryDirectory root;
     given("a registration whose record is open in a reader, as `list` reads it", [&] {
         const auto directory = root.path() / "sessions";
@@ -93,7 +93,7 @@ Scenario recordReader{"A record that a reader holds open is still withdrawn", []
     });
 }};
 
-Scenario sharedSession{"A shared session is listed with its grants and never with its capability", [] {
+const Scenario sharedSession{"A shared session is listed with its grants and never with its capability", [] {
     webfront::test::TemporaryDirectory root;
     given("a registration in a discovery directory", [&] {
         const auto directory = root.path() / "sessions";
@@ -174,7 +174,7 @@ Scenario sharedSession{"A shared session is listed with its grants and never wit
 #endif
 }};
 
-Scenario discoveryDirectory{"A discovery directory only lists live, well-formed records", [] {
+const Scenario discoveryDirectory{"A discovery directory only lists live, well-formed records", [] {
     webfront::test::TemporaryDirectory root;
     const auto                         directory = root.path() / "sessions";
     discovery::Registration            live{directory, entry("live")};
@@ -219,7 +219,7 @@ Scenario discoveryDirectory{"A discovery directory only lists live, well-formed 
     });
 }};
 
-Scenario clientConfiguration{"A client configuration attaches to an endpoint without grants or secrets", [] {
+const Scenario clientConfiguration{"A client configuration attaches to an endpoint without grants or secrets", [] {
     given("an agent and an endpoint directory", [&] {
         const auto text = discovery::mcpConfiguration("/tools/webfront-agent", "/run/session", "bf");
         then("it is a stdio server configuration whose arguments only attach", [&] {
@@ -238,7 +238,7 @@ Scenario clientConfiguration{"A client configuration attaches to an endpoint wit
     });
 }};
 
-Scenario consumerEnables{"A consumer enables automation explicitly, with fixed grants and a visible endpoint", [] {
+const Scenario consumerEnables{"A consumer enables automation explicitly, with fixed grants and a visible endpoint", [] {
     webfront::test::TemporaryDirectory root;
     std::filesystem::create_directory(root.path() / "project");
     ConsumerApp app{.project = root.path() / "project"};
@@ -374,7 +374,7 @@ void awaitCloseGrace(const auto& automation) {
 }
 }  // namespace
 
-Scenario windowIgnores{"A window that ignores the deadline's close request is declared unresponsive by the consumer's automation", [] {
+const Scenario windowIgnores{"A window that ignores the deadline's close request is declared unresponsive by the consumer's automation", [] {
     SupervisorClock::reset();
     webfront::test::TemporaryDirectory root;
     std::filesystem::create_directory(root.path() / "project");
@@ -505,7 +505,7 @@ Scenario windowIgnores{"A window that ignores the deadline's close request is de
     });
 }};
 
-Scenario defaultAutomation{"The default automation clock supervises a renderer that never becomes ready", [] {
+const Scenario defaultAutomation{"The default automation clock supervises a renderer that never becomes ready", [] {
     webfront::test::TemporaryDirectory root;
     std::filesystem::create_directory(root.path() / "project");
     ConsumerApp       app{.project = root.path() / "project"};

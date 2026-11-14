@@ -102,7 +102,7 @@ const std::string upgradeRequest =
 
 }  // namespace
 
-Scenario hTTPListener{"The HTTP listener is ready before its event loop starts", [] {
+const Scenario hTTPListener{"The HTTP listener is ready before its event loop starts", [] {
     const auto port = freePort();
     http::Server<Stdnet, fs::DefaultFS> server("127.0.0.1", port);
     Stdnet::IoContext clientContext;
@@ -112,7 +112,7 @@ Scenario hTTPListener{"The HTTP listener is ready before its event loop starts",
     require(client.is_open());
 }};
 
-Scenario acceptedConnections{"Accepted connections retain TCP_NODELAY through WebSocket upgrade", [] {
+const Scenario acceptedConnections{"Accepted connections retain TCP_NODELAY through WebSocket upgrade", [] {
     given("A real stdnet HTTP server and a loopback client", [&] {
         const auto                          port = freePort();
         http::Server<Stdnet, fs::DefaultFS> server("127.0.0.1", port);
@@ -137,7 +137,7 @@ Scenario acceptedConnections{"Accepted connections retain TCP_NODELAY through We
     });
 }};
 
-Scenario stoppingRunning{"Stopping a running server releases its connections", [] {
+const Scenario stoppingRunning{"Stopping a running server releases its connections", [] {
     given("A running server with an idle client connection", [&] {
         const auto port = freePort();
         Stdnet::IoContext clientContext;
@@ -156,7 +156,7 @@ Scenario stoppingRunning{"Stopping a running server releases its connections", [
     });
 }};
 
-Scenario destroyingServer{"Destroying a server which is not running releases its connections", [] {
+const Scenario destroyingServer{"Destroying a server which is not running releases its connections", [] {
     given("A server which accepted a client connection", [&] {
         const auto port = freePort();
         Stdnet::IoContext clientContext;
@@ -171,7 +171,7 @@ Scenario destroyingServer{"Destroying a server which is not running releases its
     });
 }};
 
-Scenario destroyingWebFront{"Destroying WebFront closes its established WebSockets", [] {
+const Scenario destroyingWebFront{"Destroying WebFront closes its established WebSockets", [] {
     given("A WebFront with an established WebSocket", [&] {
         const auto        port = freePort();
         Stdnet::IoContext clientContext;
@@ -227,7 +227,7 @@ Task applicationTaskOnServer(TaskThreadState& state) {
 }
 }  // namespace
 
-Scenario applicationTask{"Application task cancellation returns to the server context", [] {
+const Scenario applicationTask{"Application task cancellation returns to the server context", [] {
     given("an application task running on a real stdnet context", [&] {
         TaskThreadState                state;
         BasicWF<Stdnet, fs::DefaultFS> app(WebFrontConfig{.port = "0"});
@@ -257,7 +257,7 @@ Scenario applicationTask{"Application task cancellation returns to the server co
     });
 }};
 
-Scenario rejectedWebSocket{"A rejected WebSocket Origin never reaches the server upgrade callback", [] {
+const Scenario rejectedWebSocket{"A rejected WebSocket Origin never reaches the server upgrade callback", [] {
     const auto                          port = freePort();
     http::Server<Stdnet, fs::DefaultFS> server("127.0.0.1", port);
     std::atomic<int>                    upgrades = 0;
@@ -302,7 +302,7 @@ Scenario rejectedWebSocket{"A rejected WebSocket Origin never reaches the server
     serverThread.join();
 }};
 
-Scenario drainingPumps{"Draining pumps cancelled tasks while a route handler waits for their cleanup", [] {
+const Scenario drainingPumps{"Draining pumps cancelled tasks while a route handler waits for their cleanup", [] {
     const auto                          port = freePort();
     http::Server<Stdnet, fs::DefaultFS> server("127.0.0.1", port);
     std::promise<void>                  released, entered;

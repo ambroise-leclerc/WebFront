@@ -49,7 +49,7 @@ std::string decodedModule() {
 }
 }  // namespace
 
-Scenario requestHandlerServes{"RequestHandler serves JavaScript modules", [] {
+const Scenario requestHandlerServes{"RequestHandler serves JavaScript modules", [] {
     std::string input{"GET /modules/main.mjs HTTP/1.1\r\nHost: localhost\r\nAccept-encoding: gzip, br, deflate\r\n\r\n"};
     Request     request;
     requireNothrow([&] { request.parseSomeData(input.cbegin(), input.cend()); });
@@ -65,7 +65,7 @@ Scenario requestHandlerServes{"RequestHandler serves JavaScript modules", [] {
 
 // WebKit does not advertise Brotli over loopback HTTP.
 
-Scenario embeddedGzip{"Embedded gzip assets are served to gzip-only HTTP clients", [] {
+const Scenario embeddedGzip{"Embedded gzip assets are served to gzip-only HTTP clients", [] {
     RequestHandler<Net, GzipModuleFS> handler{"."};
     when("the client requests the module without Brotli support", [&] {
         const std::string input = "GET /modules/answer.mjs HTTP/1.1\r\nHost: localhost\r\nAccept-Encoding: gzip, deflate\r\n\r\n";
@@ -83,7 +83,7 @@ Scenario embeddedGzip{"Embedded gzip assets are served to gzip-only HTTP clients
     });
 }};
 
-Scenario embeddedGzipAssets{"Embedded gzip assets are served to identity-only HTTP clients", [] {
+const Scenario embeddedGzipAssets{"Embedded gzip assets are served to identity-only HTTP clients", [] {
     RequestHandler<Net, GzipModuleFS> handler{"."};
     const auto                        expected = decodedModule();
     for (const auto accept : {"", "Accept-Encoding: identity\r\n", "Accept-Encoding: gzip;q=0, identity;q=1\r\n"}) {

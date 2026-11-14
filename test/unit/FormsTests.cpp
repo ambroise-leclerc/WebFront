@@ -46,7 +46,7 @@ forms::Field<Settings>& fieldNamed(forms::Description<Settings>& description, st
 }
 }  // namespace
 
-Scenario handWrittenDescriptors{"Hand-written descriptors parse and format the values of the browser", {"forms"}, [] {
+const Scenario handWrittenDescriptors{"Hand-written descriptors parse and format the values of the browser", {"forms"}, [] {
     auto     description = forms_fixture::settingsDescription();
     Settings settings;
     given("the descriptor of each member kind", [&] {
@@ -166,7 +166,7 @@ Scenario handWrittenDescriptors{"Hand-written descriptors parse and format the v
     });
 }};
 
-Scenario descriptorsValidated{"Descriptors are validated before generation", {"forms"}, [] {
+const Scenario descriptorsValidated{"Descriptors are validated before generation", {"forms"}, [] {
     auto description = forms_fixture::settingsDescription();
     when("a name is not an identifier or is repeated", [&] {
         auto badType = description;
@@ -221,7 +221,7 @@ Scenario descriptorsValidated{"Descriptors are validated before generation", {"f
     });
 }};
 
-Scenario descriptionGenerates{"A description generates the TypeScript declaration of its type", {"forms"}, [] {
+const Scenario descriptionGenerates{"A description generates the TypeScript declaration of its type", {"forms"}, [] {
     given("the hand-written settings", [&] {
         then("numbers, booleans, strings and the union of the choices are declared, with labels and bounds", [&] {
             require(forms::typescriptDeclaration(forms_fixture::settingsDescription()) == forms_fixture::settingsDeclaration);
@@ -252,7 +252,7 @@ Scenario descriptionGenerates{"A description generates the TypeScript declaratio
     });
 }};
 
-Scenario formBuilt{"A form is built in a document and writes the object from browser events", {"forms", "dom"}, [] {
+const Scenario formBuilt{"A form is built in a document and writes the object from browser events", {"forms", "dom"}, [] {
     Recorder recorder;
     auto     settings = std::make_shared<Settings>();
     auto     root     = recorder.doc.island();
@@ -485,7 +485,7 @@ Scenario formBuilt{"A form is built in a document and writes the object from bro
     });
 }};
 
-Scenario inspectorShows{"An inspector shows an object and updates only what changed", {"forms", "dom"}, [] {
+const Scenario inspectorShows{"An inspector shows an object and updates only what changed", {"forms", "dom"}, [] {
     Recorder recorder;
     auto     settings  = std::make_shared<Settings>();
     auto     inspector = forms::inspector(recorder.doc, recorder.doc.island(), settings, forms_fixture::settingsDescription());

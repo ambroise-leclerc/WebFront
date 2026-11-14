@@ -138,7 +138,7 @@ struct ShutdownNet : webfront::networking::NetworkingMock {
 };
 }  // namespace
 
-Scenario serverDrain{"Server drain joins its pending connection without draining unrelated work", [] {
+const Scenario serverDrain{"Server drain joins its pending connection without draining unrelated work", [] {
     std::shared_ptr<ShutdownTrace> trace;
     given("a server with an accepted socket and a pending read", [&] {
         {
@@ -170,7 +170,7 @@ webfront::networking::Task failingTask(int failure) {
     co_return;
 }
 }  // namespace
-Scenario trackedTask{"Tracked task errors are logged and do not prevent joining", [] {
+const Scenario trackedTask{"Tracked task errors are logged and do not prevent joining", [] {
     namespace log = webfront::log;
     std::vector<std::string> lines;
     log::setLogLevel(log::Error);

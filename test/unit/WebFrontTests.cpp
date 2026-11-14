@@ -36,7 +36,7 @@ using namespace webfront::bdd;
 
 using namespace webfront;
 
-Scenario publicVersion{"The public version matches the version detected by CMake", {"version"}, [] {
+const Scenario publicVersion{"The public version matches the version detected by CMake", {"version"}, [] {
     then("consumers and CMake observe the same version", [&] {
         require(webfront::version == cmakeProjectVersion);
     });
@@ -190,7 +190,7 @@ int freeFunctionForDeductionTest(double value) {
 
 }  // namespace
 
-Scenario frontendSelection{"Frontend selection aliases", [] {
+const Scenario frontendSelection{"Frontend selection aliases", [] {
 #if defined(_WIN32) || defined(__APPLE__) || defined(__linux__)
     static_assert(frontend::FrontendType<frontend::NativeWebViewFrontend>);
     static_assert(std::is_same_v<webfront::WebFrontWithFrontend<frontend::NativeWebViewFrontend>::FrontendProvider, frontend::NativeWebViewFrontend>);
@@ -220,7 +220,7 @@ Scenario frontendSelection{"Frontend selection aliases", [] {
 
 #if (defined(_WIN32) && !defined(WEBFRONT_EMBED_WEBVIEW2)) || (defined(__APPLE__) && !defined(WEBFRONT_EMBED_WKWEBVIEW))                                       \
     || (defined(__linux__) && !defined(WEBFRONT_EMBED_WEBKITGTK))
-Scenario selectingNative{"Selecting the native web view without support preserves the platform diagnostic", [] {
+const Scenario selectingNative{"Selecting the native web view without support preserves the platform diagnostic", [] {
     #if defined(_WIN32)
     const auto diagnostic = "WebView2Frontend is unavailable. Configure on Windows with -DWEBFRONT_EMBED_WEBVIEW2=ON";
     #elif defined(__APPLE__)
@@ -234,7 +234,7 @@ Scenario selectingNative{"Selecting the native web view without support preserve
 }};
 #endif
 
-Scenario selectingFrontend{"Selecting a frontend the build does not support fails clearly", [] {
+const Scenario selectingFrontend{"Selecting a frontend the build does not support fails clearly", [] {
 #if !defined(WEBFRONT_EMBED_WKWEBVIEW) || !defined(__APPLE__)
     then("WKWebView's initialization and opening name the enabling option", [&] {
         requireThrows([&] { frontend::WKWebViewFrontend::initialize(); }, equals("WKWebViewFrontend is unavailable. Configure on macOS with -DWEBFRONT_EMBED_WKWEBVIEW=ON"));
@@ -266,7 +266,7 @@ Scenario selectingFrontend{"Selecting a frontend the build does not support fail
     }
 }};
 
-Scenario cEFSubprocess{"CEF subprocess exits preserve their status and diagnostic", [] {
+const Scenario cEFSubprocess{"CEF subprocess exits preserve their status and diagnostic", [] {
     then("a subprocess that completed successfully propagates its status, and a failed one its status and the exit request", [&] {
         require(cef::CEFSubprocessExit{0}.exit_code() == 0);
         const cef::CEFSubprocessExit failed{7};
@@ -275,7 +275,7 @@ Scenario cEFSubprocess{"CEF subprocess exits preserve their status and diagnosti
     });
 }};
 
-Scenario frontendInitialized{"A frontend is initialized once per process, and a failed initialization is retried", [] {
+const Scenario frontendInitialized{"A frontend is initialized once per process, and a failed initialization is retried", [] {
     given("two BasicWF instances sharing the same frontend type", [&] {
         using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
         FrontendWF first("8080");
@@ -300,7 +300,7 @@ Scenario frontendInitialized{"A frontend is initialized once per process, and a 
     });
 }};
 
-Scenario frontendContract{"The frontend contract: a failing open() stops the server before propagating, whatever its action", [] {
+const Scenario frontendContract{"The frontend contract: a failing open() stops the server before propagating, whatever its action", [] {
     given("an embedded frontend that fails to open", [&] {
         using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, FailingFrontend>;
         App app("9200");
@@ -321,7 +321,7 @@ Scenario frontendContract{"The frontend contract: a failing open() stops the ser
     });
 }};
 
-Scenario frontendContractThread{"The frontend contract: open() runs on the calling thread and a closing frontend stops the server", [] {
+const Scenario frontendContractThread{"The frontend contract: open() runs on the calling thread and a closing frontend stops the server", [] {
     given("an embedded frontend that records the thread it is opened on", [&] {
         using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, ThreadRecordingFrontend>;
         App app("9201");
@@ -357,7 +357,7 @@ struct FallbackBrowser {
     static void                       open(std::string_view, std::string_view) { ++openCalls; }
 };
 
-Scenario nativeWindowBrowser{"Native window or browser, decided at run time", [] {
+const Scenario nativeWindowBrowser{"Native window or browser, decided at run time", [] {
     using Fallback = frontend::NativeOrBrowserFrontendFor<FallbackNativeWindow, FallbackBrowser>;
     static_assert(frontend::FrontendType<Fallback>);
     static_assert(frontend::FrontendType<frontend::NativeOrBrowserFrontend>);
@@ -431,7 +431,7 @@ Scenario nativeWindowBrowser{"Native window or browser, decided at run time", []
 #endif
 }};
 
-Scenario nativeEngine{"The native engine availability is a constant", [] {
+const Scenario nativeEngine{"The native engine availability is a constant", [] {
     static_assert(std::is_same_v<decltype(frontend::nativeWebViewAvailable), const bool>);
 #if defined(__linux__) && defined(WEBFRONT_EMBED_WEBKITGTK)
     static_assert(frontend::nativeWebViewAvailable);
@@ -448,7 +448,7 @@ Scenario nativeEngine{"The native engine availability is a constant", [] {
 #endif
 }};
 
-Scenario embeddedFrontendDeclared{"The embedded frontend is declared in every configuration", [] {
+const Scenario embeddedFrontendDeclared{"The embedded frontend is declared in every configuration", [] {
     static_assert(std::is_same_v<decltype(embeddedFrontendAvailable), const bool>);
 #ifdef WEBFRONT_EMBED_CEF
     static_assert(embeddedFrontendAvailable);
@@ -472,7 +472,7 @@ Scenario embeddedFrontendDeclared{"The embedded frontend is declared in every co
     }
 }};
 
-Scenario basicWFDelegates{"BasicWF delegates window opening to the selected frontend", [] {
+const Scenario basicWFDelegates{"BasicWF delegates window opening to the selected frontend", [] {
     given("a frontend that keeps the server running after open", [&] {
         using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, OpeningFrontend>;
         FrontendWF webFront("8123");
@@ -520,7 +520,7 @@ Scenario basicWFDelegates{"BasicWF delegates window opening to the selected fron
     });
 }};
 
-Scenario registeredC{"Registered C++ function handlers own and invoke their callable", [] {
+const Scenario registeredC{"Registered C++ function handlers own and invoke their callable", [] {
     given("handlers created from temporary callables", [&] {
         int  decodedValue = 0;
         using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
@@ -549,7 +549,7 @@ Scenario registeredC{"Registered C++ function handlers own and invoke their call
     });
 }};
 
-Scenario applicationServes{"An application that serves a document root is told the development path once", [] {
+const Scenario applicationServes{"An application that serves a document root is told the development path once", [] {
     using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, ClosingFrontend>;
     std::ostringstream captured;
     struct Redirect {
@@ -592,7 +592,7 @@ Scenario applicationServes{"An application that serves a document root is told t
     });
 }};
 
-Scenario showOpens{"show opens the default page and returns when the window session ends", [] {
+const Scenario showOpens{"show opens the default page and returns when the window session ends", [] {
     given("a default-constructed application whose frontend completes after open", [&] {
         using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, ClosingFrontend>;
         FrontendWF webFront;
@@ -618,7 +618,7 @@ Scenario showOpens{"show opens the default page and returns when the window sess
     });
 }};
 
-Scenario cppFunctionDeduces{"cppFunction deduces a callable's signature from itself", [] {
+const Scenario cppFunctionDeduces{"cppFunction deduces a callable's signature from itself", [] {
     then("callable_traits resolves the return type and decayed, owning parameter types", [&] {
         auto voidLambda = [](int) {};
         require(std::is_same_v<detail::callable_traits<decltype(voidLambda)>::Return, void>);
@@ -641,7 +641,7 @@ Scenario cppFunctionDeduces{"cppFunction deduces a callable's signature from its
     });
 }};
 
-Scenario deducedCppFunction{"Deduced cppFunction registration accepts common callable kinds", [] {
+const Scenario deducedCppFunction{"Deduced cppFunction registration accepts common callable kinds", [] {
     given("a WebFront instance", [&] {
         using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
         FrontendWF webFront("9150");
@@ -671,7 +671,7 @@ Scenario deducedCppFunction{"Deduced cppFunction registration accepts common cal
     });
 }};
 
-Scenario cFunction{"C++ function responders encode values and failures", [] {
+const Scenario cFunction{"C++ function responders encode values and failures", [] {
     using Policy = http::DefaultBuffersPolicy;
     using Net    = networking::NetworkingMock;
 
@@ -783,7 +783,7 @@ std::pair<std::string, std::string> sentException(std::function<void()> thrower)
 }
 }  // namespace
 
-Scenario callbackFailure{"A callback failure is sent with its code", [] {
+const Scenario callbackFailure{"A callback failure is sent with its code", [] {
     given("a callback throwing a BridgeError", [&] {
         then("the rejection carries its code", [&] {
             require(sentException([] { throw BridgeError("denied", "no"); }) == std::pair<std::string, std::string>{"denied", "no"});
@@ -826,7 +826,7 @@ Scenario callbackFailure{"A callback failure is sent with its code", [] {
     });
 }};
 
-Scenario cString{"C++ string results cross the bridge up to the message size of the policy", [] {
+const Scenario cString{"C++ string results cross the bridge up to the message size of the policy", [] {
     const std::string longText(100000, 'x');
     using SmallPolicy = http::CustomBuffersPolicy<8192, 8192, 32768, 1024 * 1024>;
     const std::string overlong(1024 * 1024, 'x');
@@ -865,7 +865,7 @@ std::vector<std::byte> smallStringData(std::string_view text) {
 
 }  // namespace
 
-Scenario cCallback{"A C++ callback can receive the browser that called it", [] {
+const Scenario cCallback{"A C++ callback can receive the browser that called it", [] {
     using Policy = http::DefaultBuffersPolicy;
 
     given("a handler whose callable takes the caller before its JavaScript parameters", [&] {
@@ -913,7 +913,7 @@ static_assert(detail::takes_caller<CallerTestUI, const CallerTestUI&>::value);
 static_assert(!detail::takes_caller<CallerTestUI, std::string, CallerTestUI>::value);
 static_assert(!detail::takes_caller<CallerTestUI>::value);
 
-Scenario uIFirst{"A UI first parameter selects the caller form of cppFunction", [] {
+const Scenario uIFirst{"A UI first parameter selects the caller form of cppFunction", [] {
     using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
     using AppUI      = FrontendWF::UI;
 
@@ -945,7 +945,7 @@ Scenario uIFirst{"A UI first parameter selects the caller form of cppFunction", 
     });
 }};
 
-Scenario webFrontConfigHas{"WebFrontConfig has newcomer-friendly defaults", [] {
+const Scenario webFrontConfigHas{"WebFrontConfig has newcomer-friendly defaults", [] {
     then("the defaults are loopback binding, port 9002, and no local document root", [&] {
         WebFrontConfig config;
         require(config.address == "127.0.0.1");
@@ -954,7 +954,7 @@ Scenario webFrontConfigHas{"WebFrontConfig has newcomer-friendly defaults", [] {
     });
 }};
 
-Scenario basicWFSupports{"BasicWF supports default construction", [] {
+const Scenario basicWFSupports{"BasicWF supports default construction", [] {
     given("a frontend and networking mock", [&] {
         when("a BasicWF is default-constructed", [&] {
             using DefaultCtorWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
@@ -965,7 +965,7 @@ Scenario basicWFSupports{"BasicWF supports default construction", [] {
     });
 }};
 
-Scenario basicWFDoes{"BasicWF does not require onUIStarted to be set", [] {
+const Scenario basicWFDoes{"BasicWF does not require onUIStarted to be set", [] {
     // Note: this exercises construction/registration/teardown without onUIStarted. The guarded
     // dispatch itself - onEvent's `if (uiStartedHandler) uiStartedHandler(...)` for the `linked`
     // event - would need a full HTTP-upgrade-then-WebSocket-handshake simulation through the mock
@@ -1004,7 +1004,7 @@ struct PolicyFrontend {
 };
 }  // namespace
 
-Scenario webFrontPasses{"WebFront passes per-application content rules to policy-aware frontends", [] {
+const Scenario webFrontPasses{"WebFront passes per-application content rules to policy-aware frontends", [] {
     using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, PolicyFrontend>;
     App app(WebFrontConfig{
         .address       = "127.0.0.2",
@@ -1023,7 +1023,7 @@ Scenario webFrontPasses{"WebFront passes per-application content rules to policy
     });
 }};
 
-Scenario ephemeralPorts{"Ephemeral ports are bound atomically and forwarded to the frontend", [] {
+const Scenario ephemeralPorts{"Ephemeral ports are bound atomically and forwarded to the frontend", [] {
     using App = BasicWFWithFrontend<NetProvider, TestFilesystem, AddressFrontend>;
     App first{WebFrontConfig{.port = "0"}};
     App second{WebFrontConfig{.port = "0"}};
@@ -1044,7 +1044,7 @@ Scenario ephemeralPorts{"Ephemeral ports are bound atomically and forwarded to t
     });
 }};
 
-Scenario sendingDOM{"Sending a DOM batch through a lost UI link throws ConnectionError", [] {
+const Scenario sendingDOM{"Sending a DOM batch through a lost UI link throws ConnectionError", [] {
     using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
     given("a UI handle whose connection is absent from the application", [&] {
         App           app("9161");
@@ -1058,7 +1058,7 @@ Scenario sendingDOM{"Sending a DOM batch through a lost UI link throws Connectio
     });
 }};
 
-Scenario uIAssignable{"A UI is an assignable value identifying one browser of one application", [] {
+const Scenario uIAssignable{"A UI is an assignable value identifying one browser of one application", [] {
     using App = BasicWF<networking::NetworkingMock, fs::DefaultFS>;
     given("an application over the networking mock", [&] {
         App app(WebFrontConfig{.port = "0"});
@@ -1119,7 +1119,7 @@ struct DomNoTimerNet : testing::InjectableNetworking {
 };
 }  // namespace
 
-Scenario dOMReadiness{"DOM readiness explains a missing network timer while the ordinary bridge remains usable", {"dom"}, [] {
+const Scenario dOMReadiness{"DOM readiness explains a missing network timer while the ordinary bridge remains usable", {"dom"}, [] {
     using Socket = testing::InjectableSocket;
     Socket::reset();
     DomNoTimerNet::accepted = false;

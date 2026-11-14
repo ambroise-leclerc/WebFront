@@ -10,7 +10,7 @@ using namespace webfront;
 using namespace webfront::frontend::detail::webkitgtk;
 }  // namespace
 
-Scenario webKitGTKApplies{"WebKitGTK applies navigation policy without toolkit objects", [] {
+const Scenario webKitGTKApplies{"WebKitGTK applies navigation policy without toolkit objects", [] {
     const detail::BoundContentPolicy policy;
     struct Case {
         PolicyEvent    event;
@@ -58,7 +58,7 @@ Scenario webKitGTKApplies{"WebKitGTK applies navigation policy without toolkit o
     });
 }};
 
-Scenario webKitGTKRetains{"WebKitGTK retains the first session failure", [] {
+const Scenario webKitGTKRetains{"WebKitGTK retains the first session failure", [] {
     FailureState state;
     checkNothrow([&] { state.rethrowIfFailed(); });
     when("a navigation error is followed by a queued timeout and callback exception", [&] {
@@ -89,7 +89,7 @@ Scenario webKitGTKRetains{"WebKitGTK retains the first session failure", [] {
     });
 }};
 
-Scenario webKitGTKHandles{"WebKitGTK handles missing native navigation diagnostics", [] {
+const Scenario webKitGTKHandles{"WebKitGTK handles missing native navigation diagnostics", [] {
     then("a null GError message has an actionable fallback", [&] {
         check(initialNavigationError(nullptr) == "initial navigation failed: unknown error; check the local server and page path");
         check(initialNavigationError("connection refused") == "initial navigation failed: connection refused; check the local server and page path");

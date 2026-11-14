@@ -62,7 +62,7 @@ vector<string> allNames(S& storage, string_view directory, size_t pageSize) {
 
 }  // namespace
 
-Scenario safePathRefuses{"SafePath refuses the names Windows reserves, on every platform", [] {
+const Scenario safePathRefuses{"SafePath refuses the names Windows reserves, on every platform", [] {
     given("a reserved device name, whatever its case and extension, or a name Windows would alter", [&] {
         then("safeRelativePath, safePathComponents and isSafeFileName reject it", [&] {
             for (string name : {"con", "CON", "Con.txt", "nul", "nul.tar.gz", "aux", "prn", "com1", "COM9.log",
@@ -90,7 +90,7 @@ Scenario safePathRefuses{"SafePath refuses the names Windows reserves, on every 
     });
 }};
 
-Scenario storageError{"A storage error is a bridge error with a storage code", [] {
+const Scenario storageError{"A storage error is a bridge error with a storage code", [] {
     const fs::StorageError error(fs::StorageErrc::rootMoved, "moved");
     const BridgeError&     bridge = error;
     require(bridge.code() == "storage.rootMoved");
@@ -112,7 +112,7 @@ Scenario storageError{"A storage error is a bridge error with a storage code", [
         require(BridgeError::isValidCode(fs::storageErrorCode(errc)));
 }};
 
-Scenario fileReads{"A file reads its bytes through a provider's byte source", [] {
+const Scenario fileReads{"A file reads its bytes through a provider's byte source", [] {
     struct Source : fs::ByteSource {
         string bytes{"0123456789"};
         size_t position{};
@@ -144,7 +144,7 @@ Scenario fileReads{"A file reads its bytes through a provider's byte source", []
     requireThrows<invalid_argument>([&] { fs::File{unique_ptr<fs::ByteSource>{}}; });
 }};
 
-Scenario simulatedStorage{"The simulated storage follows the storage contract", [] {
+const Scenario simulatedStorage{"The simulated storage follows the storage contract", [] {
     fs::MemoryStorage storage;
 
     given("files and directories created through it", [&] {
@@ -353,7 +353,7 @@ Scenario simulatedStorage{"The simulated storage follows the storage contract", 
     });
 }};
 
-Scenario listingPages{"Listing pages are stable while the directory changes", [] {
+const Scenario listingPages{"Listing pages are stable while the directory changes", [] {
     fs::MemoryStorage storage;
     for (int index = 10; index < 40; ++index)
         writeFile(storage, "f" + to_string(index), "x");

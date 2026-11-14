@@ -190,7 +190,7 @@ void checkStartupFailure() {
 }
 }  // namespace
 
-Scenario embeddedFrontend{"An embedded frontend blocks show until closure and completes the server loop", [] {
+const Scenario embeddedFrontend{"An embedded frontend blocks show until closure and completes the server loop", [] {
     given("a window held open while its server loop runs", [&] {
         when("show opens the window and the window is closed", [&] {
             then("show runs open on its calling thread and waits for shutdown after closure", [&] {
@@ -200,7 +200,7 @@ Scenario embeddedFrontend{"An embedded frontend blocks show until closure and co
     });
 }};
 
-Scenario launchingFrontend{"A launching frontend leaves the server loop running after show returns", [] {
+const Scenario launchingFrontend{"A launching frontend leaves the server loop running after show returns", [] {
     given("a frontend with keepServerRunning", [&] {
         when("show opens the frontend and open returns", [&] {
             then("the server remains active until explicitly stopped", [&] {
@@ -210,7 +210,7 @@ Scenario launchingFrontend{"A launching frontend leaves the server loop running 
     });
 }};
 
-Scenario frontendExceptions{"Frontend exceptions propagate only after the server loop completes", [] {
+const Scenario frontendExceptions{"Frontend exceptions propagate only after the server loop completes", [] {
     given("an embedded frontend that throws", [&] {
         when("open fails during window cleanup", [&] {
             then("the original diagnostic survives shutdown", [&] {
@@ -234,7 +234,7 @@ Scenario frontendExceptions{"Frontend exceptions propagate only after the server
     });
 }};
 
-Scenario frontendStartup{"A frontend startup failure before window creation completes the server loop", [] {
+const Scenario frontendStartup{"A frontend startup failure before window creation completes the server loop", [] {
     given("a frontend that fails before creating a window", [&] {
         when("show selects an embedded frontend", [&] {
             then("the server stops before the startup error propagates", [&] {
@@ -270,7 +270,7 @@ WindowOptions windowReceivedBy(WebFrontConfig config) {
 }
 }  // namespace
 
-Scenario applicationChooses{"The application chooses the title and the size of the embedded window", [] {
+const Scenario applicationChooses{"The application chooses the title and the size of the embedded window", [] {
     given("a configuration with a window title and size", [&] {
         const auto window = windowReceivedBy({.window = {.title = "SiliconForge", .width = 640, .height = 480}});
         then("the frontend receives them unchanged", [&] {
@@ -316,7 +316,7 @@ struct LaunchRecordingFrontend {
 };
 }  // namespace
 
-Scenario frontendAccepts{"A frontend that accepts a view launch receives this application's secret and origin", [] {
+const Scenario frontendAccepts{"A frontend that accepts a view launch receives this application's secret and origin", [] {
     given("a frontend with the richest open overload", [&] {
         using LaunchApp = BasicWFWithFrontend<ContractNet, MockFileSystem<>, LaunchRecordingFrontend>;
         LaunchApp first;
@@ -516,7 +516,7 @@ static_assert(!frontend::endsOnRequest<frontend::NativeOrBrowserFrontendFor<fron
 static_assert(frontend::endsOnRequest<frontend::NativeOrBrowserFrontendFor<frontend::WebView2Frontend, frontend::BrowserWithUILoopFrontend>>);
 }  // namespace
 
-Scenario startOpens{"start() opens the interface and returns to the host with the server running", [] {
+const Scenario startOpens{"start() opens the interface and returns to the host with the server running", [] {
     given("a frontend that can launch without a loop", [&] {
         LaunchRecorder::fail = false;
         LaunchRecorder::url.clear();
@@ -556,7 +556,7 @@ Scenario startOpens{"start() opens the interface and returns to the host with th
     });
 }};
 
-Scenario requestCloseEnds{"requestClose() ends show() from another thread", [] {
+const Scenario requestCloseEnds{"requestClose() ends show() from another thread", [] {
     given("an embedded window shown on one thread", [&] {
         HostApp<HostFrontend<>> app;
         const auto              state = ContractIoContext::current;
@@ -577,7 +577,7 @@ Scenario requestCloseEnds{"requestClose() ends show() from another thread", [] {
     });
 }};
 
-Scenario uIThreadRuns{"UIThread runs an application on its own thread while the host keeps its thread", [] {
+const Scenario uIThreadRuns{"UIThread runs an application on its own thread while the host keeps its thread", [] {
     given("a host that starts its interface", [&] {
         std::thread::id setupThread;
         std::string     port;
@@ -645,7 +645,7 @@ Scenario uIThreadRuns{"UIThread runs an application on its own thread while the 
     });
 }};
 
-Scenario uIThreadReports{"UIThread reports start and opening failures to the host", [] {
+const Scenario uIThreadReports{"UIThread reports start and opening failures to the host", [] {
     given("a setup that throws", [&] {
         then("the constructor rethrows it on the host thread", [&] {
             using Hosted = UIThread<HostApp<HostFrontend<>>>;
@@ -677,7 +677,7 @@ Scenario uIThreadReports{"UIThread reports start and opening failures to the hos
     });
 }};
 
-Scenario startCalled{"start() is called once and replaces show()", [] {
+const Scenario startCalled{"start() is called once and replaces show()", [] {
     given("an application already started", [&] {
         LaunchRecorder::fail = false;
         HostApp<LaunchRecorder> app;
@@ -757,7 +757,7 @@ Scenario startCalled{"start() is called once and replaces show()", [] {
     });
 }};
 
-Scenario uIThreadWaits{"UIThread waits for a window that takes longer than one retry period to close", [] {
+const Scenario uIThreadWaits{"UIThread waits for a window that takes longer than one retry period to close", [] {
     given("a window that accepts the request on its fifth attempt (about forty milliseconds)", [&] {
         using Slow     = SlowCloseFrontend<5>;
         Slow::requests = 0;
@@ -776,7 +776,7 @@ Scenario uIThreadWaits{"UIThread waits for a window that takes longer than one r
     });
 }};
 
-Scenario uIThreadJoins{"UIThread joins its thread when a close request throws", [] {
+const Scenario uIThreadJoins{"UIThread joins its thread when a close request throws", [] {
     given("a frontend whose first close requests throw", [&] {
         using Flaky     = SlowCloseFrontend<3, true>;
         Flaky::requests = 0;
@@ -802,7 +802,7 @@ Scenario uIThreadJoins{"UIThread joins its thread when a close request throws", 
     });
 }};
 
-Scenario applicationCloses{"An application closes only the window that it shows", [] {
+const Scenario applicationCloses{"An application closes only the window that it shows", [] {
     given("two applications of the same frontend, the first showing a window", [&] {
         using Shared     = SharedWindowFrontend<false>;
         Shared::requests = 0;
@@ -876,7 +876,7 @@ Scenario applicationCloses{"An application closes only the window that it shows"
     });
 }};
 
-Scenario showCannot{"A show() that cannot own the session is refused before it opens a window", [] {
+const Scenario showCannot{"A show() that cannot own the session is refused before it opens a window", [] {
     given("a frontend without an executor, the first application showing", [&] {
         using Shared     = SharedWindowFrontend<false>;
         Shared::requests = 0;
@@ -1035,7 +1035,7 @@ static_assert(frontend::CanRequestClose<SessionOnlyFrontend>);
 static_assert(frontend::endsOnRequest<SessionOnlyFrontend>);
 }  // namespace
 
-Scenario secondShowSame{"A second show() on the same application leaves the first one's server and window alone", [] {
+const Scenario secondShowSame{"A second show() on the same application leaves the first one's server and window alone", [] {
     given("an application showing a window", [&] {
         using Shared       = SharedWindowFrontend<true>;
         Shared::requests   = 0;
@@ -1090,7 +1090,7 @@ Scenario secondShowSame{"A second show() on the same application leaves the firs
     });
 }};
 
-Scenario frontendOffers{"A frontend that offers only the close request with a session can be closed", [] {
+const Scenario frontendOffers{"A frontend that offers only the close request with a session can be closed", [] {
     given("an application shown through it", [&] {
         SessionOnlyFrontend::requests = 0;
         HostApp<SessionOnlyFrontend> app;
@@ -1107,7 +1107,7 @@ Scenario frontendOffers{"A frontend that offers only the close request with a se
     });
 }};
 
-Scenario nativeOrBrowserFrontendForwards{"NativeOrBrowserFrontend forwards a close request when its native frontend has no executor", [] {
+const Scenario nativeOrBrowserFrontendForwards{"NativeOrBrowserFrontend forwards a close request when its native frontend has no executor", [] {
     given("a native frontend that offers only requestClose()", [&] {
         using Either = frontend::NativeOrBrowserFrontendFor<HostFrontend<>, DeafFrontend>;
         HostApp<Either> app;
@@ -1121,7 +1121,7 @@ Scenario nativeOrBrowserFrontendForwards{"NativeOrBrowserFrontend forwards a clo
     });
 }};
 
-Scenario uIThreadStop{"UIThread::stop reports a window that does not close", [] {
+const Scenario uIThreadStop{"UIThread::stop reports a window that does not close", [] {
     given("a window that ignores close requests", [&] {
         UIThread<HostApp<DeafFrontend>> ui(WebFrontConfig{}, [](auto&) { });
         const auto                      state = ContractIoContext::current;
@@ -1143,7 +1143,7 @@ Scenario uIThreadStop{"UIThread::stop reports a window that does not close", [] 
     });
 }};
 
-Scenario closeRequest{"A close request made for one session never closes the window of a later one", [] {
+const Scenario closeRequest{"A close request made for one session never closes the window of a later one", [] {
     given("a request prepared for the first loop of a frontend", [&] {
         frontend::UIExecutorHost   host;
         frontend::NativeWindowHost windowHost{host.executor()};
@@ -1185,7 +1185,7 @@ Scenario closeRequest{"A close request made for one session never closes the win
     });
 }};
 
-Scenario systemBrowserLoop{"The system browser's loop ignores a close request made for an earlier loop", [] {
+const Scenario systemBrowserLoop{"The system browser's loop ignores a close request made for an earlier loop", [] {
     given("a session of the first loop, kept after it ended", [&] {
         using Browser = frontend::BrowserWithUILoopFrontend;
         // The loop's stop state is process-wide and a test before this one may have left a request pending: spend it.
@@ -1223,7 +1223,7 @@ Scenario systemBrowserLoop{"The system browser's loop ignores a close request ma
 }};
 
 #if !defined(_WIN32)
-Scenario systemBrowserLoopUp{"The system browser's loop is up while its opener is still running", [] {
+const Scenario systemBrowserLoopUp{"The system browser's loop is up while its opener is still running", [] {
     given("an opener that lives longer than the close request", [&] {
         namespace fs = std::filesystem;
         if (browser::isWSL())
@@ -1263,7 +1263,7 @@ Scenario systemBrowserLoopUp{"The system browser's loop is up while its opener i
     });
 }};
 
-Scenario systemBrowserOpener{"The system browser opener is started without being waited for", [] {
+const Scenario systemBrowserOpener{"The system browser opener is started without being waited for", [] {
     given("a command that lives for two seconds", [&] {
         const auto start = std::chrono::steady_clock::now();
         std::mutex              mutex;
@@ -1301,7 +1301,7 @@ Scenario systemBrowserOpener{"The system browser opener is started without being
 }};
 #endif
 
-Scenario windowClose{"A window close request is always released by the executor", [] {
+const Scenario windowCloseScenario{"A window close request is always released by the executor", [] {
     given("a close function that holds a resource", [&] {
         frontend::UIExecutorHost   host;
         frontend::NativeWindowHost windowHost{host.executor()};

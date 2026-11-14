@@ -149,7 +149,7 @@ void serveEmbedded(std::string content, std::string_view encoding = {}) {
 
 } // namespace
 
-Scenario rangeHeader{"A Range header selects one part of a representation", [] {
+const Scenario rangeHeader{"A Range header selects one part of a representation", [] {
     constexpr std::uint64_t size = 1000;
     given("well-formed single ranges", [&] {
         then("first-last selects the bytes, last being clamped to the end", [&] {
@@ -235,7 +235,7 @@ Scenario rangeHeader{"A Range header selects one part of a representation", [] {
     });
 }};
 
-Scenario fileServed{"A file is served by ranges", [] {
+const Scenario fileServed{"A file is served by ranges", [] {
     const auto chunk = DefaultBuffersPolicy::emissionBufferSize;
     for (const bool native : {false, true}) {
         given(std::string(native ? "a native file" : "an embedded file"), " of several chunks", [&] {
@@ -321,7 +321,7 @@ Scenario fileServed{"A file is served by ranges", [] {
     }
 }};
 
-Scenario rangeSurvives{"A range survives a file changed between two requests only when its validator still matches", [] {
+const Scenario rangeSurvives{"A range survives a file changed between two requests only when its validator still matches", [] {
     webfront::test::TemporaryDirectory directory;
     Served::native   = directory.path() / "media.bin";
     Served::encoding = {};
@@ -396,7 +396,7 @@ Scenario rangeSurvives{"A range survives a file changed between two requests onl
     });
 }};
 
-Scenario storedDecoded{"A stored or decoded representation is not served by ranges", [] {
+const Scenario storedDecoded{"A stored or decoded representation is not served by ranges", [] {
     const auto content = pattern(300);
     given("a gzip file the client accepts", [&] {
         serveEmbedded(content, "gzip");
@@ -418,7 +418,7 @@ Scenario storedDecoded{"A stored or decoded representation is not served by rang
     });
 }};
 
-Scenario dynamicRoute{"A dynamic route serves a file by ranges", [] {
+const Scenario dynamicRoute{"A dynamic route serves a file by ranges", [] {
     for (const bool native : {false, true}) {
         given(std::string(native ? "a native file" : "an embedded file"), " behind a route", [&] {
             webfront::test::TemporaryDirectory directory;
@@ -492,7 +492,7 @@ Scenario dynamicRoute{"A dynamic route serves a file by ranges", [] {
     }
 }};
 
-Scenario routeServing{"A route serving a stored encoding keeps it and negotiates it", [] {
+const Scenario routeServing{"A route serving a stored encoding keeps it and negotiates it", [] {
     const auto content = pattern(64);
     const auto serve   = [&](std::string_view acceptEncoding) {
         InjectableSocket::reset();
@@ -534,7 +534,7 @@ Scenario routeServing{"A route serving a stored encoding keeps it and negotiates
     });
 }};
 
-Scenario nativeFile{"A native file can be read again from any position after its end", [] {
+const Scenario nativeFile{"A native file can be read again from any position after its end", [] {
     webfront::test::TemporaryDirectory directory;
     const auto                         path = directory.path() / "short.bin";
     std::ofstream(path, std::ios::binary) << "abc";

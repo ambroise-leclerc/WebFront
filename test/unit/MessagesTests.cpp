@@ -18,7 +18,7 @@ using namespace webfront::bdd;
 using namespace std;
 using namespace webfront;
 
-Scenario handshakeAck{"Handshake and Ack messages have a two-byte header", [] {
+const Scenario handshakeAck{"Handshake and Ack messages have a two-byte header", [] {
     require(sizeof(msg::Ack) == 2);
     std::vector<std::byte> raw{std::byte{0x00}, std::byte{0x00}};
     then("a bare handshake is little-endian", [&] {
@@ -36,7 +36,7 @@ Scenario handshakeAck{"Handshake and Ack messages have a two-byte header", [] {
     });
 }};
 
-Scenario functionCallScenario{"FunctionCall", [] {
+const Scenario functionCallScenario{"FunctionCall", [] {
     given("Raw data of a call to 'print' function with a small string as parameter", [&] {
         std::array<uint8_t, 36> raw{0x03, 0x02, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x00, 0x04, 0x05, 0x70, 0x72, 0x69, 0x6e, 0x74, 0x04, 0x13, 0x48,
                                     0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x57, 0x6f, 0x72, 0x6c, 0x64, 0x20, 0x6f, 0x66, 0x20, 0x32, 0x30, 0x32, 0x32};
@@ -94,7 +94,7 @@ Scenario functionCallScenario{"FunctionCall", [] {
     });
 }};
 
-Scenario functionReturnScenario{"FunctionReturn", [] {
+const Scenario functionReturnScenario{"FunctionReturn", [] {
     using Net = networking::NetworkingMock;
 
     given("A FunctionReturn message", [&] {
@@ -208,7 +208,7 @@ msg::CodedType firstCodeOf(const T& value) {
 }
 }  // namespace
 
-Scenario strings65536{"Strings of 65536 bytes or more use a 32-bit length", [] {
+const Scenario strings65536{"Strings of 65536 bytes or more use a 32-bit length", [] {
     given("strings on both sides of the 16-bit boundary", [&] {
         then("255 bytes is a smallString, 256 to 65535 a string and 65536 a longString", [&] {
             require(firstCodeOf(string(255, 'x')) == msg::CodedType::smallString);
@@ -362,7 +362,7 @@ static_assert(msg::contains_list_v<tuple<int, vector<string>>>);
 
 }  // namespace
 
-Scenario listsStrings{"Lists of strings, tuples and arrays are encoded as one list value", [] {
+const Scenario listsStrings{"Lists of strings, tuples and arrays are encoded as one list value", [] {
     given("an empty list of strings", [&] {
         const vector<string> empty;
         then("it is the list code and a zero count", [&] {
@@ -509,7 +509,7 @@ Scenario listsStrings{"Lists of strings, tuples and arrays are encoded as one li
 
 // A scenario of its own: each message and frame holds its policy's buffers, and one function with all of them exceeds
 // the 64 KiB of stack that the MSVC analysis allows (C6262, #512).
-Scenario listsRespect{"Lists respect the bounds of the buffers policy", [] {
+const Scenario listsRespect{"Lists respect the bounds of the buffers policy", [] {
     given("a policy whose messages cannot exceed 1 KiB", [&] {
         using SmallPolicy = http::CustomBuffersPolicy<8192, 8192, 32768, 1024>;
         msg::FunctionReturn<SmallPolicy>             message;
@@ -528,7 +528,7 @@ Scenario listsRespect{"Lists respect the bounds of the buffers policy", [] {
     });
 }};
 
-Scenario typedArray{"A typed array that exactly fills the message size is encoded", [] {
+const Scenario typedArray{"A typed array that exactly fills the message size is encoded", [] {
     using ExactPolicy = http::CustomBuffersPolicy<8192, 8192, 32768, 32>;
     msg::FunctionReturn<ExactPolicy>             message;
     websocket::Frame<networking::NetworkingMock> frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
@@ -542,7 +542,7 @@ Scenario typedArray{"A typed array that exactly fills the message size is encode
     });
 }};
 
-Scenario exceptionsCarry{"Exceptions carry a code and a message", [] {
+const Scenario exceptionsCarry{"Exceptions carry a code and a message", [] {
     auto decodeBoth = [](const vector<byte>& bytes) {
         string           code, message;
         span<const byte> payload{bytes};
@@ -605,7 +605,7 @@ Scenario exceptionsCarry{"Exceptions carry a code and a message", [] {
     });
 }};
 
-Scenario functionCallCorrelation{"Function call correlation identifiers", [] {
+const Scenario functionCallCorrelation{"Function call correlation identifiers", [] {
     msg::FunctionCall<> message;
     message.setCallId(42);
     require(message.getCallId() == 42);
@@ -613,7 +613,7 @@ Scenario functionCallCorrelation{"Function call correlation identifiers", [] {
     require(message.getCallId() == 0);
 }};
 
-Scenario numericArrays{"Numeric arrays are encoded and decoded as owning values", [] {
+const Scenario numericArrays{"Numeric arrays are encoded and decoded as owning values", [] {
     using Net = networking::NetworkingMock;
 
     auto roundTrip = []<typename Element>(const vector<Element>& input) {
@@ -650,7 +650,7 @@ Scenario numericArrays{"Numeric arrays are encoded and decoded as owning values"
 
 }};
 
-Scenario uint8Arrays{"Uint8 arrays switch encoding at the compact-length boundary", [] {
+const Scenario uint8Arrays{"Uint8 arrays switch encoding at the compact-length boundary", [] {
     using Net = networking::NetworkingMock;
 
     auto encodedType = []<typename Array>(const Array& input) {
@@ -689,7 +689,7 @@ constexpr array<byte, 11> threeUint16s{byte{static_cast<uint8_t>(msg::CodedType:
                                        byte{0}};
 }  // namespace
 
-Scenario numericArraysDecode{"Numeric arrays decode into fixed-size destinations", [] {
+const Scenario numericArraysDecode{"Numeric arrays decode into fixed-size destinations", [] {
     array<uint16_t, 3> output{};
     span<const byte>   payload{threeUint16s};
     msg::FunctionCall<>::decodeParameter(output, payload);
@@ -697,7 +697,7 @@ Scenario numericArraysDecode{"Numeric arrays decode into fixed-size destinations
     require(payload.empty());
 }};
 
-Scenario malformedNumeric{"Malformed numeric array payloads are rejected", [] {
+const Scenario malformedNumeric{"Malformed numeric array payloads are rejected", [] {
     given("A payload shorter than its declared element count", [&] {
         vector<uint8_t>  output;
         array<byte, 3>   truncated{byte{static_cast<uint8_t>(msg::CodedType::smallArrayU8)}, byte{2}, byte{1}};
@@ -725,7 +725,7 @@ Scenario malformedNumeric{"Malformed numeric array payloads are rejected", [] {
     });
 }};
 
-Scenario decodeParameterRejects{"decodeParameter rejects malformed and mistyped payloads", [] {
+const Scenario decodeParameterRejects{"decodeParameter rejects malformed and mistyped payloads", [] {
     auto decodeInto = []<typename T>(T& target, span<const byte> bytes) {
         span<const byte> payload{bytes};
         msg::FunctionCall<>::decodeParameter(target, payload);
@@ -794,7 +794,7 @@ Scenario decodeParameterRejects{"decodeParameter rejects malformed and mistyped 
     });
 }};
 
-Scenario bufferOverflow{"BufferOverflow", [] {
+const Scenario bufferOverflow{"BufferOverflow", [] {
     using Net        = networking::NetworkingMock;
     using TinyPolicy = http::CustomBuffersPolicy<8192, 8192, 12>;
 
@@ -832,7 +832,7 @@ Scenario bufferOverflow{"BufferOverflow", [] {
     });
 }};
 
-Scenario emptyWire{"Empty wire strings are decoded without indexing past the input", [] {
+const Scenario emptyWire{"Empty wire strings are decoded without indexing past the input", [] {
     for (auto bytes : {
              std::vector<std::byte>{std::byte{4}, std::byte{0}},
              std::vector<std::byte>{std::byte{5}, std::byte{0}, std::byte{0}}
@@ -845,7 +845,7 @@ Scenario emptyWire{"Empty wire strings are decoded without indexing past the inp
     }
 }};
 
-Scenario wireNumbers{"Wire numbers outside an integer result range are rejected", [] {
+const Scenario wireNumbers{"Wire numbers outside an integer result range are rejected", [] {
     for (double number : {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN(), 2147483648.0, -2147483649.0}) {
         std::array<std::byte, 9> bytes{std::byte{3}};
         std::memcpy(bytes.data() + 1, &number, sizeof(number));
@@ -855,7 +855,7 @@ Scenario wireNumbers{"Wire numbers outside an integer result range are rejected"
     }
 }};
 
-Scenario wireInteger{"Wire integer conversion keeps truncation and handles 64-bit boundaries", [] {
+const Scenario wireInteger{"Wire integer conversion keeps truncation and handles 64-bit boundaries", [] {
     auto decode = []<typename T>(double number, T& value) {
         std::array<std::byte, 9> bytes{std::byte{3}};
         std::memcpy(bytes.data() + 1, &number, sizeof(number));
@@ -915,7 +915,7 @@ void expectPackedBitsetBytes(span<const byte> bytes, const bitset<N>& input) {
 }
 }  // namespace
 
-Scenario bitsetsUse{"Bitsets use canonical packed Uint8Array bytes at every size boundary", [] {
+const Scenario bitsetsUse{"Bitsets use canonical packed Uint8Array bytes at every size boundary", [] {
     auto check = []<size_t N>() {
         bitset<N> input;
         if constexpr (N != 0)
@@ -966,7 +966,7 @@ Scenario bitsetsUse{"Bitsets use canonical packed Uint8Array bytes at every size
     require(bitsetPayload(bitset<9>{0x181}) == vector<byte>{byte(msg::CodedType::smallArrayU8), byte{2}, byte{0x81}, byte{1}});
 }};
 
-Scenario packedBitsets{"Packed bitsets retain owned bytes, tuple counts and the decoder cursor", [] {
+const Scenario packedBitsetsScenario{"Packed bitsets retain owned bytes, tuple counts and the decoder cursor", [] {
     const auto expected = tuple{
         bitset<9>{0x181},
         tuple{bitset<0>{}, bitset<65>{9}},
@@ -986,7 +986,7 @@ Scenario packedBitsets{"Packed bitsets retain owned bytes, tuple counts and the 
     require(data.empty());
 }};
 
-Scenario bitsetDecoding{"Bitset decoding rejects wrong types, lengths, padding and truncation", [] {
+const Scenario bitsetDecoding{"Bitset decoding rejects wrong types, lengths, padding and truncation", [] {
     const auto valid  = bitsetPayload(bitset<9>{0x181});
     auto       reject = [](const vector<byte>& bytes) {
         span<const byte> data{bytes};
@@ -1024,7 +1024,7 @@ Scenario bitsetDecoding{"Bitset decoding rejects wrong types, lengths, padding a
     require(data.empty());
 }};
 
-Scenario encodingBridge{"Encoding bridge messages writes nothing to the standard output", [] {
+const Scenario encodingBridge{"Encoding bridge messages writes nothing to the standard output", [] {
     given("the standard output captured while a call and a return are encoded with every scalar kind", [&] {
         ostringstream captured;
         auto*         previous = cout.rdbuf(captured.rdbuf());

@@ -13,7 +13,7 @@ using namespace webfront::bdd;
 using webfront::frontend::detail::DownloadReservations;
 using webfront::frontend::detail::uniqueDownloadPath;
 
-Scenario downloadStaging{"Download staging preserves a destination created while a download runs", [] {
+const Scenario downloadStaging{"Download staging preserves a destination created while a download runs", [] {
     std::random_device random;
     const auto         folder = std::filesystem::temp_directory_path() / ("webfront-download-staging-unit-" + std::to_string(random()));
     require(std::filesystem::create_directory(folder));
@@ -59,7 +59,7 @@ Scenario downloadStaging{"Download staging preserves a destination created while
     std::filesystem::remove(folder);
 }};
 
-Scenario downloadName{"A download name suggested by a page stays inside the download folder", [] {
+const Scenario downloadName{"A download name suggested by a page stays inside the download folder", [] {
     const auto folder = std::filesystem::temp_directory_path() / "webfront-downloads-unit";
     std::filesystem::remove_all(folder);
     std::filesystem::create_directories(folder);
@@ -107,7 +107,7 @@ Scenario downloadName{"A download name suggested by a page stays inside the down
     std::filesystem::remove_all(folder);
 }};
 
-Scenario downloadsAsk{"Downloads that ask for the same name before their files exist get different destinations", [] {
+const Scenario downloadsAsk{"Downloads that ask for the same name before their files exist get different destinations", [] {
     const auto folder = std::filesystem::temp_directory_path() / "webfront-downloads-reserved";
     std::filesystem::remove_all(folder);
     std::filesystem::create_directories(folder);

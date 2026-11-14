@@ -7,7 +7,7 @@ using namespace webfront::bdd;
 
 using namespace webfront::http;
 
-Scenario mimeTypes{"MimeTypes", [] {
+const Scenario mimeTypes{"MimeTypes", [] {
     require(MimeType::fromExtension("jpg").type == MimeType::jpg);
     require(MimeType::fromExtension("js").type == MimeType::js);
     require(MimeType::fromExtension("mjs").type == MimeType::js);
@@ -28,7 +28,7 @@ Scenario mimeTypes{"MimeTypes", [] {
     require(std::string(MimeType(".webp").toString()) == "image/webp");
     require(std::string(MimeType("webp").toString()) == "image/webp");
 }};
-Scenario everyMIME{"Every MIME type has its own name", [] {
+const Scenario everyMIME{"Every MIME type has its own name", [] {
     given("each extension and the content type a browser expects for it", [&] {
         const std::pair<std::string, std::string> types[]{
             { "txt",             "text/plain"},

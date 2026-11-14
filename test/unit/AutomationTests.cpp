@@ -40,7 +40,7 @@ struct BindingApp {
     }
 };
 using namespace webfront::automation;
-Scenario failedAutomation{"A failed automation bootstrap retains exit 70 regardless of transport completion order", [] {
+const Scenario failedAutomation{"A failed automation bootstrap retains exit 70 regardless of transport completion order", [] {
     given("the transport reports the closed session before or after bootstrap failure", [&] {
         then("the bootstrap failure is distinct from an operation failure in both orders", [&] {
             for (const bool transportFirst : {false, true}) {
@@ -79,7 +79,7 @@ Object command(const Session& session, std::string operation, std::string args =
     }));
 }
 
-Scenario earlierBrowser{"An earlier browser cannot claim the launched automation window", [] {
+const Scenario earlierBrowser{"An earlier browser cannot claim the launched automation window", [] {
     webfront::test::TemporaryDirectory directory;
     auto                               session = std::make_shared<Session>(SessionOptions{directory.path(), {"build"}});
     BindingApp                         app;
@@ -114,7 +114,7 @@ Object query(const Session& session, std::string id) {
 }
 }  // namespace
 
-Scenario pageCallback{"Page callback authentication matches RFC 4231 and refuses wire replay or forgery", [] {
+const Scenario pageCallback{"Page callback authentication matches RFC 4231 and refuses wire replay or forgery", [] {
     using namespace webfront::automation::authentication;
     require(hmac(std::string(20, '\x0b'), "Hi There") == "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7");
     require(hmac("Jefe", "what do ya want for nothing?") == "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
@@ -139,7 +139,7 @@ Scenario pageCallback{"Page callback authentication matches RFC 4231 and refuses
 }};
 
 #ifndef _WIN32
-Scenario mCPStdin{"MCP stdin drains buffered lines and preserves a partial line through EOF", [] {
+const Scenario mCPStdin{"MCP stdin drains buffered lines and preserves a partial line through EOF", [] {
     struct InputPipe {
         int saved = ::dup(STDIN_FILENO);
         int descriptors[2]{-1, -1};
@@ -172,7 +172,7 @@ Scenario mCPStdin{"MCP stdin drains buffered lines and preserves a partial line 
 }};
 #endif
 
-Scenario automationAuthorization{"Automation authorization stays native and binds requests to a project session", [] {
+const Scenario automationAuthorization{"Automation authorization stays native and binds requests to a project session", [] {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
         {directory.path(), {"build", "test", "inspect"}}
@@ -204,7 +204,7 @@ Scenario automationAuthorization{"Automation authorization stays native and bind
     });
 }};
 
-Scenario automationEntries{"Automation entries accept manifest labels while refusing unsafe paths", [] {
+const Scenario automationEntries{"Automation entries accept manifest labels while refusing unsafe paths", [] {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
         {directory.path(), {"build", "preview"}}
@@ -233,7 +233,7 @@ Scenario automationEntries{"Automation entries accept manifest labels while refu
     });
 }};
 
-Scenario projectSetup{"Project setup operations need their own grants and plain arguments", [] {
+const Scenario projectSetup{"Project setup operations need their own grants and plain arguments", [] {
     webfront::test::TemporaryDirectory directory;
     Session                            denied{
         {directory.path(), {"build"}}
@@ -285,7 +285,7 @@ Scenario projectSetup{"Project setup operations need their own grants and plain 
     });
 }};
 
-Scenario authorizationPrecedes{"Authorization precedes operation and argument validation", [] {
+const Scenario authorizationPrecedes{"Authorization precedes operation and argument validation", [] {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
         {directory.path(), {"build"}}
@@ -320,7 +320,7 @@ Scenario authorizationPrecedes{"Authorization precedes operation and argument va
     require(audit.find("test") != std::string::npos);
 }};
 
-Scenario exitCode130{"Exit code 130 needs an actual cancellation request", [] {
+const Scenario exitCode130{"Exit code 130 needs an actual cancellation request", [] {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
         {directory.path(), {"build"}}
@@ -336,7 +336,7 @@ Scenario exitCode130{"Exit code 130 needs an actual cancellation request", [] {
     require(Object(session.result(query(session, second))).string("state") == "cancelled");
 }};
 
-Scenario automationCancellation{"Automation cancellation and native deadlines cannot reuse a stalled renderer", [] {
+const Scenario automationCancellation{"Automation cancellation and native deadlines cannot reuse a stalled renderer", [] {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
         {directory.path(), {"build"}, std::chrono::seconds{1}}
@@ -366,7 +366,7 @@ Scenario automationCancellation{"Automation cancellation and native deadlines ca
     });
 }};
 
-Scenario automationStartup{"Automation startup expiry respects readiness at the deadline", [] {
+const Scenario automationStartup{"Automation startup expiry respects readiness at the deadline", [] {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
         {directory.path(), {"build"}}
@@ -386,7 +386,7 @@ Scenario automationStartup{"Automation startup expiry respects readiness at the 
     });
 }};
 
-Scenario mCPInitialization{"MCP initialization, tool errors and request identifiers follow the supported profile", [] {
+const Scenario mCPInitialization{"MCP initialization, tool errors and request identifiers follow the supported profile", [] {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
         {directory.path(), {}}
@@ -419,7 +419,7 @@ Scenario mCPInitialization{"MCP initialization, tool errors and request identifi
     require(Object(*mcp.receive(R"({"jsonrpc":"1.0","id":7,"method":"ping"})")).has("error"));
 }};
 
-Scenario automationAudit{"Automation audit retains authorization decisions through busy and malformed retries", [] {
+const Scenario automationAudit{"Automation audit retains authorization decisions through busy and malformed retries", [] {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
         {directory.path(), {"build"}}
@@ -443,7 +443,7 @@ Scenario automationAudit{"Automation audit retains authorization decisions throu
     require(Object(session.describe()).raw("audit") == audit);
 }};
 
-Scenario automationJSON{"Automation JSON rejects duplicate keys, non-UTF8 and deeply nested or oversized input", [] {
+const Scenario automationJSON{"Automation JSON rejects duplicate keys, non-UTF8 and deeply nested or oversized input", [] {
     requireThrows([&] { Object(R"({"operation":"build","operation":"exec"})"); });
     requireThrows([&] { Object(std::string(60001, ' ')); });
     requireThrows([&] { Object(std::string("{\"x\":\"") + std::string("\xC0\xAF", 2) + "\"}"); });
@@ -452,7 +452,7 @@ Scenario automationJSON{"Automation JSON rejects duplicate keys, non-UTF8 and de
     requireThrows([&] { Object("{} trailing"); });
 }};
 
-Scenario versionedOperation{"The versioned operation schema projects the same fields and permissions to native and MCP clients", [] {
+const Scenario versionedOperation{"The versioned operation schema projects the same fields and permissions to native and MCP clients", [] {
     using namespace webfront::automation;
     const Object contract{contractSource};
     const Object properties{contract.raw("properties")};
@@ -475,7 +475,7 @@ Scenario versionedOperation{"The versioned operation schema projects the same fi
     require(&startSchema() == &startSchema());
 }};
 
-Scenario completedAutomation{"A completed automation snapshot replaces progress with the final bounded output", [] {
+const Scenario completedAutomation{"A completed automation snapshot replaces progress with the final bounded output", [] {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
         {directory.path(), {"build"}}
@@ -502,7 +502,7 @@ Scenario completedAutomation{"A completed automation snapshot replaces progress 
     require(Object(session.result(query(session, next))).string("output") == "new run progress");
 }};
 
-Scenario completionNative{"A completion the native side cannot validate fails its run instead of wedging the session", [] {
+const Scenario completionNative{"A completion the native side cannot validate fails its run instead of wedging the session", [] {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
         {directory.path(), {"build"}}
@@ -542,7 +542,7 @@ Scenario completionNative{"A completion the native side cannot validate fails it
     });
 }};
 
-Scenario mCPErrors{"MCP errors keep the request id and distinguish a lost transport from bad arguments", [] {
+const Scenario mCPErrors{"MCP errors keep the request id and distinguish a lost transport from bad arguments", [] {
     struct LostBackend {
         std::string describe() const {
             throw TransportError("Native attachment is unavailable");
@@ -593,7 +593,7 @@ Scenario mCPErrors{"MCP errors keep the request id and distinguish a lost transp
     });
 }};
 
-Scenario applicationCallback{"An application callback is called only when its name was allow-listed with the call grant", [] {
+const Scenario applicationCallback{"An application callback is called only when its name was allow-listed with the call grant", [] {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
         {.project = directory.path(), .allow = {"call"}, .callbacks = {"app.render", "app.count"}}

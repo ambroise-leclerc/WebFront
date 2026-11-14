@@ -173,7 +173,7 @@ std::string receive(Net::Socket& socket, bool head = false) {
 }
 }  // namespace
 
-Scenario gzipCPU{"Gzip CPU work coalesces revisions and bounds jobs, bytes and response leases", [] {
+const Scenario gzipCPU{"Gzip CPU work coalesces revisions and bounds jobs, bytes and response leases", [] {
     auto       gate = std::make_shared<Gate>();
     Executor   executor({1, 2, 200000, 1000}, {gate});
     Completion first, head, full;
@@ -219,7 +219,7 @@ Scenario gzipCPU{"Gzip CPU work coalesces revisions and bounds jobs, bytes and r
     require(executor.statistics().bytes == 0);
 }};
 
-Scenario gzipWork{"Gzip work skips cancelled queued jobs and drains an active decode on stop", [] {
+const Scenario gzipWork{"Gzip work skips cancelled queued jobs and drains an active decode on stop", [] {
     auto                    gate = std::make_shared<Gate>();
     Executor                executor({2, 3, 200000, 1000}, {gate});
     Completion              active, queued;
@@ -260,7 +260,7 @@ Scenario gzipWork{"Gzip work skips cancelled queued jobs and drains an active de
     });
 }};
 
-Scenario gzipWorkRejects{"Gzip work rejects saturation without starting a worker and preserves decode failures", [] {
+const Scenario gzipWorkRejects{"Gzip work rejects saturation without starting a worker and preserves decode failures", [] {
     given("zero job, waiter, byte or encoded-input capacity", [&] {
         for (const auto limits : {
                  gzip::DecodeLimits{0, 2, 100000, 1000},
@@ -303,7 +303,7 @@ Scenario gzipWorkRejects{"Gzip work rejects saturation without starting a worker
     });
 }};
 
-Scenario gatedCold{"A gated cold gzip decode leaves HTTP and WebSocket upgrades responsive on the I/O thread", [] {
+const Scenario gatedCold{"A gated cold gzip decode leaves HTTP and WebSocket upgrades responsive on the I/O thread", [] {
     const auto                                   port = freePort();
     auto                                         gate = std::make_shared<Gate>();
     Server<Net, NeutralFS, OneJob, GatedDecoder> server("127.0.0.1", port, ".", {}, {gate});
@@ -344,7 +344,7 @@ Scenario gatedCold{"A gated cold gzip decode leaves HTTP and WebSocket upgrades 
     require(server.fallbackDecodeStatistics().decodes == 1);
 }};
 
-Scenario hTTPStop{"HTTP stop and disconnected clients cannot outlive the owned gzip worker", [] {
+const Scenario hTTPStop{"HTTP stop and disconnected clients cannot outlive the owned gzip worker", [] {
     const auto                                                 port = freePort();
     auto                                                       gate = std::make_shared<Gate>();
     Server<Net, NeutralFS, DefaultBuffersPolicy, GatedDecoder> server("127.0.0.1", port, ".", {}, {gate});
@@ -373,7 +373,7 @@ Scenario hTTPStop{"HTTP stop and disconnected clients cannot outlive the owned g
     require(server.fallbackDecodeStatistics().bytes == 0);
 }};
 
-Scenario gzipCoalescing{"Gzip coalescing isolates consumer cancellation and different output budgets", [] {
+const Scenario gzipCoalescing{"Gzip coalescing isolates consumer cancellation and different output budgets", [] {
     auto                    gate = std::make_shared<Gate>();
     Executor                executor({2, 3, 200000, 1000}, {gate});
     Completion              first, second;
@@ -419,7 +419,7 @@ Scenario gzipCoalescing{"Gzip coalescing isolates consumer cancellation and diff
     });
 }};
 
-Scenario gzipResponse{"Gzip response leases enforce exact capacity accounting after CPU completion", [] {
+const Scenario gzipResponse{"Gzip response leases enforce exact capacity accounting after CPU completion", [] {
     auto        gate  = std::make_shared<Gate>();
     const auto  bytes = std::string(gzipfixtures::fixed);
     std::string buffer;
@@ -450,7 +450,7 @@ Scenario gzipResponse{"Gzip response leases enforce exact capacity accounting af
     require(executor.statistics().bytes == 0);
 }};
 
-Scenario failedGzip{"Failed gzip responses retain their job slot until the response lease is released", [] {
+const Scenario failedGzip{"Failed gzip responses retain their job slot until the response lease is released", [] {
     for (const bool throws : {false, true}) {
         auto gate = std::make_shared<Gate>();
         gate->release();
@@ -482,7 +482,7 @@ Scenario failedGzip{"Failed gzip responses retain their job slot until the respo
     }
 }};
 
-Scenario gzipCompletion{"Gzip completion resumes on the supplied I/O scheduler", [] {
+const Scenario gzipCompletion{"Gzip completion resumes on the supplied I/O scheduler", [] {
     auto           gate = std::make_shared<Gate>();
     Executor       executor({}, {gate});
     Net::IoContext context;
@@ -509,7 +509,7 @@ Scenario gzipCompletion{"Gzip completion resumes on the supplied I/O scheduler",
     require(result.result->valid());
 }};
 
-Scenario disconnectedGzip{"A disconnected gzip requester leaves the shared decode usable by another browser", [] {
+const Scenario disconnectedGzip{"A disconnected gzip requester leaves the shared decode usable by another browser", [] {
     const auto                                   port = freePort();
     auto                                         gate = std::make_shared<Gate>();
     Server<Net, NeutralFS, OneJob, GatedDecoder> server("127.0.0.1", port, ".", {}, {gate});
@@ -537,7 +537,7 @@ Scenario disconnectedGzip{"A disconnected gzip requester leaves the shared decod
     require(server.fallbackDecodeStatistics().decodes == 1);
 }};
 
-Scenario hTTPGzip{"HTTP gzip workers preserve failure statuses and remain lazy on pass-through", [] {
+const Scenario hTTPGzip{"HTTP gzip workers preserve failure statuses and remain lazy on pass-through", [] {
     const auto port = freePort();
     auto       gate = std::make_shared<Gate>();
     gate->release();
@@ -596,7 +596,7 @@ struct ShrinkingBudget : DefaultBuffersPolicy {
 };
 }  // namespace
 
-Scenario hTTPRejects{"HTTP rejects oversized fallback input before enqueue while preserving gzip pass-through", [] {
+const Scenario hTTPRejects{"HTTP rejects oversized fallback input before enqueue while preserving gzip pass-through", [] {
     RequestHandler<Net, NeutralFS, SmallInput> handler(".");
     Request                                    request;
     request.method = Request::Method::Get;
@@ -629,7 +629,7 @@ Scenario hTTPRejects{"HTTP rejects oversized fallback input before enqueue while
     require(!server.fallbackDecodeStatistics().workerStarted);
 }};
 
-Scenario hTTPRechecks{"HTTP rechecks the output budget after a suspended worker finishes", [] {
+const Scenario hTTPRechecks{"HTTP rechecks the output budget after a suspended worker finishes", [] {
     const auto oldLimit = ShrinkingBudget::maxDecodedAssetSize;
     Finally    restore{[oldLimit] {
         ShrinkingBudget::maxDecodedAssetSize = oldLimit;
@@ -659,7 +659,7 @@ Scenario hTTPRechecks{"HTTP rechecks the output budget after a suspended worker 
     require(handler.fallbackCacheStatistics().entries == 0);
 }};
 
-Scenario newGzip{"New gzip consumers retry work skipped or interrupted by a decoder exception", [] {
+const Scenario newGzip{"New gzip consumers retry work skipped or interrupted by a decoder exception", [] {
     for (const bool failed : {false, true}) {
         auto                    gate = std::make_shared<Gate>();
         Executor                executor({4, 4, 400000, 1000}, {gate, false, std::make_shared<std::atomic_bool>(failed)});

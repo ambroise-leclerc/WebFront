@@ -56,7 +56,7 @@ struct OneBrowserNet : testing::InjectableNetworking {
 };
 }  // namespace
 
-Scenario broadcastKeeps{"A broadcast keeps only the latest call for a browser with too many pending writes", {"broadcast"}, [] {
+const Scenario broadcastKeeps{"A broadcast keeps only the latest call for a browser with too many pending writes", {"broadcast"}, [] {
     using Socket = testing::InjectableSocket;
     Socket::reset();
     OneBrowserNet::accepted = false;
@@ -140,7 +140,7 @@ Scenario broadcastKeeps{"A broadcast keeps only the latest call for a browser wi
     Socket::reset();
 }};
 
-Scenario broadcastLimit{"A broadcast limit must allow at least one pending write", {"broadcast"}, [] {
+const Scenario broadcastLimit{"A broadcast limit must allow at least one pending write", {"broadcast"}, [] {
     testing::InjectableSocket::reset();
     OneBrowserNet::accepted = false;
     BasicWF<OneBrowserNet, fs::DefaultFS> app{WebFrontConfig{.port = "0"}};
@@ -149,7 +149,7 @@ Scenario broadcastLimit{"A broadcast limit must allow at least one pending write
     testing::InjectableSocket::reset();
 }};
 
-Scenario browserReceives{"A browser receives a broadcast made while its onUIStarted handlers run after what they sent", {"broadcast"}, [] {
+const Scenario browserReceives{"A browser receives a broadcast made while its onUIStarted handlers run after what they sent", {"broadcast"}, [] {
     using Socket = testing::InjectableSocket;
     using App    = BasicWF<OneBrowserNet, fs::DefaultFS>;
     Socket::reset();
@@ -187,7 +187,7 @@ Scenario browserReceives{"A browser receives a broadcast made while its onUIStar
     Socket::reset();
 }};
 
-Scenario browserWhose{"A browser whose onUIStarted handlers run keeps only the latest calls within the limit", {"broadcast"}, [] {
+const Scenario browserWhose{"A browser whose onUIStarted handlers run keeps only the latest calls within the limit", {"broadcast"}, [] {
     using Socket = testing::InjectableSocket;
     using App    = BasicWF<OneBrowserNet, fs::DefaultFS>;
     Socket::reset();
@@ -244,7 +244,7 @@ Scenario browserWhose{"A browser whose onUIStarted handlers run keeps only the l
     Socket::reset();
 }};
 
-Scenario heldBroadcast{"A held broadcast reaches the browser after a later call of another function", {"broadcast"}, [] {
+const Scenario heldBroadcast{"A held broadcast reaches the browser after a later call of another function", {"broadcast"}, [] {
     using Socket = testing::InjectableSocket;
     Socket::reset();
     OneBrowserNet::accepted = false;
@@ -352,7 +352,7 @@ struct Observed {
 };
 }  // namespace
 
-Scenario callbacksRun{"Callbacks run one at a time on the server thread, and browser calls are made from any thread", {"broadcast"}, [] {
+const Scenario callbacksRun{"Callbacks run one at a time on the server thread, and browser calls are made from any thread", {"broadcast"}, [] {
     using App = BasicWF<Stdnet, fs::DefaultFS>;
     App        app{WebFrontConfig{.port = "0"}};
     Observed   observed;
@@ -500,7 +500,7 @@ struct ConnectionIds {
 };
 }  // namespace webfront::testing
 
-Scenario uIKept{"A UI kept after its connection closed reaches no browser once its identifier is reused", {"broadcast", "ui"}, [] {
+const Scenario uIKept{"A UI kept after its connection closed reaches no browser once its identifier is reused", {"broadcast", "ui"}, [] {
     using App = BasicWF<Stdnet, fs::DefaultFS>;
     App                                app{WebFrontConfig{.port = "0"}};
     std::mutex                         mutex;

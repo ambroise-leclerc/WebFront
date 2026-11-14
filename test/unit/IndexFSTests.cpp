@@ -12,7 +12,7 @@ using namespace webfront::bdd;
 using namespace std;
 using namespace webfront;
 
-Scenario indexFileSystemProvides{"IndexFileSystem provides basic files for browser support", [] {
+const Scenario indexFileSystemProvides{"IndexFileSystem provides basic files for browser support", [] {
     given("An IndexFS", [&] {
         using FS = fs::IndexFS;
         when("Requesting index.html", [&] {

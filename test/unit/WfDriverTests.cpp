@@ -18,7 +18,7 @@ webfront::testdriver::Options parseDriver(std::initializer_list<std::string> ext
 }
 }  // namespace
 
-Scenario browserTest{"Browser test diagnostics retain HTTP failures without filling the transcript with bridge traffic", [] {
+const Scenario browserTest{"Browser test diagnostics retain HTTP failures without filling the transcript with bridge traffic", [] {
     std::ostringstream output;
     auto*              previous = std::clog.rdbuf(output.rdbuf());
     const auto         sink     = webfront::testdriver::logRequests();
@@ -41,7 +41,7 @@ Scenario browserTest{"Browser test diagnostics retain HTTP failures without fill
     });
 }};
 
-Scenario driverRepeats{"The driver repeats its close request until the window has closed", [] {
+const Scenario driverRepeats{"The driver repeats its close request until the window has closed", [] {
     using namespace std::chrono_literals;
     using webfront::testdriver::closeUntilShown;
     std::stop_source shown;
@@ -73,7 +73,7 @@ Scenario driverRepeats{"The driver repeats its close request until the window ha
     });
 }};
 
-Scenario pageEnd{"The page's end releases the driver's close without a time limit", [] {
+const Scenario pageEnd{"The page's end releases the driver's close without a time limit", [] {
     using namespace std::chrono_literals;
     webfront::testdriver::DriverDeadline deadline{1h};
     std::stop_source                     shown;
@@ -84,7 +84,7 @@ Scenario pageEnd{"The page's end releases the driver's close without a time limi
     require(!shown.stop_requested());
 }};
 
-Scenario driverWebView2{"Driver WebView2 profiles isolate environments served at identical URLs", [] {
+const Scenario driverWebView2{"Driver WebView2 profiles isolate environments served at identical URLs", [] {
     using namespace webfront;
     static_assert(std::is_same_v<testdriver::DriverFrontend<frontend::WebView2Frontend>, frontend::WebView2FrontendWithOptions<testdriver::DriverWebView2Options>>);
     static_assert(std::is_same_v<testdriver::DriverFrontend<frontend::CEFFrontend>, testdriver::DriverCEFFrontend>);
@@ -96,7 +96,7 @@ Scenario driverWebView2{"Driver WebView2 profiles isolate environments served at
     require(testdriver::DriverWebView2Options::get("").userDataFolder.empty());
 }};
 
-Scenario singleCommand{"A single-command watchdog has a separate budget after bootstrap", [] {
+const Scenario singleCommand{"A single-command watchdog has a separate budget after bootstrap", [] {
     using namespace std::chrono_literals;
     given("an overall deadline and a shorter command limit", [&] {
         const auto options = parseDriver({"--timeout", "100", "--command-timeout", "4", "--", "run", "sleep"});
@@ -115,7 +115,7 @@ Scenario singleCommand{"A single-command watchdog has a separate budget after bo
     });
 }};
 
-Scenario driverWatchdog{"The driver watchdog keeps a native command limit inside the overall budget", [] {
+const Scenario driverWatchdog{"The driver watchdog keeps a native command limit inside the overall budget", [] {
     using namespace std::chrono_literals;
     using webfront::testdriver::DriverDeadline;
     DriverDeadline deadline{1h};

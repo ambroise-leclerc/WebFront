@@ -240,7 +240,7 @@ void checkTruncation(const Delivered& record) {
 
 }  // namespace
 
-Scenario browserTransports{"Browser transports receive the context captured at emission", {"mddlog", "transport"}, [] {
+const Scenario browserTransports{"Browser transports receive the context captured at emission", {"mddlog", "transport"}, [] {
     struct Event {
         string_view        component;
         string_view        link;
@@ -284,7 +284,7 @@ Scenario browserTransports{"Browser transports receive the context captured at e
     }));
 }};
 
-Scenario browserTransportsKeep{"Browser transports keep the legacy rendering and the governed truncation flag", {"mddlog", "transport"}, [] {
+const Scenario browserTransportsKeep{"Browser transports keep the legacy rendering and the governed truncation flag", {"mddlog", "transport"}, [] {
     Collector      collector;
     TransportScope scope;
     scope.add(ref(collector));
@@ -308,7 +308,7 @@ Scenario browserTransportsKeep{"Browser transports keep the legacy rendering and
     check(identities({records[4]}) == vector<Identity>{{}});
 }};
 
-Scenario blockedTransport{"A blocked transport never blocks producers; saturation is refused observably", {"mddlog", "transport"}, [] {
+const Scenario blockedTransport{"A blocked transport never blocks producers; saturation is refused observably", {"mddlog", "transport"}, [] {
     const auto     gate = make_shared<Gate>();
     atomic<size_t> calls{0};
     TransportScope scope;
@@ -339,7 +339,7 @@ Scenario blockedTransport{"A blocked transport never blocks producers; saturatio
     check(since(before).delivered == 1 + log::transportRingCapacity);
 }};
 
-Scenario transportThrowing{"A transport throwing synchronously is detached before its next record", {"mddlog", "transport"}, [] {
+const Scenario transportThrowing{"A transport throwing synchronously is detached before its next record", {"mddlog", "transport"}, [] {
     atomic<size_t> calls{0};
     Collector      healthy;
     TransportScope scope;
@@ -362,7 +362,7 @@ Scenario transportThrowing{"A transport throwing synchronously is detached befor
     check(health.activeTransports == before.activeTransports - 1);
 }};
 
-Scenario loggingSynchronously{"Logging synchronously from a transport is not amplified", {"mddlog", "transport"}, [] {
+const Scenario loggingSynchronously{"Logging synchronously from a transport is not amplified", {"mddlog", "transport"}, [] {
     atomic<size_t> echoes{0};
     Collector      observer;
     TransportScope scope;
@@ -381,7 +381,7 @@ Scenario loggingSynchronously{"Logging synchronously from a transport is not amp
     check(since(before).reentrantRecords == 1);
 }};
 
-Scenario asynchronousWrite{"An asynchronous write failure detaches the transport before its diagnostic", {"mddlog", "transport"}, [] {
+const Scenario asynchronousWrite{"An asynchronous write failure detaches the transport before its diagnostic", {"mddlog", "transport"}, [] {
     mutex          queuedMutex;
     vector<string> queued;
     Collector      observer;
@@ -407,7 +407,7 @@ Scenario asynchronousWrite{"An asynchronous write failure detaches the transport
     check(failures(since(before)) == Failures{.delivered = 3, .writeFailures = 0, .reportedFailures = 1, .detachments = 1});
 }};
 
-Scenario removalDuring{"Removal during emission is quiescent, so captures can be destroyed at once", {"mddlog", "transport"}, [] {
+const Scenario removalDuring{"Removal during emission is quiescent, so captures can be destroyed at once", {"mddlog", "transport"}, [] {
     log::setLogLevel(log::Info);
     for (int round = 0; round < 10; ++round) {
         auto           state = make_unique<vector<int>>();
@@ -438,7 +438,7 @@ Scenario removalDuring{"Removal during emission is quiescent, so captures can be
     log::setLogLevel(log::Disabled);
 }};
 
-Scenario webLinkRemoves{"WebLink removes its browser transport on normal disconnection", {"mddlog", "transport", "weblink"}, [] {
+const Scenario webLinkRemoves{"WebLink removes its browser transport on normal disconnection", {"mddlog", "transport", "weblink"}, [] {
     LinkedBrowser browser;
     InjectableSocket::fail(make_error_code(errc::connection_reset));
     log::info("after disconnection");
@@ -450,7 +450,7 @@ Scenario webLinkRemoves{"WebLink removes its browser transport on normal disconn
     check(!InjectableSocket::wrote("after disconnection"));
 }};
 
-Scenario webLinkCaptures{"WebLink captures the link and call context of a C++ function call", {"mddlog", "transport", "weblink"}, [] {
+const Scenario webLinkCaptures{"WebLink captures the link and call context of a C++ function call", {"mddlog", "transport", "weblink"}, [] {
     LinkedBrowser  browser;
     Collector      observer;
     TransportScope scope;
@@ -483,7 +483,7 @@ Scenario webLinkCaptures{"WebLink captures the link and call context of a C++ fu
     check(InjectableSocket::wrote("Function called !"));
 }};
 
-Scenario webLinkReports{"WebLink reports a write failing inside its transport before the diagnostic", {"mddlog", "transport", "weblink"}, [] {
+const Scenario webLinkReports{"WebLink reports a write failing inside its transport before the diagnostic", {"mddlog", "transport", "weblink"}, [] {
     LinkedBrowser  browser;
     Collector      observer;
     TransportScope scope;
@@ -499,7 +499,7 @@ Scenario webLinkReports{"WebLink reports a write failing inside its transport be
     check(deliveredMessages(observer.snapshot()) == vector<string>{"cannot be sent"});
 }};
 
-Scenario webLinkReportsWrite{"WebLink reports a write failing on asynchronous completion", {"mddlog", "transport", "weblink"}, [] {
+const Scenario webLinkReportsWrite{"WebLink reports a write failing on asynchronous completion", {"mddlog", "transport", "weblink"}, [] {
     LinkedBrowser browser;
     InjectableSocket::deferWrites();
     InjectableSocket::failWrites(make_error_code(errc::broken_pipe));
@@ -514,7 +514,7 @@ Scenario webLinkReportsWrite{"WebLink reports a write failing on asynchronous co
     check(health.activeTransports == browser.before.activeTransports - 1);
 }};
 
-Scenario webLinkDestroyed{"A WebLink destroyed before the drain receives nothing more", {"mddlog", "transport", "weblink"}, [] {
+const Scenario webLinkDestroyed{"A WebLink destroyed before the drain receives nothing more", {"mddlog", "transport", "weblink"}, [] {
     LinkedBrowser  browser;
     const auto     gate = make_shared<Gate>();
     atomic<int>    blocked{0};

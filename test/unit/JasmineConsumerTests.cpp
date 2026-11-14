@@ -11,7 +11,7 @@
 
 using namespace webfront::bdd;
 
-Scenario consumerJasmine{"Consumer Jasmine configuration is bounded and rejects ambiguous or incomplete input", [] {
+const Scenario consumerJasmine{"Consumer Jasmine configuration is bounded and rejects ambiguous or incomplete input", [] {
     using webfront::testing::detail::jasmineConfiguration;
     given("a runtime, a spec and an explicit report destination", [&] {
         const auto config = jasmineConfiguration(R"({"files":["jasmine.js","board.spec.js"],"report":"report.json"})");
@@ -48,8 +48,8 @@ struct ReportFile {
 };
 }  // namespace
 
-Scenario jasmineSession{"A Jasmine session serves its files in bounded chunks to the instrumented page only", [] {
-    constexpr auto chunk = JasmineSession<>::chunkSize;
+const Scenario jasmineSession{"A Jasmine session serves its files in bounded chunks to the instrumented page only", [] {
+    static constexpr auto chunk = JasmineSession<>::chunkSize;
     ReportFile     report{"chunks"};
     given("a file that is an exact multiple of the chunk size, an empty file and a short one", [&] {
         JasmineSession session{{std::string(chunk * 2, 'a'), "", "short"}, report.path};
@@ -80,7 +80,7 @@ Scenario jasmineSession{"A Jasmine session serves its files in bounded chunks to
     });
 }};
 
-Scenario reloadedPage{"A reloaded page replaces the previous one, and nothing attaches after completion", [] {
+const Scenario reloadedPage{"A reloaded page replaces the previous one, and nothing attaches after completion", [] {
     ReportFile     report{"reload"};
     JasmineSession session{{"x"}, report.path};
     require(session.attach(1));
@@ -91,7 +91,7 @@ Scenario reloadedPage{"A reloaded page replaces the previous one, and nothing at
     require(!session.attach(3));
 }};
 
-Scenario jasmineSessionValidates{"A Jasmine session validates and records exactly one result", [] {
+const Scenario jasmineSessionValidates{"A Jasmine session validates and records exactly one result", [] {
     ReportFile report{"result"};
     given("an attached page", [&] {
         JasmineSession session{{"x"}, report.path};
@@ -123,7 +123,7 @@ Scenario jasmineSessionValidates{"A Jasmine session validates and records exactl
     });
 }};
 
-Scenario injectedScript{"The injected script reads in the same chunk size the session serves and reports load errors", [] {
+const Scenario injectedScript{"The injected script reads in the same chunk size the session serves and reports load errors", [] {
     const auto script = webfront::testing::detail::jasmineScript();
     require(script.starts_with("const CHUNK = " + std::to_string(JasmineSession<>::chunkSize) + ";"));
     require(script.find("49152", script.find("49152") + 1) == std::string::npos);  // the number appears only in the CHUNK definition
@@ -167,7 +167,7 @@ bool fileExists(const std::filesystem::path& path) {
 }
 }  // namespace
 
-Scenario captureStore{"A capture store writes images only below its directory", [] {
+const Scenario captureStoreScenario{"A capture store writes images only below its directory", [] {
     CaptureDirectory directory{"names"};
     given("a store with a window that answers", [&] {
         CaptureStore store{directory.path, fakeImage};
@@ -193,7 +193,7 @@ Scenario captureStore{"A capture store writes images only below its directory", 
     });
 }};
 
-Scenario captureStoreRecords{"A capture store records numbered images at a bounded rate", [] {
+const Scenario captureStoreRecords{"A capture store records numbered images at a bounded rate", [] {
     CaptureDirectory directory{"record"};
     std::atomic<int> calls = 0;
     CaptureStore     store{directory.path, [&](std::chrono::milliseconds) -> CaptureResult {
@@ -227,7 +227,7 @@ Scenario captureStoreRecords{"A capture store records numbered images at a bound
     });
 }};
 
-Scenario recordingLoses{"A recording that loses its window reports the failure when it is stopped", [] {
+const Scenario recordingLoses{"A recording that loses its window reports the failure when it is stopped", [] {
     CaptureDirectory directory{"failure"};
     std::atomic<int> calls = 0;
     CaptureStore     store{directory.path, [&](std::chrono::milliseconds) -> CaptureResult {
@@ -251,7 +251,7 @@ double pollUntilDone(Poll poll) {
 }
 }  // namespace
 
-Scenario captureStoreTakes{"A capture store takes a screenshot without making the caller wait for the window", [] {
+const Scenario captureStoreTakes{"A capture store takes a screenshot without making the caller wait for the window", [] {
     CaptureDirectory  directory{"async"};
     std::atomic<bool> release = false;
     CaptureStore      store{directory.path, [&](std::chrono::milliseconds) -> CaptureResult {
@@ -278,7 +278,7 @@ Scenario captureStoreTakes{"A capture store takes a screenshot without making th
     release = true;
 }};
 
-Scenario asynchronousScreenshot{"An asynchronous screenshot reports a capture failure when polled", [] {
+const Scenario asynchronousScreenshot{"An asynchronous screenshot reports a capture failure when polled", [] {
     CaptureDirectory directory{"asyncfail"};
     CaptureStore     store{directory.path, [](std::chrono::milliseconds) -> CaptureResult {
                            return std::unexpected("no window");
@@ -291,7 +291,7 @@ Scenario asynchronousScreenshot{"An asynchronous screenshot reports a capture fa
         }(); }, equals("Capture failed: no window"));
 }};
 
-Scenario recordingStops{"A recording stops on request and reports its count by polling", [] {
+const Scenario recordingStops{"A recording stops on request and reports its count by polling", [] {
     CaptureDirectory directory{"stop"};
     CaptureStore     store{directory.path, fakeImage};
     store.startRecording("run", 30);
@@ -307,7 +307,7 @@ Scenario recordingStops{"A recording stops on request and reports its count by p
     requireThrows<std::logic_error>([&] { store.pollRecording(); });
 }};
 
-Scenario recordingEnds{"A recording ends by itself at the image limit and can still be collected", [] {
+const Scenario recordingEnds{"A recording ends by itself at the image limit and can still be collected", [] {
     CaptureDirectory directory{"limit"};
     CaptureStore     store{directory.path, fakeImage, 3};
     store.startRecording("run", 30);
@@ -323,7 +323,7 @@ Scenario recordingEnds{"A recording ends by itself at the image limit and can st
     require(store.stopRecording() <= 3);
 }};
 
-Scenario captureNobody{"A capture that nobody collects does not block the next one", [] {
+const Scenario captureNobody{"A capture that nobody collects does not block the next one", [] {
     CaptureDirectory directory{"uncollected"};
     CaptureStore     store{directory.path, fakeImage, 2};
     given("a screenshot that finished but was never polled", [&] {
@@ -375,7 +375,7 @@ Scenario captureNobody{"A capture that nobody collects does not block the next o
     });
 }};
 
-Scenario recordingNever{"A recording never erases the images of an earlier recording of the same run", [] {
+const Scenario recordingNever{"A recording never erases the images of an earlier recording of the same run", [] {
     CaptureDirectory directory{"duplicate"};
     CaptureStore     store{directory.path, fakeImage};
     store.startRecording("run", 30);
@@ -397,7 +397,7 @@ Scenario recordingNever{"A recording never erases the images of an earlier recor
     });
 }};
 
-Scenario stopRequest{"A stop request belongs to its own recording", [] {
+const Scenario stopRequest{"A stop request belongs to its own recording", [] {
     CaptureDirectory directory{"restart"};
     CaptureStore     store{directory.path, fakeImage, 3};
     store.startRecording("one", 30);
@@ -428,7 +428,7 @@ CaptureStore::Source blockedUntilReleased(std::shared_ptr<Gate> gate) {
 }
 }  // namespace
 
-Scenario destroyingStore{"Destroying a store does not wait for a window that never answers", [] {
+const Scenario destroyingStore{"Destroying a store does not wait for a window that never answers", [] {
     CaptureDirectory directory{"closing"};
     const auto       gate    = std::make_shared<Gate>();
     const auto       started = std::chrono::steady_clock::now();
@@ -447,7 +447,7 @@ Scenario destroyingStore{"Destroying a store does not wait for a window that nev
     require(elapsed < std::chrono::seconds{5});
 }};
 
-Scenario captureCallbacks{"Capture callbacks of a Jasmine session obey the same page authority", [] {
+const Scenario captureCallbacks{"Capture callbacks of a Jasmine session obey the same page authority", [] {
     CaptureDirectory directory{"session"};
     ReportFile       report{"capture"};
     auto             store = std::make_shared<CaptureStore>(directory.path, fakeImage);
@@ -490,7 +490,7 @@ Scenario captureCallbacks{"Capture callbacks of a Jasmine session obey the same 
     });
 }};
 
-Scenario windowRegistration{"A window registration is replaced by a later one and never removes its successor", [] {
+const Scenario windowRegistration{"A window registration is replaced by a later one and never removes its successor", [] {
     using webfront::frontend::capturePng;
     using webfront::frontend::CaptureRegistration;
     const auto answer = [](std::uint8_t byte) {
@@ -514,14 +514,14 @@ Scenario windowRegistration{"A window registration is replaced by a later one an
     }
 }};
 
-Scenario jasmineConfigurationAccepts{"The Jasmine configuration accepts an optional capture directory", [] {
+const Scenario jasmineConfigurationAccepts{"The Jasmine configuration accepts an optional capture directory", [] {
     using webfront::testing::detail::jasmineConfiguration;
     require(jasmineConfiguration(R"({"files":["j","s"],"report":"r","captures":"c"})").captures == "c");
     require(jasmineConfiguration(R"({"files":["j","s"],"report":"r"})").captures.empty());
     requireThrows([&] { jasmineConfiguration(R"({"files":["j","s"],"report":"r","captures":"a","captures":"b"})"); });
 }};
 
-Scenario abandoningRecording{"Abandoning a recording frees its slot before it returns, unless the window blocks the worker", [] {
+const Scenario abandoningRecording{"Abandoning a recording frees its slot before it returns, unless the window blocks the worker", [] {
     CaptureDirectory directory{"abandon"};
     given("a window that answers", [&] {
         CaptureStore store{directory.path, fakeImage};
@@ -558,7 +558,7 @@ Scenario abandoningRecording{"Abandoning a recording frees its slot before it re
     });
 }};
 
-Scenario twoRecording{"Two recording names that differ only by case are one recording, as on a case-insensitive file system", [] {
+const Scenario twoRecording{"Two recording names that differ only by case are one recording, as on a case-insensitive file system", [] {
     CaptureDirectory directory{"case"};
     CaptureStore     store{directory.path, fakeImage};
     store.startRecording("run", 30);
@@ -583,7 +583,7 @@ namespace {
 struct FakeCapture { };
 }  // namespace
 
-Scenario windowCloses{"A window that closes answers the captures it never got to run", [] {
+const Scenario windowCloses{"A window that closes answers the captures it never got to run", [] {
     using Pending = webfront::frontend::PendingCaptures<FakeCapture>;
     given("a request queued for a window whose event loop will never serve it", [&] {
         Pending pending;

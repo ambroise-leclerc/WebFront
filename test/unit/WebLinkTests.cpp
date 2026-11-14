@@ -72,7 +72,7 @@ vector<byte> returnMessage(msg::CallId callId, Configure configure) {
 
 }  // namespace
 
-Scenario webLinkSettles{"WebLink settles correlated asynchronous results", [] {
+const Scenario webLinkSettles{"WebLink settles correlated asynchronous results", [] {
     InjectableSocket::reset();
     InlineTaskScope               scope;
     WebLink<InjectableNetworking> link{InjectableSocket{}, 7, [](WebLinkEvent) { }, scope};
@@ -136,7 +136,7 @@ pair<string, string> futureFailure(future<Result>& result) {
 }
 }  // namespace
 
-Scenario browserRejection{"A browser rejection reaches C++ with its code", [] {
+const Scenario browserRejection{"A browser rejection reaches C++ with its code", [] {
     InjectableSocket::reset();
     InlineTaskScope               scope;
     WebLink<InjectableNetworking> link{InjectableSocket{}, 7, [](WebLinkEvent) { }, scope};
@@ -197,7 +197,7 @@ Scenario browserRejection{"A browser rejection reaches C++ with its code", [] {
     });
 }};
 
-Scenario webLinkRejects{"WebLink rejects incomplete asynchronous results", [] {
+const Scenario webLinkRejects{"WebLink rejects incomplete asynchronous results", [] {
     InjectableSocket::reset();
     InlineTaskScope               scope;
     WebLink<InjectableNetworking> link{InjectableSocket{}, 8, [](WebLinkEvent) { }, scope};
@@ -225,7 +225,7 @@ Scenario webLinkRejects{"WebLink rejects incomplete asynchronous results", [] {
     });
 }};
 
-Scenario webLinkDispatches{"WebLink dispatches browser messages and allocates distinct calls", [] {
+const Scenario webLinkDispatches{"WebLink dispatches browser messages and allocates distinct calls", [] {
     InjectableSocket::reset();
     vector<WebLinkEvent::Code>    events;
     string                        calledName;
@@ -315,7 +315,7 @@ Scenario webLinkDispatches{"WebLink dispatches browser messages and allocates di
     });
 }};
 
-Scenario webLinkReportsBrowser{"WebLink reports a browser's close frame as its disconnection", [] {
+const Scenario webLinkReportsBrowser{"WebLink reports a browser's close frame as its disconnection", [] {
     InjectableSocket::reset();
     vector<WebLinkEvent::Code>    events;
     InlineTaskScope               scope;
@@ -328,7 +328,7 @@ Scenario webLinkReportsBrowser{"WebLink reports a browser's close frame as its d
     });
 }};
 
-Scenario webLinkDispatchesEvery{"WebLink dispatches every WebSocket frame coalesced in one read", [] {
+const Scenario webLinkDispatchesEvery{"WebLink dispatches every WebSocket frame coalesced in one read", [] {
     InjectableSocket::reset();
     vector<WebLinkEvent::Code>    events;
     string                        calledName;
@@ -366,7 +366,7 @@ Scenario webLinkDispatchesEvery{"WebLink dispatches every WebSocket frame coales
     });
 }};
 
-Scenario webLinkForwards{"WebLink forwards logs to the browser until a write fails", [] {
+const Scenario webLinkForwards{"WebLink forwards logs to the browser until a write fails", [] {
     InjectableSocket::reset();
     log::setLogLevel(log::Info);
     InlineTaskScope               scope;
@@ -389,7 +389,7 @@ Scenario webLinkForwards{"WebLink forwards logs to the browser until a write fai
     log::setLogLevel(log::Disabled);
 }};
 
-Scenario writeFailing{"A write failing after its WebLink is destroyed does not reach the link or its successor", [] {
+const Scenario writeFailing{"A write failing after its WebLink is destroyed does not reach the link or its successor", [] {
     InjectableSocket::reset();
     log::setLogLevel(log::Info);
     InlineTaskScope scope;
@@ -416,7 +416,7 @@ Scenario writeFailing{"A write failing after its WebLink is destroyed does not r
     log::setLogLevel(log::Disabled);
 }};
 
-Scenario browserStops{"A browser that stops reading bounds the diagnostic frames queued for it", [] {
+const Scenario browserStops{"A browser that stops reading bounds the diagnostic frames queued for it", [] {
     InjectableSocket::reset();
     log::setLogLevel(log::Info);
     InlineTaskScope               scope;
@@ -462,7 +462,7 @@ networking::Task waitWritesSeeing(Writes writes, const vector<WebLinkEvent::Code
 }
 }  // namespace
 
-Scenario linkWakes{"A link wakes a writer once its write queue drains", [] {
+const Scenario linkWakes{"A link wakes a writer once its write queue drains", [] {
     InjectableSocket::reset();
     InlineTaskScope scope;
     auto            link = make_shared<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{12}, [](WebLinkEvent) { }, scope);
@@ -510,7 +510,7 @@ Scenario linkWakes{"A link wakes a writer once its write queue drains", [] {
     while (InjectableSocket::completeDeferredWrites() > 0) { }
 }};
 
-Scenario writerResumes{"A writer resumes after a failed write reported the closure", [] {
+const Scenario writerResumes{"A writer resumes after a failed write reported the closure", [] {
     InjectableSocket::reset();
     InlineTaskScope            scope;
     vector<WebLinkEvent::Code> events;
@@ -531,7 +531,7 @@ Scenario writerResumes{"A writer resumes after a failed write reported the closu
     InjectableSocket::reset();
 }};
 
-Scenario webLinkNever{"WebLink never logs the payload of an incoming message", [] {
+const Scenario webLinkNever{"WebLink never logs the payload of an incoming message", [] {
     InjectableSocket::reset();
     InlineTaskScope               scope;
     WebLink<InjectableNetworking> link{InjectableSocket{}, 7, [](WebLinkEvent) { }, scope};

@@ -9,7 +9,7 @@ using namespace webfront::bdd;
 using namespace webfront;
 using namespace std;
 
-Scenario uRLEncoding{"URL encoding", [] {
+const Scenario uRLEncoding{"URL encoding", [] {
     require(uri::encode("mango & pineapple") == "mango%20%26%20pineapple");
     require(uri::encode("AZaz09-_.~") == "AZaz09-_.~");
 
@@ -31,7 +31,7 @@ Scenario uRLEncoding{"URL encoding", [] {
     });
 }};
 
-Scenario uRIDecoding{"URI decoding", [] {
+const Scenario uRIDecoding{"URI decoding", [] {
     require(uri::decode("http://path%25name%2F%25%23%21%25") == "http://path%name/%#!%");
     require(uri::decode("http://ABC12345zef") == "http://ABC12345zef");
     require(uri::decode("%20%RQabcABV") == " %RQabcABV");
@@ -39,7 +39,7 @@ Scenario uRIDecoding{"URI decoding", [] {
     require(uri::decode("%\xC3\xA9%E9") == "%\xC3\xA9\xE9");  // Non-ASCII bytes after '%' are kept as they are
 }};
 
-Scenario uRIParsing{"URI parsing", [] {
+const Scenario uRIParsing{"URI parsing", [] {
     given("An URI with no userinfo nor fragment", [&] {
         uri::URI u0("http://localhost:80/foo.html?&q=1:2:3");
         when("decoded", [&] {
@@ -129,7 +129,7 @@ Scenario uRIParsing{"URI parsing", [] {
     });
 }};
 
-Scenario webSocketSec{"WebSocket Sec Key coding", [] {
+const Scenario webSocketSec{"WebSocket Sec Key coding", [] {
     std::string key = "x3JJHMbDL1EzLkh9GBhXDw==";
     require(base64::encodeInNetworkOrder(crypto::sha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")) ==
             "HSmrc0sMlYUkAGmm5OPpG2HaGWk=");
@@ -139,7 +139,7 @@ Scenario webSocketSec{"WebSocket Sec Key coding", [] {
             "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
 }};
 
-Scenario base64Encoding{"Base64 encoding", [] {
+const Scenario base64Encoding{"Base64 encoding", [] {
     require(base64::encodeInNetworkOrder(crypto::sha1("The quick brown fox jumps over the lazy dog")) ==
             "L9ThxnotKPzthJ7hu3bnORuT6xI=");
     require(base64::encodeInNetworkOrder(crypto::sha1("The quick brown fox jumps over the lazy cog")) ==
@@ -147,7 +147,7 @@ Scenario base64Encoding{"Base64 encoding", [] {
     require(base64::encodeInNetworkOrder(crypto::sha1("")) == "2jmj7l5rSw0yVb/vlWAYkK/YBwk=");
 }};
 
-Scenario sHA1Hashing{"SHA1 hashing", [] {
+const Scenario sHA1Hashing{"SHA1 hashing", [] {
     require(crypto::sha1String("The quick brown fox jumps over the lazy dog") == "2fd4e1c67a2d28fced849ee1bb76e7391b93eb12");
     require(crypto::sha1String("The quick brown fox jumps over the lazy cog") == "de9f2c7fd25e1b3afad3e85a0bd17d9b100db4b3");
     require(crypto::sha1String("") == "da39a3ee5e6b4b0d3255bfef95601890afd80709");

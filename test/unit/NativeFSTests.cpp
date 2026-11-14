@@ -109,7 +109,7 @@ namespace {
     }
 }
 
-Scenario nativeDebugFSProvides{"NativeDebugFS provides access to local files", [] {
+const Scenario nativeDebugFSProvides{"NativeDebugFS provides access to local files", [] {
     given("A local file", [&] {
         filesystem::path testFilename{"test.tmp"};
         {
@@ -133,7 +133,7 @@ Scenario nativeDebugFSProvides{"NativeDebugFS provides access to local files", [
     });
 }};
 
-Scenario nativeDebugFSOpens{"NativeDebugFS opens an existing text file using a relative path", [] {
+const Scenario nativeDebugFSOpens{"NativeDebugFS opens an existing text file using a relative path", [] {
     TemporaryTestEnvironment testEnv;
     auto textFilePath = testEnv.createTextFile("sample.txt", "This is a sample text file\nwith multiple lines\nfor testing.");
     DebugFS debugFS(testEnv.getTestDir().string());
@@ -145,7 +145,7 @@ Scenario nativeDebugFSOpens{"NativeDebugFS opens an existing text file using a r
     });
 }};
 
-Scenario nativeDebugFSOpensJSON{"NativeDebugFS opens a JSON configuration file", [] {
+const Scenario nativeDebugFSOpensJSON{"NativeDebugFS opens a JSON configuration file", [] {
     TemporaryTestEnvironment testEnv;
     auto configFilePath = testEnv.createTextFile("config.json", "{ \"name\": \"NativeFS\", \"version\": 1.0, \"isTest\": true }");
     DebugFS debugFS(testEnv.getTestDir().string());
@@ -157,7 +157,7 @@ Scenario nativeDebugFSOpensJSON{"NativeDebugFS opens a JSON configuration file",
     });
 }};
 
-Scenario nativeDebugFSOpensBinary{"NativeDebugFS opens a binary file", [] {
+const Scenario nativeDebugFSOpensBinary{"NativeDebugFS opens a binary file", [] {
     TemporaryTestEnvironment testEnv;
     auto binaryFilePath = testEnv.createBinaryFile("data.bin", 1024);
     DebugFS debugFS(testEnv.getTestDir().string());
@@ -176,7 +176,7 @@ Scenario nativeDebugFSOpensBinary{"NativeDebugFS opens a binary file", [] {
     });
 }};
 
-Scenario nativeDebugFSOpensEmpty{"NativeDebugFS opens an empty file", [] {
+const Scenario nativeDebugFSOpensEmpty{"NativeDebugFS opens an empty file", [] {
     TemporaryTestEnvironment testEnv;
     auto emptyFilePath = testEnv.createTextFile("empty.txt", "");
     DebugFS debugFS(testEnv.getTestDir().string());
@@ -193,7 +193,7 @@ Scenario nativeDebugFSOpensEmpty{"NativeDebugFS opens an empty file", [] {
     });
 }};
 
-Scenario nativeDebugFSOpensFile{"NativeDebugFS opens a file in a subdirectory", [] {
+const Scenario nativeDebugFSOpensFile{"NativeDebugFS opens a file in a subdirectory", [] {
     TemporaryTestEnvironment testEnv;
     auto subdirFilePath = testEnv.createTextFile("subdir/nested.txt", "This is a nested file in a subdirectory");
     DebugFS debugFS(testEnv.getTestDir().string());
@@ -205,7 +205,7 @@ Scenario nativeDebugFSOpensFile{"NativeDebugFS opens a file in a subdirectory", 
     });
 }};
 
-Scenario nativeDebugFSAttempts{"NativeDebugFS attempts to open a non-existent file", [] {
+const Scenario nativeDebugFSAttempts{"NativeDebugFS attempts to open a non-existent file", [] {
     TemporaryTestEnvironment testEnv;
     DebugFS debugFS(testEnv.getTestDir().string());
 
@@ -224,7 +224,7 @@ Scenario nativeDebugFSAttempts{"NativeDebugFS attempts to open a non-existent fi
     });
 }};
 
-Scenario temporaryTestEnvironmentGetBinaryData{"TemporaryTestEnvironment::getBinaryData returns the correct binary data", [] {
+const Scenario temporaryTestEnvironmentGetBinaryData{"TemporaryTestEnvironment::getBinaryData returns the correct binary data", [] {
     TemporaryTestEnvironment testEnv;
     auto binaryFilePath = testEnv.createBinaryFile("data.bin", 1024);
 
@@ -237,7 +237,7 @@ Scenario temporaryTestEnvironmentGetBinaryData{"TemporaryTestEnvironment::getBin
     });
 }};
 
-Scenario nativeDebugFSRoot{"NativeDebugFS root path handling", [] {
+const Scenario nativeDebugFSRoot{"NativeDebugFS root path handling", [] {
     TemporaryTestEnvironment testEnv;
     auto testFile = testEnv.createTextFile("test_root.txt", "Root path test");
     
@@ -286,7 +286,7 @@ Scenario nativeDebugFSRoot{"NativeDebugFS root path handling", [] {
     });
 }};
 
-Scenario temporaryTestEnvironmentDestructor{"TemporaryTestEnvironment destructor handles remove_all exception", [] {
+const Scenario temporaryTestEnvironmentDestructor{"TemporaryTestEnvironment destructor handles remove_all exception", [] {
     unique_ptr<TemporaryTestEnvironment> testEnv = make_unique<TemporaryTestEnvironment>();
     auto protectedDir = testEnv->getTestDir() / "protected";
     filesystem::create_directory(protectedDir);

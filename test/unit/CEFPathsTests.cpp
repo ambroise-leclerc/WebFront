@@ -5,7 +5,7 @@
 
 using namespace webfront::bdd;
 
-Scenario macOSCEF{"macOS CEF paths match the deployed framework layout", [] {
+const Scenario macOSCEF{"macOS CEF paths match the deployed framework layout", [] {
     given("executables in different CMake target directories", [&] {
         const std::filesystem::path buildRoot{"build-cef"};
         const auto                  deployedFramework = buildRoot / "Frameworks" / "Chromium Embedded Framework.framework";

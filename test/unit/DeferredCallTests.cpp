@@ -136,7 +136,7 @@ struct DeferredBrowser {
 
 }  // namespace
 
-Scenario callbackReturns{"A callback that returns a task answers when the task completes", {"deferred"}, [] {
+const Scenario callbackReturns{"A callback that returns a task answers when the task completes", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.app.cppFunction("echoLater", &echoLater);
     browser.connect();
@@ -163,7 +163,7 @@ Scenario callbackReturns{"A callback that returns a task answers when the task c
     });
 }};
 
-Scenario deferredCallback{"A deferred callback that fails rejects the call with its code", {"deferred"}, [] {
+const Scenario deferredCallback{"A deferred callback that fails rejects the call with its code", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.app.cppFunction("failLater", &failLater);
     browser.connect();
@@ -175,7 +175,7 @@ Scenario deferredCallback{"A deferred callback that fails rejects the call with 
     });
 }};
 
-Scenario deferredCallbackThrows{"A deferred callback that throws before returning its task rejects the call at once", {"deferred"}, [] {
+const Scenario deferredCallbackThrows{"A deferred callback that throws before returning its task rejects the call at once", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.app.cppFunction<ResultTask<std::string>, std::string>("throwsNow", [](const std::string&) -> ResultTask<std::string> {
         throw BridgeError("early", "refused before it started");
@@ -188,7 +188,7 @@ Scenario deferredCallbackThrows{"A deferred callback that throws before returnin
     });
 }};
 
-Scenario deferredCallbackWhose{"A deferred callback whose operation is stopped rejects the call as cancelled", {"deferred"}, [] {
+const Scenario deferredCallbackWhose{"A deferred callback whose operation is stopped rejects the call as cancelled", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.app.cppFunction("echoLater", &echoLater);
     browser.connect();
@@ -199,7 +199,7 @@ Scenario deferredCallbackWhose{"A deferred callback whose operation is stopped r
     });
 }};
 
-Scenario callbackMay{"A callback may be a task without result", {"deferred"}, [] {
+const Scenario callbackMay{"A callback may be a task without result", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.app.cppFunction("voidLater", &voidLater);
     browser.connect();
@@ -213,7 +213,7 @@ Scenario callbackMay{"A callback may be a task without result", {"deferred"}, []
     });
 }};
 
-Scenario callbackTaking{"A callback taking the caller can answer later", {"deferred"}, [] {
+const Scenario callbackTaking{"A callback taking the caller can answer later", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.app.cppFunction<ResultTask<std::string>, DeferredApp::UI, std::string>("withCaller", [](DeferredApp::UI, const std::string& value) -> ResultTask<std::string> {
         return echoLater(value);
@@ -226,7 +226,7 @@ Scenario callbackTaking{"A callback taking the caller can answer later", {"defer
     });
 }};
 
-Scenario severalDeferred{"Several deferred calls of one connection are answered independently", {"deferred"}, [] {
+const Scenario severalDeferred{"Several deferred calls of one connection are answered independently", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.app.cppFunction("echoLater", &echoLater);
     browser.connect();
@@ -246,7 +246,7 @@ Scenario severalDeferred{"Several deferred calls of one connection are answered 
     });
 }};
 
-Scenario callReuses{"A call that reuses the identifier of a running call is dropped without any answer", {"deferred"}, [] {
+const Scenario callReuses{"A call that reuses the identifier of a running call is dropped without any answer", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.app.cppFunction("echoLater", &echoLater);
     browser.app.cppFunction<std::string>("plain", [] { return std::string("plain-result"); });
@@ -275,7 +275,7 @@ Scenario callReuses{"A call that reuses the identifier of a running call is drop
     });
 }};
 
-Scenario disconnectionBrowser{"The disconnection of the browser stops its deferred calls and drops their answers", {"deferred"}, [] {
+const Scenario disconnectionBrowser{"The disconnection of the browser stops its deferred calls and drops their answers", {"deferred"}, [] {
     DeferredBrowser browser;
     std::weak_ptr<int> observed;
     browser.app.cppFunction<ResultTask<std::string>>("watched", [&observed]() -> ResultTask<std::string> {
@@ -295,7 +295,7 @@ Scenario disconnectionBrowser{"The disconnection of the browser stops its deferr
     });
 }};
 
-Scenario shuttingApplication{"Shutting the application down joins its pending deferred calls", {"deferred"}, [] {
+const Scenario shuttingApplication{"Shutting the application down joins its pending deferred calls", {"deferred"}, [] {
     DeferredBrowser browser;
     std::weak_ptr<int> observed;
     browser.app.cppFunction<ResultTask<std::string>>("watched", [&observed]() -> ResultTask<std::string> {
@@ -311,7 +311,7 @@ Scenario shuttingApplication{"Shutting the application down joins its pending de
     });
 }};
 
-Scenario identifiersFlight{"The identifiers of in-flight calls are claimed once and released on finish", {"deferred"}, [] {
+const Scenario identifiersFlight{"The identifiers of in-flight calls are claimed once and released on finish", {"deferred"}, [] {
     detail::DeferredCalls calls;
     const auto            key = calls.reserve(5);
     require(key != 0);
@@ -332,7 +332,7 @@ Scenario identifiersFlight{"The identifiers of in-flight calls are claimed once 
     });
 }};
 
-Scenario decodedArguments{"The decoded arguments of a deferred callback live until it completes", {"deferred"}, [] {
+const Scenario decodedArguments{"The decoded arguments of a deferred callback live until it completes", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.app.cppFunction("byReference", &byReferenceLater);
     browser.connect();
@@ -343,7 +343,7 @@ Scenario decodedArguments{"The decoded arguments of a deferred callback live unt
     });
 }};
 
-Scenario callRefused{"A call refused as a duplicate does not run the callback", {"deferred"}, [] {
+const Scenario callRefused{"A call refused as a duplicate does not run the callback", {"deferred"}, [] {
     DeferredBrowser browser;
     sideEffects = 0;
     browser.app.cppFunction<ResultTask<std::string>, std::string>("counting", [](const std::string& value) -> ResultTask<std::string> {
@@ -359,7 +359,7 @@ Scenario callRefused{"A call refused as a duplicate does not run the callback", 
     });
 }};
 
-Scenario callingUI{"The calling UI of a deferred callback lives until it completes", {"deferred"}, [] {
+const Scenario callingUI{"The calling UI of a deferred callback lives until it completes", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.app.cppFunction<ResultTask<std::string>, const DeferredApp::UI&, std::string>("uiReference", &uiReferenceLater);
     browser.app.cppFunction<ResultTask<std::string>, DeferredApp::UI&, std::string>("uiMutable", &uiMutableLater);
@@ -375,7 +375,7 @@ Scenario callingUI{"The calling UI of a deferred callback lives until it complet
     });
 }};
 
-Scenario callUnknown{"A call to an unknown function is rejected with the not-found code of the bridge", {"deferred"}, [] {
+const Scenario callUnknown{"A call to an unknown function is rejected with the not-found code of the bridge", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.connect();
     browser.call("noSuchFunction", 4);

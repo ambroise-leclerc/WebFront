@@ -21,7 +21,7 @@ void rejectLaunch(const std::string&) {
 }
 }  // namespace
 
-Scenario systemBrowserSession{"The system browser session waits only after a successful launch", [] {
+const Scenario systemBrowserSession{"The system browser session waits only after a successful launch", [] {
     std::istringstream input("\nremaining");
     std::ostringstream output;
     given("a successful desktop launcher", [&] {
@@ -53,7 +53,7 @@ Scenario systemBrowserSession{"The system browser session waits only after a suc
     });
 }};
 
-Scenario everyFrontend{"Every frontend builds the application URL the same way", [] {
+const Scenario everyFrontend{"Every frontend builds the application URL the same way", [] {
     given("plain page paths", [&] {
         then("the path is appended to the local origin", [&] {
             require(applicationUrl("9002", "index.html") == "http://127.0.0.1:9002/index.html");
@@ -87,7 +87,7 @@ Scenario everyFrontend{"Every frontend builds the application URL the same way",
     });
 }};
 
-Scenario defaultBrowser{"The default browser opens a quoted, encoded URL", [] {
+const Scenario defaultBrowser{"The default browser opens a quoted, encoded URL", [] {
     given("a page whose name contains characters that are special to shells and URLs", [&] {
         const auto command = webfront::browser::command("9002", "my page %231&2.html");
 
@@ -119,7 +119,7 @@ Scenario defaultBrowser{"The default browser opens a quoted, encoded URL", [] {
     });
 }};
 
-Scenario popupURLs{"Popup URLs remain literal arguments to desktop launchers", [] {
+const Scenario popupURLs{"Popup URLs remain literal arguments to desktop launchers", [] {
     const std::string url = "https://example.com/it's?value=$HOME&x=1";
     require(
         webfront::browser::wslCommandForUrl(url).find(webfront::browser::shellArgument("Start-Process -FilePath 'https://example.com/it''s?value=$HOME&x=1'"))

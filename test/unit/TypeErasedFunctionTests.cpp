@@ -22,7 +22,7 @@ void function4(const char* text, int plusValue, int minusValue) {
     testCounter -= static_cast<size_t>(minusValue);
 }
 
-Scenario typeErasedFunctions{"TypeErasedFunctions", [] {
+const Scenario typeErasedFunctions{"TypeErasedFunctions", [] {
     given("Different free functions, member functions and lambdas", [&] {
 
         auto function1 = [&](int value) {

@@ -5,7 +5,7 @@ using namespace webfront::bdd;
 
 using webfront::http::Headers;
 
-Scenario acceptEncodingDefaults{"Accept-Encoding defaults to the identity fallback", [] {
+const Scenario acceptEncodingDefaults{"Accept-Encoding defaults to the identity fallback", [] {
     for (const auto includeEmptyField : {false, true}) {
         given("an absent or empty field: ", includeEmptyField, [&] {
             Headers headers;
@@ -19,7 +19,7 @@ Scenario acceptEncodingDefaults{"Accept-Encoding defaults to the identity fallba
     }
 }};
 
-Scenario acceptEncodingMatches{"Accept-Encoding matches complete case-insensitive tokens with HTTP whitespace", [] {
+const Scenario acceptEncodingMatches{"Accept-Encoding matches complete case-insensitive tokens with HTTP whitespace", [] {
     for (const auto value : {"gzip", "GZIP", " GZIP \t", "br,\tgzip ; q = 0.5 ", "gzip;q=1.000", ", gzip,,"}) {
         given(value, [&] {
             Headers headers;
@@ -40,7 +40,7 @@ Scenario acceptEncodingMatches{"Accept-Encoding matches complete case-insensitiv
     }
 }};
 
-Scenario acceptEncodingRespects{"Accept-Encoding respects explicit and wildcard exclusions", [] {
+const Scenario acceptEncodingRespects{"Accept-Encoding respects explicit and wildcard exclusions", [] {
     struct Preference {
         const char* value;
         bool        gzip;
@@ -66,7 +66,7 @@ Scenario acceptEncodingRespects{"Accept-Encoding respects explicit and wildcard 
     }
 }};
 
-Scenario acceptEncodingRejects{"Accept-Encoding rejects malformed qvalues", [] {
+const Scenario acceptEncodingRejects{"Accept-Encoding rejects malformed qvalues", [] {
     for (const auto value : {"1.5", "", "invalid", "-1", "01", "0.0001", "1.001", ".5"}) {
         given("q=", value, [&] {
             Headers headers;
@@ -78,7 +78,7 @@ Scenario acceptEncodingRejects{"Accept-Encoding rejects malformed qvalues", [] {
     }
 }};
 
-Scenario acceptEncodingIgnores{"Accept-Encoding ignores unknown parameters while preserving q exclusions", [] {
+const Scenario acceptEncodingIgnores{"Accept-Encoding ignores unknown parameters while preserving q exclusions", [] {
     for (const auto value : {"gzip;level=1", "gzip;level=1;q=0.5", "gzip; q=1; level=1", "gzip;extension"}) {
         given(value, [&] {
             Headers headers;
@@ -99,7 +99,7 @@ Scenario acceptEncodingIgnores{"Accept-Encoding ignores unknown parameters while
     }
 }};
 
-Scenario acceptEncodingCombines{"Accept-Encoding combines multiple fields before applying wildcard precedence", [] {
+const Scenario acceptEncodingCombines{"Accept-Encoding combines multiple fields before applying wildcard precedence", [] {
     Headers headers;
     headers.headers.emplace_back("Accept-Encoding", "*;q=0");
     headers.headers.emplace_back("accept-encoding", "GZIP;q=0.5");
@@ -120,7 +120,7 @@ Scenario acceptEncodingCombines{"Accept-Encoding combines multiple fields before
     });
 }};
 
-Scenario acceptEncodingAccepts{"Accept-Encoding accepts any positive duplicate regardless of order", [] {
+const Scenario acceptEncodingAccepts{"Accept-Encoding accepts any positive duplicate regardless of order", [] {
     for (const auto value : {"gzip;q=0, gzip", "gzip, gzip;q=0", "gzip;q=.5, gzip", "gzip, gzip;q=.5"}) {
         given(value, [&] {
             Headers headers;
@@ -145,7 +145,7 @@ Scenario acceptEncodingAccepts{"Accept-Encoding accepts any positive duplicate r
 static_assert(webfront::http::encoding::tokenEquals("GZIP", "gzip"));
 static_assert(!webfront::http::encoding::tokenEquals("\xc0", "\xe0"));
 
-Scenario hTTPEncoding{"HTTP encoding token comparison folds ASCII letters only", [] {
+const Scenario hTTPEncoding{"HTTP encoding token comparison folds ASCII letters only", [] {
     given("ASCII punctuation", [&] {
         then("case folding does not conflate punctuation pairs", [&] {
             require(!webfront::http::encoding::tokenEquals("@", "`"));
@@ -164,7 +164,7 @@ Scenario hTTPEncoding{"HTTP encoding token comparison folds ASCII letters only",
     });
 }};
 
-Scenario acceptEncodingTreats{"Accept-Encoding treats x-gzip as the gzip alias", [] {
+const Scenario acceptEncodingTreats{"Accept-Encoding treats x-gzip as the gzip alias", [] {
     struct Preference {
         const char* field;
         bool        accepted;

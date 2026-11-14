@@ -29,7 +29,7 @@ using MockIndexFS = MockFileSystem<IndexNames>;
 using MockJsLibFS = MockFileSystem<JsLibNames>;
 using MockMixFS = MockFileSystem<MixNames>;
 
-Scenario filesystemMulti{"filesystem::Multi can combine multiple FileSystems", [] {
+const Scenario filesystemMulti{"filesystem::Multi can combine multiple FileSystems", [] {
     given("IndexFS", [&] {
         MockIndexFS indexFS(".");
         when("opening known filenames", [&] {
@@ -141,7 +141,7 @@ static string readAll(fs::File file, size_t bufferSize) {
     return content;
 }
 
-Scenario embeddedFile{"An embedded file reads the same bytes whatever the buffer size", [] {
+const Scenario embeddedFile{"An embedded file reads the same bytes whatever the buffer size", [] {
     for (const size_t bufferSize : array<size_t, 6>{1, 3, 7, 8, 13, 4096}) {
         given("A buffer of " + to_string(bufferSize) + " bytes", [&] {
             then("Embedded data reads back unchanged, across its 64-bit words", [&] {

@@ -31,7 +31,7 @@ struct LoggingScope {
 };
 }  // namespace
 
-Scenario mddlogFacade{"mddlog facade masks, caller location and independent registrations", {"mddlog", "logger"}, [] {
+const Scenario mddlogFacade{"mddlog facade masks, caller location and independent registrations", {"mddlog", "logger"}, [] {
     namespace log = webfront::log;
     std::vector<std::string> lines;
     std::size_t              otherWrites = 0;
@@ -72,7 +72,7 @@ Scenario mddlogFacade{"mddlog facade masks, caller location and independent regi
     require(otherWrites == 4);
 }};
 
-Scenario mddlogFacadeRenders{"mddlog facade renders every byte independently of char signedness", {"mddlog", "logger"}, [] {
+const Scenario mddlogFacadeRenders{"mddlog facade renders every byte independently of char signedness", {"mddlog", "logger"}, [] {
     namespace log = webfront::log;
     std::vector<std::string> lines;
     LoggingScope             scope;
@@ -96,7 +96,7 @@ Scenario mddlogFacadeRenders{"mddlog facade renders every byte independently of 
     require(lines.size() == 2);
 }};
 
-Scenario mddlogFacadePreserves{"mddlog facade preserves structured context and independent text delivery", {"mddlog", "logger"}, [] {
+const Scenario mddlogFacadePreserves{"mddlog facade preserves structured context and independent text delivery", {"mddlog", "logger"}, [] {
     namespace log = webfront::log;
     std::vector<std::string> lines;
     std::vector<std::string> operations;
@@ -139,7 +139,7 @@ Scenario mddlogFacadePreserves{"mddlog facade preserves structured context and i
     require(lines.size() == 5);
 }};
 
-Scenario mddlogHex{"mddlog hex summary retains truncation from admitted records only", {"mddlog", "logger"}, [] {
+const Scenario mddlogHex{"mddlog hex summary retains truncation from admitted records only", {"mddlog", "logger"}, [] {
     namespace log = webfront::log;
     const LoggingScope scope;
     log::setLogLevel(log::Info);

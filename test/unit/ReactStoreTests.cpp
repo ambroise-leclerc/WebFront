@@ -57,7 +57,7 @@ struct UI {
 };
 }  // namespace
 
-Scenario reactStores{"React stores coalesce a thousand writes into one snapshot per server cycle", {"react"}, [] {
+const Scenario reactStores{"React stores coalesce a thousand writes into one snapshot per server cycle", {"react"}, [] {
     Harness                         harness;
     webfront::react::Store<UI, int> store{UI{&harness}, "counter"};
     auto                            copy = store;

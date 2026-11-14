@@ -74,7 +74,7 @@ void freshNetwork() {
 }
 }  // namespace
 
-Scenario connectionAssociated{"A connection is associated with the view of an embedded frontend only by the secret of the launch", {"view-association"}, [] {
+const Scenario connectionAssociated{"A connection is associated with the view of an embedded frontend only by the secret of the launch", {"view-association"}, [] {
     freshNetwork();
     ViewApp app{WebFrontConfig{.port = "0"}};
     const std::string secret = testing::LaunchSecret<ViewApp>::of(app);
@@ -153,7 +153,7 @@ Scenario connectionAssociated{"A connection is associated with the view of an em
     });
 }};
 
-Scenario scriptHands{"The script that hands the secret to a view refuses what it cannot write safely", {"view-association"}, [] {
+const Scenario scriptHands{"The script that hands the secret to a view refuses what it cannot write safely", {"view-association"}, [] {
     const std::string secret(64, 'a');
     given("a hexadecimal secret and a plain origin", [&] {
         const auto script = detail::viewSecretScript(secret, "http://127.0.0.1:9002");
@@ -173,7 +173,7 @@ Scenario scriptHands{"The script that hands the secret to a view refuses what it
     });
 }};
 
-Scenario originGiven{"The origin given to a view is written as the browser writes location.origin", {"view-association"}, [] {
+const Scenario originGiven{"The origin given to a view is written as the browser writes location.origin", {"view-association"}, [] {
     then("the default port 80 is dropped and the host is lowercase", [&] {
         require(detail::browserOrigin("127.0.0.1", "80") == "http://127.0.0.1");
         require(detail::browserOrigin("LocalHost", "9002") == "http://localhost:9002");
@@ -181,7 +181,7 @@ Scenario originGiven{"The origin given to a view is written as the browser write
     });
 }};
 
-Scenario iPv4Loopback{"An IPv4 loopback seen through a dual-stack socket is a loopback peer", {"view-association"}, [] {
+const Scenario iPv4Loopback{"An IPv4 loopback seen through a dual-stack socket is a loopback peer", {"view-association"}, [] {
     then("the v4-mapped loopback is, another mapped address and a public one are not", [&] {
         require(detail::isLoopbackAddress(stdnet::ip::address(stdnet::ip::address_v4::loopback())));
         require(detail::isLoopbackAddress(stdnet::ip::address(stdnet::ip::address_v6::loopback())));
@@ -197,7 +197,7 @@ Scenario iPv4Loopback{"An IPv4 loopback seen through a dual-stack socket is a lo
     });
 }};
 
-Scenario loopbackPeer{"A loopback peer is a local client only when the application trusts loopback clients", {"view-association"}, [] {
+const Scenario loopbackPeerScenario{"A loopback peer is a local client only when the application trusts loopback clients", {"view-association"}, [] {
     freshNetwork();
     ViewSocket::peerIsLoopback = true;
 
@@ -227,7 +227,7 @@ Scenario loopbackPeer{"A loopback peer is a local client only when the applicati
     });
 }};
 
-Scenario handshakeSecret{"The handshake's secret never reaches the diagnostics", {"view-association"}, [] {
+const Scenario handshakeSecret{"The handshake's secret never reaches the diagnostics", {"view-association"}, [] {
     freshNetwork();
     ViewApp                    app{WebFrontConfig{.port = "0"}};
     std::vector<std::string> records;

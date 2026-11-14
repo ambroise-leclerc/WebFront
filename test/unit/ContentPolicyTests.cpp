@@ -63,7 +63,7 @@ struct WarningCapture {
 };
 }  // namespace
 
-Scenario contentPolicyCompares{"Content policy compares complete HTTP origins", [] {
+const Scenario contentPolicyCompares{"Content policy compares complete HTTP origins", [] {
     const detail::BoundContentPolicy policy{"http://127.0.0.1:9002/index.html"};
     given("the default policy", [&] {
         then("same-origin URLs and native clients are allowed", [&] {
@@ -126,7 +126,7 @@ Scenario contentPolicyCompares{"Content policy compares complete HTTP origins", 
     });
 }};
 
-Scenario contentPolicyControls{"Content policy controls popup delegation", [] {
+const Scenario contentPolicyControls{"Content policy controls popup delegation", [] {
     std::vector<std::string> opened;
     auto                     launch = [&](const std::string& url) {
         opened.push_back(url);
@@ -152,7 +152,7 @@ Scenario contentPolicyControls{"Content policy controls popup delegation", [] {
     });
 }};
 
-Scenario webSocketUpgrades{"WebSocket upgrades authorize Origin before returning 101", [] {
+const Scenario webSocketUpgrades{"WebSocket upgrades authorize Origin before returning 101", [] {
     using namespace webfront::http;
     using Net    = networking::NetworkingMock;
     auto upgrade = [](const std::string& headers, ContentPolicy policy = {}) {

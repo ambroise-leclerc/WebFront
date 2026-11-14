@@ -23,7 +23,7 @@ struct ViewRegistrationBrowser {
 };
 }
 
-Scenario webView2Waits{"WebView2 waits for view association registration before navigation", [] {
+const Scenario webView2Waits{"WebView2 waits for view association registration before navigation", [] {
     using namespace webfront::frontend::detail::webview2;
     Apartment apartment;
     auto session = std::make_shared<Session>(std::chrono::milliseconds{25});
@@ -62,7 +62,7 @@ Scenario webView2Waits{"WebView2 waits for view association registration before 
     });
 }};
 
-Scenario webView2Installs{"WebView2 installs the window close script even without a view association secret", [] {
+const Scenario webView2Installs{"WebView2 installs the window close script even without a view association secret", [] {
     using namespace webfront::frontend::detail::webview2;
     Apartment apartment;
     auto session = std::make_shared<Session>();
@@ -82,7 +82,7 @@ Scenario webView2Installs{"WebView2 installs the window close script even withou
     });
 }};
 
-Scenario webView2Encodes{"WebView2 encodes application paths", [] {
+const Scenario webView2Encodes{"WebView2 encodes application paths", [] {
     using webfront::frontend::detail::webview2::applicationUrl;
     given("a UTF-8 filename containing percent-escaped URL delimiters", [&] {
         then("all frontends share URI-reference encoding", [&] {
@@ -92,7 +92,7 @@ Scenario webView2Encodes{"WebView2 encodes application paths", [] {
     });
 }};
 
-Scenario webView2Runtime{"WebView2 runtime startup has a configurable deadline", [] {
+const Scenario webView2Runtime{"WebView2 runtime startup has a configurable deadline", [] {
     using namespace webfront::frontend::detail::webview2;
     using namespace std::chrono_literals;
     requireNothrow([&] { Session{3min}; });
@@ -104,7 +104,7 @@ Scenario webView2Runtime{"WebView2 runtime startup has a configurable deadline",
     requireThrows([&] { session->run(); }, contains("25 milliseconds"));
 }};
 
-Scenario webView2Controller{"WebView2 controller closure is idempotent and preserves errors", [] {
+const Scenario webView2Controller{"WebView2 controller closure is idempotent and preserves errors", [] {
     using webfront::frontend::detail::webview2::Session;
     auto session            = std::make_shared<Session>();
     auto controller         = Microsoft::WRL::Make<webfront::test::WebView2ControllerMock>();
@@ -121,7 +121,7 @@ Scenario webView2Controller{"WebView2 controller closure is idempotent and prese
     requireThrows([&] { std::rethrow_exception(session->failure); }, contains("closing controller"));
 }};
 
-Scenario webView2Tolerates{"WebView2 tolerates a temporarily unresponsive renderer", [] {
+const Scenario webView2Tolerates{"WebView2 tolerates a temporarily unresponsive renderer", [] {
     using webfront::frontend::detail::webview2::Session;
     then("unresponsive and recoverable auxiliary processes are not fatal", [&] {
         requireNothrow([&] { Session::checkProcessFailure(COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE); });
@@ -133,7 +133,7 @@ Scenario webView2Tolerates{"WebView2 tolerates a temporarily unresponsive render
     });
 }};
 
-Scenario webView2Errors{"WebView2 errors display the Windows HRESULT in hexadecimal", [] {
+const Scenario webView2Errors{"WebView2 errors display the Windows HRESULT in hexadecimal", [] {
     using webfront::frontend::detail::webview2::check;
     then("the original HRESULT can be compared directly with Windows diagnostics", [&] {
         requireThrows([&] { check(HRESULT_FROM_WIN32(ERROR_BAD_COMPRESSION_BUFFER), "creating environment"); }, contains("HRESULT 0x8007025D"));
@@ -141,7 +141,7 @@ Scenario webView2Errors{"WebView2 errors display the Windows HRESULT in hexadeci
     });
 }};
 
-Scenario webView2Forwards{"WebView2 forwards native focus and movement messages", [] {
+const Scenario webView2Forwards{"WebView2 forwards native focus and movement messages", [] {
     using namespace webfront::frontend::detail::webview2;
     Apartment apartment;
     auto      session = std::make_shared<Session>();
@@ -191,7 +191,7 @@ Scenario webView2Forwards{"WebView2 forwards native focus and movement messages"
     });
 }};
 
-Scenario webView2Only{"WebView2 only forwards user-initiated popups", [] {
+const Scenario webView2Only{"WebView2 only forwards user-initiated popups", [] {
     using webfront::frontend::detail::webview2::Session;
     auto session           = std::make_shared<Session>();
     session->contentPolicy = webfront::detail::BoundContentPolicy{"http://127.0.0.1:9002", {.popups = webfront::PopupPolicy::systemBrowser}};
@@ -213,7 +213,7 @@ Scenario webView2Only{"WebView2 only forwards user-initiated popups", [] {
     }
 }};
 
-Scenario webView2Popup{"WebView2 popup launcher failures leave the application running", [] {
+const Scenario webView2Popup{"WebView2 popup launcher failures leave the application running", [] {
     using webfront::frontend::detail::webview2::Session;
     auto session           = std::make_shared<Session>();
     session->contentPolicy = webfront::detail::BoundContentPolicy{"http://127.0.0.1:9002", {.popups = webfront::PopupPolicy::systemBrowser}};
@@ -251,7 +251,7 @@ Scenario webView2Popup{"WebView2 popup launcher failures leave the application r
     });
 }};
 
-Scenario webView2Content{"WebView2 content controls map to engine settings", [] {
+const Scenario webView2Content{"WebView2 content controls map to engine settings", [] {
     auto settings = Microsoft::WRL::Make<webfront::test::WebView2SettingsMock>();
     using webfront::frontend::detail::webview2::configureContentSettings;
     configureContentSettings(settings.Get(), {});
@@ -267,7 +267,7 @@ Scenario webView2Content{"WebView2 content controls map to engine settings", [] 
     requireThrows<std::runtime_error>([&] { configureContentSettings(settings.Get(), {}); });
 }};
 
-Scenario apartmentWebView2{"The apartment of a WebView2 window leaves the thread as it found it", [] {
+const Scenario apartmentWebView2{"The apartment of a WebView2 window leaves the thread as it found it", [] {
     using namespace webfront::frontend::detail::webview2;
     // A thread of its own: no other scenario and no engine has initialized COM there (#564).
     struct State {

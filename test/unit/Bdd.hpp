@@ -4,7 +4,7 @@
 ///
 /// A scenario is a named object that registers itself; its sections are lambdas:
 /// @code
-/// Scenario jsFunction{"JsFunction", [] {
+/// const Scenario jsFunction{"JsFunction", [] {
 ///     WebFrontMock webFront;
 ///     given("A print JsFunction", [&] {
 ///         when("print is called", [&] {
@@ -29,6 +29,7 @@
 #include <cstdio>
 #include <ctime>
 #include <exception>
+#include <fstream>
 #include <initializer_list>
 #include <memory>
 #include <source_location>
@@ -234,15 +235,11 @@ inline std::string sourceLine(const std::source_location& location) {
             lines = &content;
     if (!lines) {
         lines = &files.emplace_back(location.file_name(), std::vector<std::string>{}).second;
-        if (auto* file = std::fopen(location.file_name(), "rb")) {
-            std::string line;
-            for (int character; (character = std::fgetc(file)) != EOF;)
-                if (character == '\n')
-                    lines->push_back(std::exchange(line, {}));
-                else if (character != '\r')
-                    line += static_cast<char>(character);
+        std::ifstream file{location.file_name(), std::ios::binary};
+        for (std::string line; std::getline(file, line);) {
+            if (line.ends_with('\r'))
+                line.pop_back();
             lines->push_back(std::move(line));
-            std::fclose(file);
         }
     }
     if (location.line() == 0 || location.line() > lines->size())
@@ -869,12 +866,11 @@ inline bool writeJUnit(std::string_view path, const std::vector<Result>& results
         else
             xml += ">\n      <skipped/>\n    </testcase>\n";
     }
-    xml       += "  </testsuite>\n</testsuites>\n";
-    auto* file = std::fopen(std::string{path}.c_str(), "wb");
-    if (!file)
-        return false;
-    bool written = std::fwrite(xml.data(), 1, xml.size(), file) == xml.size();
-    return std::fclose(file) == 0 && written;
+    xml += "  </testsuite>\n</testsuites>\n";
+    std::ofstream file{std::string{path}, std::ios::binary};
+    file.write(xml.data(), static_cast<std::streamsize>(xml.size()));
+    file.close();
+    return !file.fail();
 }
 
 inline bool number(std::string_view text, std::uint64_t& value) {

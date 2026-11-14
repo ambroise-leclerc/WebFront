@@ -97,7 +97,7 @@ bool contains(const std::string& haystack, std::string_view needle) { return hay
 
 } // namespace
 
-Scenario routePrefixes{"Route prefixes are validated when registered", [] {
+const Scenario routePrefixes{"Route prefixes are validated when registered", [] {
     RouteTable table;
     const auto handler = [](const RouteRequest&) { return RouteReply{}; };
     given("prefixes that cannot be routes", [&] {
@@ -145,7 +145,7 @@ Scenario routePrefixes{"Route prefixes are validated when registered", [] {
     });
 }};
 
-Scenario routeStreams{"A route streams its reply in bounded chunks", [] {
+const Scenario routeStreams{"A route streams its reply in bounded chunks", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     given("a body several chunks long", [&] {
@@ -184,7 +184,7 @@ Scenario routeStreams{"A route streams its reply in bounded chunks", [] {
     });
 }};
 
-Scenario routeAnswers{"A route answers HEAD without reading its body", [] {
+const Scenario routeAnswers{"A route answers HEAD without reading its body", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     std::atomic<int> reads{0};
@@ -202,7 +202,7 @@ Scenario routeAnswers{"A route answers HEAD without reading its body", [] {
     });
 }};
 
-Scenario routePrecedes{"A route precedes the file providers and refuses other methods", [] {
+const Scenario routePrecedes{"A route precedes the file providers and refuses other methods", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     std::atomic<int> calls{0};
@@ -224,7 +224,7 @@ Scenario routePrecedes{"A route precedes the file providers and refuses other me
     });
 }};
 
-Scenario pathOutside{"A path outside every route, or after unregistering, goes to the providers", [] {
+const Scenario pathOutside{"A path outside every route, or after unregistering, goes to the providers", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     auto    route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) { return text("x"); });
@@ -235,7 +235,7 @@ Scenario pathOutside{"A path outside every route, or after unregistering, goes t
     });
 }};
 
-Scenario failingHandler{"A failing handler answers 500 without leaking its error", [] {
+const Scenario failingHandler{"A failing handler answers 500 without leaking its error", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     given("a handler that throws", [&] {
@@ -269,7 +269,7 @@ Scenario failingHandler{"A failing handler answers 500 without leaking its error
     });
 }};
 
-Scenario bodyBreaks{"A body that breaks its promise closes the connection", [] {
+const Scenario bodyBreaks{"A body that breaks its promise closes the connection", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     given("a body shorter than its Content-Length", [&] {
@@ -309,7 +309,7 @@ Scenario bodyBreaks{"A body that breaks its promise closes the connection", [] {
     });
 }};
 
-Scenario slowHandler{"A slow handler does not block the server context", [] {
+const Scenario slowHandler{"A slow handler does not block the server context", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     std::atomic<bool> entered{false}, release{false};
@@ -328,7 +328,7 @@ Scenario slowHandler{"A slow handler does not block the server context", [] {
     });
 }};
 
-Scenario drainingWaits{"Draining waits for a handler still running on the worker instead of reporting a stalled scope", [] {
+const Scenario drainingWaits{"Draining waits for a handler still running on the worker instead of reporting a stalled scope", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     std::atomic<bool> entered{false}, release{false};
@@ -370,7 +370,7 @@ struct StreamingPolicy : DefaultBuffersPolicy {
 };
 }  // namespace
 
-Scenario largeBody{"A large body is streamed without being held", [] {
+const Scenario largeBody{"A large body is streamed without being held", [] {
     Fixture                                  fixture;
     Server<RouteNet, Files, StreamingPolicy> server("127.0.0.1", "0");
     static constexpr std::uint64_t           size         = 128ull * 1024 * 1024;
@@ -407,7 +407,7 @@ Scenario largeBody{"A large body is streamed without being held", [] {
     });
 }};
 
-Scenario connectionWhich{"A connection which fails while a reply is streamed stops the reading", [] {
+const Scenario connectionWhich{"A connection which fails while a reply is streamed stops the reading", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     std::atomic<int> reads{0};
@@ -429,7 +429,7 @@ Scenario connectionWhich{"A connection which fails while a reply is streamed sto
     });
 }};
 
-Scenario stoppingServer{"Stopping the server ends a reply being streamed", [] {
+const Scenario stoppingServer{"Stopping the server ends a reply being streamed", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     auto route = server.addRoute("/webfront/services/files/", [&](const RouteRequest&) {
@@ -474,7 +474,7 @@ struct ProvidedFS {
 
 } // namespace
 
-Scenario filesProvider{"Files of a provider are announced by size and streamed", [] {
+const Scenario filesProvider{"Files of a provider are announced by size and streamed", [] {
     for (const bool native : {false, true}) {
         given(std::string(native ? "a native file" : "an embedded file"), " of several chunks", [&] {
             webfront::test::TemporaryDirectory directory;
@@ -525,7 +525,7 @@ Scenario filesProvider{"Files of a provider are announced by size and streamed",
     });
 }};
 
-Scenario nativeFileKnown{"A native file known by its size reports it", [] {
+const Scenario nativeFileKnown{"A native file known by its size reports it", [] {
     webfront::test::TemporaryDirectory directory;
     const auto                         path = directory.path() / "known.bin";
     std::ofstream(path, std::ios::binary) << pattern(1234);
@@ -538,7 +538,7 @@ Scenario nativeFileKnown{"A native file known by its size reports it", [] {
     });
 }};
 
-Scenario failedHEAD{"Failed HEAD requests carry no body", [] {
+const Scenario failedHEAD{"Failed HEAD requests carry no body", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     given("a handler which throws", [&] {
@@ -567,7 +567,7 @@ Scenario failedHEAD{"Failed HEAD requests carry no body", [] {
     });
 }};
 
-Scenario fileWrapped{"A file wrapped after a prefix yields the remaining bytes and their count", [] {
+const Scenario fileWrapped{"A file wrapped after a prefix yields the remaining bytes and their count", [] {
     webfront::test::TemporaryDirectory directory;
     const auto                         path = directory.path() / "prefixed.bin";
     std::ofstream(path, std::ios::binary) << "prefix:payload";
@@ -592,7 +592,7 @@ struct Completes {
 };
 }  // namespace
 
-Scenario blockedJob{"A blocked job does not delay the others of a worker with several threads", [] {
+const Scenario blockedJob{"A blocked job does not delay the others of a worker with several threads", [] {
     BlockingWorker     worker{2};
     std::promise<void> release, blockedDone, quickDone;
     auto               shared = release.get_future().share();
@@ -625,7 +625,7 @@ Scenario blockedJob{"A blocked job does not delay the others of a worker with se
     });
 }};
 
-Scenario singleThread{"A single-thread worker keeps the jobs in order", [] {
+const Scenario singleThread{"A single-thread worker keeps the jobs in order", [] {
     BlockingWorker     worker;
     std::promise<void> firstDone, secondDone;
     std::string        order;
@@ -638,7 +638,7 @@ Scenario singleThread{"A single-thread worker keeps the jobs in order", [] {
     require(order == "ab");
 }};
 
-Scenario handlerBody{"A handler or a body throwing something else than a std::exception is contained", [] {
+const Scenario handlerBody{"A handler or a body throwing something else than a std::exception is contained", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     given("a handler which throws an int", [&] {
@@ -658,7 +658,7 @@ Scenario handlerBody{"A handler or a body throwing something else than a std::ex
     });
 }};
 
-Scenario routeMatching{"Route matching sees the path as a URL path", [] {
+const Scenario routeMatching{"Route matching sees the path as a URL path", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     std::string seen;
@@ -693,7 +693,7 @@ Scenario routeMatching{"Route matching sees the path as a URL path", [] {
     });
 }};
 
-Scenario handlerMay{"A handler may answer 405 with a body of its own", [] {
+const Scenario handlerMay{"A handler may answer 405 with a body of its own", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     auto    route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) {
@@ -708,7 +708,7 @@ Scenario handlerMay{"A handler may answer 405 with a body of its own", [] {
     });
 }};
 
-Scenario headerNames{"Header names are ASCII tokens whatever the locale", [] {
+const Scenario headerNames{"Header names are ASCII tokens whatever the locale", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     auto    route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) {

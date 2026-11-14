@@ -21,7 +21,7 @@ std::string payload() {
 }
 }  // namespace
 
-Scenario gzipDecoding{"Gzip decoding validates complete bounded members", [] {
+const Scenario gzipDecoding{"Gzip decoding validates complete bounded members", [] {
     const auto expected = payload();
     given("fixed and dynamic Huffman blocks, with optional gzip fields", [&] {
         for (const auto bytes : {gzipfixtures::fixed, gzipfixtures::dynamic, gzipfixtures::optional}) {
@@ -88,7 +88,7 @@ Scenario gzipDecoding{"Gzip decoding validates complete bounded members", [] {
     });
 }};
 
-Scenario gzipRejects{"Gzip rejects invalid Huffman codes and match distances", [] {
+const Scenario gzipRejects{"Gzip rejects invalid Huffman codes and match distances", [] {
     given("malformed DEFLATE blocks", [&] {
         then("decoding rejects the blocks without accessing missing history or table entries", [&] {
             for (const auto bytes : {gzipfixtures::invalidDistance,
@@ -104,7 +104,7 @@ Scenario gzipRejects{"Gzip rejects invalid Huffman codes and match distances", [
     });
 }};
 
-Scenario gzipRejectsReserved{"Gzip rejects reserved distance declarations and trailing padding", [] {
+const Scenario gzipRejectsReserved{"Gzip rejects reserved distance declarations and trailing padding", [] {
     given("dynamic blocks declaring 31 or 32 distance symbols", [&] {
         then("the declarations are rejected even when no distance is used", [&] {
             require(!decodeGzip(gzipfixtures::distanceCount31));
@@ -119,7 +119,7 @@ Scenario gzipRejectsReserved{"Gzip rejects reserved distance declarations and tr
     });
 }};
 
-Scenario gzipDefault{"Gzip default output budget is four MiB across concatenated members", [] {
+const Scenario gzipDefault{"Gzip default output budget is four MiB across concatenated members", [] {
     const auto  memberSize  = payload().size();
     const auto  memberCount = (4 * 1024 * 1024) / memberSize + 1;
     std::string bytes;
@@ -135,7 +135,7 @@ Scenario gzipDefault{"Gzip default output budget is four MiB across concatenated
     });
 }};
 
-Scenario gzipMatch{"Gzip match copies preserve overlapping history across string growth", [] {
+const Scenario gzipMatch{"Gzip match copies preserve overlapping history across string growth", [] {
     using webfront::http::gzip::InflateContext;
     given("a periodic match longer than its distance", [&] {
         std::string    output = "abc";
@@ -159,7 +159,7 @@ Scenario gzipMatch{"Gzip match copies preserve overlapping history across string
     });
 }};
 
-Scenario gzipBulk{"Gzip bulk reads require alignment and complete input", [] {
+const Scenario gzipBulk{"Gzip bulk reads require alignment and complete input", [] {
     webfront::http::gzip::GzipReader reader("abc");
     given("an unaligned reader", [&] {
         reader.bits(1);
@@ -180,7 +180,7 @@ Scenario gzipBulk{"Gzip bulk reads require alignment and complete input", [] {
     });
 }};
 
-Scenario gzipCRC32{"Gzip CRC32 matches standard and binary reference vectors", [] {
+const Scenario gzipCRC32{"Gzip CRC32 matches standard and binary reference vectors", [] {
     using webfront::http::gzip::gzipCrc;
     given("the empty input and the standard check vector", [&] {
         then("the IEEE CRC32 values match", [&] {
@@ -198,7 +198,7 @@ Scenario gzipCRC32{"Gzip CRC32 matches standard and binary reference vectors", [
     });
 }};
 
-Scenario validatedGzip{"Validated gzip cache shares GET content and HEAD metadata within the current output budget", [] {
+const Scenario validatedGzip{"Validated gzip cache shares GET content and HEAD metadata within the current output budget", [] {
     using webfront::http::gzip::ValidatedCache;
     ValidatedCache cache(100000);
     auto           bytes = std::string(gzipfixtures::fixed);
@@ -224,7 +224,7 @@ Scenario validatedGzip{"Validated gzip cache shares GET content and HEAD metadat
     });
 }};
 
-Scenario validatedGzipCache{"Validated gzip cache bounds keys and data and evicts the least recently used revision", [] {
+const Scenario validatedGzipCache{"Validated gzip cache bounds keys and data and evicts the least recently used revision", [] {
     using webfront::http::gzip::ValidatedCache;
     auto first  = std::string(gzipfixtures::fixed);
     auto second = first;
@@ -280,7 +280,7 @@ Scenario validatedGzipCache{"Validated gzip cache bounds keys and data and evict
     });
 }};
 
-Scenario validatedGzipCacheNever{"Validated gzip cache never promotes invalid streams or trusts ISIZE alone", [] {
+const Scenario validatedGzipCacheNever{"Validated gzip cache never promotes invalid streams or trusts ISIZE alone", [] {
     webfront::http::gzip::ValidatedCache cache(100000);
     given("corrupt CRC, invalid trailer, truncated and concatenated invalid members", [&] {
         auto corrupt                 = std::string(gzipfixtures::fixed);
@@ -309,7 +309,7 @@ Scenario validatedGzipCacheNever{"Validated gzip cache never promotes invalid st
     });
 }};
 
-Scenario validatedGzipCacheLifetime{"Validated gzip cache lifetime is owned and copies do not share application state", [] {
+const Scenario validatedGzipCacheLifetime{"Validated gzip cache lifetime is owned and copies do not share application state", [] {
     using webfront::http::gzip::ValidatedCache;
     std::string response(gzipfixtures::fixed);
     given("a populated cache", [&] {
@@ -333,7 +333,7 @@ Scenario validatedGzipCacheLifetime{"Validated gzip cache lifetime is owned and 
     });
 }};
 
-Scenario validatedGzipCachePermits{"Validated gzip cache permits empty streams under a zero output budget", [] {
+const Scenario validatedGzipCachePermits{"Validated gzip cache permits empty streams under a zero output budget", [] {
     // Empty stored block, with a validated CRC32 and ISIZE of zero.
     const std::string                    empty("\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03"
                                                "\x01\x00\x00\xff\xff"
@@ -352,7 +352,7 @@ Scenario validatedGzipCachePermits{"Validated gzip cache permits empty streams u
     });
 }};
 
-Scenario gzipDecodingFills{"Gzip decoding fills a preallocated bounded worker buffer without growing it", [] {
+const Scenario gzipDecodingFills{"Gzip decoding fills a preallocated bounded worker buffer without growing it", [] {
     std::string output;
     output.reserve(23768);
     const auto capacity = output.capacity();
@@ -365,7 +365,7 @@ Scenario gzipDecodingFills{"Gzip decoding fills a preallocated bounded worker bu
     }
 }};
 
-Scenario gzipBuffered{"Gzip buffered reads preserve logical byte offsets and exact member boundaries", [] {
+const Scenario gzipBuffered{"Gzip buffered reads preserve logical byte offsets and exact member boundaries", [] {
     using webfront::http::gzip::GzipReader;
     using webfront::http::gzip::InvalidGzip;
     given("a binary stream read with every supported width and initial bit alignment", [&] {
@@ -417,7 +417,7 @@ Scenario gzipBuffered{"Gzip buffered reads preserve logical byte offsets and exa
     });
 }};
 
-Scenario gzipLookahead{"Gzip lookahead retains prefetched bytes through alignment and bulk reads", [] {
+const Scenario gzipLookahead{"Gzip lookahead retains prefetched bytes through alignment and bulk reads", [] {
     using webfront::http::gzip::GzipReader;
     using webfront::http::gzip::InvalidGzip;
     GzipReader reader("abcdef");
@@ -450,7 +450,7 @@ Scenario gzipLookahead{"Gzip lookahead retains prefetched bytes through alignmen
     });
 }};
 
-Scenario gzipHuffman{"Gzip Huffman lookup preserves short tails, long codes and empty distance trees", [] {
+const Scenario gzipHuffman{"Gzip Huffman lookup preserves short tails, long codes and empty distance trees", [] {
     using namespace webfront::http::gzip;
     given("a single-symbol incomplete alphabet at the very last input bit", [&] {
         const std::array<unsigned, 1> lengths{1};

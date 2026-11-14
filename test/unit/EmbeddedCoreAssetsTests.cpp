@@ -52,7 +52,7 @@ void requireHeaderMatchesSource(std::string_view source) {
 
 }  // namespace
 
-Scenario embeddedAssets{"The embedded assets of the core are the readable sources they are generated from", [] {
+const Scenario embeddedAssets{"The embedded assets of the core are the readable sources they are generated from", [] {
     given("The generated headers of include/webfront/system and the sources of js/core", [&] {
         then("Each header embeds exactly the bytes of its source, without compression and with zero padding only", [&] {
             requireHeaderMatchesSource<fs::generated::DomInterpreterData>("js/core/dom-interpreter.mjs");

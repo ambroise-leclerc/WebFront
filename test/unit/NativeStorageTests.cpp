@@ -155,7 +155,7 @@ shared_ptr<fs::StorageHooks> hooksAt(function<void(fs::StoragePoint, string_view
 
 }  // namespace
 
-Scenario nativeStorage{"A native storage reads and writes under its root", [] {
+const Scenario nativeStorage{"A native storage reads and writes under its root", [] {
     Sandbox           sandbox;
     fs::NativeStorage storage(sandbox.root);
 
@@ -266,7 +266,7 @@ Scenario nativeStorage{"A native storage reads and writes under its root", [] {
     });
 }};
 
-Scenario nativeStorageReserves{"A native storage reserves the names of its temporary files", [] {
+const Scenario nativeStorageReserves{"A native storage reserves the names of its temporary files", [] {
     Sandbox           sandbox;
     fs::NativeStorage storage(sandbox.root);
     require(errorOf([&] {
@@ -307,7 +307,7 @@ Scenario nativeStorageReserves{"A native storage reserves the names of its tempo
     });
 }};
 
-Scenario interruptedWrite{"An interrupted write leaves no partial file", [] {
+const Scenario interruptedWrite{"An interrupted write leaves no partial file", [] {
     Sandbox           sandbox;
     fs::NativeStorage storage(sandbox.root);
     writeFile(storage, "kept.txt", "original");
@@ -334,7 +334,7 @@ Scenario interruptedWrite{"An interrupted write leaves no partial file", [] {
     });
 }};
 
-Scenario committedWriter{"A committed writer holds none of its directories", [] {
+const Scenario committedWriter{"A committed writer holds none of its directories", [] {
     Sandbox           sandbox;
     fs::NativeStorage storage(sandbox.root);
     storage.createDirectory("dir");
@@ -351,7 +351,7 @@ Scenario committedWriter{"A committed writer holds none of its directories", [] 
     require(!removed);
 }};
 
-Scenario nativeListings{"Native listings are paginated and stable", [] {
+const Scenario nativeListings{"Native listings are paginated and stable", [] {
     Sandbox sandbox;
     for (int index = 10; index < 40; ++index)
         writeDisk(sandbox.root / ("f" + to_string(index)), "x");
@@ -384,7 +384,7 @@ Scenario nativeListings{"Native listings are paginated and stable", [] {
     require(seen == expected);
 }};
 
-Scenario linksNever{"Links never lead a native storage outside its root", [] {
+const Scenario linksNever{"Links never lead a native storage outside its root", [] {
     Sandbox sandbox;
     makeDirectories(sandbox.root / "inside");
     writeDisk(sandbox.root / "inside" / "note.txt", "note");
@@ -496,7 +496,7 @@ Scenario linksNever{"Links never lead a native storage outside its root", [] {
 #endif
 }};
 
-Scenario componentReplaced{"A component replaced by a link during the resolution does not lead outside", [] {
+const Scenario componentReplaced{"A component replaced by a link during the resolution does not lead outside", [] {
     Sandbox sandbox;
 
     // Before each operation: root/a/b/file.txt. When `a` has been opened and `b` not yet, b is replaced by a link to
@@ -547,7 +547,7 @@ Scenario componentReplaced{"A component replaced by a link during the resolution
         });
 }};
 
-Scenario finalFile{"A final file replaced by a link after the resolution does not lead outside", [] {
+const Scenario finalFile{"A final file replaced by a link after the resolution does not lead outside", [] {
     Sandbox sandbox;
     auto    swapFile = hooksAt([&](fs::StoragePoint point, string_view name) {
         if (point == fs::StoragePoint::resolved && name == "target.txt") {
@@ -585,7 +585,7 @@ Scenario finalFile{"A final file replaced by a link after the resolution does no
 }};
 
 #ifndef _WIN32
-Scenario repeatedRaces{"Repeated races between a link swap and the operations never reach the outside", [] {
+const Scenario repeatedRaces{"Repeated races between a link swap and the operations never reach the outside", [] {
     Sandbox           sandbox;
     fs::NativeStorage storage(sandbox.root);
     makeDirectories(sandbox.root / "a");
@@ -638,7 +638,7 @@ Scenario repeatedRaces{"Repeated races between a link swap and the operations ne
     require(refused > 0);  // the operations did meet the link
 }};
 
-Scenario directoryMoved{"A directory moved out of the root by the same user is detected before the commit", [] {
+const Scenario directoryMoved{"A directory moved out of the root by the same user is detected before the commit", [] {
     Sandbox sandbox;
     makeDirectories(sandbox.root / "a" / "b");
     const auto moved = sandbox.outside / "b";
@@ -693,7 +693,7 @@ Scenario directoryMoved{"A directory moved out of the root by the same user is d
     });
 }};
 
-Scenario rootMovedSame{"A root moved by the same user is no longer used", [] {
+const Scenario rootMovedSame{"A root moved by the same user is no longer used", [] {
     Sandbox    sandbox;
     const auto elsewhere = sandbox.base.path() / "elsewhere";
 
@@ -742,7 +742,7 @@ Scenario rootMovedSame{"A root moved by the same user is no longer used", [] {
     });
 }};
 
-Scenario pOSIXDirectories{"POSIX directories another user could move refuse the root or the operation", [] {
+const Scenario pOSIXDirectories{"POSIX directories another user could move refuse the root or the operation", [] {
     Sandbox                              sandbox;
     const auto                           otherUser = ::geteuid() == 4242u ? 4243u : 4242u;
     const auto                           base      = stdfs::canonical(sandbox.base.path());
@@ -863,7 +863,7 @@ Scenario pOSIXDirectories{"POSIX directories another user could move refuse the 
 }};
 
     #if defined(__APPLE__)
-Scenario macOSACLs{"macOS ACLs that let another user change a directory refuse the root or the operation", [] {
+const Scenario macOSACLs{"macOS ACLs that let another user change a directory refuse the root or the operation", [] {
     Sandbox sandbox;
     auto    grant = [](const stdfs::path& directory, const string& who) {
         const auto command = "chmod +a '" + who + " allow add_file,add_subdirectory,delete_child' '" + directory.string() + "'";
@@ -927,7 +927,7 @@ Scenario macOSACLs{"macOS ACLs that let another user change a directory refuse t
 }};
     #endif
 
-Scenario replacedFile{"A replaced file keeps the permission bits it has at the commit", [] {
+const Scenario replacedFile{"A replaced file keeps the permission bits it has at the commit", [] {
     Sandbox           sandbox;
     fs::NativeStorage storage(sandbox.root);
     constexpr auto    privateBits = stdfs::perms::owner_read | stdfs::perms::owner_write;
@@ -976,7 +976,7 @@ const string            aclVersion("\x02\0\0\0", 4);
 }  // namespace
     #endif
 
-Scenario replacedFileKeeps{"A replaced file keeps its access control list", [] {
+const Scenario replacedFileKeeps{"A replaced file keeps its access control list", [] {
     Sandbox           sandbox;
     fs::NativeStorage storage(sandbox.root);
     const auto        file = sandbox.root / "guarded.txt";
@@ -1022,7 +1022,7 @@ Scenario replacedFileKeeps{"A replaced file keeps its access control list", [] {
     #endif
 }};
 
-Scenario replacedFileWithout{"A replaced file without an ACL gets none from its directory", [] {
+const Scenario replacedFileWithout{"A replaced file without an ACL gets none from its directory", [] {
     Sandbox           sandbox;
     fs::NativeStorage storage(sandbox.root);
     const auto        file = sandbox.root / "plain.txt";
@@ -1046,7 +1046,7 @@ Scenario replacedFileWithout{"A replaced file without an ACL gets none from its 
     require(stdfs::status(file).permissions() == (stdfs::perms::owner_read | stdfs::perms::owner_write | stdfs::perms::group_read));
 }};
 
-Scenario runningOut{"Running out of descriptors does not mark the root as moved", [] {
+const Scenario runningOut{"Running out of descriptors does not mark the root as moved", [] {
     Sandbox           sandbox;
     fs::NativeStorage storage(sandbox.root);
     // GCC 13's UBSan vptr check opens a pipe. Exercise the error types before denying it the descriptors for its
@@ -1103,7 +1103,7 @@ Scenario runningOut{"Running out of descriptors does not mark the root as moved"
 }};
 
     #if defined(__APPLE__)
-Scenario temporaryFile{"The temporary file of a replacing write keeps no inherited ACL", [] {
+const Scenario temporaryFile{"The temporary file of a replacing write keeps no inherited ACL", [] {
     Sandbox           sandbox;
     fs::NativeStorage storage(sandbox.root);
     writeDisk(sandbox.root / "private.txt", "old");
@@ -1122,7 +1122,7 @@ Scenario temporaryFile{"The temporary file of a replacing write keeps no inherit
 }};
     #endif
 
-Scenario replacingWrite{"A replacing write is private from the creation of its temporary file", [] {
+const Scenario replacingWrite{"A replacing write is private from the creation of its temporary file", [] {
     Sandbox           sandbox;
     fs::NativeStorage storage(sandbox.root);
     // No file to replace when the write begins: a private one may appear under that name before the commit.
@@ -1138,7 +1138,7 @@ Scenario replacingWrite{"A replacing write is private from the creation of its t
     require(namesOn(sandbox.root) == vector<string>{"later.txt"});
 }};
 
-Scenario replacedFileKeepsGroup{"A replaced file keeps its group", [] {
+const Scenario replacedFileKeepsGroup{"A replaced file keeps its group", [] {
     // A group of the effective user other than its effective group, which a new file would not get.
     const int     count = ::getgroups(0, nullptr);
     vector<gid_t> groups(static_cast<size_t>(max(count, 0)));
@@ -1164,7 +1164,7 @@ Scenario replacedFileKeepsGroup{"A replaced file keeps its group", [] {
 }};
 
 #ifndef _WIN32
-Scenario directoriesMade{"Directories made by the tests stay closed to group and others under a permissive umask", [] {
+const Scenario directoriesMade{"Directories made by the tests stay closed to group and others under a permissive umask", [] {
     // Restores the umask on every exit, a failing REQUIRE or an exception included: it is process-wide.
     struct UmaskScope {
         mode_t previous;
@@ -1188,7 +1188,7 @@ Scenario directoriesMade{"Directories made by the tests stay closed to group and
 }};
 #endif
 
-Scenario linkFollowed{"A link followed inside the root never reaches a temporary file", [] {
+const Scenario linkFollowed{"A link followed inside the root never reaches a temporary file", [] {
     Sandbox           sandbox;
     fs::NativeStorage storage(sandbox.root, {.links = fs::LinkPolicy::followInside});
     auto              writer = storage.beginWrite("report.txt", fs::WriteMode::createNew);
@@ -1209,7 +1209,7 @@ Scenario linkFollowed{"A link followed inside the root never reaches a temporary
     require(readAll(storage.openRead("report.txt")) == "partial");
 }};
 
-Scenario rootUnder{"A root under the real /tmp of the superuser is accepted", [] {
+const Scenario rootUnder{"A root under the real /tmp of the superuser is accepted", [] {
     // /tmp is owned by the superuser, writable by all and sticky: an element of the effective user under it is safe.
     std::error_code error;
     if (!stdfs::is_directory("/tmp", error))
@@ -1229,7 +1229,7 @@ Scenario rootUnder{"A root under the real /tmp of the superuser is accepted", []
 #endif
 
 #ifdef _WIN32
-Scenario windowsOpens{"Windows opens a root from its drive, its share or its volume", [] {
+const Scenario windowsOpens{"Windows opens a root from its drive, its share or its volume", [] {
     using Split      = std::pair<std::wstring, vector<string>>;
     const auto split = [](const wchar_t* path) {
         return fs::detail::windows::splitLocation(path);
@@ -1257,7 +1257,7 @@ Scenario windowsOpens{"Windows opens a root from its drive, its share or its vol
                 == fs::StorageErrc::invalidPath);
 }};
 
-Scenario windowsFinds{"Windows finds a directory below a root at the top of its volume", [] {
+const Scenario windowsFinds{"Windows finds a directory below a root at the top of its volume", [] {
     using fs::detail::windows::isBelow;
     require(isBelow(LR"(\Device\HarddiskVolume3\Users)", LR"(\Device\HarddiskVolume3\)"));
     require(isBelow(LR"(\Device\HarddiskVolume3\)", LR"(\Device\HarddiskVolume3\)"));
@@ -1281,7 +1281,7 @@ Scenario windowsFinds{"Windows finds a directory below a root at the top of its 
     });
 }};
 
-Scenario windowsHolds{"Windows holds the directories of an operation so that nobody moves them", [] {
+const Scenario windowsHolds{"Windows holds the directories of an operation so that nobody moves them", [] {
     Sandbox sandbox;
     makeDirectories(sandbox.root / "a" / "b");
     std::error_code rootRename, directoryRename, ancestorRename, baseRename;

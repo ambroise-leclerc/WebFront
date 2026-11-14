@@ -117,7 +117,7 @@ Exception: a purely C++ change that reuses an existing encoding, introduces no n
 - Use C++23, four-space indentation, the `.clang-format` of the directory (`include/webfront/`, `test/`, `examples/`), and the naming rules in `.github/CONTRIBUTING.md`.
 - Keep production implementation header-only under `include/`; `examples/` contains the three public examples; browser resources live in `js/`.
 - Prefer standard-library facilities and explicit ownership. Keep public headers ODR-safe (`inline`/templates as appropriate).
-- Unit tests are `Scenario` objects whose `given`/`when`/`then` sections are lambdas, checked with `require`/`check` (`test/unit/Bdd.hpp`), and use deterministic mocks.
+- Unit tests are named `const Scenario` objects whose `given`/`when`/`then` sections are lambdas, checked with `require`/`check` (`test/unit/Bdd.hpp`), and use deterministic mocks.
 - Jasmine specs are the project `test/web/suite/`, built by esbuild-wasm and run by `wf test` under the locked `jasmine-core` (installed from the local registry by `WebSuiteInstall`); `webtest` is the `webfront-wf` driver plus the C++ callbacks of the specs. The specs tell C++ they are done (`specsFinished`), the process status is that of `wf test` (or 1 when C++ did not observe every call), and the CTest case has a timeout. The registry the suite installs from is built by `wf run test-registry` (the `TestRegistry` case), from the packages that configure downloaded.
 - Every bug fix needs a failing regression test at the lowest useful level. Bridge changes also need the browser integration test.
 - Tests must not require user input, a fixed pre-existing browser session, or public network access after dependencies are configured.

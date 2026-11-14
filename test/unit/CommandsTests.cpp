@@ -190,7 +190,7 @@ struct Fixture {
 
 }  // namespace
 
-Scenario commandsRegister{"Commands register their bridge functions and list the commands", [] {
+const Scenario commandsRegister{"Commands register their bridge functions and list the commands", [] {
     given("an application with commands", [&] {
         Fixture fixture;
         then("the browser discovers them, sorted, with their help", [&] {
@@ -224,7 +224,7 @@ Scenario commandsRegister{"Commands register their bridge functions and list the
     });
 }};
 
-Scenario commandStreams{"A command streams its output and reports its exit", [] {
+const Scenario commandStreams{"A command streams its output and reports its exit", [] {
     given("an application with commands", [&] {
         Fixture fixture;
         auto&   app = fixture.app;
@@ -265,7 +265,7 @@ Scenario commandStreams{"A command streams its output and reports its exit", [] 
     });
 }};
 
-Scenario commandOutput{"Command output is split under the bridge string limit on character boundaries", [] {
+const Scenario commandOutput{"Command output is split under the bridge string limit on character boundaries", [] {
     given("a text of two-byte characters longer than two pieces", [&] {
         string text;
         for (int i = 0; i < 70000; ++i)
@@ -314,7 +314,7 @@ Scenario commandOutput{"Command output is split under the bridge string limit on
     });
 }};
 
-Scenario printingWaits{"Printing waits while the browser has not read the output", [] {
+const Scenario printingWaits{"Printing waits while the browser has not read the output", [] {
     given("a browser that has more frames to read than allowed", [&] {
         FakeApp           app;
         Commands<FakeApp> commands{app};
@@ -333,7 +333,7 @@ Scenario printingWaits{"Printing waits while the browser has not read the output
     });
 }};
 
-Scenario printingLong{"Printing a long text waits between its pieces", [] {
+const Scenario printingLong{"Printing a long text waits between its pieces", [] {
     given("a browser with as many frames to read as allowed", [&] {
         FakeApp           app;
         Commands<FakeApp> commands{app};
@@ -351,7 +351,7 @@ Scenario printingLong{"Printing a long text waits between its pieces", [] {
     });
 }};
 
-Scenario printTask{"A print task may be awaited after its context is gone", [] {
+const Scenario printTask{"A print task may be awaited after its context is gone", [] {
     given("a command that creates a print task from a context, then reuses its storage for another", [&] {
         FakeApp           app;
         Commands<FakeApp> commands{app};
@@ -374,7 +374,7 @@ Scenario printTask{"A print task may be awaited after its context is gone", [] {
     });
 }};
 
-Scenario ctrlC{"Ctrl+C stops a running command and the next one runs at once", [] {
+const Scenario ctrlC{"Ctrl+C stops a running command and the next one runs at once", [] {
     given("a command waiting in a browser", [&] {
         Fixture fixture;
         auto&   app = fixture.app;
@@ -417,7 +417,7 @@ Scenario ctrlC{"Ctrl+C stops a running command and the next one runs at once", [
     });
 }};
 
-Scenario eachBrowser{"Each browser has its own commands", [] {
+const Scenario eachBrowser{"Each browser has its own commands", [] {
     given("a waiting command in each of two browsers", [&] {
         Fixture fixture;
         auto&   app    = fixture.app;
@@ -449,7 +449,7 @@ Scenario eachBrowser{"Each browser has its own commands", [] {
     });
 }};
 
-Scenario browserGiven{"A browser given the identifier of a disconnected one starts afresh", [] {
+const Scenario browserGiven{"A browser given the identifier of a disconnected one starts afresh", [] {
     given("a command that ignores its stop, in a browser that disconnects", [&] {
         Fixture fixture;
         auto&   app    = fixture.app;
@@ -480,7 +480,7 @@ Scenario browserGiven{"A browser given the identifier of a disconnected one star
     });
 }};
 
-Scenario shutdownDrains{"Shutdown drains running commands", [] {
+const Scenario shutdownDrains{"Shutdown drains running commands", [] {
     given("a waiting command", [&] {
         Fixture fixture;
         auto&   app = fixture.app;
@@ -501,7 +501,7 @@ Scenario shutdownDrains{"Shutdown drains running commands", [] {
     });
 }};
 
-Scenario commandMay{"A command may take its context by reference", [] {
+const Scenario commandMay{"A command may take its context by reference", [] {
     given("a command whose coroutine keeps a reference to its context across a suspension", [&] {
         FakeApp           app;
         Commands<FakeApp> commands{app};
@@ -518,7 +518,7 @@ Scenario commandMay{"A command may take its context by reference", [] {
     });
 }};
 
-Scenario copyContext{"A copy of a context may outlive its command", [] {
+const Scenario copyContext{"A copy of a context may outlive its command", [] {
     given("a command that keeps a copy of its context", [&] {
         FakeApp                  app;
         Commands<FakeApp>        commands{app};
@@ -541,7 +541,7 @@ Scenario copyContext{"A copy of a context may outlive its command", [] {
     });
 }};
 
-Scenario commandsMay{"Commands may outlive their registering object", [] {
+const Scenario commandsMay{"Commands may outlive their registering object", [] {
     given("commands whose Commands object is gone", [&] {
         FakeApp app;
         {
@@ -555,7 +555,7 @@ Scenario commandsMay{"Commands may outlive their registering object", [] {
     });
 }};
 
-Scenario basicWFProvides{"BasicWF provides the application facilities of commands", [] {
+const Scenario basicWFProvides{"BasicWF provides the application facilities of commands", [] {
     given("an application over the networking mock", [&] {
         RealApp app(WebFrontConfig{.port = "0"});
         then("browsers have identifiers and disconnections can be subscribed to", [&] {

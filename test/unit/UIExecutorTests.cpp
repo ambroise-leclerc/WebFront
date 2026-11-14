@@ -138,7 +138,7 @@ bool waitFor(Pred pred) {
 }
 }  // namespace
 
-Scenario interfaceThread{"The interface thread runs scheduled operations", [] {
+const Scenario interfaceThread{"The interface thread runs scheduled operations", [] {
     given("a frontend loop attached to an executor", [&] {
         FakeLoop loop;
         loop.start();
@@ -186,7 +186,7 @@ Scenario interfaceThread{"The interface thread runs scheduled operations", [] {
     });
 }};
 
-Scenario operationStopped{"An operation is stopped by its token before it runs", [] {
+const Scenario operationStopped{"An operation is stopped by its token before it runs", [] {
     given("an attached loop that is not draining", [&] {
         UIExecutorHost host;
         host.attach([] { });
@@ -225,7 +225,7 @@ Scenario operationStopped{"An operation is stopped by its token before it runs",
     });
 }};
 
-Scenario closingLoop{"Closing the loop abandons pending operations", [] {
+const Scenario closingLoop{"Closing the loop abandons pending operations", [] {
     given("an operation pending in a loop that does not drain", [&] {
         UIExecutorHost host;
         host.attach([] { });
@@ -248,7 +248,7 @@ Scenario closingLoop{"Closing the loop abandons pending operations", [] {
     });
 }};
 
-Scenario executorWithout{"An executor without a running loop is unavailable", [] {
+const Scenario executorWithout{"An executor without a running loop is unavailable", [] {
     Observed                observed;
     ex::inplace_stop_source stop;
     given("a default handle", [&] {
@@ -297,7 +297,7 @@ Scenario executorWithout{"An executor without a running loop is unavailable", []
     });
 }};
 
-Scenario loopCannot{"The loop cannot be attached twice and a failing wake fails the operation", [] {
+const Scenario loopCannot{"The loop cannot be attached twice and a failing wake fails the operation", [] {
     given("an attached host", [&] {
         UIExecutorHost host;
         host.attach([] { });
@@ -321,7 +321,7 @@ Scenario loopCannot{"The loop cannot be attached twice and a failing wake fails 
     });
 }};
 
-Scenario failingWake{"A failing wake fails the operations queued behind it", [] {
+const Scenario failingWake{"A failing wake fails the operations queued behind it", [] {
     given("a wake function that queues a second operation, then throws", [&] {
         UIExecutorHost          host;
         Observed                first;
@@ -365,7 +365,7 @@ struct FragileWake {
 };
 }  // namespace
 
-Scenario failureWhile{"A failure while queuing completes the operation and leaves the queue usable", [] {
+const Scenario failureWhile{"A failure while queuing completes the operation and leaves the queue usable", [] {
     given("a wake function that cannot be copied", [&] {
         UIExecutorHost host;
         std::size_t    wakes{0};
@@ -397,7 +397,7 @@ Scenario failureWhile{"A failure while queuing completes the operation and leave
     });
 }};
 
-Scenario shutdownWhile{"Shutdown while operations are racing stops or runs each exactly once", [] {
+const Scenario shutdownWhile{"Shutdown while operations are racing stops or runs each exactly once", [] {
     given("a loop that closes while operations are scheduled", [&] {
         for (int round = 0; round < 20; ++round) {
             FakeLoop loop;
@@ -422,7 +422,7 @@ Scenario shutdownWhile{"Shutdown while operations are racing stops or runs each 
 #include <webfront/frontend/Frontend.hpp>
 
 #if defined(__linux__)
-Scenario linuxInterface{"The Linux interface loop coalesces wake-ups without creating deferred sources", [] {
+const Scenario linuxInterface{"The Linux interface loop coalesces wake-ups without creating deferred sources", [] {
     webfront::frontend::detail::uiloop::WakeEvent wake;
     given("a wake event shared by several producers", [&] {
         require(wake.consume() == 0);
@@ -478,7 +478,7 @@ void             fakeLaunch(const std::string& url) {
 }
 }  // namespace
 
-Scenario systemBrowserCan{"The system browser can run an interface-thread loop on the calling thread", [] {
+const Scenario systemBrowserCan{"The system browser can run an interface-thread loop on the calling thread", [] {
     using Browser = BrowserWithUILoopFrontend;
     given("the browser frontend with its loop", [&] {
         check(!Browser::uiExecutor().available());
@@ -622,7 +622,7 @@ Scenario systemBrowserCan{"The system browser can run an interface-thread loop o
     });
 }};
 
-Scenario closingWaits{"Closing waits for the wake-ups in flight, which may use what the loop frees", [] {
+const Scenario closingWaits{"Closing waits for the wake-ups in flight, which may use what the loop frees", [] {
     given("a wake function blocked inside an enqueue on another thread", [&] {
         UIExecutorHost          host;
         std::mutex              gate;
@@ -677,7 +677,7 @@ Scenario closingWaits{"Closing waits for the wake-ups in flight, which may use w
     });
 }};
 
-Scenario disarmingStop{"Disarming a stop waits for the request in flight", [] {
+const Scenario disarmingStop{"Disarming a stop waits for the request in flight", [] {
     given("a quit function blocked inside request() on another thread", [&] {
         UILoopStop              stop;
         std::mutex              gate;
@@ -748,7 +748,7 @@ void Chain::next() {
 }
 }  // namespace
 
-Scenario passInterface{"A pass of the interface thread runs a bounded batch", [] {
+const Scenario passInterface{"A pass of the interface thread runs a bounded batch", [] {
     given("an operation that keeps rescheduling itself", [&] {
         UIExecutorHost host;
         std::size_t    wakes{0};

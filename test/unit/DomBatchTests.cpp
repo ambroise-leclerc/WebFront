@@ -17,7 +17,7 @@ std::vector<std::byte> packet(std::initializer_list<unsigned> payload) {
 }
 }  // namespace
 
-Scenario dOMCommands{"DOM commands have a portable golden encoding and round trip every operation", [] {
+const Scenario dOMCommands{"DOM commands have a portable golden encoding and round trip every operation", [] {
     given("A little-endian correlation id and interned UTF-8 names", [&] {
         DomBatch batch(0x12345678);
         batch.add({DomOp::name, 0, 0, 0, "div"});
@@ -56,7 +56,7 @@ Scenario dOMCommands{"DOM commands have a portable golden encoding and round tri
     });
 }};
 
-Scenario dOMCodecs{"DOM codecs reject malformed input and enforce the complete command budget", [] {
+const Scenario dOMCodecs{"DOM codecs reject malformed input and enforce the complete command budget", [] {
     given("Malformed opcodes, varints, strings and listener flags", [&] {
         const std::vector<std::vector<std::byte>> invalid{packet({0}),
                                                           packet({14}),
@@ -109,7 +109,7 @@ Scenario dOMCodecs{"DOM codecs reject malformed input and enforce the complete c
     });
 }};
 
-Scenario dOMBatch{"DOM batch identifiers and operands are explicit and canonical", [] {
+const Scenario dOMBatch{"DOM batch identifiers and operands are explicit and canonical", [] {
     static_assert(!(std::is_default_constructible_v<DomBatch>));
     given("the reserved uncorrelated identifier zero", [&] {
         then("neither encoder nor decoder accepts it as a real batch", [&] {
@@ -135,7 +135,7 @@ Scenario dOMBatch{"DOM batch identifiers and operands are explicit and canonical
     });
 }};
 
-Scenario dOMOperation{"DOM operation counts bound owning decoder allocation independently of wire bytes", [] {
+const Scenario dOMOperation{"DOM operation counts bound owning decoder allocation independently of wire bytes", [] {
     given("a batch containing exactly the maximum number of minimum-sized operations", [&] {
         DomBatch batch(1);
         for (std::size_t i = 0; i < DomBatch::maxOperations; ++i)

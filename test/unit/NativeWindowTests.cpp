@@ -101,7 +101,7 @@ typename Application::UI connect(Application& app, const std::string& proof) {
 }
 }  // namespace
 
-Scenario nativeWindowGiven{"The native window is given on the interface thread while it is published", {"native-window"}, [] {
+const Scenario nativeWindowGiven{"The native window is given on the interface thread while it is published", {"native-window"}, [] {
     given("a handle that belongs to no frontend", [&] {
         then("it answers unsupported", [&] {
             require(errorOf(NativeWindow{}.get()) == NativeWindowError::unsupported);
@@ -206,7 +206,7 @@ Scenario nativeWindowGiven{"The native window is given on the interface thread w
     });
 }};
 
-Scenario connectionGiven{"A connection is given a window only when it is the view of the frontend's window", {"native-window", "view-association"}, [] {
+const Scenario connectionGiven{"A connection is given a window only when it is the view of the frontend's window", {"native-window", "view-association"}, [] {
     freshNetwork();
     App<WindowFrontend> app{WebFrontConfig{.port = "0"}};
     const auto          secret = testing::LaunchSecret<App<WindowFrontend>>::of(app);
@@ -241,7 +241,7 @@ Scenario connectionGiven{"A connection is given a window only when it is the vie
     });
 }};
 
-Scenario frontendWithout{"A frontend without a native window gives none, even to its embedded view", {"native-window"}, [] {
+const Scenario frontendWithout{"A frontend without a native window gives none, even to its embedded view", {"native-window"}, [] {
     freshNetwork();
     App<NoWindowFrontend> app{WebFrontConfig{.port = "0"}};
     check(errorOf(app.nativeWindow().get()) == NativeWindowError::unsupported);
@@ -252,7 +252,7 @@ Scenario frontendWithout{"A frontend without a native window gives none, even to
     });
 }};
 
-Scenario browserFallback{"The browser fallback has no native window", {"native-window"}, [] {
+const Scenario browserFallback{"The browser fallback has no native window", {"native-window"}, [] {
     using Fallback = NativeOrBrowserFrontendFor<DefaultBrowserFrontend, DefaultBrowserFrontend>;
     Fallback::initialize();
     require(errorOf(Fallback::nativeWindow().get()) == NativeWindowError::unsupported);
