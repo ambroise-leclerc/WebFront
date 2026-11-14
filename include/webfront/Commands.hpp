@@ -39,8 +39,12 @@ inline constexpr std::size_t maxPendingOutput = 32;
 /// Exit code of a command stopped by Ctrl+C, a disconnection or the application's shutdown.
 inline constexpr int interruptedExitCode = 130;
 
-/// Names the terminal itself handles, which an application cannot register.
-inline constexpr std::array<std::string_view, 5> reservedNames{"wf", "clear", "exit", "help", "history"};
+/// Names the terminal itself handles, which an application cannot register: wf, the terminal's own commands (help,
+/// clear, history, exit, ls, cat, tree, mounts) and the usual file commands it keeps for itself without providing
+/// them, so that a later environment can add one without taking a name from an application (ADR-023).
+inline constexpr std::array<std::string_view, 26> reservedNames{"wf",   "clear", "exit", "help", "history", "ls",    "cat",   "tree",  "mounts",
+                                                                "cd",   "pwd",   "cp",   "mv",   "rm",      "mkdir", "rmdir", "touch", "edit",
+                                                                "find", "grep",  "head", "tail", "less",    "stat",  "du",    "df"};
 
 namespace detail {
 

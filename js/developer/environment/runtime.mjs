@@ -19,6 +19,8 @@ import {typescriptPackage, parseCheckOptions, checkHost} from './typecheck.mjs';
 import {pinnedStarters} from './bootstrap.mjs';
 import {createWorkspace, isManaged} from './workspace.mjs';
 import {connectAutomation as connectAgent, clipText, automationHelp, onAutomationNotice} from './automation.mjs';
+import {ls, cat, tree, mounts, fileCommandHelp, withheld, withheldReason} from './files.mjs';
+import {dependencyTree, why as whyInstalled, info as packageInfo} from './dependencies.mjs';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -280,18 +282,30 @@ async function test(args, {bridge, signal, write = () => {}, createFrame, onRepo
     }
 }
 
-async function list(_args, {bridge}) {
+// wf list [--tree]: the locked packages, or their graph under the roots of the manifest.
+async function list(args, {bridge}) {
+    if (args.length > 1 || (args.length && args[0] !== '--tree')) throw new Error(`Usage: ${usage.list}`);
     const project = await loadProject(bridge);
+    if (args.length) return syncNotice(project) + dependencyTree(project.lock);
     const names = Object.keys(project.lock?.packages ?? {}).sort().join('\n');
     return syncNotice(project) + (names || 'No installed packages.');
 }
+
+// wf why <package> and wf info <package>: read from the lock, like wf list.
+const lockQuery = (name, answer) => async (args, {bridge}) => {
+    if (args.length !== 1 || args[0].startsWith('-')) throw new Error(`Usage: ${usage[name]}`);
+    const project = await loadProject(bridge);
+    return syncNotice(project) + answer(project.lock, args[0]);
+};
+const why = lockQuery('why', whyInstalled);
+const info = lockQuery('info', packageInfo);
 
 const availableStarters = config => starterNames(config).length ? ` (starters: ${starterNames(config).join(', ')})` : '';
 const usage = {
     init: 'wf init [name]', create: 'wf create <starter> [directory]', install: 'wf install [--update] [<package>[@range] ...]',
     restore: 'wf restore [--offline]', run: 'wf run [--timeout <seconds>] <script> [args...]',
     exec: 'wf exec [--timeout <seconds>] <package>[:<entry>] [args...]', check: 'wf check [--timeout <seconds>]',
-    test: 'wf test [--timeout <seconds>] [pattern]', list: 'wf list', build: 'wf build [entry.tsx|name]', dev: 'wf dev [entry.tsx|name]',
+    test: 'wf test [--timeout <seconds>] [pattern]', list: 'wf list [--tree]', why: 'wf why <package>', info: 'wf info <package>', build: 'wf build [entry.tsx|name]', dev: 'wf dev [entry.tsx|name]',
     preview: 'wf preview [entry.tsx|name]', embed: 'wf embed <provider> | <entry.tsx> --output <Provider.hpp>',
     help: 'wf help [command|agents]'};
 // What a command does, in one or two lines, for wf help <command>.
@@ -305,7 +319,9 @@ const purposes = {
     exec: 'Runs the command-line entry of an installed package.',
     check: 'Type-checks the entries with the locked typescript (wf install typescript) and tsconfig.json.',
     test: 'Runs the Jasmine specs of "test": {"specs": [...]} under the locked jasmine-core (wf install jasmine-core).',
-    list: 'Lists the installed packages.',
+    list: 'Lists the installed packages; --tree shows them under the dependencies of the manifest that bring them.',
+    why: 'Shows which dependencies of the manifest bring a package, as chains of requirements.',
+    info: 'Describes an installed package: license, integrity, files, dependencies and dependents.',
     build: 'Compiles the entries once into .webfront/developer/build/.',
     dev: 'Compiles a TypeScript/TSX entry (ui/main.tsx), shows the interface in the window and rebuilds on every save. Ctrl+C stops it.',
     preview: 'Compiles an entry once and shows the interface in the window.',
@@ -338,7 +354,7 @@ function help([topic, ...extra] = [], {config} = {}) {
     return Object.values(usage).join('\n') + '\nAgents: wf help agents (the sequence, and how to run wf in JSON or MCP).' +
         '\nCtrl+C interrupts a command. No system shell is exposed.' + automationHelp();
 }
-const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, check, test, build, dev, preview, embed, list, help};
+const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, check, test, build, dev, preview, embed, list, why, info, help};
 
 let executionToken = null, executionCount = 0, automationActive = false, cppActive = 0;
 export async function exclusive(context, action, {settlesOnAbort = false} = {}) {
@@ -500,12 +516,20 @@ const builtins = {
     help: (_args, {cppCommands = new Map()}) => {
         const width = Math.max(7, ...[...cppCommands.keys()].map(name => name.length));
         const line = (name, text) => `${name.padEnd(width)}  ${text}`;
-        return [line('wf', 'Project commands: wf help lists them'), line('clear', 'Clear the screen and its scrollback'),
+        return [line('wf', 'Project commands (manifest, packages, build): wf help lists them'),
+            ...Object.entries(fileCommandHelp).map(([name, text]) => line(name, text)),
+            line('clear', 'Clear the screen and its scrollback'),
             line('history', 'List the commands typed in this project; history -c clears them'),
             line('exit', 'End the session [with an exit code]'), line('help', 'List the commands'),
             ...[...cppCommands].map(([name, text]) => line(name, text)),
-            'Ctrl+C interrupts a command. No system shell is exposed.'].join('\n');
+            'Paths are relative to the project. Ctrl+C interrupts a command. No system shell is exposed.'].join('\n');
     },
+    ls: (args, {bridge, editor}) => ls(args, {bridge, width: editor?.columns?.() ?? 80, manifest: () => cachedManifest(bridge)}),
+    cat: (args, {bridge, signal}) => cat(args, {bridge, signal}),
+    tree: (args, {bridge, signal}) => tree(args, {bridge, signal}),
+    mounts: (args, {bridge, config}) => mounts(args, {bridge, config}),
+    // The file commands kept for the terminal without being provided: each says what to use instead.
+    ...Object.fromEntries(withheld.map(name => [name, () => { throw new Error(withheldReason(name)); }])),
     clear: () => clearScreen,
     history: async (args, {editor, bridge}) => {
         if (args.length === 1 && args[0] === '-c') {
@@ -548,6 +572,8 @@ export async function runLine(line, context) {
         try { return await runCommand(context.bridge, command, args, {signal: context.signal, write}); }
         finally {--cppActive;}
     }
+    // The project commands keep their prefix, so that their names stay free for the application's (ADR-023).
+    if (Object.hasOwn(commands, command)) throw new Error(`Unknown command: ${command}. Did you mean: wf ${[command, ...args].join(' ')}?`);
     throw new Error(`Unknown command: ${command}. Type help to list the commands.`);
 }
 
@@ -584,6 +610,12 @@ async function manifestNames(bridge, command) {
     catch { return []; }
 }
 
+// The names of the locked packages, for wf why and wf info.
+async function lockedNames(bridge) {
+    try { return Object.values((await readLock(bridge, true)).packages).map(node => node.name); }
+    catch { return []; }
+}
+
 /**
  * Completes the word at the end of a line, escaped or quoted: command names first, then wf subcommands, the manifest's
  * scripts after wf run, its entries and providers after wf preview and wf embed, and project paths. Resolves with
@@ -597,9 +629,11 @@ export async function complete(line, {bridge, cppCommands = new Map()}) {
     let before;
     try { before = tokenize(line.slice(0, typed.start)); }
     catch { return matching([]); }
-    if (!before.length) return matching(['wf', ...Object.keys(builtins), ...cppCommands.keys()]);
+    if (!before.length) return matching(['wf', ...Object.keys(builtins).filter(name => !withheld.includes(name)), ...cppCommands.keys()]);
     if (before[0] === 'wf' && before.length === 1) return matching(Object.keys(commands));
     if (before[0] === 'wf' && before.length === 2 && before[1] === 'run') return matching(await manifestNames(bridge, 'run'));
+    if (before[0] === 'wf' && before.length === 2 && (before[1] === 'why' || before[1] === 'info')) return matching(await lockedNames(bridge));
+    if (before[0] === 'wf' && before.length === 2 && before[1] === 'list') return matching(['--tree']);
     if (before[0] === 'wf' && before.length === 2) return matching((await Promise.all([manifestNames(bridge, before[1]), projectPaths(bridge, word)])).flat());
     return matching(await projectPaths(bridge, word));
 }

@@ -72,26 +72,29 @@ public:
     /// be read, is omitted; only a directory that cannot be read fails the listing.
     std::vector<std::uint8_t> list(std::string directory) const {
         std::scoped_lock lock(mutex);
-        const auto       source = directory.empty() ? root : projectPath(root, directory);
-        std::error_code  error;
-        if (!std::filesystem::is_directory(source, error))
-            throw std::runtime_error("Cannot list project directory: " + directory);
-        std::vector<std::string> names;
-        std::filesystem::directory_iterator entries(source, error);
-        for (; !error && entries != std::filesystem::directory_iterator{}; entries.increment(error)) {
-            const auto name = entries->path().filename().generic_string();
-            if (auto listed = listedName(directory, name)) {
-                if (names.size() == maxListedEntries)
-                    throw std::length_error("Project directory has more than 4096 entries: " + directory);
-                names.push_back(std::move(*listed));
-            }
-        }
-        if (error)
-            throw std::runtime_error("Cannot list project directory: " + directory);
-        std::ranges::sort(names);
-        std::string text = "[";
-        for (const auto& name : names)
+        std::string      text = "[";
+        for (const auto& name : listedNames(directory))
             text += (text.size() > 1 ? "," : "") + json::quote(name);
+        text += "]";
+        return {text.begin(), text.end()};
+    }
+
+    /// The entries list() names, as a JSON array of {"name", "type", "size", "modified"} sorted like it: the name has
+    /// no final '/', "type" is "directory" or "file" (a link inside the project reads as its target), "size" is in
+    /// bytes (0 for a directory) and "modified" in milliseconds since the Unix epoch, both 0 when they cannot be read.
+    std::vector<std::uint8_t> entries(std::string directory) const {
+        std::scoped_lock lock(mutex);
+        std::string      text = "[";
+        for (auto name : listedNames(directory)) {
+            const bool isDirectory = name.ends_with('/');
+            if (isDirectory)
+                name.pop_back();
+            const auto      path = projectPath(root, directory.empty() ? name : directory + "/" + name);
+            std::error_code error;
+            const auto      size = isDirectory ? std::uintmax_t{} : std::filesystem::file_size(path, error);
+            text                += (text.size() > 1 ? "," : "") + ("{\"name\":" + json::quote(name)) + ",\"type\":\"" + (isDirectory ? "directory" : "file")
+                    + "\",\"size\":" + std::to_string(error ? std::uintmax_t{} : size) + ",\"modified\":" + std::to_string(modifiedMilliseconds(path)) + "}";
+        }
         text += "]";
         return {text.begin(), text.end()};
     }
@@ -239,6 +242,40 @@ public:
     }
 
 private:
+    // The sorted names of list(): directories end with '/'.
+    std::vector<std::string> listedNames(const std::string& directory) const {
+        const auto      source = directory.empty() ? root : projectPath(root, directory);
+        std::error_code error;
+        if (!std::filesystem::is_directory(source, error))
+            throw std::runtime_error("Cannot list project directory: " + directory);
+        std::vector<std::string>            names;
+        std::filesystem::directory_iterator entries(source, error);
+        for (; !error && entries != std::filesystem::directory_iterator{}; entries.increment(error)) {
+            const auto name = entries->path().filename().generic_string();
+            if (auto listed = listedName(directory, name)) {
+                if (names.size() == maxListedEntries)
+                    throw std::length_error("Project directory has more than 4096 entries: " + directory);
+                names.push_back(std::move(*listed));
+            }
+        }
+        if (error)
+            throw std::runtime_error("Cannot list project directory: " + directory);
+        std::ranges::sort(names);
+        return names;
+    }
+
+    // The last write of an entry on the system clock; the file clock's epoch is not portable, so the time is taken
+    // relative to now on both clocks. 0 when it cannot be read.
+    static std::int64_t modifiedMilliseconds(const std::filesystem::path& path) {
+        std::error_code error;
+        const auto      written = std::filesystem::last_write_time(path, error);
+        if (error)
+            return 0;
+        const auto age = std::filesystem::file_time_type::clock::now() - written;
+        const auto at  = std::chrono::system_clock::now() - std::chrono::duration_cast<std::chrono::system_clock::duration>(age);
+        return std::chrono::duration_cast<std::chrono::milliseconds>(at.time_since_epoch()).count();
+    }
+
     // The listed form of one entry, or nothing when it leaves the project or its type cannot be read.
     std::optional<std::string> listedName(const std::string& directory, const std::string& name) const {
         std::error_code error;
