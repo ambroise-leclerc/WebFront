@@ -1065,9 +1065,10 @@ public:
      * Only for a frontend that can open without running a loop, which it declares with `launch()`: the system browser
      * (the default `webfront::WebFront`). An embedded window lives in the loop of `show()`; such a frontend is refused at
      * compile time. Call it once per application, on the thread that owns it, instead of show(): a second start(), or
-     * a start() or show() after the other (also once show() has stopped its server), throws std::logic_error and leaves the running server untouched. If the
-     * opening throws, the server is stopped and joined before the exception propagates, as for show(). The server then
-     * runs until stop(), shutdown() or destruction; register callbacks and handlers before the call.
+     * a start() or show() after the other (also once show() has stopped its server), throws std::logic_error and leaves the running server untouched.
+     * If the opening throws, the server is stopped and joined before the exception propagates, as for show(); that
+     * application cannot be started again (the stopped server is not re-armed): construct another. Otherwise the
+     * server runs until stop(), shutdown() or destruction; register callbacks and handlers before the call.
      *
      * The frontend receives the address, the port, the page and, when its launch() takes it, the content policy. It gets
      * no WindowOptions and no view-association proof: an interface that is launched and left is an external browser,
@@ -1091,8 +1092,7 @@ public:
                 else
                     Frontend::launch(httpAddress, httpPort, page);
             } catch (...) {
-                stopAndJoinServer();
-                launched = false;  // nothing runs any more: a new attempt is allowed, as after a show() that failed to open
+                stopAndJoinServer();  // stopped for good: the server is not re-armed, so `launched` stays set
                 throw;
             }
         }
@@ -1306,7 +1306,7 @@ private:
     const std::string                                                        viewSecret = detail::newViewSecret();  // this launch's proof of an embedded view
     const bool                                                               trustLoopbackClients;
     bool                                                                     developerEnvironment = false;
-    std::atomic<bool>                                                        launched{false};  // start() was called and its server was not stopped by a failed launch
+    std::atomic<bool>                                                        launched{false};  // start() was called
     std::atomic<bool>                                                        shown{false};     // show() was called, whether or not its server still runs
     mutable std::mutex                                                       linksMutex;  // guards webLinks, read from any thread
     struct Connection {

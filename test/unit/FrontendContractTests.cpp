@@ -669,8 +669,8 @@ SCENARIO("start() is called once and replaces show()") {
         HostApp<LaunchRecorder> app;
         REQUIRE_THROWS_WITH(app.start(), "no browser to launch");
         LaunchRecorder::fail = false;
-        THEN("the server is stopped and a new attempt is accepted") {
-            REQUIRE_NOTHROW(app.start());
+        THEN("the server is stopped for good and a new attempt is refused, not served by a dead server") {
+            REQUIRE_THROWS_AS(app.start(), std::logic_error);
         }
     }
     GIVEN("a frontend whose launch takes the content policy") {

@@ -528,10 +528,10 @@ SCENARIO("The system browser can run an interface-thread loop on the calling thr
             std::atomic<bool> accepted{false};
             std::jthread      client([&] {
                 const auto executor = Browser::uiExecutor();
-                if (waitFor([&] { return executor.available(); }))
-                    accepted = Browser::requestClose();
-                else
-                    Browser::requestStop();
+                // The executor is available slightly before the loop can be stopped: repeat the request until accepted.
+                accepted = waitFor([&] { return executor.available() && Browser::requestClose(); });
+                if (!accepted)
+                    Browser::requestStop();  // never leave the loop running if the request was not accepted in time
             });
             Browser::loop("127.0.0.1", "9002", "index.html", fakeLaunch);
             client.join();
