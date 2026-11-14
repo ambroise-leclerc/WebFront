@@ -2,7 +2,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <webfront/http/WebSocket.hpp>
 #include <webfront/networking/NetworkingMock.hpp>
-#include <webfront/tooling/HexDump.hpp>
 #include <webfront/weblink/Messages.hpp>
 
 #include <limits>
@@ -17,30 +16,22 @@
 using namespace std;
 using namespace webfront;
 
-SCENARIO("Handshake message") {
-    std::array<uint8_t, 2> raw{0x00, 0x00};
-    auto                   handshake = msg::Handshake::castFromRawData(std::span(reinterpret_cast<const std::byte*>(raw.data()), raw.size()));
-
-    REQUIRE(sizeof(*handshake) == 2);
-    REQUIRE(handshake->getEndian() == msg::JSEndian::little);
-}
-
-SCENARIO("Handshake message with the proof of an embedded view") {
-    // ADR-003: bytes after the two header bytes are the launch secret of ADR-020; the header itself is unchanged.
-    const std::string proof(64, 'a');
+SCENARIO("Handshake and Ack messages have a two-byte header") {
+    REQUIRE(sizeof(msg::Ack) == 2);
     std::vector<std::byte> raw{std::byte{0x00}, std::byte{0x00}};
-    for (const char c : proof)
-        raw.push_back(static_cast<std::byte>(c));
-    auto handshake = msg::Handshake::castFromRawData(std::span(raw));
-    REQUIRE(handshake->getEndian() == msg::JSEndian::little);
-    REQUIRE(handshake->getPayloadSize() == 0);
-    REQUIRE(raw.size() - sizeof(*handshake) == proof.size());
-}
-
-SCENARIO("Ack message") {
-    msg::Ack ack;
-
-    REQUIRE(sizeof(ack) == 2);
+    THEN("a bare handshake is little-endian") {
+        auto handshake = msg::Handshake::castFromRawData(std::span(raw));
+        REQUIRE(sizeof(*handshake) == 2);
+        REQUIRE(handshake->getEndian() == msg::JSEndian::little);
+    }
+    THEN("the proof of an embedded view follows the unchanged header") {
+        // ADR-003: bytes after the two header bytes are the launch secret of ADR-020.
+        raw.resize(2 + 64, static_cast<std::byte>('a'));
+        auto handshake = msg::Handshake::castFromRawData(std::span(raw));
+        REQUIRE(handshake->getEndian() == msg::JSEndian::little);
+        REQUIRE(handshake->getPayloadSize() == 0);
+        REQUIRE(raw.size() - sizeof(*handshake) == 64);
+    }
 }
 
 SCENARIO("FunctionCall") {
@@ -146,7 +137,6 @@ SCENARIO("FunctionReturn") {
             std::tuple<int, std::string> value{42, "Hello World"};
             message.encodeParameter(value, frame);
             ws->write(std::move(frame));
-            cout << "Socket wrote :\n" << utils::hexDump(span(socket.debugBuffer.data(), socket.bufferIndex)) << '\n';
 
             THEN("An erroneous tuple should trigger an exception") {
                 websocket::FrameDecoder decoder;
@@ -168,7 +158,6 @@ SCENARIO("FunctionReturn") {
                 funcRet->decodeParameter(tupleValue, undecodedData);
                 REQUIRE(std::get<0>(tupleValue) == 42);
                 REQUIRE(std::get<1>(tupleValue) == "Hello World");
-                std::cout << undecodedData.size() << "\n";
                 REQUIRE(undecodedData.empty());
             }
         }

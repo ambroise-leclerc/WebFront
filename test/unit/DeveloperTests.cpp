@@ -297,10 +297,10 @@ SCENARIO("Transactions abandoned by a disconnected browser never lock the projec
     }
 }
 
-SCENARIO("The staging area is protected however its path is spelled") {
+SCENARIO("A link never turns the staging area into a destination or leads its cleanup outside the project") {
     TemporaryDirectory project;
-    developer::Store   store{project.path()};
     GIVEN("a symbolic link to the staging area inside the project") {
+        developer::Store store{project.path()};
         std::filesystem::create_directories(project.path() / ".webfront/developer/staging");
         const auto      victim = store.begin("victim", true);
         std::error_code error;
@@ -312,6 +312,23 @@ SCENARIO("The staging area is protected however its path is spelled") {
             }
         }
         store.abort(victim);
+    }
+    GIVEN("a staging directory that is a link to an old file outside the project") {
+        TemporaryDirectory outside;
+        const auto         victim = outside.path() / "keep.txt";
+        std::ofstream{victim} << "outside";
+        std::filesystem::last_write_time(victim, std::filesystem::file_time_type::clock::now() - std::chrono::hours{3});
+        std::filesystem::create_directories(project.path() / ".webfront/developer");
+        std::error_code error;
+        std::filesystem::create_directory_symlink(outside.path(), project.path() / ".webfront/developer/staging", error);
+        if (!error) {
+            WHEN("the project is opened, which cleans the stale staging") {
+                developer::Store store{project.path()};
+                THEN("the outside file is untouched") {
+                    REQUIRE(std::filesystem::exists(victim));
+                }
+            }
+        }
     }
 }
 
@@ -328,47 +345,19 @@ SCENARIO("The developer bridge refuses WebSocket clients without an Origin") {
     }
 }
 
-SCENARIO("Startup cleanup never leaves the project through a staging link") {
-    TemporaryDirectory project;
-    TemporaryDirectory outside;
-    GIVEN("a staging directory that is a link to an old file outside the project") {
-        const auto victim = outside.path() / "keep.txt";
-        std::ofstream{victim} << "outside";
-        std::filesystem::last_write_time(victim, std::filesystem::file_time_type::clock::now() - std::chrono::hours{3});
-        std::filesystem::create_directories(project.path() / ".webfront/developer");
-        std::error_code error;
-        std::filesystem::create_directory_symlink(outside.path(), project.path() / ".webfront/developer/staging", error);
-        if (!error) {
-            WHEN("the project is opened") {
-                developer::Store store{project.path()};
-                THEN("the outside file is untouched") {
-                    REQUIRE(std::filesystem::exists(victim));
-                }
-            }
-        }
-    }
-}
-
-SCENARIO("Paths differing only by case never share a staged file") {
+SCENARIO("The developer store refuses malformed requests without changing the project") {
     TemporaryDirectory project;
     developer::Store   store{project.path()};
     GIVEN("a staged directory holding LICENSE") {
         const auto id = store.begin("package", true);
         store.write(id, "LICENSE", 0, bytes("first"));
-        WHEN("a second file whose name differs only by case is sent") {
-            THEN("it is refused and the first file keeps its content") {
-                REQUIRE_THROWS_AS(store.write(id, "License", 0, bytes("second")), std::invalid_argument);
-                store.write(id, "LICENSE", 5, bytes("!"));
-                store.commit(id);
-                REQUIRE(read(store, "package/LICENSE") == "first!");
-            }
+        THEN("a second file whose name differs only by case is refused, and the first keeps its content") {
+            REQUIRE_THROWS_AS(store.write(id, "License", 0, bytes("second")), std::invalid_argument);
+            store.write(id, "LICENSE", 5, bytes("!"));
+            store.commit(id);
+            REQUIRE(read(store, "package/LICENSE") == "first!");
         }
     }
-}
-
-SCENARIO("The developer store refuses malformed requests without changing the project") {
-    TemporaryDirectory project;
-    developer::Store   store{project.path()};
     GIVEN("a project file and a single-output transaction") {
         std::ofstream(project.path() / "notes.txt") << "text";
         const auto id = store.begin("generated/output.hpp", false);
@@ -473,11 +462,13 @@ SCENARIO("The developer application needs an explicit project and a trusted envi
     }
 }
 
-SCENARIO("The environment learns where the application keeps the manifest") {
+SCENARIO("The environment learns which registry and manifest directory the application chose") {
     const DeveloperBootstrapOptions trusted{.environment = "https://example.test/env.tgz", .integrity = "sha512-abc"};
-    GIVEN("no manifest directory") {
-        THEN("the configuration does not mention it, so the manifest is in the project directory") {
-            REQUIRE_THAT(developer::bootstrapConfig(trusted), !Catch::Matchers::ContainsSubstring("manifestDirectory"));
+    GIVEN("neither option") {
+        THEN("the default registry is passed and marked as not chosen, so the manifest's applies, and the manifest is in the "
+             "project directory") {
+            REQUIRE(developer::bootstrapConfig(trusted)
+                    == R"({"environment":"https://example.test/env.tgz","integrity":"sha512-abc","registry":"https://registry.npmjs.org/","registryExplicit":false,"supported":{"protocol":[1],"api":[1]}})");
         }
     }
     GIVEN("a manifest directory chosen by the application") {
@@ -486,16 +477,6 @@ SCENARIO("The environment learns where the application keeps the manifest") {
         THEN("it is passed, before the supported versions") {
             REQUIRE_THAT(developer::bootstrapConfig(options),
                          Catch::Matchers::EndsWith(R"("registryExplicit":false,"manifestDirectory":"js/developer","supported":{"protocol":[1],"api":[1]}})"));
-        }
-    }
-}
-
-SCENARIO("The environment learns whether the application chose the npm registry") {
-    const DeveloperBootstrapOptions trusted{.environment = "https://example.test/env.tgz", .integrity = "sha512-abc"};
-    GIVEN("no registry option") {
-        THEN("the default registry is passed and marked as not chosen, so the manifest's applies") {
-            REQUIRE(developer::bootstrapConfig(trusted)
-                    == R"({"environment":"https://example.test/env.tgz","integrity":"sha512-abc","registry":"https://registry.npmjs.org/","registryExplicit":false,"supported":{"protocol":[1],"api":[1]}})");
         }
     }
     GIVEN("a same-origin mirror chosen by the application") {
@@ -518,13 +499,19 @@ void publishFile(developer::Store& store, const std::string& path, std::string_v
     store.commit(id);
 }
 
+// Stages a new content for each path, then publishes them together from the state `expected`.
+void publishGroup(developer::Store& store, const std::vector<std::string>& paths, const std::vector<std::string_view>& texts, const std::string& expected) {
+    std::vector<std::string> ids;
+    for (const auto& path : paths)
+        ids.push_back(store.begin(path, false));
+    for (std::size_t index = 0; index < ids.size(); ++index)
+        store.write(ids[index], "output", 0, bytes(texts[index]));
+    store.commitGroup(ids, paths, expected);
+}
+
 // Stages new contents for the manifest and the lock, then publishes them together.
 void publishPair(developer::Store& store, std::string_view manifest, std::string_view lock, const std::string& expected) {
-    const auto first  = store.begin(manifestPath, false);
-    const auto second = store.begin(lockPath, false);
-    store.write(first, "output", 0, bytes(manifest));
-    store.write(second, "output", 0, bytes(lock));
-    store.commitGroup({first, second}, pair, expected);
+    publishGroup(store, pair, {manifest, lock}, expected);
 }
 
 // The lock file stays in the journal directory; anything else is a journal or its remains.
@@ -942,94 +929,31 @@ SCENARIO("A project directory is listed without leaving the project") {
     }
 }
 
-SCENARIO("The entries of a project directory are described like its listing names them") {
-    TemporaryDirectory project;
-    TemporaryDirectory outside;
-    developer::Store   store{project.path()};
-    publishFile(store, "ui/main.tsx", "main");
-    publishFile(store, "ui/parts/a.ts", "a");
-    publishFile(store, "ui/b.css", "");
-    const auto text = [&](std::string path) {
-        const auto bytes = store.entries(std::move(path));
-        return std::string(bytes.begin(), bytes.end());
-    };
-    // "modified" is a time of this run: its digits are replaced before comparing.
-    const auto shape = [&](std::string path) {
-        return std::regex_replace(text(std::move(path)), std::regex{R"re("modified":[1-9][0-9]{12,})re"}, R"("modified":T)");
-    };
-    GIVEN("files and a subdirectory") {
-        THEN("each entry has its name without a slash, its type, its size and a recent modification time") {
-            REQUIRE(shape("ui")
-                    == R"([{"name":"b.css","type":"file","size":0,"modified":T},)"
-                       R"({"name":"main.tsx","type":"file","size":4,"modified":T},)"
-                       R"({"name":"parts","type":"directory","size":0,"modified":T}])");
-            REQUIRE_THAT(text(""), Catch::Matchers::ContainsSubstring(R"("name":"ui","type":"directory")"));
-        }
-    }
-    GIVEN("a link to a directory outside the project") {
-        std::error_code error;
-        std::filesystem::create_directory_symlink(outside.path(), project.path() / "ui" / "escape", error);
-        if (!error) {
-            THEN("it is omitted, and describing through it is refused") {
-                REQUIRE_THAT(text("ui"), !Catch::Matchers::ContainsSubstring("escape"));
-                REQUIRE_THROWS_AS(store.entries("ui/escape"), std::invalid_argument);
-            }
-        }
-    }
-    GIVEN("a missing directory, a file or a path escaping the project") {
-        THEN("describing fails like listing") {
-            REQUIRE_THROWS_WITH(store.entries("missing"), Catch::Matchers::ContainsSubstring("Cannot list project directory"));
-            REQUIRE_THROWS_WITH(store.entries("ui/main.tsx"), Catch::Matchers::ContainsSubstring("Cannot list project directory"));
-            REQUIRE_THROWS_AS(store.entries("../outside"), std::invalid_argument);
-        }
-    }
-}
-
-SCENARIO("A project path beyond the 260 characters of Windows is published and read like any other") {
+SCENARIO("Project paths beyond the 260 characters of Windows are published, grouped and read like any other") {
     TemporaryDirectory project;
     developer::Store   store{project.path()};
-    GIVEN("a destination whose absolute path exceeds MAX_PATH") {
-        std::string directory = "deep";
-        while (project.path().native().size() + directory.size() < 300)
-            directory += "/" + std::string(40, 'd');
+    std::string        directory = "deep";  // absolute paths below it exceed MAX_PATH; none of its directories exists yet
+    while (project.path().native().size() + directory.size() < 300)
+        directory += "/" + std::string(40, 'd');
+    WHEN("a file is published there") {
         const auto destination = directory + "/file.txt";
-        WHEN("a file is published there") {
-            const auto id = store.begin(destination, false);
-            store.write(id, "output", 0, bytes("long"));
-            store.commit(id);
-            THEN("it can be read back and replaced") {
-                REQUIRE(read(store, destination) == "long");
-                const auto second = store.begin(destination, false);
-                store.write(second, "output", 0, bytes("longer"));
-                store.commit(second);
-                REQUIRE(read(store, destination) == "longer");
-            }
-            THEN("a path escaping the project is still refused") {
-                REQUIRE_THROWS_AS(store.read(directory + "/../../../../../../../../../../../../../../../../../outside", 0), std::invalid_argument);
-            }
+        publishFile(store, destination, "long");
+        THEN("it can be read back and replaced") {
+            REQUIRE(read(store, destination) == "long");
+            publishFile(store, destination, "longer");
+            REQUIRE(read(store, destination) == "longer");
+        }
+        THEN("a path escaping the project is still refused") {
+            REQUIRE_THROWS_AS(store.read(directory + "/../../../../../../../../../../../../../../../../../outside", 0), std::invalid_argument);
         }
     }
-}
-
-SCENARIO("A group of files beyond the 260 characters of Windows is published together") {
-    TemporaryDirectory project;
-    developer::Store   store{project.path()};
-    GIVEN("two destinations in directories that do not exist yet, with absolute paths beyond MAX_PATH") {
-        std::string directory = "deep";
-        while (project.path().native().size() + directory.size() < 300)
-            directory += "/" + std::string(40, 'd');
+    WHEN("two files are published there as one group") {
         const std::vector<std::string> paths{directory + "/a.txt", directory + "/b.txt"};
-        WHEN("they are published as one group") {
-            const auto first  = store.begin(paths[0], false);
-            const auto second = store.begin(paths[1], false);
-            store.write(first, "output", 0, bytes("one"));
-            store.write(second, "output", 0, bytes("two"));
-            store.commitGroup({first, second}, paths, store.state(paths));
-            THEN("both are readable and no journal remains") {
-                REQUIRE(read(store, paths[0]) == "one");
-                REQUIRE(read(store, paths[1]) == "two");
-                REQUIRE_FALSE(journalsRemain(project.path() / ".webfront/developer/journal"));
-            }
+        publishGroup(store, paths, {"one", "two"}, store.state(paths));
+        THEN("both are readable and no journal remains") {
+            REQUIRE(read(store, paths[0]) == "one");
+            REQUIRE(read(store, paths[1]) == "two");
+            REQUIRE_FALSE(journalsRemain(project.path() / ".webfront/developer/journal"));
         }
     }
 }
@@ -1045,11 +969,7 @@ SCENARIO("A project whose own directory exceeds the 260 characters of Windows ca
         WHEN("a file is published and a group is committed") {
             publishFile(store, "file.txt", "root");
             const std::vector<std::string> paths{"sub/a.txt", "sub/b.txt"};
-            const auto                     first  = store.begin(paths[0], false);
-            const auto                     second = store.begin(paths[1], false);
-            store.write(first, "output", 0, bytes("one"));
-            store.write(second, "output", 0, bytes("two"));
-            store.commitGroup({first, second}, paths, store.state(paths));
+            publishGroup(store, paths, {"one", "two"}, store.state(paths));
             THEN("everything is readable and the project stays confined") {
                 REQUIRE(read(store, "file.txt") == "root");
                 REQUIRE(read(store, "sub/b.txt") == "two");

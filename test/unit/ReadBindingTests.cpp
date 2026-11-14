@@ -13,10 +13,13 @@
 
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <list>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using namespace webfront;
@@ -247,6 +250,17 @@ SCENARIO("The exchange secret is single use and only the right one works", "[rea
         fixture.binding.close(1);
         REQUIRE(call(fixture.exchange, path).status == http::Response::forbidden);
     }
+    THEN("a connection key opened twice starts over") {
+        const auto again = fixture.binding.open(1, true);
+        REQUIRE(call(fixture.exchange, path).status == http::Response::forbidden);
+        REQUIRE(call(fixture.exchange, std::string(ReadBinding::bindPath) + again).status == http::Response::ok);
+    }
+    THEN("the check of one exchange is not satisfied by the cookie of a concurrent one") {
+        // The browser kept the first cookie and rejected the second: the second client must not be told it is bound.
+        const auto cookieA = cookiePair(headers(call(fixture.exchange, path), "Set-Cookie").front());
+        const auto clientB = *header(fixture.bind(2, true), "X-WebFront-Client");
+        REQUIRE(call(fixture.exchange, std::string(ReadBinding::bindPath) + "check/" + clientB, cookieA).status == http::Response::forbidden);
+    }
     THEN("the check answers only to a request whose cookies designate the client the exchange named") {
         const auto base = std::string(ReadBinding::bindPath) + "check/";
         const auto reply  = call(fixture.exchange, path);
@@ -460,17 +474,44 @@ SCENARIO("Read responses neutralize active content", "[read-binding]") {
 
 namespace {
 
-/// Runs its cleanup once, on request or at scope exit: a failing REQUIRE must not leave a sink that points into the test.
-struct LogRestore {
-    std::function<void()> cleanup;
-    ~LogRestore() { run(); }
-    void run() {
-        if (auto once = std::move(cleanup); once) { cleanup = nullptr; once(); }
+/// Every log line written at Debug level until stop() or scope exit: a failing REQUIRE must not leave a sink that points
+/// into the test.
+class LogCapture {
+public:
+    LogCapture() {
+        webfront::log::setLogLevel(webfront::log::Debug);
+        sink = webfront::log::addSinks(std::function<void(std::string_view)>([this](std::string_view line) {
+            std::scoped_lock lock{mutex};
+            logged += std::string(line) + "\n";
+        }));
     }
+    ~LogCapture() { stop(); }
+    void stop() {
+        if (std::exchange(active, false)) {
+            webfront::log::removeSinks(sink);
+            webfront::log::setLogLevel(webfront::log::Error);
+        }
+    }
+    std::string text() {
+        std::scoped_lock lock{mutex};
+        return logged;
+    }
+
+private:
+    std::mutex  mutex;
+    std::string logged;
+    decltype(webfront::log::addSinks(std::function<void(std::string_view)>{})) sink{};
+    bool        active = true;
 };
 
 struct NoFiles {
     static inline std::list<std::string_view> names{};
+};
+
+/// A file provider whose failure quotes the path it was asked for.
+struct ThrowingFileSystem {
+    ThrowingFileSystem(std::filesystem::path) {}
+    std::optional<webfront::fs::File> open(std::filesystem::path file) { throw std::runtime_error("cannot open " + file.string()); }
 };
 
 /// One connection, accepted at once.
@@ -494,94 +535,121 @@ bool waitFor(auto condition) {
     return false;
 }
 
+/// The injected socket starts clean before the server exists and is cleaned once it is gone.
+struct CleanSocket {
+    CleanSocket() {
+        testing::InjectableSocket::reset();
+        ReadNet::accepts = 0;
+    }
+    ~CleanSocket() { testing::InjectableSocket::reset(); }
+};
+
+/// A server whose single connection receives one request: answer() returns what was logged meanwhile, and response() what
+/// the server wrote.
+template <typename Files = MockFileSystem<NoFiles>>
+struct OneRequest : CleanSocket {
+    http::Server<ReadNet, Files> server{"127.0.0.1", "0"};
+
+    /// Sends "<requestLine> HTTP/1.1" with `headers` and waits for the server to close the connection.
+    std::string answer(const std::string& requestLine, const std::string& headers = {}) {
+        LogCapture             log;
+        const std::string      raw = requestLine + " HTTP/1.1\r\nHost: localhost\r\n" + headers + "\r\n";
+        std::vector<std::byte> bytes;
+        for (const char c : raw)
+            bytes.push_back(static_cast<std::byte>(c));
+        testing::InjectableSocket::receive(bytes);
+        REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
+        log.stop();
+        return log.text();
+    }
+    static std::string response() { return testing::InjectableSocket::writtenText(); }
+};
+
 }  // namespace
 
 SCENARIO("The server never writes a read token to its logs", "[read-binding]") {
-    testing::InjectableSocket::reset();
-    ReadNet::accepts = 0;
-    http::Server<ReadNet, MockFileSystem<NoFiles>> server("127.0.0.1", "0");
-    Fixture                                                 fixture;
-    const auto cookie = cookiePair(headers(fixture.bind(1, true), "Set-Cookie").front());
-    const auto url    = fixture.url(1, "secret-name.txt");
-    auto       route  = server.addRoute(std::string(readPrefix), fixture.read, true);
-
-    webfront::log::setLogLevel(webfront::log::Debug);
-    std::string logged;
-    std::mutex  loggedMutex;
-    const auto  sink = webfront::log::addSinks([&](std::string_view line) {
-        std::scoped_lock lock{loggedMutex};
-        logged += std::string(line) + "\n";
-    });
-    LogRestore restore_sink{[&] { webfront::log::removeSinks(sink); webfront::log::setLogLevel(webfront::log::Error); }};
-    std::string raw = "GET " + url + " HTTP/1.1\r\nHost: localhost\r\nCookie: " + cookie + "\r\n\r\n";
-    std::vector<std::byte> bytes;
-    for (const char c : raw)
-        bytes.push_back(static_cast<std::byte>(c));
-    testing::InjectableSocket::receive(bytes);
-    REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
-    restore_sink.run();
+    OneRequest<> request;
+    Fixture      fixture;
+    const auto   cookie = cookiePair(headers(fixture.bind(1, true), "Set-Cookie").front());
+    const auto   url    = fixture.url(1, "secret-name.txt");
+    auto         route  = request.server.addRoute(std::string(readPrefix), fixture.read, true);
+    const auto   logged = request.answer("GET " + url, "Cookie: " + cookie + "\r\n");
 
     THEN("the response is the neutralized read, and no log line holds the token") {
-        const auto response = testing::InjectableSocket::writtenText();
+        const auto response = request.response();
         REQUIRE(response.starts_with("HTTP/1.1 200 OK\r\n"));
         REQUIRE(response.contains("Content-Security-Policy: sandbox; default-src 'none'\r\n"));
         const auto token = url.substr(readPrefix.size(), 16 + 1 + 64);
-        std::scoped_lock lock{loggedMutex};
         REQUIRE(logged.contains("Received request GET on /webfront/services/files/..."));
         REQUIRE_FALSE(logged.contains(token));
         REQUIRE_FALSE(logged.contains(token.substr(0, 16)));
         REQUIRE_FALSE(logged.contains("secret-name"));
     }
-    testing::InjectableSocket::reset();
 }
 
-SCENARIO("A rejected or upgraded services target is not logged either", "[read-binding]") {
-    testing::InjectableSocket::reset();
-    ReadNet::accepts = 0;
-    http::Server<ReadNet, MockFileSystem<NoFiles>> server("127.0.0.1", "0");
-    webfront::log::setLogLevel(webfront::log::Debug);
-    std::string logged;
-    std::mutex  loggedMutex;
-    const auto  sink = webfront::log::addSinks([&](std::string_view line) {
-        std::scoped_lock lock{loggedMutex};
-        logged += std::string(line) + "\n";
-    });
-    LogRestore restore_sink{[&] { webfront::log::removeSinks(sink); webfront::log::setLogLevel(webfront::log::Error); }};
-    // "report..txt" makes the target unfit for route dispatch: it falls to the file providers.
-    const std::string raw = "GET /webfront/services/files/0123456789abcdef.TOKENSECRET/report..txt HTTP/1.1\r\nHost: localhost\r\n\r\n";
-    std::vector<std::byte> bytes;
-    for (const char c : raw)
-        bytes.push_back(static_cast<std::byte>(c));
-    testing::InjectableSocket::receive(bytes);
-    REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
-    restore_sink.run();
-    // The same target spelled with an encoded first letter and doubled separators.
-    testing::InjectableSocket::reset();
-    ReadNet::accepts = 0;
-    http::Server<ReadNet, MockFileSystem<NoFiles>> encodedServer("127.0.0.1", "0");
-    const std::string encodedRaw = "GET /%77ebfront//services/./files/0123456789abcdef.ENCODEDSECRET/report..txt HTTP/1.1\r\nHost: localhost\r\n\r\n";
-    std::vector<std::byte> encodedBytes;
-    for (const char c : encodedRaw)
-        encodedBytes.push_back(static_cast<std::byte>(c));
-    webfront::log::setLogLevel(webfront::log::Debug);
-    const auto encodedSink = webfront::log::addSinks([&](std::string_view line) {
-        std::scoped_lock lock{loggedMutex};
-        logged += std::string(line) + "\n";
-    });
-    LogRestore restore_encodedSink{[&] { webfront::log::removeSinks(encodedSink); webfront::log::setLogLevel(webfront::log::Error); }};
-    testing::InjectableSocket::receive(encodedBytes);
-    REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
-    restore_encodedSink.run();
-    std::scoped_lock lock{loggedMutex};
-    THEN("no log line holds the encoded token either") {
-        REQUIRE_FALSE(logged.contains("ENCODEDSECRET"));
+SCENARIO("No log line holds the token of a services target, whatever answers it", "[read-binding]") {
+    const std::string target = std::string(readPrefix) + "0123456789abcdef.TOKENSECRET/a.txt";
+    THEN("a target unfit for route dispatch, plain or spelled with an encoded letter and doubled separators, falls to the "
+         "file providers without being logged") {
+        // "report..txt" makes the target unfit for route dispatch.
+        for (const auto* unfit : {"/webfront/services/files/0123456789abcdef.TOKENSECRET/report..txt",
+                                  "/%77ebfront//services/./files/0123456789abcdef.TOKENSECRET/report..txt"}) {
+            OneRequest<> request;
+            const auto   logged = request.answer(std::string("GET ") + unfit);
+            REQUIRE(logged.contains("Received request GET"));
+            REQUIRE_FALSE(logged.contains("TOKENSECRET"));
+            REQUIRE_FALSE(logged.contains("report"));
+        }
     }
-    THEN("no log line holds the token or the file name") {
+    THEN("the error of a failing secret route is not logged") {
+        OneRequest<> request;
+        auto         route = request.server.addRoute(std::string(readPrefix), [](const http::RouteRequest& failed) -> http::RouteReply {
+            throw std::runtime_error("cannot open " + std::string(failed.path));
+        }, true);
+        const auto logged = request.answer("GET " + target);
+        REQUIRE(logged.contains("failed"));
         REQUIRE_FALSE(logged.contains("TOKENSECRET"));
-        REQUIRE_FALSE(logged.contains("report"));
-        REQUIRE(logged.contains("Received request GET"));
     }
-    testing::InjectableSocket::reset();
+    THEN("a file provider that fails on the target, with no route registered, does not log it") {
+        OneRequest<ThrowingFileSystem> request;
+        const auto                     logged = request.answer("GET " + target);
+        REQUIRE(logged.contains("failed"));
+        REQUIRE_FALSE(logged.contains("TOKENSECRET"));
+    }
+    THEN("a secret route lives under the services space, and the query of a request is never logged") {
+        OneRequest<> request;
+        REQUIRE_THROWS_AS(request.server.addRoute("/files/", [](const http::RouteRequest&) { return http::RouteReply{}; }, true), std::invalid_argument);
+        const auto logged = request.answer("GET /viewer?file=%2Fwebfront%2Fservices%2Ffiles%2FQUERYSECRET%2Fdoc");
+        REQUIRE(logged.contains("Received request GET on /viewer"));
+        REQUIRE_FALSE(logged.contains("QUERYSECRET"));
+    }
+}
+
+SCENARIO("The answers the server writes for a read route are hardened too", "[read-binding]") {
+    for (const auto* method : {"GET", "POST"}) {
+        OneRequest<> request;
+        auto route = request.server.addRoute(std::string(readPrefix), [](const http::RouteRequest&) -> http::RouteReply { throw std::runtime_error("boom"); }, true,
+                                             [](http::RouteReply& reply) { detail::hardenRead(reply, {}); });
+        request.answer(std::string(method) + " " + std::string(readPrefix) + "0123456789abcdef.SECRET/a.txt");
+        const auto response = request.response();
+        THEN(std::string(method) + " is refused with the hardening headers") {
+            REQUIRE(response.starts_with(std::string_view(method) == "GET" ? "HTTP/1.1 500" : "HTTP/1.1 405"));
+            REQUIRE(response.contains("Cache-Control: no-store\r\n"));
+            REQUIRE(response.contains("Referrer-Policy: no-referrer\r\n"));
+            REQUIRE(response.contains("Content-Security-Policy: sandbox; default-src 'none'\r\n"));
+            REQUIRE(response.contains("X-Content-Type-Options: nosniff\r\n"));
+        }
+    }
+}
+
+SCENARIO("A frame never logs the bytes of its payload", "[read-binding]") {
+    LogCapture             log;
+    std::vector<std::byte> bytes(64, static_cast<std::byte>('q'));
+    websocket::Frame<ReadNet> frame{std::string_view{}};
+    frame.addBuffer(bytes);
+    log.stop();
+    REQUIRE_FALSE(log.text().contains("qqqq"));
+    REQUIRE_FALSE(log.text().contains("71 71"));
 }
 
 namespace {
@@ -623,9 +691,9 @@ SCENARIO("An application registers read routes under the services path only", "[
     testing::InjectableSocket::reset();
 }
 
-SCENARIO("Two applications on one host keep their own cookies", "[read-binding]") {
-    Fixture first, second;
-    GIVEN("a client bound to each application, whose cookies the browser shares") {
+SCENARIO("Each application names its own cookies, and a namespace named after the port survives a restart", "[read-binding]") {
+    GIVEN("a client bound to each of two applications on one host, whose cookies the browser shares") {
+        Fixture    first, second;
         const auto cookieA = cookiePair(headers(first.bind(1, true), "Set-Cookie").front());
         const auto both    = cookieA + "; " + cookiePair(headers(second.bind(1, true), "Set-Cookie").front());
         REQUIRE(cookieA.starts_with("wf-client-"));
@@ -639,59 +707,22 @@ SCENARIO("Two applications on one host keep their own cookies", "[read-binding]"
             REQUIRE(call(first.read, url, both).status == http::Response::ok);
         }
     }
+    GIVEN("an application restarted on the same port") {
+        Fixture before, after;
+        before.binding.useNamespace("9002");
+        after.binding.useNamespace("9002");
+        const auto cookie = cookiePair(headers(before.bind(1, true), "Set-Cookie").front());
+        THEN("it recognizes the cookie of its previous run and erases it") {
+            REQUIRE(cookie.starts_with("wf-client-9002-"));
+            bool erased = false;
+            for (const auto& line : headers(after.bind(1, true, cookie), "Set-Cookie"))
+                erased = erased || (line.starts_with(cookie.substr(0, cookie.find('=')) + "=;") && line.contains("Max-Age=0"));
+            REQUIRE(erased);
+        }
+    }
 }
 
-SCENARIO("A frame never logs the bytes of its payload", "[read-binding]") {
-    webfront::log::setLogLevel(webfront::log::Debug);
-    std::string logged;
-    const auto  sink = webfront::log::addSinks([&](std::string_view line) { logged += std::string(line) + "\n"; });
-    LogRestore restore_sink{[&] { webfront::log::removeSinks(sink); webfront::log::setLogLevel(webfront::log::Error); }};
-    const std::string      secret(64, 'q');
-    std::vector<std::byte> bytes;
-    for (const char c : secret)
-        bytes.push_back(static_cast<std::byte>(c));
-    websocket::Frame<ReadNet> frame{std::string_view{}};
-    frame.addBuffer(bytes);
-    restore_sink.run();
-    REQUIRE_FALSE(logged.contains("qqqq"));
-    REQUIRE_FALSE(logged.contains("71 71"));
-}
-
-SCENARIO("Expired grants release their context without being requested again", "[read-binding]") {
-    Fixture fixture;
-    const auto cookie = cookiePair(headers(fixture.bind(1, true), "Set-Cookie").front());
-    (void)cookie;
-    auto       token  = std::make_shared<int>(7);
-    std::weak_ptr<int> watch = token;
-    (void)fixture.url(1, "a", {.lifetime = 60s, .context = token});
-    token.reset();
-    REQUIRE_FALSE(watch.expired());
-    fixture.time += 61s;
-    (void)fixture.url(1, "b");  // issuing another grant sweeps the expired ones
-    REQUIRE(watch.expired());
-}
-
-SCENARIO("A namespace named after the port survives a restart", "[read-binding]") {
-    Fixture before, after;
-    before.binding.useNamespace("9002");
-    after.binding.useNamespace("9002");
-    const auto cookie = cookiePair(headers(before.bind(1, true), "Set-Cookie").front());
-    REQUIRE(cookie.starts_with("wf-client-9002-"));
-    bool erased = false;
-    for (const auto& line : headers(after.bind(1, true, cookie), "Set-Cookie"))
-        erased = erased || (line.starts_with(cookie.substr(0, cookie.find('=')) + "=;") && line.contains("Max-Age=0"));
-    REQUIRE(erased);
-}
-
-SCENARIO("A grant is refused for a path the server would never route", "[read-binding]") {
-    Fixture fixture;
-    fixture.bind(1, true);
-    for (const std::string_view path : {"report..txt", "../up.txt", "a/../b", "tab\there.txt", "line\nbreak"})
-        REQUIRE_THROWS_AS(fixture.url(1, path), ReadRefused);
-    REQUIRE_NOTHROW(fixture.url(1, "dir/report.v2.txt"));
-}
-
-SCENARIO("A token opens only the path it was issued for", "[read-binding]") {
+SCENARIO("A token opens only the path it was issued for, and only a path the server would route", "[read-binding]") {
     Fixture fixture;
     const auto cookie = cookiePair(headers(fixture.bind(1, true), "Set-Cookie").front());
     const auto url    = fixture.url(1, "public.txt");
@@ -702,13 +733,40 @@ SCENARIO("A token opens only the path it was issued for", "[read-binding]") {
     const auto transferable = fixture.url(1, "public.txt", {.lifetime = 60s, .transferable = true});
     REQUIRE(call(fixture.read, transferable).status == http::Response::ok);
     REQUIRE(call(fixture.read, transferable.substr(0, transferable.rfind('/')) + "/private.txt").status == http::Response::forbidden);
-    REQUIRE_THROWS_AS(fixture.url(1, "a//b"), ReadRefused);
+    for (const std::string_view path : {"a//b", "report..txt", "../up.txt", "a/../b", "tab\there.txt", "line\nbreak"})
+        REQUIRE_THROWS_AS(fixture.url(1, path), ReadRefused);
+    REQUIRE_NOTHROW(fixture.url(1, "dir/report.v2.txt"));
+}
+
+SCENARIO("A grant's context is released when the grant expires or the binding shuts down", "[read-binding]") {
+    Fixture fixture;
+    fixture.bind(1, true);
+    auto               held  = std::make_shared<int>(7);
+    std::weak_ptr<int> watch = held;
+    WHEN("the grant expires") {
+        (void)fixture.url(1, "a", {.lifetime = 60s, .context = held});
+        held.reset();
+        REQUIRE_FALSE(watch.expired());
+        fixture.time += 61s;
+        (void)fixture.url(1, "b");  // issuing another grant sweeps the expired ones
+        THEN("its context is released without the grant being requested again") { REQUIRE(watch.expired()); }
+    }
+    WHEN("the binding shuts down") {
+        const auto url = fixture.url(1, "a", {.context = held});
+        held.reset();
+        REQUIRE_FALSE(watch.expired());
+        fixture.binding.shutdown();
+        THEN("it holds nothing and grants nothing") {
+            REQUIRE(watch.expired());
+            REQUIRE_THROWS_AS(fixture.url(1, "b"), ReadRefused);
+            REQUIRE(call(fixture.read, url).status == http::Response::forbidden);
+        }
+    }
 }
 
 SCENARIO("Dropping a grant never runs its context's destructor under the lock", "[read-binding]") {
     Fixture fixture;
-    const auto cookie = cookiePair(headers(fixture.bind(1, true), "Set-Cookie").front());
-    (void)cookie;
+    fixture.bind(1, true);
     // A context whose deleter calls back into the binding would deadlock if it ran while the binding is locked.
     const auto reentrant = [&fixture] {
         return std::shared_ptr<int>(new int(1), [&fixture](int* value) {
@@ -732,151 +790,4 @@ SCENARIO("Dropping a grant never runs its context's destructor under the lock", 
         (void)fixture.url(1, "a", {.context = reentrant()});
         fixture.binding.shutdown();
     }
-}
-
-SCENARIO("A binding that was shut down grants nothing and holds nothing", "[read-binding]") {
-    Fixture fixture;
-    fixture.bind(1, true);
-    auto               held = std::make_shared<int>(3);
-    std::weak_ptr<int> watch = held;
-    const auto         url = fixture.url(1, "a", {.context = held});
-    held.reset();
-    REQUIRE_FALSE(watch.expired());
-    fixture.binding.shutdown();
-    REQUIRE(watch.expired());
-    REQUIRE_THROWS_AS(fixture.url(1, "b"), ReadRefused);
-    REQUIRE(call(fixture.read, url).status == http::Response::forbidden);
-}
-
-SCENARIO("The check of one exchange is not satisfied by the cookie of a concurrent one", "[read-binding]") {
-    Fixture fixture;
-    const auto first  = fixture.bind(1, true);
-    const auto second = fixture.bind(2, true);
-    const auto clientB = *header(second, "X-WebFront-Client");
-    const auto cookieA = cookiePair(headers(first, "Set-Cookie").front());
-    // The browser kept A's cookie and rejected B's: B must not be told it is bound.
-    REQUIRE(call(fixture.exchange, std::string(ReadBinding::bindPath) + "check/" + clientB, cookieA).status == http::Response::forbidden);
-}
-
-SCENARIO("The error of a failing secret route is not logged", "[read-binding]") {
-    testing::InjectableSocket::reset();
-    ReadNet::accepts = 0;
-    http::Server<ReadNet, MockFileSystem<NoFiles>> server("127.0.0.1", "0");
-    auto route = server.addRoute(std::string(readPrefix), [](const http::RouteRequest& request) -> http::RouteReply {
-        throw std::runtime_error("cannot open " + std::string(request.path));
-    }, true);
-    webfront::log::setLogLevel(webfront::log::Debug);
-    std::string logged;
-    std::mutex  loggedMutex;
-    const auto  sink = webfront::log::addSinks([&](std::string_view line) {
-        std::scoped_lock lock{loggedMutex};
-        logged += std::string(line) + "\n";
-    });
-    LogRestore restore_sink{[&] { webfront::log::removeSinks(sink); webfront::log::setLogLevel(webfront::log::Error); }};
-    const std::string      raw = "GET " + std::string(readPrefix) + "0123456789abcdef.TOKENSECRET/a.txt HTTP/1.1\r\nHost: localhost\r\n\r\n";
-    std::vector<std::byte> bytes;
-    for (const char c : raw)
-        bytes.push_back(static_cast<std::byte>(c));
-    testing::InjectableSocket::receive(bytes);
-    REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
-    restore_sink.run();
-    std::scoped_lock lock{loggedMutex};
-    REQUIRE(logged.contains("failed"));
-    REQUIRE_FALSE(logged.contains("TOKENSECRET"));
-    testing::InjectableSocket::reset();
-}
-
-SCENARIO("The answers the server writes for a read route are hardened too", "[read-binding]") {
-    for (const auto* method : {"GET", "POST"}) {
-        testing::InjectableSocket::reset();
-        ReadNet::accepts = 0;
-        http::Server<ReadNet, MockFileSystem<NoFiles>> server("127.0.0.1", "0");
-        auto route = server.addRoute(std::string(readPrefix), [](const http::RouteRequest&) -> http::RouteReply { throw std::runtime_error("boom"); }, true,
-                                     [](http::RouteReply& reply) { detail::hardenRead(reply, {}); });
-        const std::string      raw = std::string(method) + " " + std::string(readPrefix) + "0123456789abcdef.SECRET/a.txt HTTP/1.1\r\nHost: localhost\r\n\r\n";
-        std::vector<std::byte> bytes;
-        for (const char c : raw)
-            bytes.push_back(static_cast<std::byte>(c));
-        testing::InjectableSocket::receive(bytes);
-        REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
-        const auto response = testing::InjectableSocket::writtenText();
-        THEN(std::string(method) + " is refused with the hardening headers") {
-            REQUIRE(response.starts_with(std::string_view(method) == "GET" ? "HTTP/1.1 500" : "HTTP/1.1 405"));
-            REQUIRE(response.contains("Cache-Control: no-store\r\n"));
-            REQUIRE(response.contains("Referrer-Policy: no-referrer\r\n"));
-            REQUIRE(response.contains("Content-Security-Policy: sandbox; default-src 'none'\r\n"));
-            REQUIRE(response.contains("X-Content-Type-Options: nosniff\r\n"));
-        }
-        testing::InjectableSocket::reset();
-    }
-}
-
-namespace {
-
-/// A file provider whose failure quotes the path it was asked for.
-struct ThrowingFileSystem {
-    ThrowingFileSystem(std::filesystem::path) {}
-    std::optional<webfront::fs::File> open(std::filesystem::path file) { throw std::runtime_error("cannot open " + file.string()); }
-};
-
-}  // namespace
-
-SCENARIO("A file provider that fails on a services target does not log the token", "[read-binding]") {
-    testing::InjectableSocket::reset();
-    ReadNet::accepts = 0;
-    http::Server<ReadNet, ThrowingFileSystem> server("127.0.0.1", "0");
-    webfront::log::setLogLevel(webfront::log::Debug);
-    std::string logged;
-    std::mutex  loggedMutex;
-    const auto  sink = webfront::log::addSinks([&](std::string_view line) {
-        std::scoped_lock lock{loggedMutex};
-        logged += std::string(line) + "\n";
-    });
-    LogRestore restore_sink{[&] { webfront::log::removeSinks(sink); webfront::log::setLogLevel(webfront::log::Error); }};
-    // No route is registered: the target falls to the file providers, which throw.
-    const std::string      raw = "GET /webfront/services/files/0123456789abcdef.PROVIDERSECRET/a.txt HTTP/1.1\r\nHost: localhost\r\n\r\n";
-    std::vector<std::byte> bytes;
-    for (const char c : raw)
-        bytes.push_back(static_cast<std::byte>(c));
-    testing::InjectableSocket::receive(bytes);
-    REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
-    restore_sink.run();
-    std::scoped_lock lock{loggedMutex};
-    REQUIRE(logged.contains("failed"));
-    REQUIRE_FALSE(logged.contains("PROVIDERSECRET"));
-    testing::InjectableSocket::reset();
-}
-
-SCENARIO("A connection key opened twice starts over", "[read-binding]") {
-    Fixture fixture;
-    const auto stale  = fixture.binding.open(1, true);
-    const auto secret = fixture.binding.open(1, true);
-    REQUIRE(call(fixture.exchange, std::string(ReadBinding::bindPath) + stale).status == http::Response::forbidden);
-    REQUIRE(call(fixture.exchange, std::string(ReadBinding::bindPath) + secret).status == http::Response::ok);
-}
-
-SCENARIO("A secret route lives under the services space and the query of a request is never logged", "[read-binding]") {
-    testing::InjectableSocket::reset();
-    ReadNet::accepts = 0;
-    http::Server<ReadNet, MockFileSystem<NoFiles>> server("127.0.0.1", "0");
-    REQUIRE_THROWS_AS(server.addRoute("/files/", [](const http::RouteRequest&) { return http::RouteReply{}; }, true), std::invalid_argument);
-    webfront::log::setLogLevel(webfront::log::Debug);
-    std::string logged;
-    std::mutex  loggedMutex;
-    const auto  sink = webfront::log::addSinks([&](std::string_view line) {
-        std::scoped_lock lock{loggedMutex};
-        logged += std::string(line) + "\n";
-    });
-    LogRestore restore_sink{[&] { webfront::log::removeSinks(sink); webfront::log::setLogLevel(webfront::log::Error); }};
-    const std::string      raw = "GET /viewer?file=%2Fwebfront%2Fservices%2Ffiles%2FQUERYSECRET%2Fdoc HTTP/1.1\r\nHost: localhost\r\n\r\n";
-    std::vector<std::byte> bytes;
-    for (const char c : raw)
-        bytes.push_back(static_cast<std::byte>(c));
-    testing::InjectableSocket::receive(bytes);
-    REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
-    restore_sink.run();
-    std::scoped_lock lock{loggedMutex};
-    REQUIRE(logged.contains("Received request GET on /viewer"));
-    REQUIRE_FALSE(logged.contains("QUERYSECRET"));
-    testing::InjectableSocket::reset();
 }

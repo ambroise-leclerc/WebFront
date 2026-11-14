@@ -931,15 +931,54 @@ SCENARIO("macOS ACLs that let another user change a directory refuse the root or
 }
     #endif
 
-SCENARIO("A replaced file keeps its permission bits") {
+SCENARIO("A replaced file keeps the permission bits it has at the commit") {
     Sandbox           sandbox;
     fs::NativeStorage storage(sandbox.root);
-    writeDisk(sandbox.root / "private.txt", "old");
-    stdfs::permissions(sandbox.root / "private.txt", stdfs::perms::owner_read | stdfs::perms::owner_write, stdfs::perm_options::replace);
-    writeFile(storage, "private.txt", "new secret", fs::WriteMode::replace);
-    REQUIRE(readDisk(sandbox.root / "private.txt") == "new secret");
-    REQUIRE(stdfs::status(sandbox.root / "private.txt").permissions() == (stdfs::perms::owner_read | stdfs::perms::owner_write));
+    constexpr auto    privateBits = stdfs::perms::owner_read | stdfs::perms::owner_write;
+    GIVEN("a private file") {
+        writeDisk(sandbox.root / "private.txt", "old");
+        stdfs::permissions(sandbox.root / "private.txt", privateBits, stdfs::perm_options::replace);
+        writeFile(storage, "private.txt", "new secret", fs::WriteMode::replace);
+        THEN("its replacement is private too") {
+            REQUIRE(readDisk(sandbox.root / "private.txt") == "new secret");
+            REQUIRE(stdfs::status(sandbox.root / "private.txt").permissions() == privateBits);
+        }
+    }
+    GIVEN("a public file that the storage replaces by a private one while a write to it is open") {
+        writeDisk(sandbox.root / "doc.txt", "public");
+        stdfs::permissions(sandbox.root / "doc.txt", privateBits | stdfs::perms::group_read | stdfs::perms::others_read, stdfs::perm_options::replace);
+        auto writer = storage.beginWrite("doc.txt", fs::WriteMode::replace);
+        writer.write(span<const char>("new", 3));
+        writeDisk(sandbox.root / "private.txt", "private");
+        stdfs::permissions(sandbox.root / "private.txt", privateBits, stdfs::perm_options::replace);
+        storage.remove("doc.txt");
+        storage.rename("private.txt", "doc.txt");
+        writer.commit();
+        THEN("the commit takes the rights of the file it replaces at that moment") {
+            REQUIRE(readDisk(sandbox.root / "doc.txt") == "new");
+            REQUIRE(stdfs::status(sandbox.root / "doc.txt").permissions() == privateBits);
+        }
+    }
 }
+
+    #if !defined(__APPLE__)
+namespace {
+/// One entry of a POSIX ACL in its extended attribute form: tag, permissions and identifier, little-endian. Written directly
+/// so that the tests need no setfacl.
+string aclEntry(std::uint16_t tag, std::uint16_t permissions, std::uint32_t id) {
+    std::array<char, 8> bytes{};
+    for (int index = 0; index < 2; ++index) {
+        bytes[static_cast<size_t>(index)]     = static_cast<char>(tag >> (8 * index));
+        bytes[static_cast<size_t>(index + 2)] = static_cast<char>(permissions >> (8 * index));
+    }
+    for (int index = 0; index < 4; ++index)
+        bytes[static_cast<size_t>(index + 4)] = static_cast<char>(id >> (8 * index));
+    return string(bytes.data(), bytes.size());
+}
+constexpr std::uint32_t aclUndefined = 0xFFFFFFFF, aclNobody = 65534;
+const string            aclVersion("\x02\0\0\0", 4);
+}  // namespace
+    #endif
 
 SCENARIO("A replaced file keeps its access control list") {
     Sandbox           sandbox;
@@ -971,22 +1010,9 @@ SCENARIO("A replaced file keeps its access control list") {
         }
     }
     #else
-    // The POSIX access ACL in its extended attribute form (version 2, then tag, permissions and identifier per entry),
-    // written directly so that the test needs no setfacl: the owner reads and writes, the user nobody (65534) gets
-    // nothing, the group and the others read.
-    const auto entry = [](std::uint16_t tag, std::uint16_t permissions, std::uint32_t id) {
-        std::array<char, 8> bytes{};
-        for (int index = 0; index < 2; ++index) {
-            bytes[static_cast<size_t>(index)]     = static_cast<char>(tag >> (8 * index));
-            bytes[static_cast<size_t>(index + 2)] = static_cast<char>(permissions >> (8 * index));
-        }
-        for (int index = 0; index < 4; ++index)
-            bytes[static_cast<size_t>(index + 4)] = static_cast<char>(id >> (8 * index));
-        return string(bytes.data(), bytes.size());
-    };
-    constexpr std::uint32_t undefined = 0xFFFFFFFF, nobody = 65534;
-    const string acl = string("\x02\0\0\0", 4) + entry(0x01, 6, undefined) + entry(0x02, 0, nobody) + entry(0x04, 4, undefined) + entry(0x10, 4, undefined)
-                       + entry(0x20, 4, undefined);
+    // The POSIX access ACL: the owner reads and writes, the user nobody gets nothing, the group and the others read.
+    const string acl = aclVersion + aclEntry(0x01, 6, aclUndefined) + aclEntry(0x02, 0, aclNobody) + aclEntry(0x04, 4, aclUndefined)
+                       + aclEntry(0x10, 4, aclUndefined) + aclEntry(0x20, 4, aclUndefined);
     const char*  key = "system.posix_acl_access";
     if (::setxattr(file.c_str(), key, acl.data(), acl.size(), 0) != 0)
         SKIP("This file system has no POSIX ACL");
@@ -996,7 +1022,7 @@ SCENARIO("A replaced file keeps its access control list") {
     const auto size = ::getxattr(file.c_str(), key, kept.data(), kept.size());
     REQUIRE(size > 0);
     kept.resize(static_cast<size_t>(size));
-    REQUIRE(kept.find(entry(0x02, 0, nobody)) != string::npos);
+    REQUIRE(kept.find(aclEntry(0x02, 0, aclNobody)) != string::npos);
     #endif
 }
 
@@ -1012,20 +1038,9 @@ SCENARIO("A replaced file without an ACL gets none from its directory") {
     writeFile(storage, "plain.txt", "new secret", fs::WriteMode::replace);
     REQUIRE(std::system(("ls -le '" + file.string() + "' | grep -q nobody").c_str()) != 0);
     #else
-    // A default ACL of the directory that lets the user nobody (65534) read new files.
-    const auto entry = [](std::uint16_t tag, std::uint16_t permissions, std::uint32_t id) {
-        std::array<char, 8> bytes{};
-        for (int index = 0; index < 2; ++index) {
-            bytes[static_cast<size_t>(index)]     = static_cast<char>(tag >> (8 * index));
-            bytes[static_cast<size_t>(index + 2)] = static_cast<char>(permissions >> (8 * index));
-        }
-        for (int index = 0; index < 4; ++index)
-            bytes[static_cast<size_t>(index + 4)] = static_cast<char>(id >> (8 * index));
-        return string(bytes.data(), bytes.size());
-    };
-    constexpr std::uint32_t undefined = 0xFFFFFFFF;
-    const string defaults = string("\x02\0\0\0", 4) + entry(0x01, 7, undefined) + entry(0x02, 4, 65534) + entry(0x04, 5, undefined) + entry(0x10, 5, undefined)
-                            + entry(0x20, 5, undefined);
+    // A default ACL of the directory that lets the user nobody read new files.
+    const string defaults = aclVersion + aclEntry(0x01, 7, aclUndefined) + aclEntry(0x02, 4, aclNobody) + aclEntry(0x04, 5, aclUndefined)
+                            + aclEntry(0x10, 5, aclUndefined) + aclEntry(0x20, 5, aclUndefined);
     if (::setxattr(sandbox.root.c_str(), "system.posix_acl_default", defaults.data(), defaults.size(), 0) != 0)
         SKIP("This file system has no POSIX ACL");
     writeFile(storage, "plain.txt", "new secret", fs::WriteMode::replace);
@@ -1033,25 +1048,6 @@ SCENARIO("A replaced file without an ACL gets none from its directory") {
     #endif
     REQUIRE(readDisk(file) == "new secret");
     REQUIRE(stdfs::status(file).permissions() == (stdfs::perms::owner_read | stdfs::perms::owner_write | stdfs::perms::group_read));
-}
-
-SCENARIO("A commit takes the rights of the file it replaces at that moment") {
-    Sandbox           sandbox;
-    fs::NativeStorage storage(sandbox.root);
-    writeDisk(sandbox.root / "doc.txt", "public");
-    stdfs::permissions(sandbox.root / "doc.txt",
-                       stdfs::perms::owner_read | stdfs::perms::owner_write | stdfs::perms::group_read | stdfs::perms::others_read,
-                       stdfs::perm_options::replace);
-    auto writer = storage.beginWrite("doc.txt", fs::WriteMode::replace);
-    writer.write(span<const char>("new", 3));
-    // Meanwhile the storage itself puts a private file under that name.
-    writeDisk(sandbox.root / "private.txt", "private");
-    stdfs::permissions(sandbox.root / "private.txt", stdfs::perms::owner_read | stdfs::perms::owner_write, stdfs::perm_options::replace);
-    storage.remove("doc.txt");
-    storage.rename("private.txt", "doc.txt");
-    writer.commit();
-    REQUIRE(readDisk(sandbox.root / "doc.txt") == "new");
-    REQUIRE(stdfs::status(sandbox.root / "doc.txt").permissions() == (stdfs::perms::owner_read | stdfs::perms::owner_write));
 }
 
 SCENARIO("Running out of descriptors does not mark the root as moved") {
