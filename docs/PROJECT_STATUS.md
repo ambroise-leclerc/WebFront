@@ -72,16 +72,17 @@ asset freshness checks and, with an enabled engine, real-browser Jasmine and lif
 its generated provider from an empty directory. Configured tests need no public network.
 
 [Tiers](TEST_TIERS.md) defines the desktop and extended CI scope, including the GCC 13 Linux aarch64 job (#548).
-[Test execution and profiling](TEST_PERFORMANCE.md) documents session isolation, fixture locks,
-resource limits and complete-suite repetition. Sessions retain individual CTest assertions;
-independent driver processes use OS-assigned loopback ports. Manual transport measurements
+[Test execution and profiling](TEST_PERFORMANCE.md) documents fixture locks, complete-suite repetition, the intermittent
+failures of the last runs and why shared browser sessions were retired (#570); each wf command is a driver process
+on an OS-assigned loopback port. Manual transport measurements
 remain separate from the short native transport contract tests.
 
 The [#542 investigation](validation/ci-flakes-542.md) reproduces and fixes Windows developer publication held open by
 an HTTP reader and concurrent fallback logger delivery. Its qualification passes 20 selected browser graphs on each
 native engine and 1,000 repetitions of each Linux closure case. The historical Linux internal stall was not reproduced;
-the report distinguishes that evidence from proven causes. The Windows early-close COM lifetime failure remains in
-[#564](https://github.com/ambroise-leclerc/WebFront/issues/564), and still makes the complete Windows qualification red.
+the report distinguishes that evidence from proven causes. The Windows early-close COM failure
+([#564](https://github.com/ambroise-leclerc/WebFront/issues/564)) is reproduced and attributed to the runtime
+([measurements](TEST_PERFORMANCE.md#the-webview2-early-close-failure-564)); its limit is listed below.
 The [diagnostic workflow](TEST_PERFORMANCE.md#investigating-intermittent-failures) preserves failed attempts and HTTP
 transcripts without automatic retries.
 
@@ -133,6 +134,10 @@ are retained for investigation; diagnostics alone do not establish a correction.
   require macOS 14+ and a WindowServer session. Automated CEF coverage is Linux/Xvfb;
   Windows/macOS CEF deployment is not qualified. WebView2 needs its installed Evergreen runtime;
   fixed-version runtime packaging, application installers and accessibility remain application work.
+- `WebView2Frontend::open()` releases the STA it initialized. When a window is closed while the runtime is still
+  starting and the same thread then opens another one, the WebView2 runtime (observed with 157.0.4341.46) can keep one
+  COM initialization of its own: the thread then remains in its STA after `open()` returns (#564). A window that ran to
+  its end leaves none.
 - The low-level DOM batch command and optional embedded interpreter are implemented; see
   [the wire contract](adr/ADR-003-protocole-binaire-et-bornes.md#commande-dom-dombatch-code-5-version-1).
   The per-connection document/node API, events (callbacks or `co_await node.next(name)`) and grouped

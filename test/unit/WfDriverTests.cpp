@@ -99,30 +99,10 @@ SCENARIO("A single-command watchdog has a separate budget after bootstrap") {
     GIVEN("invalid or ambiguous limits") {
         REQUIRE_THROWS_AS(parseDriver({"--command-timeout", "0", "list"}), webfront::testdriver::UsageError);
         REQUIRE_THROWS_AS(parseDriver({"--command-timeout", "bad", "list"}), webfront::testdriver::UsageError);
-        REQUIRE_THROWS_AS(parseDriver({"--command-timeout", "4", "--suite", "cases.json", "--report-dir", "reports"}), webfront::testdriver::UsageError);
     }
 }
 
-SCENARIO("Driver suites validate names, commands and filters before opening a browser") {
-    using namespace webfront::testdriver;
-    const auto source = R"([{"name":"install","command":["install","a b"]},{"name":"failure","expect":"1","command":["nosuchcommand"]}])";
-    const auto cases  = parseSuite(source);
-    REQUIRE(cases.size() == 2);
-    REQUIRE(cases[0].command == std::vector<std::string>{"install", "a b"});
-    REQUIRE(cases[1].expected == 1);
-    REQUIRE(parseSuite(source, "fail").front().name == "failure");
-    REQUIRE_THROWS(parseSuite(source, "absent"));
-    for (const auto invalid : {"[]",
-                               R"([{"name":"../escape","command":["list"]}])",
-                               R"([{"name":"x","command":[]}])",
-                               R"([{"name":"x","command":["list"],"expect":"-1"}])",
-                               R"([{"name":"x","command":["list"]},{"name":"x","command":["list"]}])",
-                               R"([{"name":"x","command":["list"],"extra":true}])",
-                               "[] trailing"})
-        REQUIRE_THROWS(parseSuite(invalid));
-}
-
-SCENARIO("Suite watchdogs keep a native per-case limit inside the overall budget") {
+SCENARIO("The driver watchdog keeps a native command limit inside the overall budget") {
     using namespace std::chrono_literals;
     using webfront::testdriver::DriverDeadline;
     DriverDeadline deadline{1h};
@@ -142,7 +122,7 @@ SCENARIO("Suite watchdogs keep a native per-case limit inside the overall budget
             fallback.request_stop();
     });
     REQUIRE(deadline.expired(fallback.get_token()));
-    // Starting a command never extends an already expiring overall startup/session limit.
+    // Starting a command never extends an already expiring overall limit.
     DriverDeadline overall{1ms};
     overall.beginCase(1h);
     REQUIRE(overall.expired(fallback.get_token()));
@@ -151,6 +131,4 @@ SCENARIO("Suite watchdogs keep a native per-case limit inside the overall budget
     std::stop_source cancelled;
     cancelled.request_stop();
     REQUIRE_FALSE(deadline.expired(cancelled.get_token()));
-    REQUIRE(webfront::testdriver::parseSuite(R"([{"name":"x","command":["list"],"timeout":"17"}])").front().timeout == 17s);
-    REQUIRE_THROWS(webfront::testdriver::parseSuite(R"([{"name":"x","command":["list"],"timeout":"0"}])"));
 }

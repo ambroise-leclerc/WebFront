@@ -6,7 +6,7 @@ to the standard tier.
 | Tier | Label | Content | When it runs |
 | --- | --- | --- | --- |
 | Fast | `fast` | Catch2 unit tests and the Python tool tests; no browser, no nested build | Locally on demand, and as the first test step of every Linux/Windows/macOS desktop job |
-| Standard | none, or `web-integration` | Everything but the portability tests: unit tests, real-browser integration, `wf` sessions, embedded builds | Every pull request and every push to `develop` or `master` |
+| Standard | none, or `web-integration` | Everything but the portability tests: unit tests, real-browser integration, `wf` commands, embedded builds | Every pull request and every push to `develop` or `master` |
 | Portability | `portability` | The library consumed from another project: `AddSubdirectoryConsumer` | Weekly, and on every pull request into `master` |
 
 ```sh
@@ -40,10 +40,8 @@ ctest --test-dir build -R DeveloperBrowserIntegration -V        # CTest prints t
 ctest --test-dir build -R DeveloperBrowserIntegration -N -V     # prints the command to run `developer_integration` directly
 ```
 
-`DeveloperBrowserSession` displays all six parts in one visible native window, with a fresh page, project and origin per
-part. `DeveloperBrowserIntegration*` keep their original names and check its independent reports. Run
-`developer_integration <fixtures> <output> --session` directly to follow the shared window. Configure
-`-DWEBFRONT_TEST_SESSIONS=OFF` to compare the separate-process path.
+Each part is a process with its own project, origin and visible window; CTest runs them side by side
+(docs/TEST_PERFORMANCE.md records why the shared window of #556 was retired).
 
 Run `developer_integration` with a fixtures directory and an output directory but no `--part=` for the older mode in
 which all parts share one project; `--part=app|scripts|typescript|jasmine|terminal|workspace` plays one in its own visible window.
