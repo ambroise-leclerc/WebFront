@@ -55,7 +55,9 @@ function(provision name result_var output_var)
             -DWEBFRONT_DOWNLOAD_RETRY_DELAY=0 -P "${WORK}/run.cmake"
         RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err)
     set(${result_var} "${result}" PARENT_SCOPE)
-    set(${output_var} "${out}${err}" PARENT_SCOPE)
+    # CMake wraps a long message wherever its paths make it long: the checks read it on one line.
+    string(REGEX REPLACE "[ \t\r\n]+" " " text "${out}${err}")
+    set(${output_var} "${text}" PARENT_SCOPE)
 endfunction()
 
 # A file URL: a Windows drive letter needs a third slash.
@@ -143,6 +145,58 @@ provision(localMissing result text URL "https://offline.invalid/environment.tgz"
 if(result EQUAL 0 OR NOT text MATCHES "is missing")
     message(FATAL_ERROR "An absent local archive must fail the configure: ${result} ${text}")
 endif()
+
+# A cache that exists but refuses files (a shared, read-only one): a verified entry still serves, and a download falls back
+# to the build tree with a warning instead of stopping the configure. Only POSIX permissions can make it so, and a process
+# that writes through them (root) cannot test it.
+if(NOT CMAKE_HOST_WIN32)
+    file(WRITE "${WORK}/source/environment.tgz" "${content}")
+    set(readonly "${WORK}/readonly")
+    file(REMOVE_RECURSE "${readonly}")
+    file(MAKE_DIRECTORY "${readonly}/${key}")
+    file(CHMOD "${readonly}" "${readonly}/${key}" DIRECTORY_PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
+        WORLD_READ WORLD_EXECUTE)
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E touch "${readonly}/${key}/probe" RESULT_VARIABLE writable OUTPUT_QUIET ERROR_QUIET)
+    if(writable EQUAL 0)
+        file(REMOVE "${readonly}/${key}/probe")
+        message(STATUS "This process writes into read-only directories: the read-only cache cases are skipped")
+    else()
+        provision(readonlyEmpty result text URL "${url}" INTEGRITY "${sri}" DESTINATION "${WORK}/tree-e" CACHE "${readonly}")
+        expect_equal("${result}" 0 "A read-only cache must not stop the configure: ${text}")
+        if(NOT text MATCHES "cannot be written")
+            message(FATAL_ERROR "A read-only cache must be reported: ${text}")
+        endif()
+        file(SHA512 "${WORK}/tree-e/environment.tgz" digest)
+        expect_equal("${digest}" "${hex}" "The archive kept in the build tree beside a read-only cache")
+        file(CHMOD "${readonly}/${key}" DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+        file(COPY_FILE "${WORK}/source/environment.tgz" "${readonly}/${key}/environment.tgz")
+        file(CHMOD "${readonly}/${key}" DIRECTORY_PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+        file(REMOVE "${WORK}/source/environment.tgz")
+        provision(readonlyEntry result text URL "${url}" INTEGRITY "${sri}" DESTINATION "${WORK}/tree-f" CACHE "${readonly}")
+        expect_equal("${result}" 0 "A verified entry of a read-only cache must serve without the source: ${text}")
+        file(SHA512 "${WORK}/tree-f/environment.tgz" digest)
+        expect_equal("${digest}" "${hex}" "The archive linked from a read-only cache")
+    endif()
+    file(CHMOD "${readonly}" "${readonly}/${key}" DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+endif()
+
+# The test registry keeps the verified archives already in the build tree: its offline directory need not stay mounted.
+file(MAKE_DIRECTORY "${WORK}/offline")
+file(WRITE "${WORK}/offline/environment.tgz" "${content}")
+file(WRITE "${WORK}/packages.json" "{\"packages\": [{\"name\": \"environment\", \"url\": \"https://offline.invalid/environment.tgz\", \"integrity\": \"${sri}\"}]}")
+file(WRITE "${WORK}/registry.cmake" [[
+list(APPEND CMAKE_MODULE_PATH "${ROOT}/cmake")
+include("${ROOT}/cmake/WebFrontRegistry.cmake")
+webfront_provision_registry(directory "${WORK}/packages.json" "${WORK}/registry-tree")
+message(STATUS "provisioned ${directory}")
+]])
+foreach(round mounted unmounted)
+    execute_process(COMMAND "${CMAKE_COMMAND}" -DROOT=${ROOT} -DWORK=${WORK} -DWEBFRONT_REGISTRY_DIR=${WORK}/offline
+            -DWEBFRONT_DOWNLOAD_CACHE= -P "${WORK}/registry.cmake"
+        RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err)
+    expect_equal("${result}" 0 "The ${round} offline registry directory must provision the build tree: ${out}${err}")
+    file(REMOVE_RECURSE "${WORK}/offline")
+endforeach()
 
 # A malformed integrity is refused before anything is downloaded.
 provision(malformed result text URL "${url}" INTEGRITY "sha256-abc")
