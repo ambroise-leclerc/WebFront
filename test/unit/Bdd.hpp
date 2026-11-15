@@ -113,6 +113,21 @@ inline Equals equals(std::string text) {
 
 namespace impl {
 
+/// A number written by snprintf, with '.' as its decimal separator whatever the C locale a test may have changed.
+inline std::string withPoint(std::string number) {
+    std::string_view point = std::localeconv()->decimal_point;
+    if (auto position = number.find(point); !point.empty() && point != "." && position != std::string::npos)
+        number.replace(position, point.size(), ".");
+    return number;
+}
+
+/// A duration in seconds as JUnit readers expect it: a decimal number, never in scientific notation.
+inline std::string seconds(double value) {
+    char buffer[64];
+    auto length = std::snprintf(buffer, sizeof buffer, "%.6f", value);
+    return withPoint({buffer, length > 0 ? static_cast<std::size_t>(length) : 0});
+}
+
 /// Appends the text of a value: a string, a character, a boolean, a number or an enumeration.
 template <typename T>
 void append(std::string& text, const T& value) {
@@ -127,12 +142,7 @@ void append(std::string& text, const T& value) {
     else if constexpr (std::is_floating_point_v<T>) {
         char buffer[64];
         auto length = std::snprintf(buffer, sizeof buffer, "%.17g", static_cast<double>(value));
-        // snprintf writes the decimal point of the C locale a test may have changed.
-        std::string      number(buffer, length > 0 ? static_cast<std::size_t>(length) : 0);
-        std::string_view point = std::localeconv()->decimal_point;
-        if (auto position = number.find(point); !point.empty() && point != "." && position != std::string::npos)
-            number.replace(position, point.size(), ".");
-        text += number;
+        text       += withPoint({buffer, length > 0 ? static_cast<std::size_t>(length) : 0});
     } else if constexpr (std::is_integral_v<T>) {
         char buffer[64];
         auto [end, error] = std::to_chars(buffer, buffer + sizeof buffer, value);
@@ -842,7 +852,7 @@ inline std::string xmlEscape(std::string_view text) {
     return escaped;
 }
 
-inline bool writeJUnit(std::string_view path, const std::vector<Result>& results, double seconds) {
+inline bool writeJUnit(std::string_view path, const std::vector<Result>& results, double total) {
     std::size_t failed = 0, skipped = 0;
     for (const auto& result : results) {
         failed  += result.outcome == Outcome::failed;
@@ -855,10 +865,10 @@ inline bool writeJUnit(std::string_view path, const std::vector<Result>& results
                       "\" errors=\"0\" skipped=\"",
                       skipped,
                       "\" time=\"",
-                      seconds,
+                      seconds(total),
                       "\">\n");
     for (const auto& result : results) {
-        xml += concat("    <testcase classname=\"tests\" name=\"Scenario: ", xmlEscape(result.entry->title), "\" time=\"", result.seconds, '"');
+        xml += concat("    <testcase classname=\"tests\" name=\"Scenario: ", xmlEscape(result.entry->title), "\" time=\"", seconds(result.seconds), '"');
         if (result.outcome == Outcome::passed)
             xml += "/>\n";
         else if (result.outcome == Outcome::failed)
@@ -1022,7 +1032,7 @@ inline int run(int argc, char** argv) {
     auto start = now();
     for (const auto* entry : selection)
         results.push_back(runScenario(*entry));
-    auto seconds = now() - start;
+    auto elapsed = now() - start;
 
     std::size_t failed = 0, skipped = 0;
     for (const auto& result : results) {
@@ -1041,7 +1051,7 @@ inline int run(int argc, char** argv) {
                  " failed, ",
                  skipped,
                  " skipped)\n"));
-    if (!options.junit.empty() && !writeJUnit(options.junit, results, seconds)) {
+    if (!options.junit.empty() && !writeJUnit(options.junit, results, elapsed)) {
         std::fprintf(stderr, "Cannot write %s\n", std::string{options.junit}.c_str());
         return 1;
     }

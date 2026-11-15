@@ -21,7 +21,14 @@ add_executable(bdd_self_test BddSelfTest.cpp)
 target_link_libraries(bdd_self_test PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options)
 target_compile_features(bdd_self_test PRIVATE cxx_std_23)
 add_test(NAME BddSelfTest COMMAND bdd_self_test)
-set_tests_properties(BddSelfTest PROPERTIES TIMEOUT 30 LABELS fast)
+# CTest registers one case per scenario whatever brackets or semicolons its title holds.
+add_executable(bdd_discovery_probe Main.cpp BddDiscoveryProbe.cpp)
+target_link_libraries(bdd_discovery_probe PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options)
+target_compile_features(bdd_discovery_probe PRIVATE cxx_std_23)
+add_test(NAME BddDiscovery COMMAND ${CMAKE_COMMAND} -DPROBE=$<TARGET_FILE:bdd_discovery_probe>
+    -DSCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/BddDiscoverTests.cmake -DWORK=${CMAKE_CURRENT_BINARY_DIR}/bdd-discovery
+    -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckBddDiscovery.cmake)
+set_tests_properties(BddSelfTest BddDiscovery PROPERTIES TIMEOUT 30 LABELS fast)
 
 set(TESTS_LIST)
 list(APPEND TESTS_LIST WebKitGTKPolicyTests.cpp ContentPolicyTests.cpp HTTPServerTests.cpp HTTPEncodingTests.cpp GzipExecutorTests.cpp AcceptEncodingTests.cpp GzipTests.cpp ModuleHTTPServerTests.cpp HTTPRoutesTests.cpp HTTPRangeTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp MimeTypeTests.cpp)

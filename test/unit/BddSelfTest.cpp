@@ -247,6 +247,16 @@ int main() {
         ++failures;
         std::cerr << "MISMATCH: the JUnit report does not escape a NUL\n";
     }
+    // Durations are decimal numbers with six digits after the point, never in scientific notation.
+    for (auto position = xml.find("time=\""); position != std::string::npos; position = xml.find("time=\"", position + 1)) {
+        auto start = position + 6, end = xml.find('"', start);
+        auto value = xml.substr(start, end - start);
+        auto point = value.find('.');
+        if (point == std::string::npos || point == 0 || value.size() - point != 7 || value.find_first_not_of("0123456789.") != std::string::npos) {
+            ++failures;
+            std::cerr << "MISMATCH: the JUnit duration " << value << " is not a fixed-point number\n";
+        }
+    }
     file.close();
     std::remove(report.c_str());
 
