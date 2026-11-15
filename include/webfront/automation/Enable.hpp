@@ -32,9 +32,10 @@
 
 namespace webfront::automation {
 /// `from + after`, saturated: a very large duration (`seconds::max()` to disable a delay) must not overflow the clock's tick
-/// count, which is undefined behavior and would yield a deadline already past. The comparison is made in whole seconds, which
-/// cannot overflow for any clock origin (negative included), and keeps a one-second margin for the truncation, so the sum is
-/// only computed when it is representable. A zero or negative duration returns `from`.
+/// count, which is undefined behavior and would yield a deadline already past. Nothing is computed that can overflow: the room
+/// left before `time_point::max()` is measured in whole seconds (never more than twice the clock's range, whatever the origin,
+/// negative included), `after` is compared to it without being incremented, and the sum is made in two steps when `after`
+/// alone exceeds the clock's tick range while the deadline stays representable. A zero or negative duration returns `from`.
 template <typename Duration>
 [[nodiscard]] constexpr std::chrono::steady_clock::time_point deadlineAfter(std::chrono::steady_clock::time_point from, Duration after) noexcept {
     using Clock = std::chrono::steady_clock;
@@ -42,10 +43,18 @@ template <typename Duration>
     using std::chrono::seconds;
     if (after <= Duration::zero())
         return from;
-    const auto room = duration_cast<seconds>(Clock::time_point::max().time_since_epoch()) - duration_cast<seconds>(from.time_since_epoch());
-    if (duration_cast<seconds>(after) + seconds{1} >= room)
+    const auto capacity = duration_cast<seconds>(Clock::time_point::max().time_since_epoch());
+    const auto room     = capacity - duration_cast<seconds>(from.time_since_epoch());
+    const auto whole    = duration_cast<seconds>(after);
+    // One second of margin for the truncations; `room - 1` cannot overflow, `room` being at least 1.
+    if (whole >= room - seconds{1})
         return Clock::time_point::max();
-    return from + after;
+    if (whole < capacity)
+        return from + after;  // `after` converts to ticks: it is below the clock's range
+    // `after` exceeds the range of the ticks but the deadline does not: `from` is negative, so a first step of the largest
+    // whole number of `Duration` the clock can hold stays representable, then the rest.
+    const auto step = duration_cast<Duration>(Clock::duration::max());
+    return from + duration_cast<Clock::duration>(step) + (after - step);
 }
 
 /// The end of the startup window, saturated (see `deadlineAfter`).

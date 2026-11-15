@@ -547,6 +547,16 @@ const Scenario startupDeadlineSaturates{"A delay too large for the clock never e
             check(deadlineAfter(negative, milliseconds::max()) == limit);
         });
     });
+    given("a delay beyond the clock's tick range from an origin that makes the deadline representable", [&] {
+        then("the deadline is exact instead of overflowing in the conversion", [&] {
+            if constexpr (std::is_same_v<steady_clock::duration, nanoseconds> && sizeof(steady_clock::rep) == 8) {
+                const auto from = steady_clock::time_point::min();
+                // min() + 1e10 s = -9223372036854775808 + 1e19 ticks
+                check(deadlineAfter(from, seconds{10'000'000'000}) == steady_clock::time_point{nanoseconds{776'627'963'145'224'192LL}});
+                check(deadlineAfter(from, milliseconds{10'000'000'000'000}) == steady_clock::time_point{nanoseconds{776'627'963'145'224'192LL}});
+            }
+        });
+    });
 }};
 
 const Scenario unboundedDelaysKeepTheSession{"Unbounded startup and grace options neither revoke the session nor end the window", [] {
