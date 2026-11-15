@@ -17,6 +17,10 @@ on:
         description: 'Also run the CEF linuxarm64 browser integration (GCC 13)'
         type: boolean
         default: false
+      webkitgtk_arm64:
+        description: 'Also run the WebKitGTK aarch64 browser integration (GCC 13)'
+        type: boolean
+        default: false
       repeat_desktop_tests:
         description: 'Also run the desktop matrix, repeating the complete CTest suite desktop_passes times'
         type: boolean
@@ -471,6 +475,65 @@ jobs:
           path: |
             build-cef/test-results.xml
             build-cef/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+
+  # WebKitGTK 6.0 on Linux aarch64 (#524): the system WebKitGTK of Ubuntu 24.04 with GCC 13 and Xvfb, running the same
+  # web-integration suite as the CEF job through the WebKitGTK frontend. Weekly and on demand with webkitgtk_arm64, not on
+  # pull requests, like the CEF job; the sandbox opt-out is confined to this test step and its trusted fixtures.
+  webkitgtk-arm64:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.webkitgtk_arm64)
+    timeout-minutes: 60
+    runs-on: ubuntu-24.04-arm
+    env:
+      CC: gcc-13
+      CXX: g++-13
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v4
+        with:
+          path: .cache/CPM
+          key: cpm-extended-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
+          restore-keys: cpm-extended-${{ runner.os }}-${{ runner.arch }}-
+      - uses: actions/cache@v4
+        with:
+          path: |
+            build-webkitgtk/bootstrap
+            build-webkitgtk/registry-archives
+          key: inputs-webkitgtk-arm64-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/WebFrontBootstrap.cmake', 'test/web/registry-packages.json') }}
+      - uses: ./.github/actions/remove-node
+      - uses: ./.github/actions/setup-cmake
+        with:
+          version: '4.4.4'
+      - name: Install GCC 13, WebKitGTK and Xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-13 ninja-build xvfb libwebkitgtk-6.0-dev
+      - name: Verify the compiler
+        run: |
+          test "$(uname -m)" = aarch64
+          case "$(g++-13 -dumpfullversion)" in 13.*) ;; *) echo "::error::Expected GCC 13, got $(g++-13 -dumpfullversion)"; exit 1 ;; esac
+          pkg-config --modversion webkitgtk-6.0
+      - name: Configure WebKitGTK integration build
+        run: >-
+          cmake -S . -B build-webkitgtk -G Ninja -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=ON
+          -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK -DWEBFRONT_BUILD_EXAMPLES=OFF -DWEBFRONT_ENABLE_TESTING=ON
+          -DWARNINGS_AS_ERRORS=OFF -DENABLE_CACHE=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+      - name: Build browser test
+        run: cmake --build build-webkitgtk --target webtest developer_integration webfront-wf --parallel 4
+      - name: Run Jasmine bridge test
+        env:
+          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'
+        run: >-
+          ctest --test-dir build-webkitgtk -L web-integration --output-on-failure --no-tests=error --parallel 2
+          --output-junit "${{ github.workspace }}/build-webkitgtk/test-results.xml"
+      - name: Retain test timings and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log-webkitgtk-arm64
+          path: |
+            build-webkitgtk/test-results.xml
+            build-webkitgtk/Testing/Temporary/LastTest.log
           if-no-files-found: ignore
 
   sanitizers:

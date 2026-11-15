@@ -127,6 +127,7 @@ dispatch with `repeat_desktop_tests`:
   the tests with warnings that are not errors (libstdc++ 13 reports false `-Wnull-dereference` positives, #526), then running
   the fast tier, then rebuilding the tests under GCC 13 ASan/UBSan and repeating the fast tier (#525, S2 support). It has no browser frontend. A compile error or a failing fast test under GCC 13 on aarch64 turns it red;
 - the `cef-arm64` job (#524): the `web-integration` suite under CEF `linuxarm64` (GCC 13, Xvfb) on `ubuntu-24.04-arm`, weekly and on demand with `cef_arm64=true`, not on pull requests; it fails if the CEF library is not aarch64;
+- the `webkitgtk-arm64` job (#524): the same suite through the WebKitGTK 6.0 frontend of Ubuntu 24.04 (GCC 13, Xvfb) on `ubuntu-24.04-arm`, weekly and on demand with `webkitgtk_arm64=true`, not on pull requests;
 - the address/undefined and thread sanitizers, the five fuzzers, and the GCC and Clang CEF browser integration.
 
 Manual dispatch with `gcc13_arm64=true` adds the GCC 13 ARM64 job and its sanitizer pass
@@ -136,7 +137,9 @@ to the extended checks without enabling the repeated desktop matrix. For example
 gh workflow run BuildAndTest.yml --ref <branch> -f gcc13_arm64=true
 ```
 
-`cef_arm64=true` likewise runs only the CEF `linuxarm64` browser integration.
+`cef_arm64=true` and `webkitgtk_arm64=true` likewise run only the CEF `linuxarm64` or the WebKitGTK aarch64 browser integration. The two aarch64 browser jobs and `gcc13-arm64` share the `cpm-extended-Linux-ARM64-*` key, so whichever finishes first saves it; the bootstrap and registry archives have a key per job. None of them uses a compiler cache (`ENABLE_CACHE=OFF`).
+
+Measured on hosted `ubuntu-24.04-arm` runners with cold caches (run 43745895208): `gcc13-arm64` 25 min (fast tier 9 s, 551 cases, then ASan/UBSan 43 s), `cef-arm64` 9 min (101 cases, 169 s of tests) and `webkitgtk-arm64` 7 min (113 cases, 221 s of tests). A second run (43748323731) restored the CPM, bootstrap and registry caches on both browser jobs (8 and 7 min): the time is the compilation, not the downloads.
 
 The portability matrix does not vary the CMake version: `setup-cmake` pins the SHA-256 of each archive it installs, so
 another version needs its checksum added first.
