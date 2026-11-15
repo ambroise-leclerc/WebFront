@@ -665,7 +665,8 @@ struct Condition {
 inline constexpr std::chrono::milliseconds defaultTimeout{30000};
 
 /// The factor of WEBFRONT_TEST_TIMEOUT_FACTOR: a slow job (sanitizers, emulation) lengthens every wait. It is a decimal
-/// number such as 2 or 2.5, the grammar test/unit/CMakeLists.txt reads too; anything else, or zero, is ignored.
+/// number such as 2 or 2.5 of at most six digits before the point, which test/unit/CMakeLists.txt reads the same way to
+/// size the CTest limits; anything else, or zero, is ignored.
 inline double parseFactor(const char* text) {
     if (!text || !*text)
         return 1.0;
@@ -736,9 +737,15 @@ inline bool eventually(Condition condition, std::chrono::milliseconds limit, con
 template <typename Future>
 concept Waitable = requires(const Future& future) { future.wait_for(std::chrono::milliseconds{0}); };
 
-/// Whether a future is ready, at once; a deferred one never becomes ready by waiting.
+/// Whether a future is ready, at once; a deferred one never becomes ready by waiting. A future without a shared state (not
+/// assigned, or already consumed) is reported as `invalid`: waiting on it is undefined.
 template <typename Future>
-bool readyNow(const Future& future, bool& deferred) {
+bool readyNow(const Future& future, bool& deferred, bool& invalid) {
+    if constexpr (requires { future.valid(); }) {
+        invalid = !future.valid();
+        if (invalid)
+            return false;
+    }
     using Status = decltype(future.wait_for(std::chrono::milliseconds{0}));
     auto status  = future.wait_for(std::chrono::milliseconds{0});
     if constexpr (requires { Status::deferred; })
@@ -787,15 +794,17 @@ bool waitUntil(P&& predicate, std::chrono::milliseconds limit = impl::defaultTim
 /// becomes ready when it is waited on, fails at once.
 template <impl::Waitable Future>
 bool checkReady(const Future& future, std::chrono::milliseconds limit, std::source_location location = std::source_location::current()) {
-    bool deferred = false;
-    if (!impl::readyNow(future, deferred) && deferred) {
+    bool deferred = false, invalid = false;
+    if (!impl::readyNow(future, deferred, invalid) && (deferred || invalid)) {
         impl::count();
-        impl::reportFailure(location, "the future is deferred: it is never ready until it is waited on");
+        impl::reportFailure(location,
+                            invalid ? "the future has no shared state: it was consumed or never assigned"
+                                    : "the future is deferred: it is never ready until it is waited on");
         return false;
     }
     return checkEventually(
         [&] {
-            return impl::readyNow(future, deferred);
+            return impl::readyNow(future, deferred, invalid);
         },
         limit,
         location);
@@ -813,13 +822,16 @@ template <impl::Waitable Future>
 void requireReady(const Future& future, std::source_location location = std::source_location::current()) {
     requireReady(future, impl::defaultTimeout, location);
 }
-/// Waits for a future like waitUntil(), without recording anything.
+/// Waits for a future like waitUntil(), without recording anything. A deferred future or one without a shared state returns
+/// false at once.
 template <impl::Waitable Future>
 bool waitReady(const Future& future, std::chrono::milliseconds limit = impl::defaultTimeout) {
-    bool deferred = false;
+    bool deferred = false, invalid = false;
+    if (!impl::readyNow(future, deferred, invalid) && (deferred || invalid))
+        return false;
     return waitUntil(
         [&] {
-            return impl::readyNow(future, deferred);
+            return impl::readyNow(future, deferred, invalid);
         },
         limit);
 }

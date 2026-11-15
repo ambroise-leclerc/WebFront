@@ -6,13 +6,13 @@ include(CTest)
 
 # WEBFRONT_TEST_TIMEOUT_FACTOR (Bdd.hpp) lengthens the waits of a slow job. It is read here, when CMake configures, and
 # handed to every unit test as its environment, so that the waits and the CTest limits below agree whatever the
-# environment of ctest is. The grammar is that of parseFactor(): digits with an optional fraction, such as 2 or 2.5.
+# environment of ctest is. The grammar is that of parseFactor(): up to six digits with an optional fraction, such as 2 or 2.5.
 # A scenario may wait several times for a condition that never holds, so the limit leaves room for two of the 30 s
 # waits, times the factor rounded up; a factor of 1 or less leaves it at 60 s.
 set(_unit_factor 1)
 set(_unit_test_environment "")
 set(_unit_text "$ENV{WEBFRONT_TEST_TIMEOUT_FACTOR}")
-if(_unit_text MATCHES "^([0-9]+)(\\.[0-9]+)?$")
+if(_unit_text MATCHES "^([0-9]{1,6})(\\.[0-9]+)?$")
   set(_unit_whole "${CMAKE_MATCH_1}")
   set(_unit_fraction "${CMAKE_MATCH_2}")
   if(NOT _unit_text MATCHES "^0+(\\.0+)?$")

@@ -651,7 +651,9 @@ const Scenario closingWaits{"Closing waits for the wake-ups in flight, which may
             closed = true;
         });
         when("the loop closes meanwhile", [&] {
-            check(checkEventually([&] { return !host.executor().available(); }));
+            checkEventually([&] {
+                return !host.executor().available();
+            });
             then("close() does not return before the wake-up is over", [&] {
                 check(!closed);
                 {

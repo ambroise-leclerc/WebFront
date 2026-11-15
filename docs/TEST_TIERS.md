@@ -33,13 +33,13 @@ share a process: `test/unit/ScenarioIsolation.cpp` restores the process-wide sta
 A unit test waits for an observable state, never for a fixed pause. `requireEventually(condition)` ends the scenario when
 the condition does not hold in time, `checkEventually(condition, 5s)` records the failure and returns the result, and
 `requireReady(future)` / `checkReady(future, 5s)` wait for a `std::future` or `std::shared_future` without consuming it
-(a deferred future fails at once, because waiting never makes it ready). The condition is any callable, a free
+(a deferred future, or one without a shared state, fails at once: waiting never makes the first ready). The condition is any callable, a free
 function included, evaluated after pauses that grow from 0.1 to 5 ms; the delay is 30 seconds unless given. A failure
 reports the source line of the call, the delay and the time waited, with the sections and `info()` messages of the
 scenario.
 
 A thread that cannot assert, or a wait that precedes a cleanup (joining a thread), uses `waitUntil(condition, limit)` or
-`waitReady(future, limit)`, which record nothing and return the result, and the scenario asserts it afterwards.
+`waitReady(future, limit)` (false at once for a deferred or empty future), which record nothing and return the result, and the scenario asserts it afterwards.
 
 A slow job (sanitizers, emulation) lengthens every delay of the process with `WEBFRONT_TEST_TIMEOUT_FACTOR=<number>`: digits
 with an optional fraction such as `2` or `2.5`, anything else being ignored. Set it when CMake configures: it is then

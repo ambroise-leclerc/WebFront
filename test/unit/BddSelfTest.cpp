@@ -197,7 +197,11 @@ const Scenario eventuallyHolds{"eventually holds", [] {
                                        value = 2;
                                    }};
                                    requireEventually([&] { return value == 2; });
-                                   check(checkEventually([&] { return value == 2; }, 1s));
+                                   checkEventually(
+                                       [&] {
+                                           return value == 2;
+                                       },
+                                       1s);
                                    worker.join();
                                    std::promise<int> promise;
                                    auto              future = promise.get_future();
@@ -245,6 +249,10 @@ const Scenario waitingForms{"waiting forms", [] {
                                 });
                                 check(!waitReady(deferred, 5ms));
                                 check(!checkReady(deferred, 5s));  // fails at once, not after 5 s
+                                check(!waitReady(deferred, 5s));   // returns at once too
+                                std::future<int> empty;
+                                check(!waitReady(empty, 5s));
+                                check(!checkReady(empty, 5s));
                                 trace.push_back("deferred");
                             }};
 
