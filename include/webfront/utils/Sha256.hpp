@@ -1,10 +1,12 @@
 /// @brief SHA-256 (FIPS 180-4), computed incrementally: a file is digested block by block, without loading it whole.
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <span>
 #include <string>
 #include <string_view>
@@ -15,15 +17,27 @@ class Sha256 {
 public:
     using Digest = std::array<std::uint8_t, 32>;
 
-    /// Adds `bytes` to the message.
+    /// Adds `bytes` to the message. Whole blocks are compressed where they lie; only a partial one is copied.
     void update(std::span<const std::byte> bytes) {
         length += bytes.size();
-        for (const auto byte : bytes) {
-            block[filled++] = static_cast<std::uint8_t>(byte);
-            if (filled == block.size()) {
-                compress();
-                filled = 0;
-            }
+        const auto* data = reinterpret_cast<const std::uint8_t*>(bytes.data());
+        std::size_t size = bytes.size();
+        if (filled != 0) {
+            const auto taken = std::min(size, block.size() - filled);
+            std::memcpy(block.data() + filled, data, taken);
+            filled += taken;
+            data   += taken;
+            size   -= taken;
+            if (filled < block.size())
+                return;
+            compress(block.data());
+            filled = 0;
+        }
+        for (; size >= block.size(); data += block.size(), size -= block.size())
+            compress(data);
+        if (size != 0) {
+            std::memcpy(block.data(), data, size);
+            filled = size;
         }
     }
     void update(std::string_view text) {
@@ -37,14 +51,14 @@ public:
         if (filled > 56) {
             while (filled < block.size())
                 block[filled++] = 0;
-            compress();
+            compress(block.data());
             filled = 0;
         }
         while (filled < 56)
             block[filled++] = 0;
         for (int shift = 56; shift >= 0; shift -= 8)
             block[filled++] = static_cast<std::uint8_t>((bits >> shift) & 255);
-        compress();
+        compress(block.data());
         Digest digest{};
         for (std::size_t i = 0; i < state.size(); ++i)
             for (std::size_t j = 0; j < 4; ++j)
@@ -65,7 +79,8 @@ public:
     }
 
 private:
-    void compress() {
+    // Compresses the 64 bytes at `input` into the state.
+    void compress(const std::uint8_t* input) {
         static constexpr std::array<std::uint32_t, 64> constants{
             0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be,
             0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa,
@@ -75,8 +90,8 @@ private:
             0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
         std::array<std::uint32_t, 64> words{};
         for (std::size_t i = 0; i < 16; ++i)
-            words[i] = (std::uint32_t{block[i * 4]} << 24) | (std::uint32_t{block[i * 4 + 1]} << 16) | (std::uint32_t{block[i * 4 + 2]} << 8)
-                     | std::uint32_t{block[i * 4 + 3]};
+            words[i] = (std::uint32_t{input[i * 4]} << 24) | (std::uint32_t{input[i * 4 + 1]} << 16) | (std::uint32_t{input[i * 4 + 2]} << 8)
+                     | std::uint32_t{input[i * 4 + 3]};
         for (std::size_t i = 16; i < 64; ++i) {
             const auto x = words[i - 15], y = words[i - 2];
             words[i] = words[i - 16] + (std::rotr(x, 7) ^ std::rotr(x, 18) ^ (x >> 3)) + words[i - 7] + (std::rotr(y, 17) ^ std::rotr(y, 19) ^ (y >> 10));
