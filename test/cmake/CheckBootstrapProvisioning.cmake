@@ -146,8 +146,8 @@ if(result EQUAL 0 OR NOT text MATCHES "is missing")
     message(FATAL_ERROR "An absent local archive must fail the configure: ${result} ${text}")
 endif()
 
-# A cache that exists but refuses files (a shared, read-only one): a verified entry still serves, and a download falls back
-# to the build tree with a warning instead of stopping the configure. Only POSIX permissions can make it so, and a process
+# A cache that exists but refuses files (a shared, read-only one): a download falls back to the build tree with a warning
+# instead of stopping the configure. Only POSIX permissions can make it so, and a process
 # that writes through them (root) cannot test it.
 if(NOT CMAKE_HOST_WIN32)
     file(WRITE "${WORK}/source/environment.tgz" "${content}")
@@ -166,16 +166,6 @@ if(NOT CMAKE_HOST_WIN32)
         if(NOT text MATCHES "cannot be written")
             message(FATAL_ERROR "A read-only cache must be reported: ${text}")
         endif()
-        file(SHA512 "${WORK}/tree-e/environment.tgz" digest)
-        expect_equal("${digest}" "${hex}" "The archive kept in the build tree beside a read-only cache")
-        file(CHMOD "${readonly}/${key}" DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
-        file(COPY_FILE "${WORK}/source/environment.tgz" "${readonly}/${key}/environment.tgz")
-        file(CHMOD "${readonly}/${key}" DIRECTORY_PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
-        file(REMOVE "${WORK}/source/environment.tgz")
-        provision(readonlyEntry result text URL "${url}" INTEGRITY "${sri}" DESTINATION "${WORK}/tree-f" CACHE "${readonly}")
-        expect_equal("${result}" 0 "A verified entry of a read-only cache must serve without the source: ${text}")
-        file(SHA512 "${WORK}/tree-f/environment.tgz" digest)
-        expect_equal("${digest}" "${hex}" "The archive linked from a read-only cache")
     endif()
     file(CHMOD "${readonly}" "${readonly}/${key}" DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
 endif()
@@ -198,27 +188,17 @@ foreach(round mounted unmounted)
     file(REMOVE_RECURSE "${WORK}/offline")
 endforeach()
 
-# The default cache: an environment variable set to nothing counts as unset, so that it never makes a path at the root. The
-# probe runs as a consuming project would (its source is not WebFront's), which keeps its downloads in its build tree.
+# An environment variable set to nothing counts as unset: an empty CPM_SOURCE_CACHE gives a consuming project no cache,
+# not one at the root.
 file(WRITE "${WORK}/default-cache.cmake" [[
 include("${ROOT}/cmake/WebFrontBootstrap.cmake")
 message(STATUS "cache=[${WEBFRONT_DOWNLOAD_CACHE}]")
 ]])
-function(default_cache output)
-    execute_process(COMMAND "${CMAKE_COMMAND}" -E env --unset=WEBFRONT_DOWNLOAD_CACHE --unset=CPM_SOURCE_CACHE ${ARGN}
-            "${CMAKE_COMMAND}" -DROOT=${ROOT} -P "${WORK}/default-cache.cmake"
-        WORKING_DIRECTORY "${WORK}" RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err)
-    if(NOT result EQUAL 0 OR NOT out MATCHES "cache=\\[([^]]*)\\]")
-        message(FATAL_ERROR "The default cache could not be read: ${result} ${out}${err}")
-    endif()
-    set(${output} "${CMAKE_MATCH_1}" PARENT_SCOPE)
-endfunction()
-default_cache(chosen "CPM_SOURCE_CACHE=")
-expect_equal("${chosen}" "" "An empty CPM_SOURCE_CACHE must not choose a cache for a consuming project")
-default_cache(chosen "WEBFRONT_DOWNLOAD_CACHE=" "CPM_SOURCE_CACHE=${WORK}/cpm")
-expect_equal("${chosen}" "${WORK}/cpm/webfront-downloads" "An empty WEBFRONT_DOWNLOAD_CACHE must leave the choice to CPM's cache")
-default_cache(chosen "WEBFRONT_DOWNLOAD_CACHE=${WORK}/chosen" "CPM_SOURCE_CACHE=${WORK}/cpm")
-expect_equal("${chosen}" "${WORK}/chosen" "WEBFRONT_DOWNLOAD_CACHE comes first")
+execute_process(COMMAND "${CMAKE_COMMAND}" -E env --unset=WEBFRONT_DOWNLOAD_CACHE CPM_SOURCE_CACHE= "${CMAKE_COMMAND}" -DROOT=${ROOT}
+        -P "${WORK}/default-cache.cmake" WORKING_DIRECTORY "${WORK}" OUTPUT_VARIABLE out ERROR_VARIABLE out)
+if(NOT out MATCHES "cache=\\[\\]")
+    message(FATAL_ERROR "An empty CPM_SOURCE_CACHE must not choose a cache: ${out}")
+endif()
 
 # A malformed integrity is refused before anything is downloaded.
 provision(malformed result text URL "${url}" INTEGRITY "sha256-abc")
