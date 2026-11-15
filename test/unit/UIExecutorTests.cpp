@@ -5,6 +5,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <functional>
+#include <future>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -430,6 +431,43 @@ const Scenario linuxInterface{"The Linux interface loop coalesces wake-ups witho
             check(wake.consume() == 0);
             wake.signal();
             check(wake.consume() == 1);
+        });
+    });
+}};
+
+const Scenario linuxContextOwner{"The Linux interface loop refuses a default GLib context that another thread iterates", [] {
+    using namespace webfront::frontend;
+    const auto&        glib = detail::uiloop::GLib::get();
+    std::promise<void> owned;
+    std::promise<void> release;
+    auto               ownedReady = owned.get_future();
+    const auto         released   = release.get_future().share();
+    given("another thread that owns the default context", [&] {
+        // Joined on every path, including a failed require: a joinable thread would end the process.
+        std::jthread owner([&] {
+            const auto context = glib.contextDefault();
+            const bool taken   = glib.contextAcquire(context) != 0;
+            owned.set_value();
+            released.wait();
+            if (taken)
+                glib.contextRelease(context);
+        });
+        struct Free {
+            std::promise<void>& release;
+            ~Free() {
+                release.set_value();
+            }
+        } free{release};
+        require(ownedReady.wait_for(std::chrono::seconds{30}) == std::future_status::ready);
+        when("the loop is run", [&] {
+            UIExecutorHost host;
+            UILoopStop     stop;
+            then("it throws before it attaches, instead of letting that thread run its wake callback", [&] {
+                checkThrows<std::runtime_error>([&] {
+                    detail::uiloop::run(host, stop);
+                });
+                check(!host.executor().onUIThread());
+            });
         });
     });
 }};
