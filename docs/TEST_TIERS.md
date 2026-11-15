@@ -139,7 +139,7 @@ gh workflow run BuildAndTest.yml --ref <branch> -f gcc13_arm64=true
 
 `cef_arm64=true` and `webkitgtk_arm64=true` likewise run only the CEF `linuxarm64` or the WebKitGTK aarch64 browser integration. The two aarch64 browser jobs and `gcc13-arm64` share the `cpm-extended-Linux-ARM64-*` key, so whichever finishes first saves it; the bootstrap and registry archives have a key per job. None of them uses a compiler cache (`ENABLE_CACHE=OFF`).
 
-Measured on hosted `ubuntu-24.04-arm` runners with cold caches (run 43745895208): `gcc13-arm64` 25 min (fast tier 9 s, 551 cases, then ASan/UBSan 43 s), `cef-arm64` 9 min (101 cases, 169 s of tests) and `webkitgtk-arm64` 7 min (113 cases, 221 s of tests).
+Measured on hosted `ubuntu-24.04-arm` runners with cold caches (run 43745895208): `gcc13-arm64` 25 min (fast tier 9 s, 551 cases, then ASan/UBSan 43 s), `cef-arm64` 9 min (101 cases, 169 s of tests) and `webkitgtk-arm64` 7 min (113 cases, 221 s of tests). A second run (43748323731) restored the CPM, bootstrap and registry caches on both browser jobs (8 and 7 min): the time is the compilation, not the downloads.
 
 The portability matrix does not vary the CMake version: `setup-cmake` pins the SHA-256 of each archive it installs, so
 another version needs its checksum added first.
