@@ -390,15 +390,14 @@ deadline revocation, MCP lifecycle/IDs and hostile JSON. Browser Jasmine specs c
 dispatch arbitration and the runner. `AutomationMcpWindow` drives a real embedded window through
 stdio: structured errors, file correction, check/build/test, preview inspection/actions,
 cross-frame rejection, cancellation and POSIX SIGTERM cleanup of the shared owner
-(endpoint and temporary profile). This reuses the existing window. Separate `AutomationMcpWatchdog` and
-`AutomationCliWatchdog` cases block a real renderer inside a test-archive operation body,
-without loading/compiling Jasmine just to provoke that hang. They exercise the production signed
-callback/runner, native two-second deadline, five-second close grace, stdio EOF and endpoint removal;
-the CLI case checks endpoint reuse and Unicode failure reporting in the same restart after forced
-exit. The MCP case delays bootstrap by three
-seconds to verify that its shorter operation deadline starts only after startup. The cases retain
-separate private project/temporary directories and ephemeral ports; the frontend storage limits
-listed above still apply. Only the two spinning renderers share a lock.
+(endpoint and temporary profile). This reuses the existing window. A separate `AutomationMcpWatchdog` case
+blocks a real renderer inside a test-archive operation body,
+without loading/compiling Jasmine just to provoke that hang. It exercises the production signed
+callback/runner, native two-second deadline, five-second close grace, stdio EOF and endpoint removal
+through MCP; a CLI restart after the forced exit then checks endpoint reuse and Unicode failure reporting.
+It delays bootstrap by three seconds to verify that its shorter operation deadline starts only after startup. The
+cases retain separate private project/temporary directories and ephemeral ports; the frontend storage limits
+listed above still apply.
 That regression uses Python's standard library as a test client; Python is not a runtime
 dependency of the launcher. It is registered when a Python interpreter and embedded test engine
 are available; without xvfb-run on Linux only the optional Automation window tests are skipped with

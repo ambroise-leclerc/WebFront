@@ -47,11 +47,11 @@ and `webfront_build_tree` to protect shared browser DLLs and build outputs on Wi
 
 Automation uses independent ports and project/temporary directories; browser storage isolation
 still depends on the frontend, as documented in [AUTOMATION.md](AUTOMATION.md). Its functional MCP scenario does not
-hold `webfront_port_9002`. The two watchdog cases alone share `webfront_automation_watchdog`, limiting
-deliberately spinning renderers without blocking unrelated browser work. Their test archive replaces
-only the operation body with a marker followed by a synchronous loop; signed dispatch, the native
-deadline, shutdown grace and process/endpoint cleanup stay real. A single three-second startup delay
-exceeds their two-second operation budget, avoiding repeated long bootstrap/Jasmine waits.
+hold `webfront_port_9002`. The watchdog case (MCP; the CLI shares the same native revocation, and
+`AutomationCliWatchdog` was retired in #570) replaces only the operation body of its test archive with a marker
+followed by a synchronous loop; signed dispatch, the native deadline, shutdown grace and process/endpoint cleanup
+stay real. A single three-second startup delay exceeds its two-second operation budget, avoiding repeated long
+bootstrap/Jasmine waits.
 Mutated test archives use gzip level 1 to reduce fixture-generation CPU cost. The CLI restart checks
 endpoint reuse and Unicode bootstrap error delivery together; successful builds remain covered by
 the functional owned/shared-window scenario.

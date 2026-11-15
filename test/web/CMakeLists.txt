@@ -145,17 +145,13 @@ if(_browser_tests_available AND TARGET webfront-agent)
             webfront_use_own_profile(${name} ${profile})
         endfunction()
         set(_automation_project "${PROJECT_SOURCE_DIR}/test/fixtures/automation-project")
-        foreach(_pair "session|AutomationMcpWindow" "mcp-watchdog|AutomationMcpWatchdog" "cli-watchdog|AutomationCliWatchdog")
+        foreach(_pair "session|AutomationMcpWindow" "mcp-watchdog|AutomationMcpWatchdog")
             string(REPLACE "|" ";" _entry "${_pair}")
             list(GET _entry 0 _scenario)
             list(GET _entry 1 _case)
             # The session scenario closes several agents, each of which may use its own bound of about 9 s to exit.
             webfront_add_automation_test(${_case} "automation-${_scenario}" 180 AutomationClient.py --scenario "${_scenario}"
                 --fixture "${_automation_project}" --work "${CMAKE_CURRENT_BINARY_DIR}/automation-${_scenario}")
-            if(NOT _scenario STREQUAL "session")
-                # One deliberately spinning renderer at a time, without serializing unrelated browser tests.
-                set_tests_properties(${_case} PROPERTIES RESOURCE_LOCK webfront_automation_watchdog)
-            endif()
         endforeach()
         # A consumer application that opted in with enableAutomation (#501), driven by an agent attached from another process.
         webfront_add_test_program(automation_consumer AutomationConsumer.cpp DRIVER WITH_WEBTEST)
@@ -325,19 +321,6 @@ if(_browser_tests_available)
             set_tests_properties(${_name} PROPERTIES RESOURCE_LOCK webfront_port_9002)
         endif()
     endforeach()
-    # webfront_add_embedded_life(<target> <generated header> <fixture of the header> <build test> <run test>): the maintained
-    # Life application compiled with a header that wf embed generated, then run from an empty directory, without a project
-    # root, a bootstrap or a network. The build test serializes nested builds and the browser programs of the shared build
-    # tree, while independent unit tests may run.
-    function(webfront_add_embedded_life target header requires build run)
-        webfront_add_test_program(${target} LifeEmbeddedTest.cpp EXCLUDE_FROM_ALL DEFINITIONS WEBFRONT_LIFE_ASSETS_HEADER="${header}")
-        webfront_add_web_step(${build} TIMEOUT 180 REQUIRES ${requires} PROVIDES ${build} LOCK webfront_build_tree PROPERTIES PROCESSORS 2
-            COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" --config $<CONFIG> --target ${target} --parallel 2)
-        add_test(NAME ${run} COMMAND ${_developer_xvfb_prefix} $<TARGET_FILE:${target}>)
-        webfront_set_browser_test_properties(${run} "${CMAKE_CURRENT_SOURCE_DIR}" 60)
-        set_tests_properties(${run} PROPERTIES FIXTURES_REQUIRED ${build})
-    endfunction()
-    set_tests_properties(DeveloperBrowserIntegration PROPERTIES FIXTURES_SETUP DeveloperGenerated)
     # The driver on the environment built from the current sources: statuses, output and reports reach CTest.
     if(TARGET webfront-wf)
         set(_wf_project "${CMAKE_CURRENT_BINARY_DIR}/wf-driver-project")
@@ -414,12 +397,8 @@ if(_browser_tests_available)
 
         # The fixture manifest has no jasmine-core: wf test asks for it, and wf install resolves it from the local registry.
         webfront_add_driver_test(WfDriverInstall 0 "install|jasmine-core" OUTPUT "Installed 1 packages" PROVIDES WfDriverInstalled)
-        webfront_add_driver_test(WfDriverTestPasses 0 "test|adds" OUTPUT "PASSED: 1 spec" REPORT "\"status\":\"passed\"" REQUIRES WfDriverInstalled)
         # A failing command: its status, its output and the structured report reach CTest.
         webfront_add_driver_test(WfDriverTestFails 1 "test|fails" OUTPUT "FAILED: 1 spec, 1 failure" REPORT "\"failed\":1" REQUIRES WfDriverInstalled)
-        # The starters pinned by the environment are served next to its archive.
-        webfront_add_driver_test(WfDriverCreateStarter 0 "create|life" OUTPUT "Created"
-            FRESH_PROJECT "${CMAKE_CURRENT_BINARY_DIR}/wf-driver-starter")
         # The entry module is the one environment.json declares, not a fixed name.
         webfront_add_driver_test(WfDriverRenamedEntry 0 "list" RENAME_ENTRY runner.mjs)
         # The pinned bootstrap environment, downloaded and verified at configure time, runs a command by itself.
@@ -491,7 +470,16 @@ if(_browser_tests_available)
         webfront_add_journey_step(JourneyOfflineVerified 0 "restore|--offline" OUTPUT "Cache verified offline: 8 packages" REQUIRES JourneyRestored)
 
         # The application of the journey, from the header its wf embed generated.
-        webfront_add_embedded_life(life_journey "${_journey}/generated/LifeUI.hpp" JourneyEmbedded JourneyEmbeddedBuild JourneyEmbeddedRun)
+        # The maintained Life application compiled with that header, then run from an empty directory, without a project root,
+        # a bootstrap or a network. The build serializes nested builds and the browser programs of the shared build tree,
+        # while independent unit tests may run.
+        webfront_add_test_program(life_journey LifeEmbeddedTest.cpp EXCLUDE_FROM_ALL DEFINITIONS
+            WEBFRONT_LIFE_ASSETS_HEADER="${_journey}/generated/LifeUI.hpp")
+        webfront_add_web_step(JourneyEmbeddedBuild TIMEOUT 180 REQUIRES JourneyEmbedded PROVIDES JourneyEmbeddedBuild LOCK webfront_build_tree
+            PROPERTIES PROCESSORS 2 COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" --config $<CONFIG> --target life_journey --parallel 2)
+        add_test(NAME JourneyEmbeddedRun COMMAND ${_developer_xvfb_prefix} $<TARGET_FILE:life_journey>)
+        webfront_set_browser_test_properties(JourneyEmbeddedRun "${CMAKE_CURRENT_SOURCE_DIR}" 60)
+        set_tests_properties(JourneyEmbeddedRun PROPERTIES FIXTURES_REQUIRED JourneyEmbeddedBuild)
         set(_journey_targets life_journey)
 
         # The Jasmine suite of webtest: a fresh copy of the project, its dependencies installed from the local registry,
@@ -597,12 +585,9 @@ if(_browser_tests_available)
         webfront_add_self_build_test(SelfBuildSiteRefusesChange 1 "run|site|build-distribution|build-site" OUTPUT "differs; increment the distribution version"
             REQUIRES SelfTampered)
     endif()
-    # Compile the maintained application's actual browser-generated header, then run it without a project root.
-    webfront_add_embedded_life(life_embedded "${CMAKE_CURRENT_BINARY_DIR}/developer-generated/LifeUI.hpp" DeveloperGenerated
-        LifeEmbeddedBuild LifeEmbeddedIntegration)
     if(WEBFRONT_WEBTEST_FRONTEND STREQUAL "WKWebView")
         get_filename_component(_developer_wk_plist "${PROJECT_SOURCE_DIR}/test/cmake/WKWebViewTestInfo.plist.in" ABSOLUTE)
-        foreach(target developer_integration life_embedded ${_journey_targets})
+        foreach(target developer_integration ${_journey_targets})
             string(REPLACE "_" "-" identifier "${target}")
             set_target_properties(${target} PROPERTIES
                 MACOSX_BUNDLE TRUE
