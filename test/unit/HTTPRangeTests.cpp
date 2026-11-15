@@ -113,7 +113,11 @@ std::string fetch(const std::string& text) {
     std::vector<std::byte>           bytes;
     for (const char c : text) bytes.push_back(static_cast<std::byte>(c));
     InjectableSocket::receive(bytes);
-    requireEventually([] { return InjectableSocket::shutdownCount() > 0; });
+    requireEventually(
+        [] {
+            return InjectableSocket::shutdownCount() > 0;
+        },
+        10s);
     auto written = InjectableSocket::writtenText();
     InjectableSocket::reset();
     return written;
@@ -439,7 +443,11 @@ const Scenario dynamicRoute{"A dynamic route serves a file by ranges", [] {
                 std::vector<std::byte> bytes;
                 for (const char c : text) bytes.push_back(static_cast<std::byte>(c));
                 InjectableSocket::receive(bytes);
-                requireEventually([] { return InjectableSocket::shutdownCount() > 0; });
+                requireEventually(
+                    [] {
+                        return InjectableSocket::shutdownCount() > 0;
+                    },
+                    10s);
                 auto written = InjectableSocket::writtenText();
                 InjectableSocket::reset();
                 return written;
@@ -501,7 +509,11 @@ const Scenario routeServing{"A route serving a stored encoding keeps it and nego
         std::vector<std::byte> bytes;
         for (const char c : text) bytes.push_back(static_cast<std::byte>(c));
         InjectableSocket::receive(bytes);
-        requireEventually([] { return InjectableSocket::shutdownCount() > 0; });
+        requireEventually(
+            [] {
+                return InjectableSocket::shutdownCount() > 0;
+            },
+            10s);
         auto written = InjectableSocket::writtenText();
         InjectableSocket::reset();
         return written;

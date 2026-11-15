@@ -143,7 +143,6 @@ const Scenario stoppingRunning{"Stopping a running server releases its connectio
             std::thread                              serverThread([&server] { server.run(); });
             connect(client, port);
             checkEventually([] { return CountingNet::liveSockets.load() > 0; }, 5s);
-            check(CountingNet::liveSockets.load() > 0);
 
             server.stop();  // from another thread than the one running the server
             serverThread.join();
@@ -189,10 +188,9 @@ const Scenario destroyingWebFront{"Destroying WebFront closes its established We
             client.send(Stdnet::ConstBuffer(handshake.data(), handshake.size()));
             checkEventually(
                 [&] {
-                return linked.load();
+                    return linked.load();
                 },
                 5s);
-            check(linked.load());
             webFront.stop();
             serverThread.join();
         }
@@ -236,15 +234,14 @@ const Scenario applicationTask{"Application task cancellation returns to the ser
         const auto                     serverId = serverThread.get_id();
         checkEventually(
             [&] {
-            return state.started.load(std::memory_order_acquire);
+                return state.started.load(std::memory_order_acquire);
             },
             5s);
-        check(state.started.load(std::memory_order_acquire));
         when("another thread requests cancellation", [&] {
             handle.requestStop();
             checkEventually(
                 [&] {
-                return state.destroyed.load(std::memory_order_acquire);
+                    return state.destroyed.load(std::memory_order_acquire);
                 },
                 5s);
             app.stop();
@@ -291,7 +288,7 @@ const Scenario rejectedWebSocket{"A rejected WebSocket Origin never reaches the 
         check(readHeaders(authorized).starts_with("HTTP/1.1 101 Switching Protocols\r\n"));
         checkEventually(
             [&] {
-            return upgrades.load() != 0;
+                return upgrades.load() != 0;
             },
             5s);
         require(upgrades == 1);

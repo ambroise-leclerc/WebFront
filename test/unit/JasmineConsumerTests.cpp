@@ -193,9 +193,9 @@ const Scenario captureStoreRecords{"A capture store records numbered images at a
         then("a second recording is refused while it runs", [&] {
             requireThrows<std::logic_error>([&] { store.startRecording("other", 10); });
         });
-        require(checkEventually([&] {
+        requireEventually([&] {
             return calls >= 4;
-        }));
+        });
         const auto frames = store.stopRecording();
         then("the images are numbered from 0001 and roughly match the rate", [&] {
             require(frames >= 4);
@@ -224,9 +224,9 @@ const Scenario recordingLoses{"A recording that loses its window reports the fai
                            return std::vector<std::uint8_t>{1};
                            }};
     store.startRecording("lost", 30);
-    require(checkEventually([&] {
+    requireEventually([&] {
         return calls > 2;
-    }));
+    });
     requireThrows([&] { store.stopRecording(); }, equals("Recording stopped: Capture failed: the window is closed"));
 }};
 
@@ -283,9 +283,9 @@ const Scenario recordingStops{"A recording stops on request and reports its coun
     CaptureDirectory directory{"stop"};
     CaptureStore     store{directory.path, fakeImage};
     store.startRecording("run", 30);
-    require(checkEventually([&] {
+    requireEventually([&] {
         return fileExists(directory.path / "run" / "0002.png");
-    }));
+    });
     store.requestStop();
     std::optional<std::size_t> frames;
     requireEventually([&] { return (frames = store.pollRecording()).has_value(); });
@@ -299,9 +299,9 @@ const Scenario recordingEnds{"A recording ends by itself at the image limit and 
     CaptureDirectory directory{"limit"};
     CaptureStore     store{directory.path, fakeImage, 3};
     store.startRecording("run", 30);
-    require(checkEventually([&] {
+    requireEventually([&] {
         return fileExists(directory.path / "run" / "0003.png");
-    }));
+    });
     store.requestStop();  // finished or about to: not an error
     std::optional<std::size_t> frames;
     requireEventually([&] { return (frames = store.pollRecording()).has_value(); });
@@ -330,7 +330,7 @@ const Scenario captureNobody{"A capture that nobody collects does not block the 
     given("a screenshot that finished but whose page was replaced", [&] {
         store.beginScreenshot("a");
         then("abandon frees the slot and the next screenshot starts and can be polled", [&] {
-            require(checkEventually([&] {  // abandon frees the slot as soon as the first worker has ended
+            requireEventually([&] {  // abandon frees the slot as soon as the first worker has ended
                 store.abandon();
                 try {
                     store.beginScreenshot("b");
@@ -338,7 +338,7 @@ const Scenario captureNobody{"A capture that nobody collects does not block the 
                 } catch (const std::logic_error&) {
                     return false;
                 }
-            }));
+            });
             require(pollUntilDone([&] {
                         const auto size = store.pollScreenshot();
                         return size ? static_cast<double>(*size) : -1.0;
@@ -349,14 +349,14 @@ const Scenario captureNobody{"A capture that nobody collects does not block the 
     given("a recording that ended by itself and was never collected", [&] {
         store.startRecording("first", 30);
         then("another recording starts, and the first one keeps its images", [&] {
-            require(checkEventually([&] {  // the slot is free as soon as the first worker has ended
+            requireEventually([&] {  // the slot is free as soon as the first worker has ended
                 try {
                     store.startRecording("second", 30);
                     return true;
                 } catch (const std::logic_error&) {
                     return false;
                 }
-            }));
+            });
             require(store.stopRecording() <= 2);
             require(std::filesystem::exists(directory.path / "first" / "0002.png"));
         });
@@ -367,9 +367,9 @@ const Scenario recordingNever{"A recording never erases the images of an earlier
     CaptureDirectory directory{"duplicate"};
     CaptureStore     store{directory.path, fakeImage};
     store.startRecording("run", 30);
-    require(checkEventually([&] {
+    requireEventually([&] {
         return fileExists(directory.path / "run" / "0001.png");
-    }));
+    });
     const auto frames = store.stopRecording();
     require(frames >= 1);
     requireThrows<std::logic_error>([&] { store.startRecording("run", 30); });
@@ -393,9 +393,9 @@ const Scenario stopRequest{"A stop request belongs to its own recording", [] {
     std::optional<std::size_t> frames;
     requireEventually([&] { return (frames = store.pollRecording()).has_value(); });
     store.startRecording("two", 30);  // must not inherit, nor lose, the earlier stop request
-    require(checkEventually([&] {
+    requireEventually([&] {
         return fileExists(directory.path / "two" / "0003.png");
-    }));
+    });
     require(store.stopRecording() == 3);  // reached its own image limit: it was not stopped early by the first request
 }};
 
@@ -423,15 +423,15 @@ const Scenario destroyingStore{"Destroying a store does not wait for a window th
     {
         CaptureStore store{directory.path, blockedUntilReleased(gate)};
         store.beginScreenshot("stuck");
-        require(checkEventually([&] {
+        requireEventually([&] {
             return gate->entered.load();
-        }));
+        });
     }
     const auto elapsed = std::chrono::steady_clock::now() - started;
     gate->release      = true;  // the detached worker ends alone, only touching state it owns
-    require(checkEventually([&] {
+    requireEventually([&] {
         return gate->left.load();
-    }));
+    });
     require(elapsed < std::chrono::seconds{5});
 }};
 
@@ -455,9 +455,9 @@ const Scenario captureCallbacks{"Capture callbacks of a Jasmine session obey the
     });
     then("a recording is stopped and collected through the session", [&] {
         session.recordStart(1, "clip", 30);
-        require(checkEventually([&] {
+        requireEventually([&] {
             return fileExists(directory.path / "clip" / "0002.png");
-        }));
+        });
         session.recordStop(1);
         require(pollUntilDone([&] {
                     return session.recordPoll(1);
@@ -529,9 +529,9 @@ const Scenario abandoningRecording{"Abandoning a recording frees its slot before
         {
             CaptureStore store{directory.path, blockedUntilReleased(gate)};
             store.startRecording("blocked", 30);
-            require(checkEventually([&] {
+            requireEventually([&] {
                 return gate->entered.load();
-            }));  // The worker is inside the window's capture, not yet started.
+            });  // The worker is inside the window's capture, not yet started.
             const auto begin = std::chrono::steady_clock::now();
             store.abandon();
             then("it waits only the grace period, and the slot stays taken", [&] {
@@ -540,9 +540,9 @@ const Scenario abandoningRecording{"Abandoning a recording frees its slot before
             });
             gate->release = true;
         }
-        require(checkEventually([&] {
+        requireEventually([&] {
             return gate->left.load();
-        }));
+        });
     });
 }};
 
@@ -550,9 +550,9 @@ const Scenario twoRecording{"Two recording names that differ only by case are on
     CaptureDirectory directory{"case"};
     CaptureStore     store{directory.path, fakeImage};
     store.startRecording("run", 30);
-    require(checkEventually([&] {
+    requireEventually([&] {
         return fileExists(directory.path / "run" / "0002.png");
-    }));
+    });
     const auto frames = store.stopRecording();
     then("the second name is refused before anything is erased", [&] {
         requireThrows<std::logic_error>([&] { store.startRecording("Run", 30); });

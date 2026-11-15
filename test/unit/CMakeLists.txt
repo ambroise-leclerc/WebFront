@@ -4,6 +4,19 @@ include(BddDiscoverTests.cmake)
 find_package(Threads)
 include(CTest)
 
+# WEBFRONT_TEST_TIMEOUT_FACTOR (Bdd.hpp) lengthens the waits of a slow job: the CTest limits of the scenarios follow it, read
+# when CMake configures, so that a wait that runs out is reported by the test and not by a kill.
+set(_unit_factor 1)
+if("$ENV{WEBFRONT_TEST_TIMEOUT_FACTOR}" MATCHES "^([0-9]+)(\\.[0-9]*)?$" AND NOT CMAKE_MATCH_1 EQUAL 0)
+  set(_unit_factor ${CMAKE_MATCH_1})
+  set(_unit_fraction "${CMAKE_MATCH_2}")
+  if(NOT _unit_fraction MATCHES "^(\\.0*)?$")
+    math(EXPR _unit_factor "${_unit_factor} + 1")  # a fraction rounds the factor up
+  endif()
+endif()
+math(EXPR _unit_timeout "60 * ${_unit_factor}")
+math(EXPR _shard_timeout "600 * ${_unit_factor}")
+
 add_test(NAME TestSuiteRepetition COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
     -DWORK=${CMAKE_CURRENT_BINARY_DIR}/suite-repetition -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckTestSuiteRepetition.cmake)
 set_tests_properties(TestSuiteRepetition PROPERTIES TIMEOUT 180)
@@ -105,10 +118,10 @@ if(WEBFRONT_TEST_UNIT_SHARDS GREATER 0)
         --junit "${CMAKE_BINARY_DIR}/unit-results-${_shard}.xml")
     # The scenarios of a shard share its time limit; the slowest of them takes a few seconds.
     # A shard whose every scenario is skipped exits with 4, as a single scenario does (BddDiscoverTests.cmake).
-    set_tests_properties(UnitTests-${_shard} PROPERTIES TIMEOUT 600 LABELS fast SKIP_RETURN_CODE 4)
+    set_tests_properties(UnitTests-${_shard} PROPERTIES TIMEOUT ${_shard_timeout} LABELS fast SKIP_RETURN_CODE 4)
   endforeach()
 else()
-  bdd_discover_tests(tests PROPERTIES TIMEOUT 60 LABELS fast)
+  bdd_discover_tests(tests PROPERTIES TIMEOUT ${_unit_timeout} LABELS fast)
 endif()
 
 # The developer journey type-checks the declaration this tool writes from the hand-described settings (#383).

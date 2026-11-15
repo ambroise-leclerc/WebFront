@@ -226,6 +226,18 @@ const Scenario readyTimesOut{"a future that is never ready", [] {
                                  trace.push_back("not reached");
                              }};
 
+const Scenario timeoutReport{"a timeout in a section", [] {
+                                 using namespace std::chrono_literals;
+                                 given("a waiting test", [&] {
+                                     const auto context = info("waiting for call ", 3);
+                                     checkEventually(
+                                         [] {
+                                             return false;
+                                         },
+                                         5ms);
+                                 });
+                             }};
+
 int failures = 0;
 
 void expect(std::string_view title, int code, std::vector<std::string> expectedTrace) {
@@ -275,10 +287,14 @@ int main() {
     {
         using webfront::bdd::impl::parseFactor;
         using webfront::bdd::impl::timeoutMessage;
-        if (timeoutMessage(std::chrono::milliseconds{30000}, 30.0012345) != "not met within 30.000000 s (waited 30.001234 s)") {
-            ++failures;
-            std::cerr << "MISMATCH: the report of a timeout is \"" << timeoutMessage(std::chrono::milliseconds{30000}, 30.0012345) << "\"\n";
-        }
+        for (auto [factor, expected] : {
+                 std::pair{ 1.0,                     std::string{"not met within 30.000000 s (waited 30.001234 s)"}},
+                 std::pair{10.0, std::string{"not met within 300.000000 s (30.000000 s x 10) (waited 30.001234 s)"}}
+        })
+            if (auto text = timeoutMessage(std::chrono::milliseconds{30000}, factor, 30.0012345); text != expected) {
+                ++failures;
+                std::cerr << "MISMATCH: the report of a timeout is \"" << text << "\"\n";
+            }
         if (parseFactor(nullptr) != 1.0 || parseFactor("") != 1.0 || parseFactor("x") != 1.0 || parseFactor("-2") != 1.0 || parseFactor("0") != 1.0 || parseFactor("3x") != 1.0
             || parseFactor("3") != 3.0 || parseFactor("0.5") != 0.5) {
             ++failures;
@@ -312,6 +328,18 @@ int main() {
             std::cerr << "MISMATCH: the JUnit duration " << value << " is not a fixed-point number\n";
         }
     }
+    file.close();
+    std::remove(report.c_str());
+
+    // The report of a timeout names the delay and the time waited, the section and the info messages.
+    expectExit({"--exact", "a timeout in a section", "--junit", report}, 1);
+    file.open(report);
+    const std::string timeoutXml{std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
+    for (std::string_view part : {"not met within 0.005000 s (waited ", "Given: a waiting test", "with: waiting for call 3", "BddSelfTest.cpp:"})
+        if (timeoutXml.find(part) == std::string::npos) {
+            ++failures;
+            std::cerr << "MISMATCH: the report of a timeout lacks \"" << part << "\"\n";
+        }
     file.close();
     std::remove(report.c_str());
 

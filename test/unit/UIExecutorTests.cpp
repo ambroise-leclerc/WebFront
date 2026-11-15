@@ -474,7 +474,6 @@ const Scenario systemBrowserCan{"The system browser can run an interface-thread 
         check(!Browser::uiExecutor().available());
         launches = 0;
         LoopOutcome       outcome;
-        std::atomic<bool> clientOk{false};
         // No assertion off the main thread: the client records its result and always asks the loop to stop,
         // so that a timeout fails the test instead of hanging or terminating the process.
         std::jthread client([&] {
@@ -486,7 +485,9 @@ const Scenario systemBrowserCan{"The system browser can run an interface-thread 
                     Holder(const UIExecutor& e, LoopOutcome& o) : op(ex::connect(e.schedule(), LoopReceiver{o})) { }
                 } holder(executor, outcome);
                 ex::start(holder.op);
-                clientOk = checkEventually([&] { return outcome.completions == 1; });
+                checkEventually([&] {
+                    return outcome.completions == 1;
+                });
             }
             Browser::requestStop();
         });
@@ -495,7 +496,6 @@ const Scenario systemBrowserCan{"The system browser can run an interface-thread 
             Browser::loop("127.0.0.1", "9002", "index.html", fakeLaunch);
             then("the page was launched, the operation ran on the calling thread and the executor is gone", [&] {
                 client.join();
-                check(clientOk);
                 check(launches == 1);
                 check(outcome.valueThread == callingThread);
                 check(!outcome.stopped);
@@ -529,7 +529,6 @@ const Scenario systemBrowserCan{"The system browser can run an interface-thread 
             });
             Browser::loop("127.0.0.1", "9002", "index.html", fakeLaunch);
             client.join();
-            check(accepted);
             check(!Browser::requestClose());
         });
     });
@@ -543,7 +542,6 @@ const Scenario systemBrowserCan{"The system browser can run an interface-thread 
     given("an operation queued just before the stop request", [&] {
         launches = 0;
         LoopOutcome       outcome;
-        std::atomic<bool> clientOk{false};
         std::jthread      client([&] {
             const auto executor = Browser::uiExecutor();
             if (checkEventually([&] { return executor.available(); })) {
@@ -553,7 +551,9 @@ const Scenario systemBrowserCan{"The system browser can run an interface-thread 
                 } holder(executor, outcome);
                 ex::start(holder.op);
                 Browser::requestStop();  // the loop may run the job first or close with it still queued
-                clientOk = checkEventually([&] { return outcome.completions >= 1; });
+                checkEventually([&] {
+                    return outcome.completions >= 1;
+                });
             } else {
                 Browser::requestStop();
             }
@@ -561,7 +561,6 @@ const Scenario systemBrowserCan{"The system browser can run an interface-thread 
         then("it completes exactly once, run or stopped, and is never left waiting", [&] {
             Browser::loop("127.0.0.1", "9002", "index.html", fakeLaunch);
             client.join();
-            check(clientOk);
             check(outcome.completions == 1);
             check(!outcome.unavailable);
             check(!Browser::uiExecutor().available());
@@ -570,10 +569,11 @@ const Scenario systemBrowserCan{"The system browser can run an interface-thread 
     given("several stop requests arriving while the loop exits", [&] {
         launches = 0;
         std::atomic<bool> finished{false};
-        std::atomic<bool> clientOk{false};
         std::jthread     client([&] {
             const auto executor = Browser::uiExecutor();
-            clientOk = checkEventually([&] { return executor.available(); });
+            checkEventually([&] {
+                return executor.available();
+            });
             // Each request may queue a source in the platform loop: none may outlive it or touch what it freed.
             do
                 Browser::requestStop();
@@ -583,7 +583,6 @@ const Scenario systemBrowserCan{"The system browser can run an interface-thread 
             Browser::loop("127.0.0.1", "9002", "index.html", fakeLaunch);
             finished = true;
             client.join();
-            check(clientOk);
             check(!Browser::uiExecutor().available());
         });
     });

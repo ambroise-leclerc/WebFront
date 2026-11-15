@@ -64,7 +64,11 @@ struct Fixture {
     /// Sends the request and waits for the end of the connection; returns what the server wrote.
     std::string answer(std::string_view request) {
         send(request);
-        requireEventually([] { return InjectableSocket::shutdownCount() > 0; });
+        requireEventually(
+            [] {
+                return InjectableSocket::shutdownCount() > 0;
+            },
+            10s);
         return InjectableSocket::writtenText();
     }
 };
@@ -309,11 +313,19 @@ const Scenario slowHandler{"A slow handler does not block the server context", [
         return text("late");
     });
     send(get("/webfront/services/files/x"));
-    requireEventually([&] { return entered.load(); });
+    requireEventually(
+        [&] {
+            return entered.load();
+        },
+        10s);
     then("the thread which sent the request has already returned, and the reply comes when the handler ends", [&] {
         require(InjectableSocket::shutdownCount() == 0);
         release = true;
-        requireEventually([] { return InjectableSocket::shutdownCount() > 0; });
+        requireEventually(
+            [] {
+                return InjectableSocket::shutdownCount() > 0;
+            },
+            10s);
         require(InjectableSocket::writtenText().ends_with("late"));
     });
 }};
@@ -328,7 +340,11 @@ const Scenario drainingWaits{"Draining waits for a handler still running on the 
         return text("late");
     });
     send(get("/webfront/services/files/x"));
-    requireEventually([&] { return entered.load(); });
+    requireEventually(
+        [&] {
+            return entered.load();
+        },
+        10s);
     when("the server is stopped and drained while the handler has not returned", [&] {
         server.stop();
         std::jthread finishing([&] {
@@ -410,7 +426,11 @@ const Scenario connectionWhich{"A connection which fails while a reply is stream
         return reply;
     });
     send(get("/webfront/services/files/endless"));
-    requireEventually([] { return InjectableSocket::shutdownCount() > 0; });
+    requireEventually(
+        [] {
+            return InjectableSocket::shutdownCount() > 0;
+        },
+        10s);
     then("the body is not read again", [&] {
         const auto seen = reads.load();
         std::this_thread::sleep_for(20ms);
@@ -429,7 +449,11 @@ const Scenario stoppingServer{"Stopping the server ends a reply being streamed",
     });
     InjectableSocket::deferWrites();
     send(get("/webfront/services/files/endless"));
-    requireEventually([] { return InjectableSocket::hasDeferredWrites(); });
+    requireEventually(
+        [] {
+            return InjectableSocket::hasDeferredWrites();
+        },
+        10s);
     when("the server is stopped and drained while a send is pending", [&] {
         server.stop();
         then("the drain returns", [&] { requireNothrow([&] { server.drain(); }); });
@@ -601,7 +625,11 @@ const Scenario blockedJob{"A blocked job does not delay the others of a worker w
         ~Release() { now(); }
     } releaseGuard{release};
     networking::ex::start(slow);
-    const bool started = checkEventually([&] { return blocked.load(); });
+    const bool started = checkEventually(
+        [&] {
+            return blocked.load();
+        },
+        10s);
     if (started) networking::ex::start(fast);
     const bool quickDoneInTime = started && checkReady(quickEnded, 5s);
     const bool slowStillBlocked = blockedEnded.wait_for(10ms) == std::future_status::timeout;

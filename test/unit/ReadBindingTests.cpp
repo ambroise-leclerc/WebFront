@@ -549,7 +549,11 @@ struct OneRequest : CleanSocket {
         for (const char c : raw)
             bytes.push_back(static_cast<std::byte>(c));
         testing::InjectableSocket::receive(bytes);
-        requireEventually([] { return testing::InjectableSocket::shutdownCount() > 0; });
+        requireEventually(
+            [] {
+                return testing::InjectableSocket::shutdownCount() > 0;
+            },
+            10s);
         log.stop();
         return log.text();
     }

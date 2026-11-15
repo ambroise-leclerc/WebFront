@@ -676,8 +676,12 @@ inline double timeoutFactor() {
     return factor;
 }
 
-inline std::string timeoutMessage(std::chrono::milliseconds limit, double elapsed) {
-    return concat("not met within ", seconds(std::chrono::duration<double>(limit).count()), " s (waited ", seconds(elapsed), " s)");
+/// The report of a delay that ran out: the delay actually waited for, and the one asked for when a factor changed it.
+inline std::string timeoutMessage(std::chrono::milliseconds limit, double factor, double elapsed) {
+    std::string text = concat("not met within ", seconds(std::chrono::duration<double>(limit).count() * factor), " s");
+    if (factor != 1.0)
+        text += concat(" (", seconds(std::chrono::duration<double>(limit).count()), " s x ", factor, ")");
+    return text + concat(" (waited ", seconds(elapsed), " s)");
 }
 
 /// Evaluates a condition until it holds or the delay (times the factor) is over. Returns the time waited and whether it held.
@@ -706,7 +710,7 @@ inline bool checkEventually(impl::Condition condition, std::chrono::milliseconds
     auto [elapsed, held] = impl::conditionPoller(condition, limit);
     if (held) [[likely]]
         return true;
-    impl::reportFailure(location, impl::timeoutMessage(limit, elapsed));
+    impl::reportFailure(location, impl::timeoutMessage(limit, impl::timeoutFactor(), elapsed));
     return false;
 }
 inline bool checkEventually(impl::Condition condition, std::source_location location = std::source_location::current()) {
