@@ -518,3 +518,19 @@ const Scenario defaultAutomation{"The default automation clock supervises a rend
     require(automation->controller()->isClosed());
     require(discovery::list(root.path() / "sessions").empty());
 }};
+
+const Scenario startupDeadlineSaturates{"A startup timeout too large for the clock never expires", [] {
+    using namespace std::chrono;
+    const auto launched = steady_clock::now();
+    given("an ordinary timeout", [&] {
+        then("the deadline is the launch plus the timeout", [&] {
+            check(startupDeadline(launched, seconds{30}) == launched + seconds{30});
+        });
+    });
+    given("the largest representable timeout", [&] {
+        then("the deadline saturates instead of overflowing into the past", [&] {
+            check(startupDeadline(launched, seconds::max()) == steady_clock::time_point::max());
+            check(startupDeadline(launched, seconds::max()) > launched);
+        });
+    });
+}};
