@@ -1,152 +1,154 @@
 #include <webfront/http/Encodings.hpp>
 
-#include <catch2/catch_test_macros.hpp>
+#include "Bdd.hpp"
 
 #include <string>
+
+using namespace webfront::bdd;
 
 using namespace webfront;
 using namespace std;
 
-SCENARIO("URL encoding") {
-    REQUIRE(uri::encode("mango & pineapple") == "mango%20%26%20pineapple");
-    REQUIRE(uri::encode("AZaz09-_.~") == "AZaz09-_.~");
+const Scenario uRLEncoding{"URL encoding", [] {
+    require(uri::encode("mango & pineapple") == "mango%20%26%20pineapple");
+    require(uri::encode("AZaz09-_.~") == "AZaz09-_.~");
 
-    GIVEN("non-ASCII bytes") {
-        THEN("each byte is percent-encoded") {
-            REQUIRE(uri::encode("\xC3\xA9") == "%C3%A9");  // é in UTF-8
-            REQUIRE(uri::encode("caf\xC3\xA9 \xE2\x82\xAC") == "caf%C3%A9%20%E2%82%AC");
-            REQUIRE(uri::encode(string_view("\x00\x7F\x80\xFF", 4)) == "%00%7F%80%FF");
-        }
-    }
+    given("non-ASCII bytes", [&] {
+        then("each byte is percent-encoded", [&] {
+            require(uri::encode("\xC3\xA9") == "%C3%A9");  // é in UTF-8
+            require(uri::encode("caf\xC3\xA9 \xE2\x82\xAC") == "caf%C3%A9%20%E2%82%AC");
+            require(uri::encode(string_view("\x00\x7F\x80\xFF", 4)) == "%00%7F%80%FF");
+        });
+    });
 
-    GIVEN("every byte value") {
+    given("every byte value", [&] {
         string all;
         for (int byte = 0; byte < 256; ++byte)
             all += static_cast<char>(byte);
-        THEN("decoding the encoded string restores it") {
-            REQUIRE(uri::decode(uri::encode(all)) == all);
-        }
-    }
-}
+        then("decoding the encoded string restores it", [&] {
+            require(uri::decode(uri::encode(all)) == all);
+        });
+    });
+}};
 
-SCENARIO("URI decoding") {
-    REQUIRE(uri::decode("http://path%25name%2F%25%23%21%25") == "http://path%name/%#!%");
-    REQUIRE(uri::decode("http://ABC12345zef") == "http://ABC12345zef");
-    REQUIRE(uri::decode("%20%RQabcABV") == " %RQabcABV");
-    REQUIRE(uri::decode("%c3%a9") == "\xC3\xA9");
-    REQUIRE(uri::decode("%\xC3\xA9%E9") == "%\xC3\xA9\xE9");  // Non-ASCII bytes after '%' are kept as they are
-}
+const Scenario uRIDecoding{"URI decoding", [] {
+    require(uri::decode("http://path%25name%2F%25%23%21%25") == "http://path%name/%#!%");
+    require(uri::decode("http://ABC12345zef") == "http://ABC12345zef");
+    require(uri::decode("%20%RQabcABV") == " %RQabcABV");
+    require(uri::decode("%c3%a9") == "\xC3\xA9");
+    require(uri::decode("%\xC3\xA9%E9") == "%\xC3\xA9\xE9");  // Non-ASCII bytes after '%' are kept as they are
+}};
 
-SCENARIO("URI parsing") {
-    GIVEN("An URI with no userinfo nor fragment") {
+const Scenario uRIParsing{"URI parsing", [] {
+    given("An URI with no userinfo nor fragment", [&] {
         uri::URI u0("http://localhost:80/foo.html?&q=1:2:3");
-        WHEN("decoded") {
-            REQUIRE(u0.scheme == "http");
-            REQUIRE(u0.userinfo.empty());
-            REQUIRE(u0.host == "localhost");
-            REQUIRE(u0.port == "80");
-            REQUIRE(u0.path == "/foo.html");
-            REQUIRE(u0.authority == "localhost:80");
-            REQUIRE(u0.query == "&q=1:2:3");
-            REQUIRE(u0.fragment.empty());
-        }
-    }
+        when("decoded", [&] {
+            require(u0.scheme == "http");
+            require(u0.userinfo.empty());
+            require(u0.host == "localhost");
+            require(u0.port == "80");
+            require(u0.path == "/foo.html");
+            require(u0.authority == "localhost:80");
+            require(u0.query == "&q=1:2:3");
+            require(u0.fragment.empty());
+        });
+    });
 
-    GIVEN("A complete URI") {
+    given("A complete URI", [&] {
         uri::URI u1("https://john.doe@www.example.com:123/forum/questions/?tag=networking&order=newest#top");
-        WHEN("decoded") {
-            REQUIRE(u1.scheme == "https");
-            REQUIRE(u1.userinfo == "john.doe");
-            REQUIRE(u1.host == "www.example.com");
-            REQUIRE(u1.port == "123");
-            REQUIRE(u1.path == "/forum/questions/");
-            REQUIRE(u1.authority == "john.doe@www.example.com:123");
-            REQUIRE(u1.query == "tag=networking&order=newest");
-            REQUIRE(u1.fragment == "top");
-        }
-    }
+        when("decoded", [&] {
+            require(u1.scheme == "https");
+            require(u1.userinfo == "john.doe");
+            require(u1.host == "www.example.com");
+            require(u1.port == "123");
+            require(u1.path == "/forum/questions/");
+            require(u1.authority == "john.doe@www.example.com:123");
+            require(u1.query == "tag=networking&order=newest");
+            require(u1.fragment == "top");
+        });
+    });
 
-    GIVEN("A Relative URI") {
+    given("A Relative URI", [&] {
         uri::URI u2("/forum/questions/?tag=networking&order=newest#top");
-        WHEN("decoded") {
-            REQUIRE(u2.scheme.empty());
-            REQUIRE(u2.userinfo.empty());
-            REQUIRE(u2.host.empty());
-            REQUIRE(u2.port.empty());
-            REQUIRE(u2.path == "/forum/questions/");
-            REQUIRE(u2.authority.empty());
-            REQUIRE(u2.query == "tag=networking&order=newest");
-            REQUIRE(u2.fragment == "top");
-        }
-    }
+        when("decoded", [&] {
+            require(u2.scheme.empty());
+            require(u2.userinfo.empty());
+            require(u2.host.empty());
+            require(u2.port.empty());
+            require(u2.path == "/forum/questions/");
+            require(u2.authority.empty());
+            require(u2.query == "tag=networking&order=newest");
+            require(u2.fragment == "top");
+        });
+    });
 
-    GIVEN("A function which returns an URI from a string") {
+    given("A function which returns an URI from a string", [&] {
         auto parse = [](std::string text) { return uri::URI(text); };
 
-        WHEN("parsing URI without userinfo") {
+        when("parsing URI without userinfo", [&] {
             auto u = parse("https://www.example.com:123/forum/questions/?tag=networking&order=newest#top");
-            THEN("fields should be") {
-                REQUIRE(u.scheme == "https");
-                REQUIRE(u.userinfo.empty());
-                REQUIRE(u.host == "www.example.com");
-                REQUIRE(u.port == "123");
-                REQUIRE(u.path == "/forum/questions/");
-                REQUIRE(u.authority == "www.example.com:123");
-                REQUIRE(u.query == "tag=networking&order=newest");
-                REQUIRE(u.fragment == "top");
-            }
-        }
+            then("fields should be", [&] {
+                require(u.scheme == "https");
+                require(u.userinfo.empty());
+                require(u.host == "www.example.com");
+                require(u.port == "123");
+                require(u.path == "/forum/questions/");
+                require(u.authority == "www.example.com:123");
+                require(u.query == "tag=networking&order=newest");
+                require(u.fragment == "top");
+            });
+        });
 
-        WHEN("parsing URI without userinfo nor port") {
+        when("parsing URI without userinfo nor port", [&] {
             auto u = parse("https://www.example.com/forum/questions/?tag=networking&order=newest#top");
-            THEN("fields should be") {
-                REQUIRE(u.scheme == "https");
-                REQUIRE(u.userinfo.empty());
-                REQUIRE(u.host == "www.example.com");
-                REQUIRE(u.port.empty());
-                REQUIRE(u.path == "/forum/questions/");
-                REQUIRE(u.authority == "www.example.com");
-                REQUIRE(u.query == "tag=networking&order=newest");
-                REQUIRE(u.fragment == "top");
-            }
-        }
+            then("fields should be", [&] {
+                require(u.scheme == "https");
+                require(u.userinfo.empty());
+                require(u.host == "www.example.com");
+                require(u.port.empty());
+                require(u.path == "/forum/questions/");
+                require(u.authority == "www.example.com");
+                require(u.query == "tag=networking&order=newest");
+                require(u.fragment == "top");
+            });
+        });
 
-        WHEN("parsing URI without userinfo nor port or query") {
+        when("parsing URI without userinfo nor port or query", [&] {
             auto u = parse("https://www.example.com/forum/questions/");
-            THEN("fields should be") {
-                REQUIRE(u.scheme == "https");
-                REQUIRE(u.userinfo.empty());
-                REQUIRE(u.host == "www.example.com");
-                REQUIRE(u.port.empty());
-                REQUIRE(u.path == "/forum/questions/");
-                REQUIRE(u.authority == "www.example.com");
-                REQUIRE(u.query.empty());
-                REQUIRE(u.fragment.empty());
-            }
-        }
-    }
-}
+            then("fields should be", [&] {
+                require(u.scheme == "https");
+                require(u.userinfo.empty());
+                require(u.host == "www.example.com");
+                require(u.port.empty());
+                require(u.path == "/forum/questions/");
+                require(u.authority == "www.example.com");
+                require(u.query.empty());
+                require(u.fragment.empty());
+            });
+        });
+    });
+}};
 
-SCENARIO("WebSocket Sec Key coding") {
+const Scenario webSocketSec{"WebSocket Sec Key coding", [] {
     std::string key = "x3JJHMbDL1EzLkh9GBhXDw==";
-    REQUIRE(base64::encodeInNetworkOrder(crypto::sha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")) ==
+    require(base64::encodeInNetworkOrder(crypto::sha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")) ==
             "HSmrc0sMlYUkAGmm5OPpG2HaGWk=");
 
     key = "dGhlIHNhbXBsZSBub25jZQ==";
-    REQUIRE(base64::encodeInNetworkOrder(crypto::sha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")) ==
+    require(base64::encodeInNetworkOrder(crypto::sha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")) ==
             "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
-}
+}};
 
-SCENARIO("Base64 encoding") {
-    REQUIRE(base64::encodeInNetworkOrder(crypto::sha1("The quick brown fox jumps over the lazy dog")) ==
+const Scenario base64Encoding{"Base64 encoding", [] {
+    require(base64::encodeInNetworkOrder(crypto::sha1("The quick brown fox jumps over the lazy dog")) ==
             "L9ThxnotKPzthJ7hu3bnORuT6xI=");
-    REQUIRE(base64::encodeInNetworkOrder(crypto::sha1("The quick brown fox jumps over the lazy cog")) ==
+    require(base64::encodeInNetworkOrder(crypto::sha1("The quick brown fox jumps over the lazy cog")) ==
             "3p8sf9JeGzr60+haC9F9mxANtLM=");
-    REQUIRE(base64::encodeInNetworkOrder(crypto::sha1("")) == "2jmj7l5rSw0yVb/vlWAYkK/YBwk=");
-}
+    require(base64::encodeInNetworkOrder(crypto::sha1("")) == "2jmj7l5rSw0yVb/vlWAYkK/YBwk=");
+}};
 
-SCENARIO("SHA1 hashing") {
-    REQUIRE(crypto::sha1String("The quick brown fox jumps over the lazy dog") == "2fd4e1c67a2d28fced849ee1bb76e7391b93eb12");
-    REQUIRE(crypto::sha1String("The quick brown fox jumps over the lazy cog") == "de9f2c7fd25e1b3afad3e85a0bd17d9b100db4b3");
-    REQUIRE(crypto::sha1String("") == "da39a3ee5e6b4b0d3255bfef95601890afd80709");
-}
+const Scenario sHA1Hashing{"SHA1 hashing", [] {
+    require(crypto::sha1String("The quick brown fox jumps over the lazy dog") == "2fd4e1c67a2d28fced849ee1bb76e7391b93eb12");
+    require(crypto::sha1String("The quick brown fox jumps over the lazy cog") == "de9f2c7fd25e1b3afad3e85a0bd17d9b100db4b3");
+    require(crypto::sha1String("") == "da39a3ee5e6b4b0d3255bfef95601890afd80709");
+}};

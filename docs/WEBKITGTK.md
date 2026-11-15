@@ -94,5 +94,5 @@ namespaces. Do not use that escape hatch for browsing untrusted content.
 
 Adapter-specific CTest names use `WebKitGTKAdapter-<case>`; the
 `WebKitGTKLifecycle-<case>` names identify the shared lifecycle suite. Toolkit-free
-Catch2 tests cover the policy decision table, null error diagnostics and preserving
+unit tests cover the policy decision table, null error diagnostics and preserving
 the first failure when a timeout or callback reports a later error.

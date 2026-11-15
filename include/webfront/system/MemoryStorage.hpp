@@ -1,4 +1,4 @@
-/// @brief A simulated storage held in memory: the backend of the Catch2 tests of the services, and the model of a storage
+/// @brief A simulated storage held in memory: the backend of the unit tests of the services, and the model of a storage
 /// without links (FatFs, LittleFS), where the syntax of SafePath is the whole confinement.
 #pragma once
 

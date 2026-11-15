@@ -2,8 +2,9 @@
 #include "TemporaryDirectory.hpp"
 #include <webfront/system/NativeFS.hpp>
 
-#include <catch2/catch_test_macros.hpp>
+#include "Bdd.hpp"
 
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -12,6 +13,8 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
+using namespace webfront::bdd;
 
 using namespace std;
 using namespace webfront;
@@ -96,194 +99,194 @@ namespace {
 
     void checkFileRead(DebugFS& debugFS, const std::string& filename, const std::string& expectedContent) {
         auto file = debugFS.open(filename);
-        REQUIRE(file.has_value());
-        REQUIRE(!file->isEncoded());
+        require(file.has_value());
+        require(!file->isEncoded());
         std::array<char, 512> buffer;
         auto bytesRead = file->read(buffer);
         std::string content(buffer.data(), bytesRead);
-        REQUIRE(normaliseNewlines(content) == normaliseNewlines(expectedContent));
-        REQUIRE(file->eof());
+        require(normaliseNewlines(content) == normaliseNewlines(expectedContent));
+        require(file->eof());
     }
 }
 
-SCENARIO("NativeDebugFS provides access to local files") {
-    GIVEN("A local file") {
+const Scenario nativeDebugFSProvides{"NativeDebugFS provides access to local files", [] {
+    given("A local file", [&] {
         filesystem::path testFilename{"test.tmp"};
         {
             ofstream testFile(testFilename, ios::binary);
             testFile << "TestFile for NativeFSTests\n";
         }
-        WHEN("NativeDebugFS opens it") {
+        when("NativeDebugFS opens it", [&] {
             DebugFS debugFS(".");
             auto file = debugFS.open("test.tmp");
-            THEN("A file with the correct content is returned") {
-                REQUIRE(file);
-                REQUIRE(!file->isEncoded());
+            then("A file with the correct content is returned", [&] {
+                require(file);
+                require(!file->isEncoded());
                 array<char, 512> buffer;
                 auto bytesRead = file->read(buffer);
-                REQUIRE(bytesRead == 27);
-                REQUIRE(string(buffer.data(), 27) == "TestFile for NativeFSTests\n");
-                REQUIRE(file->eof());
-            }
-        }
+                require(bytesRead == 27);
+                require(string(buffer.data(), 27) == "TestFile for NativeFSTests\n");
+                require(file->eof());
+            });
+        });
         filesystem::remove(testFilename);
-    }
-}
+    });
+}};
 
-SCENARIO("NativeDebugFS opens an existing text file using a relative path") {
+const Scenario nativeDebugFSOpens{"NativeDebugFS opens an existing text file using a relative path", [] {
     TemporaryTestEnvironment testEnv;
     auto textFilePath = testEnv.createTextFile("sample.txt", "This is a sample text file\nwith multiple lines\nfor testing.");
     DebugFS debugFS(testEnv.getTestDir().string());
 
-    WHEN("The file sample.txt is opened") {
-        THEN("The file is opened and the content is correct") {
+    when("The file sample.txt is opened", [&] {
+        then("The file is opened and the content is correct", [&] {
             checkFileRead(debugFS, "sample.txt", "This is a sample text file\nwith multiple lines\nfor testing.");
-        }
-    }
-}
+        });
+    });
+}};
 
-SCENARIO("NativeDebugFS opens a JSON configuration file") {
+const Scenario nativeDebugFSOpensJSON{"NativeDebugFS opens a JSON configuration file", [] {
     TemporaryTestEnvironment testEnv;
     auto configFilePath = testEnv.createTextFile("config.json", "{ \"name\": \"NativeFS\", \"version\": 1.0, \"isTest\": true }");
     DebugFS debugFS(testEnv.getTestDir().string());
 
-    WHEN("The file config.json is opened") {
-        THEN("The file is opened and the JSON content is correct") {
+    when("The file config.json is opened", [&] {
+        then("The file is opened and the JSON content is correct", [&] {
             checkFileRead(debugFS, "config.json", "{ \"name\": \"NativeFS\", \"version\": 1.0, \"isTest\": true }");
-        }
-    }
-}
+        });
+    });
+}};
 
-SCENARIO("NativeDebugFS opens a binary file") {
+const Scenario nativeDebugFSOpensBinary{"NativeDebugFS opens a binary file", [] {
     TemporaryTestEnvironment testEnv;
     auto binaryFilePath = testEnv.createBinaryFile("data.bin", 1024);
     DebugFS debugFS(testEnv.getTestDir().string());
     const auto& originalData = testEnv.getBinaryData("data.bin");
 
-    WHEN("The file data.bin is opened") {
+    when("The file data.bin is opened", [&] {
         auto file = debugFS.open("data.bin");
-        THEN("The binary content matches the original data") {
-            REQUIRE(file.has_value());
-            REQUIRE(!file->isEncoded());
+        then("The binary content matches the original data", [&] {
+            require(file.has_value());
+            require(!file->isEncoded());
             vector<char> buffer(1024);
             auto bytesRead = file->read(span(buffer));
-            REQUIRE(bytesRead == 1024);
-            REQUIRE(memcmp(buffer.data(), originalData.data(), bytesRead) == 0);
-        }
-    }
-}
+            require(bytesRead == 1024);
+            require(memcmp(buffer.data(), originalData.data(), bytesRead) == 0);
+        });
+    });
+}};
 
-SCENARIO("NativeDebugFS opens an empty file") {
+const Scenario nativeDebugFSOpensEmpty{"NativeDebugFS opens an empty file", [] {
     TemporaryTestEnvironment testEnv;
     auto emptyFilePath = testEnv.createTextFile("empty.txt", "");
     DebugFS debugFS(testEnv.getTestDir().string());
 
-    WHEN("The file empty.txt is opened") {
+    when("The file empty.txt is opened", [&] {
         auto file = debugFS.open("empty.txt");
-        THEN("The file is opened but it is empty") {
-            REQUIRE(file.has_value());
+        then("The file is opened but it is empty", [&] {
+            require(file.has_value());
             array<char, 10> buffer;
             auto bytesRead = file->read(buffer);
-            REQUIRE(bytesRead == 0);
-            REQUIRE(file->eof());
-        }
-    }
-}
+            require(bytesRead == 0);
+            require(file->eof());
+        });
+    });
+}};
 
-SCENARIO("NativeDebugFS opens a file in a subdirectory") {
+const Scenario nativeDebugFSOpensFile{"NativeDebugFS opens a file in a subdirectory", [] {
     TemporaryTestEnvironment testEnv;
     auto subdirFilePath = testEnv.createTextFile("subdir/nested.txt", "This is a nested file in a subdirectory");
     DebugFS debugFS(testEnv.getTestDir().string());
 
-    WHEN("The file subdir/nested.txt is opened") {
-        THEN("The file is opened successfully") {
+    when("The file subdir/nested.txt is opened", [&] {
+        then("The file is opened successfully", [&] {
             checkFileRead(debugFS, "subdir/nested.txt", "This is a nested file in a subdirectory");
-        }
-    }
-}
+        });
+    });
+}};
 
-SCENARIO("NativeDebugFS attempts to open a non-existent file") {
+const Scenario nativeDebugFSAttempts{"NativeDebugFS attempts to open a non-existent file", [] {
     TemporaryTestEnvironment testEnv;
     DebugFS debugFS(testEnv.getTestDir().string());
 
-    WHEN("An attempt is made to open non_existent.txt") {
+    when("An attempt is made to open non_existent.txt", [&] {
         auto file = debugFS.open("non_existent.txt");
-        THEN("An empty optional is returned") {
-            REQUIRE(!file.has_value());
-        }
-    }
+        then("An empty optional is returned", [&] {
+            require(!file.has_value());
+        });
+    });
 
-    WHEN("An attempt is made to open ../unauthorized.txt") {
+    when("An attempt is made to open ../unauthorized.txt", [&] {
         auto file = debugFS.open("../unauthorized.txt");
-        THEN("An empty optional is returned for security reasons") {
-            REQUIRE(!file.has_value());
-        }
-    }
-}
+        then("An empty optional is returned for security reasons", [&] {
+            require(!file.has_value());
+        });
+    });
+}};
 
-SCENARIO("TemporaryTestEnvironment::getBinaryData returns the correct binary data") {
+const Scenario temporaryTestEnvironmentGetBinaryData{"TemporaryTestEnvironment::getBinaryData returns the correct binary data", [] {
     TemporaryTestEnvironment testEnv;
     auto binaryFilePath = testEnv.createBinaryFile("data.bin", 1024);
 
-    WHEN("Binary data is retrieved via getBinaryData") {
+    when("Binary data is retrieved via getBinaryData", [&] {
         const auto& data = testEnv.getBinaryData("data.bin");
-        THEN("The size and content are correct") {
-            REQUIRE(data.size() == 1024);
-            REQUIRE(!data.empty());
-        }
-    }
-}
+        then("The size and content are correct", [&] {
+            require(data.size() == 1024);
+            require(!data.empty());
+        });
+    });
+}};
 
-SCENARIO("NativeDebugFS root path handling") {
+const Scenario nativeDebugFSRoot{"NativeDebugFS root path handling", [] {
     TemporaryTestEnvironment testEnv;
     auto testFile = testEnv.createTextFile("test_root.txt", "Root path test");
     
-    GIVEN("A NativeDebugFS with the root path set to the test directory") {
+    given("A NativeDebugFS with the root path set to the test directory", [&] {
         DebugFS debugFS(testEnv.getTestDir().string());
         
-        WHEN("A file is opened using an absolute path that does not respect the root path") {
+        when("A file is opened using an absolute path that does not respect the root path", [&] {
             auto file = debugFS.open(filesystem::absolute("test_root.txt").string());
             
-            THEN("File access should fail as it is not under the root path") {
-                REQUIRE(!file.has_value());
-            }
-        }
+            then("File access should fail as it is not under the root path", [&] {
+                require(!file.has_value());
+            });
+        });
         
-        WHEN("The working directory is changed and relative paths are used") {
+        when("The working directory is changed and relative paths are used", [&] {
             auto originalPath = filesystem::current_path();
             
             filesystem::current_path(testEnv.getTestDir());
             auto file = debugFS.open("test_root.txt");
             filesystem::current_path(originalPath);
             
-            THEN("File access should succeed as the path is resolved correctly") {
-                REQUIRE(file.has_value());
+            then("File access should succeed as the path is resolved correctly", [&] {
+                require(file.has_value());
                 array<char, 512> buffer;
                 auto bytesRead = file->read(buffer);
-                REQUIRE(string(buffer.data(), bytesRead) == "Root path test");
-            }
-        }
-    }
+                require(string(buffer.data(), bytesRead) == "Root path test");
+            });
+        });
+    });
     
-    GIVEN("A NativeDebugFS with the root path set to a subdirectory") {
+    given("A NativeDebugFS with the root path set to a subdirectory", [&] {
         DebugFS debugFS(testEnv.getSubDir().string());
         auto subDirFile = testEnv.createTextFile("subdir/subdir_test.txt", "Subdir test");
         
-        WHEN("An attempt is made to access a file in the parent directory") {
+        when("An attempt is made to access a file in the parent directory", [&] {
             auto file = debugFS.open("../test_root.txt");
             
-            THEN("File access behaviour depends on the implementation's security policy") {
+            then("File access behaviour depends on the implementation's security policy", [&] {
                 if (file.has_value()) {
                     array<char, 512> buffer;
                     auto bytesRead = file->read(buffer);
-                    REQUIRE(string(buffer.data(), bytesRead) == "Root path test");
+                    require(string(buffer.data(), bytesRead) == "Root path test");
                 }
-            }
-        }
-    }
-}
+            });
+        });
+    });
+}};
 
-SCENARIO("TemporaryTestEnvironment destructor handles remove_all exception") {
+const Scenario temporaryTestEnvironmentDestructor{"TemporaryTestEnvironment destructor handles remove_all exception", [] {
     unique_ptr<TemporaryTestEnvironment> testEnv = make_unique<TemporaryTestEnvironment>();
     auto protectedDir = testEnv->getTestDir() / "protected";
     filesystem::create_directory(protectedDir);
@@ -302,5 +305,5 @@ SCENARIO("TemporaryTestEnvironment destructor handles remove_all exception") {
 
     // The test passes if the warning message is present OR if nothing is written (removal succeeded)
     auto warningFound = capturedCerr.str().find("Warning: Failed to clean up test directory") != string::npos;
-    REQUIRE((warningFound || capturedCerr.str().empty()));
-}
+    require((warningFound || capturedCerr.str().empty()));
+}};

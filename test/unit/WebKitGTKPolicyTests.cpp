@@ -1,15 +1,16 @@
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers.hpp>
+#include "Bdd.hpp"
 #include <webfront/frontend/WebKitGTKPolicy.hpp>
 
 #include <array>
+
+using namespace webfront::bdd;
 
 namespace {
 using namespace webfront;
 using namespace webfront::frontend::detail::webkitgtk;
 }  // namespace
 
-SCENARIO("WebKitGTK applies navigation policy without toolkit objects") {
+const Scenario webKitGTKApplies{"WebKitGTK applies navigation policy without toolkit objects", [] {
     const detail::BoundContentPolicy policy;
     struct Case {
         PolicyEvent    event;
@@ -41,26 +42,26 @@ SCENARIO("WebKitGTK applies navigation policy without toolkit objects") {
         {      PolicyEvent::newWindow,                         nullptr, false,   0, false,                 PolicyDecision::popup},
         {static_cast<PolicyEvent>(99),                         nullptr, false,   0, false,                PolicyDecision::cancel},
     });
-    THEN("responses enforce main-document origins and initial HTTP failures while actions reject opaque schemes") {
+    then("responses enforce main-document origins and initial HTTP failures while actions reject opaque schemes", [&] {
         for (const auto& entry : cases) {
-            INFO((entry.uri ? entry.uri : "null URI"));
-            CHECK(decidePolicy(policy, {entry.event, entry.uri, entry.mainResource, entry.status, entry.initial}) == entry.expected);
+            auto scope = info(entry.uri ? entry.uri : "null URI");
+            check(decidePolicy(policy, {entry.event, entry.uri, entry.mainResource, entry.status, entry.initial}) == entry.expected);
         }
-    }
-    GIVEN("an explicitly allowed destination") {
+    });
+    given("an explicitly allowed destination", [&] {
         ContentPolicy options;
         options.navigationAllowedOrigins = {"https://other.example"};
         const detail::BoundContentPolicy allowed("http://127.0.0.1:9002", options);
-        THEN("its redirected response may commit") {
-            CHECK(decidePolicy(allowed, {PolicyEvent::response, "https://other.example/redirect", true, 200, true}) == PolicyDecision::allow);
-        }
-    }
-}
+        then("its redirected response may commit", [&] {
+            check(decidePolicy(allowed, {PolicyEvent::response, "https://other.example/redirect", true, 200, true}) == PolicyDecision::allow);
+        });
+    });
+}};
 
-SCENARIO("WebKitGTK retains the first session failure") {
+const Scenario webKitGTKRetains{"WebKitGTK retains the first session failure", [] {
     FailureState state;
-    CHECK_NOTHROW(state.rethrowIfFailed());
-    WHEN("a navigation error is followed by a queued timeout and callback exception") {
+    checkNothrow([&] { state.rethrowIfFailed(); });
+    when("a navigation error is followed by a queued timeout and callback exception", [&] {
         state.fail("original navigation error");
         const auto original = state.failure;
         state.fail("initial navigation timed out");
@@ -69,28 +70,28 @@ SCENARIO("WebKitGTK retains the first session failure") {
         } catch (...) {
             state.rememberFailure();
         }
-        THEN("the original exception remains observable") {
-            REQUIRE(state.failure == original);
-            REQUIRE_THROWS_WITH(state.rethrowIfFailed(), "WebKitGTK: original navigation error");
-        }
-    }
-    WHEN("the first failure came from a callback") {
+        then("the original exception remains observable", [&] {
+            require(state.failure == original);
+            requireThrows([&] { state.rethrowIfFailed(); }, equals("WebKitGTK: original navigation error"));
+        });
+    });
+    when("the first failure came from a callback", [&] {
         try {
             throw std::logic_error("original callback failure");
         } catch (...) {
             state.rememberFailure();
         }
         state.fail("late timeout");
-        THEN("a later native failure preserves the exception type and message") {
-            REQUIRE_THROWS_AS(state.rethrowIfFailed(), std::logic_error);
-            REQUIRE_THROWS_WITH(state.rethrowIfFailed(), "original callback failure");
-        }
-    }
-}
+        then("a later native failure preserves the exception type and message", [&] {
+            requireThrows<std::logic_error>([&] { state.rethrowIfFailed(); });
+            requireThrows([&] { state.rethrowIfFailed(); }, equals("original callback failure"));
+        });
+    });
+}};
 
-SCENARIO("WebKitGTK handles missing native navigation diagnostics") {
-    THEN("a null GError message has an actionable fallback") {
-        CHECK(initialNavigationError(nullptr) == "initial navigation failed: unknown error; check the local server and page path");
-        CHECK(initialNavigationError("connection refused") == "initial navigation failed: connection refused; check the local server and page path");
-    }
-}
+const Scenario webKitGTKHandles{"WebKitGTK handles missing native navigation diagnostics", [] {
+    then("a null GError message has an actionable fallback", [&] {
+        check(initialNavigationError(nullptr) == "initial navigation failed: unknown error; check the local server and page path");
+        check(initialNavigationError("connection refused") == "initial navigation failed: connection refused; check the local server and page path");
+    });
+}};

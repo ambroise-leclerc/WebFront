@@ -1,5 +1,4 @@
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_string.hpp>
+#include "Bdd.hpp"
 #include <webfront/testing/Capture.hpp>
 #include <webfront/testing/Jasmine.hpp>
 
@@ -10,22 +9,24 @@
 #include <iterator>
 #include <thread>
 
-SCENARIO("Consumer Jasmine configuration is bounded and rejects ambiguous or incomplete input") {
+using namespace webfront::bdd;
+
+const Scenario consumerJasmine{"Consumer Jasmine configuration is bounded and rejects ambiguous or incomplete input", [] {
     using webfront::testing::detail::jasmineConfiguration;
-    GIVEN("a runtime, a spec and an explicit report destination") {
+    given("a runtime, a spec and an explicit report destination", [&] {
         const auto config = jasmineConfiguration(R"({"files":["jasmine.js","board.spec.js"],"report":"report.json"})");
-        REQUIRE(config.files == std::vector<std::string>{"jasmine.js", "board.spec.js"});
-        REQUIRE(config.report == "report.json");
-    }
-    GIVEN("an invalid or ambiguous configuration") {
+        require(config.files == std::vector<std::string>{"jasmine.js", "board.spec.js"});
+        require(config.report == "report.json");
+    });
+    given("an invalid or ambiguous configuration", [&] {
         for (const auto text : {R"({"files":["jasmine.js"],"report":"r"})",
                                 R"({"files":["j","s"]})",
                                 R"({"files":["j","s"],"report":"r","report":"other"})",
                                 R"({"files":["j","s"],"report":"r","shell":true})",
                                 "{} trailing"})
-            REQUIRE_THROWS(jasmineConfiguration(text));
-    }
-}
+            requireThrows([&] { jasmineConfiguration(text); });
+    });
+}};
 
 namespace {
 using webfront::testing::detail::JasmineSession;
@@ -47,87 +48,87 @@ struct ReportFile {
 };
 }  // namespace
 
-SCENARIO("A Jasmine session serves its files in bounded chunks to the instrumented page only") {
-    constexpr auto chunk = JasmineSession<>::chunkSize;
+const Scenario jasmineSession{"A Jasmine session serves its files in bounded chunks to the instrumented page only", [] {
+    static constexpr auto chunk = JasmineSession<>::chunkSize;
     ReportFile     report{"chunks"};
-    GIVEN("a file that is an exact multiple of the chunk size, an empty file and a short one") {
+    given("a file that is an exact multiple of the chunk size, an empty file and a short one", [&] {
         JasmineSession session{{std::string(chunk * 2, 'a'), "", "short"}, report.path};
-        REQUIRE(session.attach(7));
-        REQUIRE(session.count(7) == 3);
-        THEN("every chunk is full until an empty read ends the file") {
-            REQUIRE(session.read(7, 0, 0).size() == chunk);
-            REQUIRE(session.read(7, 0, static_cast<double>(chunk)).size() == chunk);
-            REQUIRE(session.read(7, 0, static_cast<double>(chunk * 2)).empty());
-            REQUIRE(session.read(7, 1, 0).empty());
-            REQUIRE(session.read(7, 2, 2).size() == 3);
-        }
-        THEN("indexes and offsets outside the file are rejected") {
+        require(session.attach(7));
+        require(session.count(7) == 3);
+        then("every chunk is full until an empty read ends the file", [&] {
+            require(session.read(7, 0, 0).size() == chunk);
+            require(session.read(7, 0, static_cast<double>(chunk)).size() == chunk);
+            require(session.read(7, 0, static_cast<double>(chunk * 2)).empty());
+            require(session.read(7, 1, 0).empty());
+            require(session.read(7, 2, 2).size() == 3);
+        });
+        then("indexes and offsets outside the file are rejected", [&] {
             for (const auto& [index, offset] : {std::pair{-1.0, 0.0}, {3.0, 0.0}, {0.5, 0.0}, {0.0, -1.0}, {0.0, 0.5},
                                                {0.0, static_cast<double>(chunk * 2 + 1)}, {std::nan(""), 0.0}, {0.0, std::nan("")},
                                                {0.0, HUGE_VAL}})
-                REQUIRE_THROWS(session.read(7, index, offset));
-        }
-        THEN("another page cannot read, count or report") {
-            REQUIRE_THROWS(session.count(8));
-            REQUIRE_THROWS(session.read(8, 0, 0));
-            REQUIRE_THROWS(session.result(8, R"({"status":"passed"})"));
-        }
-    }
-    GIVEN("a page that was never attached") {
+                requireThrows([&] { (void)session.read(7, index, offset); });
+        });
+        then("another page cannot read, count or report", [&] {
+            requireThrows([&] { (void)session.count(8); });
+            requireThrows([&] { (void)session.read(8, 0, 0); });
+            requireThrows([&] { session.result(8, R"({"status":"passed"})"); });
+        });
+    });
+    given("a page that was never attached", [&] {
         JasmineSession session{{"x"}, report.path};
-        REQUIRE_THROWS(session.count(1));
-    }
-}
+        requireThrows([&] { (void)session.count(1); });
+    });
+}};
 
-SCENARIO("A reloaded page replaces the previous one, and nothing attaches after completion") {
+const Scenario reloadedPage{"A reloaded page replaces the previous one, and nothing attaches after completion", [] {
     ReportFile     report{"reload"};
     JasmineSession session{{"x"}, report.path};
-    REQUIRE(session.attach(1));
-    REQUIRE(session.attach(2));
-    REQUIRE_THROWS(session.count(1));
-    REQUIRE(session.count(2) == 1);
+    require(session.attach(1));
+    require(session.attach(2));
+    requireThrows([&] { (void)session.count(1); });
+    require(session.count(2) == 1);
     session.result(2, R"({"status":"passed"})");
-    REQUIRE_FALSE(session.attach(3));
-}
+    require(!session.attach(3));
+}};
 
-SCENARIO("A Jasmine session validates and records exactly one result") {
+const Scenario jasmineSessionValidates{"A Jasmine session validates and records exactly one result", [] {
     ReportFile report{"result"};
-    GIVEN("an attached page") {
+    given("an attached page", [&] {
         JasmineSession session{{"x"}, report.path};
-        REQUIRE(session.exitCode() == 1);
-        REQUIRE(session.attach(1));
-        THEN("a malformed or ambiguous result is rejected and leaves the run failed") {
+        require(session.exitCode() == 1);
+        require(session.attach(1));
+        then("a malformed or ambiguous result is rejected and leaves the run failed", [&] {
             for (const auto text : {"", "{}", R"({"status":"ok"})", R"({"status":"passed","status":"passed"})", "[]", R"({"status":"passed"} x)"})
-                REQUIRE_THROWS(session.result(1, text));
-            REQUIRE(session.exitCode() == 1);
-            REQUIRE_FALSE(std::filesystem::exists(report.path));
-        }
-        THEN("a passing result is written once and a second one is refused") {
+                requireThrows([&] { session.result(1, text); });
+            require(session.exitCode() == 1);
+            require(!std::filesystem::exists(report.path));
+        });
+        then("a passing result is written once and a second one is refused", [&] {
             session.result(1, R"({"format":1,"status":"passed","total":1})");
-            REQUIRE(session.exitCode() == 0);
-            REQUIRE(report.text() == "{\"format\":1,\"status\":\"passed\",\"total\":1}\n");
-            REQUIRE_THROWS(session.result(1, R"({"status":"failed"})"));
-            REQUIRE(session.exitCode() == 0);
-        }
-        THEN("failed and error results keep a nonzero status") {
+            require(session.exitCode() == 0);
+            require(report.text() == "{\"format\":1,\"status\":\"passed\",\"total\":1}\n");
+            requireThrows([&] { session.result(1, R"({"status":"failed"})"); });
+            require(session.exitCode() == 0);
+        });
+        then("failed and error results keep a nonzero status", [&] {
             session.result(1, R"({"status":"error","error":"boom"})");
-            REQUIRE(session.exitCode() == 1);
-        }
-    }
-    GIVEN("a report that cannot be written") {
+            require(session.exitCode() == 1);
+        });
+    });
+    given("a report that cannot be written", [&] {
         JasmineSession session{{"x"}, std::filesystem::temp_directory_path() / "webfront-missing-dir" / "report.json"};
-        REQUIRE(session.attach(1));
-        REQUIRE_THROWS(session.result(1, R"({"status":"passed"})"));
-        REQUIRE(session.exitCode() == 1);
-    }
-}
+        require(session.attach(1));
+        requireThrows([&] { session.result(1, R"({"status":"passed"})"); });
+        require(session.exitCode() == 1);
+    });
+}};
 
-SCENARIO("The injected script reads in the same chunk size the session serves and reports load errors") {
+const Scenario injectedScript{"The injected script reads in the same chunk size the session serves and reports load errors", [] {
     const auto script = webfront::testing::detail::jasmineScript();
-    REQUIRE(script.starts_with("const CHUNK = " + std::to_string(JasmineSession<>::chunkSize) + ";"));
-    REQUIRE(script.find("49152", script.find("49152") + 1) == std::string::npos);  // the number appears only in the CHUNK definition
-    REQUIRE(script.find("failed to load") != std::string_view::npos);
-}
+    require(script.starts_with("const CHUNK = " + std::to_string(JasmineSession<>::chunkSize) + ";"));
+    require(script.find("49152", script.find("49152") + 1) == std::string::npos);  // the number appears only in the CHUNK definition
+    require(script.find("failed to load") != std::string_view::npos);
+}};
 
 
 namespace {
@@ -166,67 +167,67 @@ bool fileExists(const std::filesystem::path& path) {
 }
 }  // namespace
 
-SCENARIO("A capture store writes images only below its directory") {
+const Scenario captureStoreScenario{"A capture store writes images only below its directory", [] {
     CaptureDirectory directory{"names"};
-    GIVEN("a store with a window that answers") {
+    given("a store with a window that answers", [&] {
         CaptureStore store{directory.path, fakeImage};
-        THEN("a valid name becomes a PNG file") {
-            REQUIRE(store.screenshot("board-1_a") == 4);
-            REQUIRE(std::filesystem::file_size(directory.path / "board-1_a.png") == 4);
-        }
-        THEN("a name that could leave the directory or add an extension is refused") {
+        then("a valid name becomes a PNG file", [&] {
+            require(store.screenshot("board-1_a") == 4);
+            require(std::filesystem::file_size(directory.path / "board-1_a.png") == 4);
+        });
+        then("a name that could leave the directory or add an extension is refused", [&] {
             for (const auto* name : {"", "../x", "a/b", "a\\b", "a.png", ".", "..", "a b", "caf\xC3\xA9", "\xE9"})
-                REQUIRE_THROWS_AS(store.screenshot(name), std::invalid_argument);
-            REQUIRE_THROWS_AS(store.screenshot(std::string(65, 'a')), std::invalid_argument);
-            REQUIRE_FALSE(std::filesystem::exists(directory.path));
-        }
-    }
-    GIVEN("a window that cannot be captured") {
+                requireThrows<std::invalid_argument>([&] { store.screenshot(name); });
+            requireThrows<std::invalid_argument>([&] { store.screenshot(std::string(65, 'a')); });
+            require(!std::filesystem::exists(directory.path));
+        });
+    });
+    given("a window that cannot be captured", [&] {
         CaptureStore store{directory.path, [](std::chrono::milliseconds) -> CaptureResult {
                                return std::unexpected("no window");
                            }};
-        THEN("the diagnostic reaches the caller and nothing is written") {
-            REQUIRE_THROWS_WITH(store.screenshot("x"), Catch::Matchers::Equals("Capture failed: no window"));
-            REQUIRE_FALSE(std::filesystem::exists(directory.path / "x.png"));
-        }
-    }
-}
+        then("the diagnostic reaches the caller and nothing is written", [&] {
+            requireThrows([&] { store.screenshot("x"); }, equals("Capture failed: no window"));
+            require(!std::filesystem::exists(directory.path / "x.png"));
+        });
+    });
+}};
 
-SCENARIO("A capture store records numbered images at a bounded rate") {
+const Scenario captureStoreRecords{"A capture store records numbered images at a bounded rate", [] {
     CaptureDirectory directory{"record"};
     std::atomic<int> calls = 0;
     CaptureStore     store{directory.path, [&](std::chrono::milliseconds) -> CaptureResult {
                            ++calls;
                            return std::vector<std::uint8_t>{1, 2, 3};
                            }};
-    GIVEN("a recording at 20 images per second") {
+    given("a recording at 20 images per second", [&] {
         store.startRecording("run", 20);
-        THEN("a second recording is refused while it runs") {
-            REQUIRE_THROWS_AS(store.startRecording("other", 10), std::logic_error);
-        }
-        REQUIRE(waitUntil([&] {
+        then("a second recording is refused while it runs", [&] {
+            requireThrows<std::logic_error>([&] { store.startRecording("other", 10); });
+        });
+        require(waitUntil([&] {
             return calls >= 4;
         }));
         const auto frames = store.stopRecording();
-        THEN("the images are numbered from 0001 and roughly match the rate") {
-            REQUIRE(frames >= 4);
-            REQUIRE(frames <= 12);
-            REQUIRE(std::filesystem::exists(directory.path / "run" / "0001.png"));
-            REQUIRE(std::filesystem::exists(directory.path / "run" / "0004.png"));
-            REQUIRE(frames == static_cast<std::size_t>(calls.load()));
-        }
-        THEN("stopping again is an error") {
-            REQUIRE_THROWS_AS(store.stopRecording(), std::logic_error);
-        }
-    }
-    GIVEN("a rate outside 1 to 30 or an invalid name") {
-        REQUIRE_THROWS_AS(store.startRecording("run", 0), std::invalid_argument);
-        REQUIRE_THROWS_AS(store.startRecording("run", 31), std::invalid_argument);
-        REQUIRE_THROWS_AS(store.startRecording("../run", 10), std::invalid_argument);
-    }
-}
+        then("the images are numbered from 0001 and roughly match the rate", [&] {
+            require(frames >= 4);
+            require(frames <= 12);
+            require(std::filesystem::exists(directory.path / "run" / "0001.png"));
+            require(std::filesystem::exists(directory.path / "run" / "0004.png"));
+            require(frames == static_cast<std::size_t>(calls.load()));
+        });
+        then("stopping again is an error", [&] {
+            requireThrows<std::logic_error>([&] { store.stopRecording(); });
+        });
+    });
+    given("a rate outside 1 to 30 or an invalid name", [&] {
+        requireThrows<std::invalid_argument>([&] { store.startRecording("run", 0); });
+        requireThrows<std::invalid_argument>([&] { store.startRecording("run", 31); });
+        requireThrows<std::invalid_argument>([&] { store.startRecording("../run", 10); });
+    });
+}};
 
-SCENARIO("A recording that loses its window reports the failure when it is stopped") {
+const Scenario recordingLoses{"A recording that loses its window reports the failure when it is stopped", [] {
     CaptureDirectory directory{"failure"};
     std::atomic<int> calls = 0;
     CaptureStore     store{directory.path, [&](std::chrono::milliseconds) -> CaptureResult {
@@ -235,11 +236,11 @@ SCENARIO("A recording that loses its window reports the failure when it is stopp
                            return std::vector<std::uint8_t>{1};
                            }};
     store.startRecording("lost", 30);
-    REQUIRE(waitUntil([&] {
+    require(waitUntil([&] {
         return calls > 2;
     }));
-    REQUIRE_THROWS_WITH(store.stopRecording(), Catch::Matchers::Equals("Recording stopped: Capture failed: the window is closed"));
-}
+    requireThrows([&] { store.stopRecording(); }, equals("Recording stopped: Capture failed: the window is closed"));
+}};
 
 namespace {
 template <typename Poll>
@@ -250,7 +251,7 @@ double pollUntilDone(Poll poll) {
 }
 }  // namespace
 
-SCENARIO("A capture store takes a screenshot without making the caller wait for the window") {
+const Scenario captureStoreTakes{"A capture store takes a screenshot without making the caller wait for the window", [] {
     CaptureDirectory  directory{"async"};
     std::atomic<bool> release = false;
     CaptureStore      store{directory.path, [&](std::chrono::milliseconds) -> CaptureResult {
@@ -258,91 +259,90 @@ SCENARIO("A capture store takes a screenshot without making the caller wait for 
                                std::this_thread::sleep_for(std::chrono::milliseconds{1});
                            return std::vector<std::uint8_t>{1, 2, 3};
                             }};
-    GIVEN("a window that has not answered yet") {
+    given("a window that has not answered yet", [&] {
         store.beginScreenshot("slow");  // returns at once
-        THEN("it is pending, a second one is refused, and the result arrives later") {
-            REQUIRE_FALSE(store.pollScreenshot().has_value());
-            REQUIRE_THROWS_AS(store.beginScreenshot("other"), std::logic_error);
+        then("it is pending, a second one is refused, and the result arrives later", [&] {
+            require(!store.pollScreenshot().has_value());
+            requireThrows<std::logic_error>([&] { store.beginScreenshot("other"); });
             release = true;
             std::optional<std::size_t> size;
-            REQUIRE(waitUntil([&] { return (size = store.pollScreenshot()).has_value(); }));
-            REQUIRE(size == 3);
-            REQUIRE(std::filesystem::exists(directory.path / "slow.png"));
-            REQUIRE_THROWS_AS(store.pollScreenshot(), std::logic_error);
-        }
-    }
-    GIVEN("an invalid name") {
-        REQUIRE_THROWS_AS(store.beginScreenshot("../x"), std::invalid_argument);
-    }
+            require(waitUntil([&] { return (size = store.pollScreenshot()).has_value(); }));
+            require(size == 3);
+            require(std::filesystem::exists(directory.path / "slow.png"));
+            requireThrows<std::logic_error>([&] { store.pollScreenshot(); });
+        });
+    });
+    given("an invalid name", [&] {
+        requireThrows<std::invalid_argument>([&] { store.beginScreenshot("../x"); });
+    });
     release = true;
-}
+}};
 
-SCENARIO("An asynchronous screenshot reports a capture failure when polled") {
+const Scenario asynchronousScreenshot{"An asynchronous screenshot reports a capture failure when polled", [] {
     CaptureDirectory directory{"asyncfail"};
     CaptureStore     store{directory.path, [](std::chrono::milliseconds) -> CaptureResult {
                            return std::unexpected("no window");
                            }};
     store.beginScreenshot("x");
     std::optional<std::size_t> size;
-    REQUIRE_THROWS_WITH(
+    requireThrows([&] { 
         [&] {
             waitUntil([&] { return (size = store.pollScreenshot()).has_value(); });
-        }(),
-        Catch::Matchers::Equals("Capture failed: no window"));
-}
+        }(); }, equals("Capture failed: no window"));
+}};
 
-SCENARIO("A recording stops on request and reports its count by polling") {
+const Scenario recordingStops{"A recording stops on request and reports its count by polling", [] {
     CaptureDirectory directory{"stop"};
     CaptureStore     store{directory.path, fakeImage};
     store.startRecording("run", 30);
-    REQUIRE(waitUntil([&] {
+    require(waitUntil([&] {
         return fileExists(directory.path / "run" / "0002.png");
     }));
     store.requestStop();
     std::optional<std::size_t> frames;
-    REQUIRE(waitUntil([&] { return (frames = store.pollRecording()).has_value(); }));
-    REQUIRE(frames.has_value());
-    REQUIRE(*frames >= 2);
-    REQUIRE_THROWS_AS(store.requestStop(), std::logic_error);
-    REQUIRE_THROWS_AS(store.pollRecording(), std::logic_error);
-}
+    require(waitUntil([&] { return (frames = store.pollRecording()).has_value(); }));
+    require(frames.has_value());
+    require(*frames >= 2);
+    requireThrows<std::logic_error>([&] { store.requestStop(); });
+    requireThrows<std::logic_error>([&] { store.pollRecording(); });
+}};
 
-SCENARIO("A recording ends by itself at the image limit and can still be collected") {
+const Scenario recordingEnds{"A recording ends by itself at the image limit and can still be collected", [] {
     CaptureDirectory directory{"limit"};
     CaptureStore     store{directory.path, fakeImage, 3};
     store.startRecording("run", 30);
-    REQUIRE(waitUntil([&] {
+    require(waitUntil([&] {
         return fileExists(directory.path / "run" / "0003.png");
     }));
     store.requestStop();  // finished or about to: not an error
     std::optional<std::size_t> frames;
-    REQUIRE(waitUntil([&] { return (frames = store.pollRecording()).has_value(); }));
-    REQUIRE(frames == 3);
-    REQUIRE_FALSE(std::filesystem::exists(directory.path / "run" / "0004.png"));
+    require(waitUntil([&] { return (frames = store.pollRecording()).has_value(); }));
+    require(frames == 3);
+    require(!std::filesystem::exists(directory.path / "run" / "0004.png"));
     store.startRecording("again", 30);  // the slot is free once collected
-    REQUIRE(store.stopRecording() <= 3);
-}
+    require(store.stopRecording() <= 3);
+}};
 
-SCENARIO("A capture that nobody collects does not block the next one") {
+const Scenario captureNobody{"A capture that nobody collects does not block the next one", [] {
     CaptureDirectory directory{"uncollected"};
     CaptureStore     store{directory.path, fakeImage, 2};
-    GIVEN("a screenshot that finished but was never polled") {
+    given("a screenshot that finished but was never polled", [&] {
         store.beginScreenshot("a");
-        THEN("a concurrent request cannot take over its result") {
-            REQUIRE(waitUntil([&] { return fileExists(directory.path / "a.png"); }));
-            REQUIRE_THROWS_AS(store.beginScreenshot("b"), std::logic_error);
-            REQUIRE(pollUntilDone([&] {
+        then("a concurrent request cannot take over its result", [&] {
+            require(waitUntil([&] { return fileExists(directory.path / "a.png"); }));
+            requireThrows<std::logic_error>([&] { store.beginScreenshot("b"); });
+            require(pollUntilDone([&] {
                         const auto size = store.pollScreenshot();
                         return size ? static_cast<double>(*size) : -1.0;
                     }) == 4);
-            REQUIRE(std::filesystem::exists(directory.path / "a.png"));
-            REQUIRE_FALSE(std::filesystem::exists(directory.path / "b.png"));
-        }
-    }
-    GIVEN("a screenshot that finished but whose page was replaced") {
+            require(std::filesystem::exists(directory.path / "a.png"));
+            require(!std::filesystem::exists(directory.path / "b.png"));
+        });
+    });
+    given("a screenshot that finished but whose page was replaced", [&] {
         store.beginScreenshot("a");
-        THEN("abandon frees the slot and the next screenshot starts and can be polled") {
-            REQUIRE(waitUntil([&] {  // abandon frees the slot as soon as the first worker has ended
+        then("abandon frees the slot and the next screenshot starts and can be polled", [&] {
+            require(waitUntil([&] {  // abandon frees the slot as soon as the first worker has ended
                 store.abandon();
                 try {
                     store.beginScreenshot("b");
@@ -351,17 +351,17 @@ SCENARIO("A capture that nobody collects does not block the next one") {
                     return false;
                 }
             }));
-            REQUIRE(pollUntilDone([&] {
+            require(pollUntilDone([&] {
                         const auto size = store.pollScreenshot();
                         return size ? static_cast<double>(*size) : -1.0;
                     }) == 4);
-            REQUIRE(std::filesystem::exists(directory.path / "b.png"));
-        }
-    }
-    GIVEN("a recording that ended by itself and was never collected") {
+            require(std::filesystem::exists(directory.path / "b.png"));
+        });
+    });
+    given("a recording that ended by itself and was never collected", [&] {
         store.startRecording("first", 30);
-        THEN("another recording starts, and the first one keeps its images") {
-            REQUIRE(waitUntil([&] {  // the slot is free as soon as the first worker has ended
+        then("another recording starts, and the first one keeps its images", [&] {
+            require(waitUntil([&] {  // the slot is free as soon as the first worker has ended
                 try {
                     store.startRecording("second", 30);
                     return true;
@@ -369,47 +369,47 @@ SCENARIO("A capture that nobody collects does not block the next one") {
                     return false;
                 }
             }));
-            REQUIRE(store.stopRecording() <= 2);
-            REQUIRE(std::filesystem::exists(directory.path / "first" / "0002.png"));
-        }
-    }
-}
+            require(store.stopRecording() <= 2);
+            require(std::filesystem::exists(directory.path / "first" / "0002.png"));
+        });
+    });
+}};
 
-SCENARIO("A recording never erases the images of an earlier recording of the same run") {
+const Scenario recordingNever{"A recording never erases the images of an earlier recording of the same run", [] {
     CaptureDirectory directory{"duplicate"};
     CaptureStore     store{directory.path, fakeImage};
     store.startRecording("run", 30);
-    REQUIRE(waitUntil([&] {
+    require(waitUntil([&] {
         return fileExists(directory.path / "run" / "0001.png");
     }));
     const auto frames = store.stopRecording();
-    REQUIRE(frames >= 1);
-    REQUIRE_THROWS_AS(store.startRecording("run", 30), std::logic_error);
-    REQUIRE(std::filesystem::exists(directory.path / "run" / "0001.png"));
-    GIVEN("images left by an earlier run in a fresh store") {
+    require(frames >= 1);
+    requireThrows<std::logic_error>([&] { store.startRecording("run", 30); });
+    require(std::filesystem::exists(directory.path / "run" / "0001.png"));
+    given("images left by an earlier run in a fresh store", [&] {
         CaptureStore fresh{directory.path, fakeImage};
-        THEN("the first recording of that name replaces them") {
+        then("the first recording of that name replaces them", [&] {
             std::ofstream{directory.path / "run" / "stale.png"} << "x";
             fresh.startRecording("run", 30);
             fresh.stopRecording();
-            REQUIRE_FALSE(std::filesystem::exists(directory.path / "run" / "stale.png"));
-        }
-    }
-}
+            require(!std::filesystem::exists(directory.path / "run" / "stale.png"));
+        });
+    });
+}};
 
-SCENARIO("A stop request belongs to its own recording") {
+const Scenario stopRequest{"A stop request belongs to its own recording", [] {
     CaptureDirectory directory{"restart"};
     CaptureStore     store{directory.path, fakeImage, 3};
     store.startRecording("one", 30);
     store.requestStop();
     std::optional<std::size_t> frames;
-    REQUIRE(waitUntil([&] { return (frames = store.pollRecording()).has_value(); }));
+    require(waitUntil([&] { return (frames = store.pollRecording()).has_value(); }));
     store.startRecording("two", 30);  // must not inherit, nor lose, the earlier stop request
-    REQUIRE(waitUntil([&] {
+    require(waitUntil([&] {
         return fileExists(directory.path / "two" / "0003.png");
     }));
-    REQUIRE(store.stopRecording() == 3);  // reached its own image limit: it was not stopped early by the first request
-}
+    require(store.stopRecording() == 3);  // reached its own image limit: it was not stopped early by the first request
+}};
 
 namespace {
 /// State shared with a source that a detached worker may still run after the test ended: never a reference to a local.
@@ -428,69 +428,69 @@ CaptureStore::Source blockedUntilReleased(std::shared_ptr<Gate> gate) {
 }
 }  // namespace
 
-SCENARIO("Destroying a store does not wait for a window that never answers") {
+const Scenario destroyingStore{"Destroying a store does not wait for a window that never answers", [] {
     CaptureDirectory directory{"closing"};
     const auto       gate    = std::make_shared<Gate>();
     const auto       started = std::chrono::steady_clock::now();
     {
         CaptureStore store{directory.path, blockedUntilReleased(gate)};
         store.beginScreenshot("stuck");
-        REQUIRE(waitUntil([&] {
+        require(waitUntil([&] {
             return gate->entered.load();
         }));
     }
     const auto elapsed = std::chrono::steady_clock::now() - started;
     gate->release      = true;  // the detached worker ends alone, only touching state it owns
-    REQUIRE(waitUntil([&] {
+    require(waitUntil([&] {
         return gate->left.load();
     }));
-    REQUIRE(elapsed < std::chrono::seconds{5});
-}
+    require(elapsed < std::chrono::seconds{5});
+}};
 
-SCENARIO("Capture callbacks of a Jasmine session obey the same page authority") {
+const Scenario captureCallbacks{"Capture callbacks of a Jasmine session obey the same page authority", [] {
     CaptureDirectory directory{"session"};
     ReportFile       report{"capture"};
     auto             store = std::make_shared<CaptureStore>(directory.path, fakeImage);
     JasmineSession   session{{"x"}, report.path, store};
-    REQUIRE(session.attach(1));
-    THEN("the instrumented page captures and another page cannot") {
+    require(session.attach(1));
+    then("the instrumented page captures and another page cannot", [&] {
         session.screenshotStart(1, "ok");
-        REQUIRE(pollUntilDone([&] {
+        require(pollUntilDone([&] {
                     return session.screenshotPoll(1);
                 })
                 == 4);
-        REQUIRE_THROWS(session.screenshotStart(2, "no"));
-        REQUIRE_THROWS(session.screenshotPoll(2));
-        REQUIRE_THROWS(session.recordStart(2, "no", 10));
-        REQUIRE_THROWS(session.recordStop(2));
-        REQUIRE_THROWS(session.recordPoll(2));
-    }
-    THEN("a recording is stopped and collected through the session") {
+        requireThrows([&] { session.screenshotStart(2, "no"); });
+        requireThrows([&] { (void)session.screenshotPoll(2); });
+        requireThrows([&] { session.recordStart(2, "no", 10); });
+        requireThrows([&] { session.recordStop(2); });
+        requireThrows([&] { (void)session.recordPoll(2); });
+    });
+    then("a recording is stopped and collected through the session", [&] {
         session.recordStart(1, "clip", 30);
-        REQUIRE(waitUntil([&] {
+        require(waitUntil([&] {
             return fileExists(directory.path / "clip" / "0002.png");
         }));
         session.recordStop(1);
-        REQUIRE(pollUntilDone([&] {
+        require(pollUntilDone([&] {
                     return session.recordPoll(1);
                 })
                 >= 2);
-    }
-    THEN("a page that replaces the instrumented one finds the recording slot free") {
+    });
+    then("a page that replaces the instrumented one finds the recording slot free", [&] {
         session.recordStart(1, "abandoned", 30);
-        REQUIRE(session.attach(2));  // a reload: page 1 can no longer collect its recording
+        require(session.attach(2));  // a reload: page 1 can no longer collect its recording
         // The slot is free as soon as attach returns, with no polling for the old recording to end.
-        REQUIRE_NOTHROW(session.recordStart(2, "again", 30));
+        requireNothrow([&] { session.recordStart(2, "again", 30); });
         session.recordStop(2);
-    }
-    THEN("a session without a directory refuses to capture") {
+    });
+    then("a session without a directory refuses to capture", [&] {
         JasmineSession bare{{"x"}, report.path};
-        REQUIRE(bare.attach(1));
-        REQUIRE_THROWS(bare.screenshotStart(1, "ok"));
-    }
-}
+        require(bare.attach(1));
+        requireThrows([&] { bare.screenshotStart(1, "ok"); });
+    });
+}};
 
-SCENARIO("A window registration is replaced by a later one and never removes its successor") {
+const Scenario windowRegistration{"A window registration is replaced by a later one and never removes its successor", [] {
     using webfront::frontend::capturePng;
     using webfront::frontend::CaptureRegistration;
     const auto answer = [](std::uint8_t byte) {
@@ -498,129 +498,129 @@ SCENARIO("A window registration is replaced by a later one and never removes its
             return std::vector<std::uint8_t>{byte};
         };
     };
-    REQUIRE_FALSE(capturePng().has_value());  // nothing registered
+    require(!capturePng().has_value());  // nothing registered
     {
         CaptureRegistration first{answer(1)};
-        REQUIRE(capturePng().value() == std::vector<std::uint8_t>{1});
+        require(capturePng().value() == std::vector<std::uint8_t>{1});
         {
             CaptureRegistration second{answer(2)};
-            REQUIRE(capturePng().value() == std::vector<std::uint8_t>{2});
+            require(capturePng().value() == std::vector<std::uint8_t>{2});
             first = CaptureRegistration{};  // the stale one goes away
-            REQUIRE(capturePng().value() == std::vector<std::uint8_t>{2});
+            require(capturePng().value() == std::vector<std::uint8_t>{2});
             CaptureRegistration moved{std::move(second)};
-            REQUIRE(capturePng().value() == std::vector<std::uint8_t>{2});
+            require(capturePng().value() == std::vector<std::uint8_t>{2});
         }
-        REQUIRE_FALSE(capturePng().has_value());  // the last owner closed the window
+        require(!capturePng().has_value());  // the last owner closed the window
     }
-}
+}};
 
-SCENARIO("The Jasmine configuration accepts an optional capture directory") {
+const Scenario jasmineConfigurationAccepts{"The Jasmine configuration accepts an optional capture directory", [] {
     using webfront::testing::detail::jasmineConfiguration;
-    REQUIRE(jasmineConfiguration(R"({"files":["j","s"],"report":"r","captures":"c"})").captures == "c");
-    REQUIRE(jasmineConfiguration(R"({"files":["j","s"],"report":"r"})").captures.empty());
-    REQUIRE_THROWS(jasmineConfiguration(R"({"files":["j","s"],"report":"r","captures":"a","captures":"b"})"));
-}
+    require(jasmineConfiguration(R"({"files":["j","s"],"report":"r","captures":"c"})").captures == "c");
+    require(jasmineConfiguration(R"({"files":["j","s"],"report":"r"})").captures.empty());
+    requireThrows([&] { jasmineConfiguration(R"({"files":["j","s"],"report":"r","captures":"a","captures":"b"})"); });
+}};
 
-SCENARIO("Abandoning a recording frees its slot before it returns, unless the window blocks the worker") {
+const Scenario abandoningRecording{"Abandoning a recording frees its slot before it returns, unless the window blocks the worker", [] {
     CaptureDirectory directory{"abandon"};
-    GIVEN("a window that answers") {
+    given("a window that answers", [&] {
         CaptureStore store{directory.path, fakeImage};
         store.startRecording("first", 30);
         store.abandon();
-        THEN("a new recording starts at once") {
-            REQUIRE_NOTHROW(store.startRecording("second", 30));
-            REQUIRE_NOTHROW(store.stopRecording());
-        }
-        THEN("abandoning with nothing running is not an error") {
+        then("a new recording starts at once", [&] {
+            requireNothrow([&] { store.startRecording("second", 30); });
+            requireNothrow([&] { store.stopRecording(); });
+        });
+        then("abandoning with nothing running is not an error", [&] {
             store.abandon();
-            REQUIRE_NOTHROW(store.abandon());
-        }
-    }
-    GIVEN("a window that does not answer") {
+            requireNothrow([&] { store.abandon(); });
+        });
+    });
+    given("a window that does not answer", [&] {
         const auto gate = std::make_shared<Gate>();
         {
             CaptureStore store{directory.path, blockedUntilReleased(gate)};
             store.startRecording("blocked", 30);
-            REQUIRE(waitUntil([&] {
+            require(waitUntil([&] {
                 return gate->entered.load();
             }));  // The worker is inside the window's capture, not yet started.
             const auto begin = std::chrono::steady_clock::now();
             store.abandon();
-            THEN("it waits only the grace period, and the slot stays taken") {
-                REQUIRE(std::chrono::steady_clock::now() - begin < std::chrono::seconds{3});
-                REQUIRE_THROWS_AS(store.startRecording("next", 30), std::logic_error);
-            }
+            then("it waits only the grace period, and the slot stays taken", [&] {
+                require(std::chrono::steady_clock::now() - begin < std::chrono::seconds{3});
+                requireThrows<std::logic_error>([&] { store.startRecording("next", 30); });
+            });
             gate->release = true;
         }
-        REQUIRE(waitUntil([&] {
+        require(waitUntil([&] {
             return gate->left.load();
         }));
-    }
-}
+    });
+}};
 
-SCENARIO("Two recording names that differ only by case are one recording, as on a case-insensitive file system") {
+const Scenario twoRecording{"Two recording names that differ only by case are one recording, as on a case-insensitive file system", [] {
     CaptureDirectory directory{"case"};
     CaptureStore     store{directory.path, fakeImage};
     store.startRecording("run", 30);
-    REQUIRE(waitUntil([&] {
+    require(waitUntil([&] {
         return fileExists(directory.path / "run" / "0002.png");
     }));
     const auto frames = store.stopRecording();
-    THEN("the second name is refused before anything is erased") {
-        REQUIRE_THROWS_AS(store.startRecording("Run", 30), std::logic_error);
-        REQUIRE_THROWS_AS(store.startRecording("RUN", 30), std::logic_error);
-        REQUIRE(fileExists(directory.path / "run" / "0001.png"));
-        REQUIRE(fileExists(directory.path / "run" / "0002.png"));
-        REQUIRE(frames >= 2);
-    }
-    THEN("a different name is still accepted") {
-        REQUIRE_NOTHROW(store.startRecording("run2", 30));
+    then("the second name is refused before anything is erased", [&] {
+        requireThrows<std::logic_error>([&] { store.startRecording("Run", 30); });
+        requireThrows<std::logic_error>([&] { store.startRecording("RUN", 30); });
+        require(fileExists(directory.path / "run" / "0001.png"));
+        require(fileExists(directory.path / "run" / "0002.png"));
+        require(frames >= 2);
+    });
+    then("a different name is still accepted", [&] {
+        requireNothrow([&] { store.startRecording("run2", 30); });
         store.stopRecording();
-    }
-}
+    });
+}};
 
 namespace {
 struct FakeCapture { };
 }  // namespace
 
-SCENARIO("A window that closes answers the captures it never got to run") {
+const Scenario windowCloses{"A window that closes answers the captures it never got to run", [] {
     using Pending = webfront::frontend::PendingCaptures<FakeCapture>;
-    GIVEN("a request queued for a window whose event loop will never serve it") {
+    given("a request queued for a window whose event loop will never serve it", [&] {
         Pending pending;
         const auto request = std::make_shared<FakeCapture>();
         pending.open();
-        REQUIRE(pending.track(request));
-        WHEN("the window closes") {
+        require(pending.track(request));
+        when("the window closes", [&] {
             const auto unanswered = pending.close();
-            THEN("the request is handed back to be answered at once, not left to the capture timeout") {
-                REQUIRE(unanswered.size() == 1);
-                REQUIRE(unanswered.front() == request);
-            }
-            THEN("a request made after the closing is refused instead of queued") {
-                REQUIRE_FALSE(pending.track(std::make_shared<FakeCapture>()));
-                REQUIRE(pending.close().empty());
-            }
-        }
-        WHEN("the request is answered or gives up before the window closes") {
+            then("the request is handed back to be answered at once, not left to the capture timeout", [&] {
+                require(unanswered.size() == 1);
+                require(unanswered.front() == request);
+            });
+            then("a request made after the closing is refused instead of queued", [&] {
+                require(!pending.track(std::make_shared<FakeCapture>()));
+                require(pending.close().empty());
+            });
+        });
+        when("the request is answered or gives up before the window closes", [&] {
             pending.untrack(request);
-            THEN("closing has nothing left to answer") {
-                REQUIRE(pending.close().empty());
-            }
-        }
-    }
-    GIVEN("a window that has not opened yet") {
+            then("closing has nothing left to answer", [&] {
+                require(pending.close().empty());
+            });
+        });
+    });
+    given("a window that has not opened yet", [&] {
         Pending pending;
-        THEN("no request is accepted") {
-            REQUIRE_FALSE(pending.track(std::make_shared<FakeCapture>()));
-        }
-    }
-    GIVEN("a window that is closed and then opened again") {
+        then("no request is accepted", [&] {
+            require(!pending.track(std::make_shared<FakeCapture>()));
+        });
+    });
+    given("a window that is closed and then opened again", [&] {
         Pending pending;
         pending.open();
         static_cast<void>(pending.close());
         pending.open();
-        THEN("requests are accepted again") {
-            REQUIRE(pending.track(std::make_shared<FakeCapture>()));
-        }
-    }
-}
+        then("requests are accepted again", [&] {
+            require(pending.track(std::make_shared<FakeCapture>()));
+        });
+    });
+}};

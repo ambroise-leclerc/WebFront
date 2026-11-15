@@ -1,6 +1,5 @@
 #include "InjectableNetworking.hpp"
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_string.hpp>
+#include "Bdd.hpp"
 #include <webfront/Commands.hpp>
 #include <webfront/WebFront.hpp>
 
@@ -16,6 +15,8 @@
 #include <string_view>
 #include <type_traits>
 #include <vector>
+
+using namespace webfront::bdd;
 
 using namespace std;
 using namespace webfront;
@@ -189,100 +190,100 @@ struct Fixture {
 
 }  // namespace
 
-SCENARIO("Commands register their bridge functions and list the commands") {
-    GIVEN("an application with commands") {
+const Scenario commandsRegister{"Commands register their bridge functions and list the commands", [] {
+    given("an application with commands", [&] {
         Fixture fixture;
-        THEN("the browser discovers them, sorted, with their help") {
-            CHECK(fixture.app.registered == vector<string>{"webfront.commands.list", "webfront.commands.start", "webfront.commands.cancel"});
-            CHECK(fixture.app.list()
+        then("the browser discovers them, sorted, with their help", [&] {
+            check(fixture.app.registered == vector<string>{"webfront.commands.list", "webfront.commands.start", "webfront.commands.cancel"});
+            check(fixture.app.list()
                   == R"([{"name":"code","help":"Exit with 3"},)"
                      R"({"name":"fail","help":"Throw"},{"name":"greet","help":"Greet someone"},{"name":"wait","help":"Wait until stopped"}])");
-        }
-        THEN("a second Commands object on the application is refused") {
-            CHECK_THROWS_AS(Commands<FakeApp>{fixture.app}, logic_error);
-        }
+        });
+        then("a second Commands object on the application is refused", [&] {
+            checkThrows<logic_error>([&] { Commands<FakeApp>{fixture.app}; });
+        });
 
-        THEN("invalid, reserved and duplicate names are refused") {
+        then("invalid, reserved and duplicate names are refused", [&] {
             for (const auto* name : {"", "two words", "quo'te", "back\\slash", "tab\t", "wf", "clear", "exit", "help", "history", "greet"})
-                CHECK_THROWS_AS(fixture.commands.add(name, "", greet), invalid_argument);
-        }
-        THEN("every name the terminal keeps for itself is refused, the file commands it does not provide included") {
+                checkThrows<invalid_argument>([&] { fixture.commands.add(name, "", greet); });
+        });
+        then("every name the terminal keeps for itself is refused, the file commands it does not provide included", [&] {
             for (const auto name : webfront::commands::reservedNames)
-                CHECK_THROWS_AS(fixture.commands.add(std::string(name), "", greet), invalid_argument);
+                checkThrows<invalid_argument>([&] { fixture.commands.add(std::string(name), "", greet); });
             for (const auto* name : {"ls", "cat", "tree", "mounts", "rm", "cd", "edit"})
-                CHECK(std::ranges::find(webfront::commands::reservedNames, std::string_view{name}) != webfront::commands::reservedNames.end());
-        }
-    }
-    GIVEN("an application where only webfront.commands.cancel is taken") {
+                check(std::ranges::find(webfront::commands::reservedNames, std::string_view{name}) != webfront::commands::reservedNames.end());
+        });
+    });
+    given("an application where only webfront.commands.cancel is taken", [&] {
         FakeApp app;
         app.cppFunction<void, FakeUI, uint32_t>("webfront.commands.cancel", [](FakeUI, uint32_t) { });
-        THEN("Commands is refused and registers nothing") {
-            CHECK_THROWS_AS(Commands<FakeApp>{app}, logic_error);
-            CHECK(app.registered == vector<string>{"webfront.commands.cancel"});
-        }
-    }
-}
+        then("Commands is refused and registers nothing", [&] {
+            checkThrows<logic_error>([&] { Commands<FakeApp>{app}; });
+            check(app.registered == vector<string>{"webfront.commands.cancel"});
+        });
+    });
+}};
 
-SCENARIO("A command streams its output and reports its exit") {
-    GIVEN("an application with commands") {
+const Scenario commandStreams{"A command streams its output and reports its exit", [] {
+    given("an application with commands", [&] {
         Fixture fixture;
         auto&   app = fixture.app;
-        WHEN("a browser runs a command with arguments") {
+        when("a browser runs a command with arguments", [&] {
             app.start(app.ui(1), 7, "greet", R"(["Ada \"Lovelace\"", "é"])");
-            THEN("its output, then its exit code, reach that browser") {
+            then("its output, then its exit code, reach that browser", [&] {
                 const auto calls = app.callsOf(1);
-                REQUIRE(calls.size() == 2);
-                CHECK(calls[0].function == "webfront.commands.output");
-                CHECK(calls[0].id == 7);
-                CHECK(calls[0].values == vector<string>{"Hello Ada \"Lovelace\"\n"});
-                CHECK(calls[1].function == "webfront.commands.exit");
-                CHECK(calls[1].values == vector<string>{"0", ""});
-                CHECK(fixture.commands.running() == 0);
-            }
-        }
-        WHEN("a command throws") {
+                require(calls.size() == 2);
+                check(calls[0].function == "webfront.commands.output");
+                check(calls[0].id == 7);
+                check(calls[0].values == vector<string>{"Hello Ada \"Lovelace\"\n"});
+                check(calls[1].function == "webfront.commands.exit");
+                check(calls[1].values == vector<string>{"0", ""});
+                check(fixture.commands.running() == 0);
+            });
+        });
+        when("a command throws", [&] {
             app.start(app.ui(1), 1, "fail", "[]");
-            THEN("its message is reported with exit code 1") {
-                CHECK(app.callsOf(1).back().values == vector<string>{"1", "boom"});
-            }
-        }
-        WHEN("a command sets its exit code") {
+            then("its message is reported with exit code 1", [&] {
+                check(app.callsOf(1).back().values == vector<string>{"1", "boom"});
+            });
+        });
+        when("a command sets its exit code", [&] {
             app.start(app.ui(1), 1, "code", "[]");
-            THEN("it is reported") {
-                CHECK(app.callsOf(1).back().values == vector<string>{"3", ""});
-            }
-        }
-        WHEN("the browser names an unknown command or sends malformed arguments") {
-            THEN("its call is rejected and nothing runs") {
-                CHECK_THROWS_AS(app.start(app.ui(1), 1, "absent", "[]"), invalid_argument);
-                CHECK_THROWS_AS(app.start(app.ui(1), 1, "greet", R"(["unterminated)"), runtime_error);
-                CHECK_THROWS_AS(app.start(app.ui(1), 1, "greet", R"({"not":"an array"})"), runtime_error);
-                CHECK(app.calls.empty());
-                CHECK(fixture.commands.running() == 0);
-            }
-        }
-    }
-}
+            then("it is reported", [&] {
+                check(app.callsOf(1).back().values == vector<string>{"3", ""});
+            });
+        });
+        when("the browser names an unknown command or sends malformed arguments", [&] {
+            then("its call is rejected and nothing runs", [&] {
+                checkThrows<invalid_argument>([&] { app.start(app.ui(1), 1, "absent", "[]"); });
+                checkThrows<runtime_error>([&] { app.start(app.ui(1), 1, "greet", R"(["unterminated)"); });
+                checkThrows<runtime_error>([&] { app.start(app.ui(1), 1, "greet", R"({"not":"an array"})"); });
+                check(app.calls.empty());
+                check(fixture.commands.running() == 0);
+            });
+        });
+    });
+}};
 
-SCENARIO("Command output is split under the bridge string limit on character boundaries") {
-    GIVEN("a text of two-byte characters longer than two pieces") {
+const Scenario commandOutput{"Command output is split under the bridge string limit on character boundaries", [] {
+    given("a text of two-byte characters longer than two pieces", [&] {
         string text;
         for (int i = 0; i < 70000; ++i)
             text += "é";
-        WHEN("it is split") {
+        when("it is split", [&] {
             const auto pieces = commands::detail::chunks(text);
-            THEN("each piece is under the limit, ends on a character boundary and the pieces rebuild the text") {
-                REQUIRE(pieces.size() == 3);
+            then("each piece is under the limit, ends on a character boundary and the pieces rebuild the text", [&] {
+                require(pieces.size() == 3);
                 string rebuilt;
                 for (const auto piece : pieces) {
-                    CHECK(piece.size() <= commands::maxChunkBytes);
-                    CHECK(piece.size() % 2 == 0);
+                    check(piece.size() <= commands::maxChunkBytes);
+                    check(piece.size() % 2 == 0);
                     rebuilt += piece;
                 }
-                CHECK(rebuilt == text);
-            }
-        }
-        WHEN("a command writes it") {
+                check(rebuilt == text);
+            });
+        });
+        when("a command writes it", [&] {
             FakeApp           app;
             Commands<FakeApp> commands{app};
             commands.add("big", "", [text](Context context) -> Task {
@@ -290,50 +291,50 @@ SCENARIO("Command output is split under the bridge string limit on character bou
                 co_return;
             });
             app.start(app.ui(1), 1, "big", "[]");
-            THEN("the browser receives it in pieces") {
+            then("the browser receives it in pieces", [&] {
                 const auto calls = app.callsOf(1);
-                REQUIRE(calls.size() == 4);
-                CHECK(calls[0].values[0] + calls[1].values[0] + calls[2].values[0] == text);
-                CHECK(calls[3].function == "webfront.commands.exit");
-            }
-        }
-    }
-    GIVEN("bytes that are not UTF-8: continuation bytes only") {
+                require(calls.size() == 4);
+                check(calls[0].values[0] + calls[1].values[0] + calls[2].values[0] == text);
+                check(calls[3].function == "webfront.commands.exit");
+            });
+        });
+    });
+    given("bytes that are not UTF-8: continuation bytes only", [&] {
         const string bytes(10, '\x80');
-        WHEN("they are split") {
+        when("they are split", [&] {
             const auto pieces = commands::detail::chunks(bytes, 4);
-            THEN("the split still ends, in pieces of the limit") {
-                CHECK(pieces == vector<string_view>{string_view(bytes).substr(0, 4), string_view(bytes).substr(4, 4), string_view(bytes).substr(8)});
-            }
-        }
-    }
-    GIVEN("short and empty texts") {
-        CHECK(commands::detail::chunks("").empty());
-        CHECK(commands::detail::chunks("abc") == vector<string_view>{"abc"});
-    }
-}
+            then("the split still ends, in pieces of the limit", [&] {
+                check(pieces == vector<string_view>{string_view(bytes).substr(0, 4), string_view(bytes).substr(4, 4), string_view(bytes).substr(8)});
+            });
+        });
+    });
+    given("short and empty texts", [&] {
+        check(commands::detail::chunks("").empty());
+        check(commands::detail::chunks("abc") == vector<string_view>{"abc"});
+    });
+}};
 
-SCENARIO("Printing waits while the browser has not read the output") {
-    GIVEN("a browser that has more frames to read than allowed") {
+const Scenario printingWaits{"Printing waits while the browser has not read the output", [] {
+    given("a browser that has more frames to read than allowed", [&] {
         FakeApp           app;
         Commands<FakeApp> commands{app};
         commands.add("print", "", [](Context context) -> Task {
             co_await context.print("line\n");
         });
         app.backlog = 55;
-        WHEN("a command prints") {
+        when("a command prints", [&] {
             app.start(app.ui(1), 1, "print", "[]");
-            THEN("it waits once, until no more than the allowed frames are pending, then ends") {
-                CHECK(app.pauses == 1);
-                CHECK(app.backlog <= commands::maxPendingOutput);
-                CHECK(app.callsOf(1).back().values == vector<string>{"0", ""});
-            }
-        }
-    }
-}
+            then("it waits once, until no more than the allowed frames are pending, then ends", [&] {
+                check(app.pauses == 1);
+                check(app.backlog <= commands::maxPendingOutput);
+                check(app.callsOf(1).back().values == vector<string>{"0", ""});
+            });
+        });
+    });
+}};
 
-SCENARIO("Printing a long text waits between its pieces") {
-    GIVEN("a browser with as many frames to read as allowed") {
+const Scenario printingLong{"Printing a long text waits between its pieces", [] {
+    given("a browser with as many frames to read as allowed", [&] {
         FakeApp           app;
         Commands<FakeApp> commands{app};
         commands.add("print", "", [](Context context) -> Task {
@@ -341,17 +342,17 @@ SCENARIO("Printing a long text waits between its pieces") {
         });
         app.backlog  = commands::maxPendingOutput;
         app.queueing = true;
-        WHEN("a command prints a text of three pieces") {
+        when("a command prints a text of three pieces", [&] {
             app.start(app.ui(1), 1, "print", "[]");
-            THEN("it waits after the piece that overfills the queue, before sending the next") {
-                CHECK(app.paced == vector<string>{"send", "pause", "send", "send", "send"});
-            }
-        }
-    }
-}
+            then("it waits after the piece that overfills the queue, before sending the next", [&] {
+                check(app.paced == vector<string>{"send", "pause", "send", "send", "send"});
+            });
+        });
+    });
+}};
 
-SCENARIO("A print task may be awaited after its context is gone") {
-    GIVEN("a command that creates a print task from a context, then reuses its storage for another") {
+const Scenario printTask{"A print task may be awaited after its context is gone", [] {
+    given("a command that creates a print task from a context, then reuses its storage for another", [&] {
         FakeApp           app;
         Commands<FakeApp> commands{app};
         commands.add("print", "", [&app](Context context) -> Task {
@@ -361,63 +362,63 @@ SCENARIO("A print task may be awaited after its context is gone") {
             temporary.emplace(make_shared<commands::detail::Run<FakeUI>>(app.ui(1), 99, vector<string>{}));
             co_await std::move(printing);
         });
-        WHEN("it awaits the task") {
+        when("it awaits the task", [&] {
             app.start(app.ui(1), 1, "print", "[]");
-            THEN("the text is printed by the command that created the task") {
+            then("the text is printed by the command that created the task", [&] {
                 const auto calls = app.callsOf(1);
-                REQUIRE(calls.size() == 2);
-                CHECK(calls[0].id == 1);
-                CHECK(calls[0].values == vector<string>{"mine\n"});
-            }
-        }
-    }
-}
+                require(calls.size() == 2);
+                check(calls[0].id == 1);
+                check(calls[0].values == vector<string>{"mine\n"});
+            });
+        });
+    });
+}};
 
-SCENARIO("Ctrl+C stops a running command and the next one runs at once") {
-    GIVEN("a command waiting in a browser") {
+const Scenario ctrlC{"Ctrl+C stops a running command and the next one runs at once", [] {
+    given("a command waiting in a browser", [&] {
         Fixture fixture;
         auto&   app = fixture.app;
         app.start(app.ui(1), 1, "wait", "[]");
-        REQUIRE(fixture.commands.running() == 1);
-        REQUIRE_FALSE(*fixture.unwound);
-        THEN("its number cannot start another command") {
-            CHECK_THROWS_AS(app.start(app.ui(1), 1, "greet", "[]"), invalid_argument);
-        }
-        WHEN("a command that returns once asked to stop is cancelled") {
+        require(fixture.commands.running() == 1);
+        require(!(*fixture.unwound));
+        then("its number cannot start another command", [&] {
+            checkThrows<invalid_argument>([&] { app.start(app.ui(1), 1, "greet", "[]"); });
+        });
+        when("a command that returns once asked to stop is cancelled", [&] {
             fixture.commands.add("polite", "", [](Context context) -> Task {
                 co_await (testing::ManualSender([](auto) { }) | networking::ex::upon_stopped([] { return size_t{}; }));
                 context.exit(0);
             });
             app.start(app.ui(1), 9, "polite", "[]");
             app.cancel(app.ui(1), 9);
-            THEN("it reports exit code 130, not success") {
-                CHECK(app.callsOf(1).back().values == vector<string>{"130", ""});
-            }
-        }
-        WHEN("the browser cancels it") {
+            then("it reports exit code 130, not success", [&] {
+                check(app.callsOf(1).back().values == vector<string>{"130", ""});
+            });
+        });
+        when("the browser cancels it", [&] {
             app.cancel(app.ui(1), 1);
-            THEN("the command unwinds and reports exit code 130") {
-                CHECK(*fixture.unwound);
-                CHECK(fixture.commands.running() == 0);
+            then("the command unwinds and reports exit code 130", [&] {
+                check(*fixture.unwound);
+                check(fixture.commands.running() == 0);
                 const auto calls = app.callsOf(1);
-                CHECK(calls.back().function == "webfront.commands.exit");
-                CHECK(calls.back().values == vector<string>{"130", ""});
-            }
-            AND_WHEN("the browser runs another command and cancels the ended one again") {
+                check(calls.back().function == "webfront.commands.exit");
+                check(calls.back().values == vector<string>{"130", ""});
+            });
+            andWhen("the browser runs another command and cancels the ended one again", [&] {
                 app.start(app.ui(1), 2, "greet", "[]");
                 app.cancel(app.ui(1), 1);
-                THEN("the new command answers normally") {
+                then("the new command answers normally", [&] {
                     const auto calls = app.callsOf(1);
-                    CHECK(calls.back().id == 2);
-                    CHECK(calls.back().values == vector<string>{"0", ""});
-                }
-            }
-        }
-    }
-}
+                    check(calls.back().id == 2);
+                    check(calls.back().values == vector<string>{"0", ""});
+                });
+            });
+        });
+    });
+}};
 
-SCENARIO("Each browser has its own commands") {
-    GIVEN("a waiting command in each of two browsers") {
+const Scenario eachBrowser{"Each browser has its own commands", [] {
+    given("a waiting command in each of two browsers", [&] {
         Fixture fixture;
         auto&   app    = fixture.app;
         auto    second = make_shared<bool>(false);
@@ -426,30 +427,30 @@ SCENARIO("Each browser has its own commands") {
         });
         app.start(app.ui(1), 1, "wait", "[]");
         app.start(app.ui(2), 1, "wait2", "[]");
-        REQUIRE(fixture.commands.running() == 2);
-        WHEN("the first browser cancels its command, which has the same number") {
+        require(fixture.commands.running() == 2);
+        when("the first browser cancels its command, which has the same number", [&] {
             app.cancel(app.ui(1), 1);
-            THEN("the second browser's command keeps running") {
-                CHECK(*fixture.unwound);
-                CHECK_FALSE(*second);
-                CHECK(fixture.commands.running() == 1);
-            }
-        }
-        WHEN("the second browser disconnects") {
+            then("the second browser's command keeps running", [&] {
+                check(*fixture.unwound);
+                check(!(*second));
+                check(fixture.commands.running() == 1);
+            });
+        });
+        when("the second browser disconnects", [&] {
             const auto before = app.callsOf(2).size();
             app.disconnect(2);
-            THEN("its command is stopped and nothing more is sent to it") {
-                CHECK(*second);
-                CHECK_FALSE(*fixture.unwound);
-                CHECK(fixture.commands.running() == 1);
-                CHECK(app.callsOf(2).size() == before);
-            }
-        }
-    }
-}
+            then("its command is stopped and nothing more is sent to it", [&] {
+                check(*second);
+                check(!(*fixture.unwound));
+                check(fixture.commands.running() == 1);
+                check(app.callsOf(2).size() == before);
+            });
+        });
+    });
+}};
 
-SCENARIO("A browser given the identifier of a disconnected one starts afresh") {
-    GIVEN("a command that ignores its stop, in a browser that disconnects") {
+const Scenario browserGiven{"A browser given the identifier of a disconnected one starts afresh", [] {
+    given("a command that ignores its stop, in a browser that disconnects", [&] {
         Fixture fixture;
         auto&   app    = fixture.app;
         auto    finish = make_shared<testing::ManualSender::Completion>();
@@ -459,66 +460,66 @@ SCENARIO("A browser given the identifier of a disconnected one starts afresh") {
         });
         app.start(app.ui(2), 1, "deaf", "[]");
         app.disconnect(2);
-        WHEN("a new browser with the same identifier runs a command with the same number") {
+        when("a new browser with the same identifier runs a command with the same number", [&] {
             app.start(app.ui(2), 1, "greet", R"(["again"])");
-            THEN("it runs, and only its own messages reach the new browser") {
+            then("it runs, and only its own messages reach the new browser", [&] {
                 const auto calls = app.callsOf(2);
-                REQUIRE(calls.size() == 2);
-                CHECK(calls[0].values == vector<string>{"Hello again\n"});
-                CHECK(calls[1].values == vector<string>{"0", ""});
-            }
-            AND_WHEN("the deaf command ends at last") {
+                require(calls.size() == 2);
+                check(calls[0].values == vector<string>{"Hello again\n"});
+                check(calls[1].values == vector<string>{"0", ""});
+            });
+            andWhen("the deaf command ends at last", [&] {
                 finish->complete({}, 0);
-                THEN("its exit report does not reach the new browser either") {
-                    CHECK(app.callsOf(2).size() == 2);
-                }
-            }
-        }
+                then("its exit report does not reach the new browser either", [&] {
+                    check(app.callsOf(2).size() == 2);
+                });
+            });
+        });
         if (finish->complete)
             finish->complete({}, 0);  // lets the shutdown drain it
-    }
-}
+    });
+}};
 
-SCENARIO("Shutdown drains running commands") {
-    GIVEN("a waiting command") {
+const Scenario shutdownDrains{"Shutdown drains running commands", [] {
+    given("a waiting command", [&] {
         Fixture fixture;
         auto&   app = fixture.app;
         app.start(app.ui(1), 1, "wait", "[]");
-        WHEN("the application shuts down") {
+        when("the application shuts down", [&] {
             app.real.shutdown();
-            THEN("the command unwound before shutdown returned") {
-                CHECK(*fixture.unwound);
-                CHECK(fixture.commands.running() == 0);
-            }
-            AND_WHEN("a browser starts another command") {
-                THEN("its call is rejected and nothing is left running") {
-                    CHECK_THROWS_AS(app.start(app.ui(1), 2, "greet", "[]"), runtime_error);
-                    CHECK(fixture.commands.running() == 0);
-                }
-            }
-        }
-    }
-}
+            then("the command unwound before shutdown returned", [&] {
+                check(*fixture.unwound);
+                check(fixture.commands.running() == 0);
+            });
+            andWhen("a browser starts another command", [&] {
+                then("its call is rejected and nothing is left running", [&] {
+                    checkThrows<runtime_error>([&] { app.start(app.ui(1), 2, "greet", "[]"); });
+                    check(fixture.commands.running() == 0);
+                });
+            });
+        });
+    });
+}};
 
-SCENARIO("A command may take its context by reference") {
-    GIVEN("a command whose coroutine keeps a reference to its context across a suspension") {
+const Scenario commandMay{"A command may take its context by reference", [] {
+    given("a command whose coroutine keeps a reference to its context across a suspension", [&] {
         FakeApp           app;
         Commands<FakeApp> commands{app};
         commands.add("late", "", [](const Context& context) -> Task {
             co_await context.ui().resumeAfter(chrono::milliseconds(1));
             context.write("after the pause\n");
         });
-        WHEN("it runs") {
+        when("it runs", [&] {
             app.start(app.ui(1), 1, "late", "[]");
-            THEN("its context is still valid after the suspension") {
-                CHECK(app.callsOf(1).front().values == vector<string>{"after the pause\n"});
-            }
-        }
-    }
-}
+            then("its context is still valid after the suspension", [&] {
+                check(app.callsOf(1).front().values == vector<string>{"after the pause\n"});
+            });
+        });
+    });
+}};
 
-SCENARIO("A copy of a context may outlive its command") {
-    GIVEN("a command that keeps a copy of its context") {
+const Scenario copyContext{"A copy of a context may outlive its command", [] {
+    given("a command that keeps a copy of its context", [&] {
         FakeApp                  app;
         Commands<FakeApp>        commands{app};
         auto                     kept = make_shared<optional<Context>>();
@@ -527,54 +528,54 @@ SCENARIO("A copy of a context may outlive its command") {
             co_return;
         });
         app.start(app.ui(1), 1, "keep", "[]");
-        WHEN("the command has ended") {
-            THEN("the copy still reads its stop state, and writes nothing") {
-                REQUIRE(kept->has_value());
-                CHECK_FALSE((*kept)->stopRequested());
-                CHECK_FALSE((*kept)->stopToken().stop_requested());
+        when("the command has ended", [&] {
+            then("the copy still reads its stop state, and writes nothing", [&] {
+                require(kept->has_value());
+                check(!((*kept)->stopRequested()));
+                check(!((*kept)->stopToken().stop_requested()));
                 const auto calls = app.callsOf(1).size();
                 (*kept)->write("late\n");
-                CHECK(app.callsOf(1).size() == calls + 1);
-            }
-        }
-    }
-}
+                check(app.callsOf(1).size() == calls + 1);
+            });
+        });
+    });
+}};
 
-SCENARIO("Commands may outlive their registering object") {
-    GIVEN("commands whose Commands object is gone") {
+const Scenario commandsMay{"Commands may outlive their registering object", [] {
+    given("commands whose Commands object is gone", [&] {
         FakeApp app;
         {
             Commands<FakeApp> commands{app};
             commands.add("greet", "", greet);
         }
-        THEN("the browser still runs them") {
+        then("the browser still runs them", [&] {
             app.start(app.ui(1), 1, "greet", R"(["you"])");
-            CHECK(app.callsOf(1).front().values == vector<string>{"Hello you\n"});
-        }
-    }
-}
+            check(app.callsOf(1).front().values == vector<string>{"Hello you\n"});
+        });
+    });
+}};
 
-SCENARIO("BasicWF provides the application facilities of commands") {
-    GIVEN("an application over the networking mock") {
+const Scenario basicWFProvides{"BasicWF provides the application facilities of commands", [] {
+    given("an application over the networking mock", [&] {
         RealApp app(WebFrontConfig{.port = "0"});
-        THEN("browsers have identifiers and disconnections can be subscribed to") {
-            CHECK(RealApp::UI(app, 5, 1).id() == 5);
+        then("browsers have identifiers and disconnections can be subscribed to", [&] {
+            check(RealApp::UI(app, 5, 1).id() == 5);
             auto subscription = app.subscribeUIClosed([](RealApp::UI) { });
-            CHECK(subscription.active());
-        }
-        THEN("a second Commands object is refused, and cppFunction tells a taken name") {
+            check(subscription.active());
+        });
+        then("a second Commands object is refused, and cppFunction tells a taken name", [&] {
             Commands<RealApp> commands{app};
-            CHECK_THROWS_AS(Commands<RealApp>{app}, logic_error);
-            CHECK_FALSE(app.cppFunction("webfront.commands.list", [] { return 0; }));
-            CHECK(app.cppFunction("another", [] { return 0; }));
-        }
-        THEN("calls to a browser that is gone are dropped, and typed calls fail") {
+            checkThrows<logic_error>([&] { Commands<RealApp>{app}; });
+            check(!app.cppFunction("webfront.commands.list", [] { return 0; }));
+            check(app.cppFunction("another", [] { return 0; }));
+        });
+        then("calls to a browser that is gone are dropped, and typed calls fail", [&] {
             const RealApp::UI gone(app, 42, 1);
-            CHECK(app.connectedBrowsers() == 0);
-            CHECK_NOTHROW(gone.jsFunction("console.log")("dropped"));
+            check(app.connectedBrowsers() == 0);
+            checkNothrow([&] { gone.jsFunction("console.log")("dropped"); });
             auto result = gone.jsFunction<int>("Math.abs")(-1);
-            CHECK_THROWS_WITH(result.get(), "Browser connection closed");
-            CHECK_NOTHROW(gone.jsFunctionSender<int>("Math.abs")(-1));
-        }
-    }
-}
+            checkThrows([&] { (void)result.get(); }, equals("Browser connection closed"));
+            checkNothrow([&] { gone.jsFunctionSender<int>("Math.abs")(-1); });
+        });
+    });
+}};

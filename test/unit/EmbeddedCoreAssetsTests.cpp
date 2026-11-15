@@ -1,4 +1,4 @@
-#include <catch2/catch_test_macros.hpp>
+#include "Bdd.hpp"
 #include <webfront/system/DeveloperBootstrapData.hpp>
 #include <webfront/system/DeveloperIndexHtmlData.hpp>
 #include <webfront/system/FallbackIndexHtmlData.hpp>
@@ -14,6 +14,8 @@
 #include <iterator>
 #include <string>
 #include <string_view>
+
+using namespace webfront::bdd;
 
 using namespace webfront;
 
@@ -31,28 +33,28 @@ std::string embeddedBytes() {
 
 std::string sourceBytes(std::string_view relative) {
     std::ifstream file(std::filesystem::path(WEBFRONT_SOURCE_DIR) / relative, std::ios::binary);
-    REQUIRE(file.is_open());
+    require(file.is_open());
     return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
 }
 
 template <typename Data>
 void requireHeaderMatchesSource(std::string_view source) {
-    INFO(source);
-    REQUIRE(Data::encoding.empty());
+    auto scope = info(source);
+    require(Data::encoding.empty());
     const auto expected = sourceBytes(source);
     const auto embedded = embeddedBytes<Data>();
-    REQUIRE(Data::dataSize == expected.size());
-    REQUIRE(embedded.size() >= expected.size());
-    REQUIRE(embedded.size() - expected.size() < 8);
-    REQUIRE(std::string_view(embedded).substr(0, expected.size()) == expected);
-    REQUIRE(std::ranges::all_of(std::string_view(embedded).substr(expected.size()), [](char c) { return c == '\0'; }));
+    require(Data::dataSize == expected.size());
+    require(embedded.size() >= expected.size());
+    require(embedded.size() - expected.size() < 8);
+    require(std::string_view(embedded).substr(0, expected.size()) == expected);
+    require(std::ranges::all_of(std::string_view(embedded).substr(expected.size()), [](char c) { return c == '\0'; }));
 }
 
 }  // namespace
 
-SCENARIO("The embedded assets of the core are the readable sources they are generated from") {
-    GIVEN("The generated headers of include/webfront/system and the sources of js/core") {
-        THEN("Each header embeds exactly the bytes of its source, without compression and with zero padding only") {
+const Scenario embeddedAssets{"The embedded assets of the core are the readable sources they are generated from", [] {
+    given("The generated headers of include/webfront/system and the sources of js/core", [&] {
+        then("Each header embeds exactly the bytes of its source, without compression and with zero padding only", [&] {
             requireHeaderMatchesSource<fs::generated::DomInterpreterData>("js/core/dom-interpreter.mjs");
             requireHeaderMatchesSource<fs::generated::WebFrontJsData>("js/core/WebFront.js");
             requireHeaderMatchesSource<fs::generated::FallbackIndexHtmlData>("js/core/fallback/index.html");
@@ -60,6 +62,6 @@ SCENARIO("The embedded assets of the core are the readable sources they are gene
             requireHeaderMatchesSource<fs::generated::FaviconData>("js/core/favicon.ico");
             requireHeaderMatchesSource<fs::generated::DeveloperIndexHtmlData>("js/core/bootstrap/index.html");
             requireHeaderMatchesSource<fs::generated::DeveloperBootstrapData>("js/core/bootstrap/bootstrap.bundle.mjs");
-        }
-    }
-}
+        });
+    });
+}};

@@ -788,8 +788,8 @@ registry: the build, a repeat build (same bytes), the checked-in bootstrap bundl
 core headers rendered from them by CMake), the staging of the site (a second staging repeats the same bytes, a changed
 published file is refused) and the permissions of the manifest. `DeveloperSpecs` runs the pure JavaScript specs of
 `test/developer/` with `wf test` on that copy; the CEF-off CTest cases check the generated headers (`*AssetFresh`,
-`EmbeddedAssetGenerator`, and the Catch2 scenario on the embedded assets of the core), the checksums of the bundle inputs (`BundleInputsFresh`) and the names the
-terminal and `webfront::Commands` reserve (`CommandNamesAgree`) with CMake and Catch2 alone, and `NoNodeDependency` audits
+`EmbeddedAssetGenerator`, and the unit-test scenario on the embedded assets of the core), the checksums of the bundle inputs (`BundleInputsFresh`) and the names the
+terminal and `webfront::Commands` reserve (`CommandNamesAgree`) with CMake and the unit tests alone, and `NoNodeDependency` audits
 every file of the project. The maintainer procedure is in `js/developer/tools/PUBLISHING.md`.
 
 To try the local archive without an HTTPS server, after building the packages above (with `wf run build build-developer-environment`):

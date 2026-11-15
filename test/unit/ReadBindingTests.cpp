@@ -2,8 +2,7 @@
 /// @brief The binding of HTTP reads to the browser client of a connection: token, cookie, transport, neutralized content (#469, ADR-020).
 #include "InjectableNetworking.hpp"
 #include "Mocks.hpp"
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_string.hpp>
+#include "Bdd.hpp"
 #include <webfront/ReadBinding.hpp>
 #include <webfront/WebFront.hpp>
 #include <webfront/http/HTTPServer.hpp>
@@ -21,6 +20,8 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
+using namespace webfront::bdd;
 
 using namespace webfront;
 using namespace std::chrono_literals;
@@ -52,9 +53,9 @@ http::RouteReply call(const http::RouteHandler& handler, std::string path, std::
     raw += extra + "\r\n";
     http::Request request;
     request.parseSomeData(raw.begin(), raw.end());
-    REQUIRE(request.completed());
+    require(request.completed());
     const auto split = http::routing::splitTarget(path);  // the server decodes the target before dispatch
-    REQUIRE(split);
+    require(split);
     return handler(http::RouteRequest{request, split->first, split->second});
 }
 
@@ -97,118 +98,118 @@ struct Fixture {
 
 }  // namespace
 
-SCENARIO("A read needs the token and the cookie of the client of the connection that owns it", "[read-binding]") {
+const Scenario readNeeds{"A read needs the token and the cookie of the client of the connection that owns it", {"read-binding"}, [] {
     Fixture fixture;
-    GIVEN("a local connection that exchanged its secret for a cookie") {
+    given("a local connection that exchanged its secret for a cookie", [&] {
         const auto bound = fixture.bind(1, true);
         const auto cookies = headers(bound, "Set-Cookie");
-        REQUIRE(bound.status == http::Response::ok);
-        REQUIRE(cookies.size() == 1);
+        require(bound.status == http::Response::ok);
+        require(cookies.size() == 1);
         const auto cookie = cookiePair(cookies.front());
         const auto url    = fixture.url(1, "dir/a b.txt");
 
-        THEN("the cookie is named after its client and restricted") {
-            REQUIRE(cookie.starts_with("wf-client-"));
-            REQUIRE(cookies.front().contains("; Path=/webfront/services/"));
-            REQUIRE(cookies.front().contains("; HttpOnly"));
-            REQUIRE(cookies.front().contains("; SameSite=Strict"));
-            REQUIRE_FALSE(cookies.front().contains("Secure"));
-        }
-        THEN("the URL is under the readPrefix, followed by the token and the encoded path") {
-            REQUIRE(url.starts_with(readPrefix));
-            REQUIRE(url.ends_with("/dir/a%20b.txt"));
-        }
-        WHEN("the owner's client presents the URL with its cookie") {
+        then("the cookie is named after its client and restricted", [&] {
+            require(cookie.starts_with("wf-client-"));
+            require(cookies.front().contains("; Path=/webfront/services/"));
+            require(cookies.front().contains("; HttpOnly"));
+            require(cookies.front().contains("; SameSite=Strict"));
+            require(!cookies.front().contains("Secure"));
+        });
+        then("the URL is under the readPrefix, followed by the token and the encoded path", [&] {
+            require(url.starts_with(readPrefix));
+            require(url.ends_with("/dir/a%20b.txt"));
+        });
+        when("the owner's client presents the URL with its cookie", [&] {
             const auto reply = call(fixture.read, url, cookie);
-            THEN("the handler runs with the decoded rest of the path") {
-                REQUIRE(reply.status == http::Response::ok);
-                REQUIRE(fixture.lastRest == "dir/a b.txt");
-            }
-        }
-        WHEN("the URL is presented without cookie") {
-            REQUIRE(call(fixture.read, url).status == http::Response::forbidden);
-            THEN("the handler did not run") { REQUIRE(fixture.lastRest.empty()); }
-        }
-        WHEN("the URL is presented with the cookie of another client") {
+            then("the handler runs with the decoded rest of the path", [&] {
+                require(reply.status == http::Response::ok);
+                require(fixture.lastRest == "dir/a b.txt");
+            });
+        });
+        when("the URL is presented without cookie", [&] {
+            require(call(fixture.read, url).status == http::Response::forbidden);
+            then("the handler did not run", [&] { require(fixture.lastRest.empty()); });
+        });
+        when("the URL is presented with the cookie of another client", [&] {
             const auto other = cookiePair(headers(fixture.bind(2, true), "Set-Cookie").front());
-            REQUIRE(other != cookie);
-            THEN("it is refused") { REQUIRE(call(fixture.read, url, other).status == http::Response::forbidden); }
-        }
-        WHEN("the URL is presented with the right cookie name and a wrong value") {
+            require(other != cookie);
+            then("it is refused", [&] { require(call(fixture.read, url, other).status == http::Response::forbidden); });
+        });
+        when("the URL is presented with the right cookie name and a wrong value", [&] {
             const auto forged = cookie.substr(0, cookie.size() - 1) + (cookie.back() == '0' ? "1" : "0");
-            THEN("it is refused") { REQUIRE(call(fixture.read, url, forged).status == http::Response::forbidden); }
-        }
-        WHEN("the token is altered or absent") {
+            then("it is refused", [&] { require(call(fixture.read, url, forged).status == http::Response::forbidden); });
+        });
+        when("the token is altered or absent", [&] {
             auto altered = url;
             altered[readPrefix.size() + 20] = altered[readPrefix.size() + 20] == 'a' ? 'b' : 'a';
-            THEN("every refusal looks alike") {
+            then("every refusal looks alike", [&] {
                 const auto unknown = call(fixture.read, altered, cookie);
                 const auto missing = call(fixture.read, std::string(readPrefix), cookie);
                 const auto garbage = call(fixture.read, std::string(readPrefix) + "nodot/x", cookie);
-                REQUIRE(unknown.status == http::Response::forbidden);
-                REQUIRE(missing.status == http::Response::forbidden);
-                REQUIRE(garbage.status == http::Response::forbidden);
-                REQUIRE(unknown.headers == missing.headers);
-                REQUIRE(unknown.headers == garbage.headers);
-            }
-        }
-        WHEN("the URL is requested repeatedly, as a media element does for its byte ranges") {
-            THEN("the token stays valid") {
+                require(unknown.status == http::Response::forbidden);
+                require(missing.status == http::Response::forbidden);
+                require(garbage.status == http::Response::forbidden);
+                require(unknown.headers == missing.headers);
+                require(unknown.headers == garbage.headers);
+            });
+        });
+        when("the URL is requested repeatedly, as a media element does for its byte ranges", [&] {
+            then("the token stays valid", [&] {
                 for (int range = 0; range < 5; ++range)
-                    REQUIRE(call(fixture.read, url, cookie).status == http::Response::ok);
-            }
-        }
-        WHEN("the owning connection closes") {
+                    require(call(fixture.read, url, cookie).status == http::Response::ok);
+            });
+        });
+        when("the owning connection closes", [&] {
             fixture.binding.close(1);
-            THEN("the URL no longer works, cookie or not") { REQUIRE(call(fixture.read, url, cookie).status == http::Response::forbidden); }
-        }
-        WHEN("the grant is revoked") {
+            then("the URL no longer works, cookie or not", [&] { require(call(fixture.read, url, cookie).status == http::Response::forbidden); });
+        });
+        when("the grant is revoked", [&] {
             fixture.binding.revoke(url);
-            THEN("the URL no longer works") { REQUIRE(call(fixture.read, url, cookie).status == http::Response::forbidden); }
-        }
-        WHEN("the server restarts: another binding sees the old cookie and URL") {
+            then("the URL no longer works", [&] { require(call(fixture.read, url, cookie).status == http::Response::forbidden); });
+        });
+        when("the server restarts: another binding sees the old cookie and URL", [&] {
             Fixture restarted;
-            THEN("neither is known") { REQUIRE(call(restarted.read, url, cookie).status == http::Response::forbidden); }
-            AND_THEN("the old cookie, indistinguishable from another application's, is left alone (it is a session cookie)") {
+            then("neither is known", [&] { require(call(restarted.read, url, cookie).status == http::Response::forbidden); });
+            andThen("the old cookie, indistinguishable from another application's, is left alone (it is a session cookie)", [&] {
                 const auto again = restarted.bind(1, true, cookie);
                 for (const auto& line : headers(again, "Set-Cookie"))
-                    REQUIRE_FALSE(line.contains("Max-Age=0"));
-            }
-        }
-    }
-}
+                    require(!line.contains("Max-Age=0"));
+            });
+        });
+    });
+}};
 
-SCENARIO("The connections of one browser profile belong to one client", "[read-binding]") {
+const Scenario connectionsOne{"The connections of one browser profile belong to one client", {"read-binding"}, [] {
     Fixture fixture;
-    GIVEN("a first tab that exchanged and a second tab that presents the cookie it already holds") {
+    given("a first tab that exchanged and a second tab that presents the cookie it already holds", [&] {
         const auto cookie = cookiePair(headers(fixture.bind(1, true), "Set-Cookie").front());
         const auto second = fixture.bind(2, true, cookie);
-        THEN("the second tab creates no cookie") { REQUIRE(headers(second, "Set-Cookie").empty()); }
+        then("the second tab creates no cookie", [&] { require(headers(second, "Set-Cookie").empty()); });
         const auto url1 = fixture.url(1);
         const auto url2 = fixture.url(2);
-        THEN("each tab's URL is read with the shared cookie, as the same profile does") {
-            REQUIRE(call(fixture.read, url1, cookie).status == http::Response::ok);
-            REQUIRE(call(fixture.read, url2, cookie).status == http::Response::ok);
-        }
-        AND_WHEN("the first tab closes") {
+        then("each tab's URL is read with the shared cookie, as the same profile does", [&] {
+            require(call(fixture.read, url1, cookie).status == http::Response::ok);
+            require(call(fixture.read, url2, cookie).status == http::Response::ok);
+        });
+        andWhen("the first tab closes", [&] {
             fixture.binding.close(1);
-            THEN("the client lives on with the second") {
-                REQUIRE(call(fixture.read, url1, cookie).status == http::Response::forbidden);
-                REQUIRE(call(fixture.read, url2, cookie).status == http::Response::ok);
-            }
-            AND_WHEN("the second closes too") {
+            then("the client lives on with the second", [&] {
+                require(call(fixture.read, url1, cookie).status == http::Response::forbidden);
+                require(call(fixture.read, url2, cookie).status == http::Response::ok);
+            });
+            andWhen("the second closes too", [&] {
                 fixture.binding.close(2);
-                THEN("the client is forgotten: a third tab with the cookie gets a new client and the old cookie is erased") {
+                then("the client is forgotten: a third tab with the cookie gets a new client and the old cookie is erased", [&] {
                     const auto third = fixture.bind(3, true, cookie);
                     const auto lines = headers(third, "Set-Cookie");
-                    REQUIRE(lines.size() == 2);
-                    REQUIRE(lines[0].contains("Max-Age=0"));
-                    REQUIRE(cookiePair(lines[1]) != cookie);
-                }
-            }
-        }
-    }
-    GIVEN("two tabs of a blank profile whose exchanges run at the same time") {
+                    require(lines.size() == 2);
+                    require(lines[0].contains("Max-Age=0"));
+                    require(cookiePair(lines[1]) != cookie);
+                });
+            });
+        });
+    });
+    given("two tabs of a blank profile whose exchanges run at the same time", [&] {
         // Both secrets are issued, and both requests are answered, before the browser stores either cookie.
         const auto secretA = fixture.binding.open(1, true);
         const auto secretB = fixture.binding.open(2, true);
@@ -216,64 +217,64 @@ SCENARIO("The connections of one browser profile belong to one client", "[read-b
         const auto answerB = call(fixture.exchange, std::string(ReadBinding::bindPath) + secretB);
         const auto cookieA = cookiePair(headers(answerA, "Set-Cookie").front());
         const auto cookieB = cookiePair(headers(answerB, "Set-Cookie").front());
-        THEN("the cookies have different names, so neither overwrites the other") {
-            REQUIRE(cookieA.substr(0, cookieA.find('=')) != cookieB.substr(0, cookieB.find('=')));
-        }
-        THEN("the browser sends both, and both tabs read their URLs") {
+        then("the cookies have different names, so neither overwrites the other", [&] {
+            require(cookieA.substr(0, cookieA.find('=')) != cookieB.substr(0, cookieB.find('=')));
+        });
+        then("the browser sends both, and both tabs read their URLs", [&] {
             const auto both = cookieA + "; " + cookieB;
-            REQUIRE(call(fixture.read, fixture.url(1), both).status == http::Response::ok);
-            REQUIRE(call(fixture.read, fixture.url(2), both).status == http::Response::ok);
-        }
-        THEN("each cookie alone opens its own tab's URL only") {
-            REQUIRE(call(fixture.read, fixture.url(1), cookieA).status == http::Response::ok);
-            REQUIRE(call(fixture.read, fixture.url(2), cookieA).status == http::Response::forbidden);
-        }
-    }
-}
+            require(call(fixture.read, fixture.url(1), both).status == http::Response::ok);
+            require(call(fixture.read, fixture.url(2), both).status == http::Response::ok);
+        });
+        then("each cookie alone opens its own tab's URL only", [&] {
+            require(call(fixture.read, fixture.url(1), cookieA).status == http::Response::ok);
+            require(call(fixture.read, fixture.url(2), cookieA).status == http::Response::forbidden);
+        });
+    });
+}};
 
-SCENARIO("The exchange secret is single use and only the right one works", "[read-binding]") {
+const Scenario exchangeSecret{"The exchange secret is single use and only the right one works", {"read-binding"}, [] {
     Fixture fixture;
     const auto secret = fixture.binding.open(1, true);
     const auto path   = std::string(ReadBinding::bindPath) + secret;
-    THEN("a wrong secret is refused and gives no cookie") {
+    then("a wrong secret is refused and gives no cookie", [&] {
         const auto reply = call(fixture.exchange, std::string(ReadBinding::bindPath) + std::string(64, '0'));
-        REQUIRE(reply.status == http::Response::forbidden);
-        REQUIRE(headers(reply, "Set-Cookie").empty());
-    }
-    THEN("the secret works once") {
-        REQUIRE(call(fixture.exchange, path).status == http::Response::ok);
+        require(reply.status == http::Response::forbidden);
+        require(headers(reply, "Set-Cookie").empty());
+    });
+    then("the secret works once", [&] {
+        require(call(fixture.exchange, path).status == http::Response::ok);
         const auto replay = call(fixture.exchange, path);
-        REQUIRE(replay.status == http::Response::forbidden);
-        REQUIRE(headers(replay, "Set-Cookie").empty());
-    }
-    THEN("a secret does not survive its connection") {
+        require(replay.status == http::Response::forbidden);
+        require(headers(replay, "Set-Cookie").empty());
+    });
+    then("a secret does not survive its connection", [&] {
         fixture.binding.close(1);
-        REQUIRE(call(fixture.exchange, path).status == http::Response::forbidden);
-    }
-    THEN("a connection key opened twice starts over") {
+        require(call(fixture.exchange, path).status == http::Response::forbidden);
+    });
+    then("a connection key opened twice starts over", [&] {
         const auto again = fixture.binding.open(1, true);
-        REQUIRE(call(fixture.exchange, path).status == http::Response::forbidden);
-        REQUIRE(call(fixture.exchange, std::string(ReadBinding::bindPath) + again).status == http::Response::ok);
-    }
-    THEN("the check of one exchange is not satisfied by the cookie of a concurrent one") {
+        require(call(fixture.exchange, path).status == http::Response::forbidden);
+        require(call(fixture.exchange, std::string(ReadBinding::bindPath) + again).status == http::Response::ok);
+    });
+    then("the check of one exchange is not satisfied by the cookie of a concurrent one", [&] {
         // The browser kept the first cookie and rejected the second: the second client must not be told it is bound.
         const auto cookieA = cookiePair(headers(call(fixture.exchange, path), "Set-Cookie").front());
         const auto clientB = *header(fixture.bind(2, true), "X-WebFront-Client");
-        REQUIRE(call(fixture.exchange, std::string(ReadBinding::bindPath) + "check/" + clientB, cookieA).status == http::Response::forbidden);
-    }
-    THEN("the check answers only to a request whose cookies designate the client the exchange named") {
+        require(call(fixture.exchange, std::string(ReadBinding::bindPath) + "check/" + clientB, cookieA).status == http::Response::forbidden);
+    });
+    then("the check answers only to a request whose cookies designate the client the exchange named", [&] {
         const auto base = std::string(ReadBinding::bindPath) + "check/";
         const auto reply  = call(fixture.exchange, path);
         const auto client = *header(reply, "X-WebFront-Client");
         const auto cookie = cookiePair(headers(reply, "Set-Cookie").front());
-        REQUIRE(call(fixture.exchange, base + client).status == http::Response::forbidden);
-        REQUIRE(call(fixture.exchange, base + client, cookie).status == http::Response::ok);
-        REQUIRE(call(fixture.exchange, base + "0000000000000000", cookie).status == http::Response::forbidden);
-        REQUIRE(call(fixture.exchange, base + "0000000000000000", fixture.binding.clientCookiePrefix() + "0000000000000000=" + std::string(64, 'a')).status == http::Response::forbidden);
-    }
-}
+        require(call(fixture.exchange, base + client).status == http::Response::forbidden);
+        require(call(fixture.exchange, base + client, cookie).status == http::Response::ok);
+        require(call(fixture.exchange, base + "0000000000000000", cookie).status == http::Response::forbidden);
+        require(call(fixture.exchange, base + "0000000000000000", fixture.binding.clientCookiePrefix() + "0000000000000000=" + std::string(64, 'a')).status == http::Response::forbidden);
+    });
+}};
 
-SCENARIO("A grant works only on the route registration that issued it", "[read-binding]") {
+const Scenario grantWorks{"A grant works only on the route registration that issued it", {"read-binding"}, [] {
     Fixture fixture;
     const auto cookie = cookiePair(headers(fixture.bind(1, true), "Set-Cookie").front());
     const auto url    = fixture.url(1, "a.txt", {.context = std::string("secret-of-route-a")});
@@ -283,109 +284,108 @@ SCENARIO("A grant works only on the route registration that issued it", "[read-b
         otherRan = true;
         return http::RouteReply{};
     });
-    THEN("the other route refuses the token without running its handler") {
-        REQUIRE(call(other, url, cookie).status == http::Response::forbidden);
-        REQUIRE_FALSE(otherRan);
-    }
-    THEN("the issuing route still accepts it") { REQUIRE(call(fixture.read, url, cookie).status == http::Response::ok); }
-}
+    then("the other route refuses the token without running its handler", [&] {
+        require(call(other, url, cookie).status == http::Response::forbidden);
+        require(!otherRan);
+    });
+    then("the issuing route still accepts it", [&] { require(call(fixture.read, url, cookie).status == http::Response::ok); });
+}};
 
-SCENARIO("The transferable mode makes the token alone a short-lived bearer capability", "[read-binding]") {
+const Scenario transferableMode{"The transferable mode makes the token alone a short-lived bearer capability", {"read-binding"}, [] {
     Fixture fixture;
     const auto cookie = cookiePair(headers(fixture.bind(1, true), "Set-Cookie").front());
-    THEN("it needs an explicit short lifetime") {
-        REQUIRE_THROWS_AS(fixture.url(1, "a", {.transferable = true}), ReadRefused);
-        REQUIRE_THROWS_AS(fixture.url(1, "a", {.lifetime = 16min, .transferable = true}), ReadRefused);
-        REQUIRE_THROWS_AS(fixture.url(1, "a", {.lifetime = -1s}), ReadRefused);
-    }
-    GIVEN("a transferable URL") {
+    then("it needs an explicit short lifetime", [&] {
+        requireThrows<ReadRefused>([&] { fixture.url(1, "a", {.transferable = true}); });
+        requireThrows<ReadRefused>([&] { fixture.url(1, "a", {.lifetime = 16min, .transferable = true}); });
+        requireThrows<ReadRefused>([&] { fixture.url(1, "a", {.lifetime = -1s}); });
+    });
+    given("a transferable URL", [&] {
         const auto url = fixture.url(1, "a", {.lifetime = 60s, .transferable = true});
-        THEN("a client without any cookie reads it") { REQUIRE(call(fixture.read, url).status == http::Response::ok); }
-        THEN("it stops at its expiry") {
+        then("a client without any cookie reads it", [&] { require(call(fixture.read, url).status == http::Response::ok); });
+        then("it stops at its expiry", [&] {
             fixture.time += 59s;
-            REQUIRE(call(fixture.read, url).status == http::Response::ok);
+            require(call(fixture.read, url).status == http::Response::ok);
             fixture.time += 2s;
-            REQUIRE(call(fixture.read, url).status == http::Response::forbidden);
-        }
-        THEN("it stops with the connection") {
+            require(call(fixture.read, url).status == http::Response::forbidden);
+        });
+        then("it stops with the connection", [&] {
             fixture.binding.close(1);
-            REQUIRE(call(fixture.read, url).status == http::Response::forbidden);
-        }
-    }
-    GIVEN("a bound URL with a lifetime") {
+            require(call(fixture.read, url).status == http::Response::forbidden);
+        });
+    });
+    given("a bound URL with a lifetime", [&] {
         const auto url = fixture.url(1, "a", {.lifetime = 60s});
-        THEN("the cookie is still required, and the lifetime still applies") {
-            REQUIRE(call(fixture.read, url).status == http::Response::forbidden);
-            REQUIRE(call(fixture.read, url, cookie).status == http::Response::ok);
+        then("the cookie is still required, and the lifetime still applies", [&] {
+            require(call(fixture.read, url).status == http::Response::forbidden);
+            require(call(fixture.read, url, cookie).status == http::Response::ok);
             fixture.time += 61s;
-            REQUIRE(call(fixture.read, url, cookie).status == http::Response::forbidden);
-        }
-    }
-    GIVEN("a lifetime the clock cannot represent") {
-        THEN("it is refused instead of overflowing the expiry, and a lifetime that fits is accepted") {
-            REQUIRE_THROWS_AS(fixture.url(1, "a", {.lifetime = std::chrono::seconds::max()}), ReadRefused);
+            require(call(fixture.read, url, cookie).status == http::Response::forbidden);
+        });
+    });
+    given("a lifetime the clock cannot represent", [&] {
+        then("it is refused instead of overflowing the expiry, and a lifetime that fits is accepted", [&] {
+            requireThrows<ReadRefused>([&] { fixture.url(1, "a", {.lifetime = std::chrono::seconds::max()}); });
             const auto remaining = std::chrono::duration_cast<std::chrono::seconds>(Fixture::Clock::time_point::max() - fixture.time);
-            REQUIRE_THROWS_AS(fixture.url(1, "a", {.lifetime = remaining + 1s}), ReadRefused);
+            requireThrows<ReadRefused>([&] { fixture.url(1, "a", {.lifetime = remaining + 1s}); });
             const auto url = fixture.url(1, "a", {.lifetime = remaining - 1s});
-            REQUIRE(call(fixture.read, url, cookie).status == http::Response::ok);
-        }
-    }
-    THEN("the context of the grant reaches the handler") {
+            require(call(fixture.read, url, cookie).status == http::Response::ok);
+        });
+    });
+    then("the context of the grant reaches the handler", [&] {
         const auto url = fixture.url(1, "a", {.context = std::string("handle-7")});
-        REQUIRE(call(fixture.read, url, cookie).status == http::Response::ok);
-        REQUIRE(std::any_cast<std::string>(fixture.lastContext) == "handle-7");
-    }
-}
+        require(call(fixture.read, url, cookie).status == http::Response::ok);
+        require(std::any_cast<std::string>(fixture.lastContext) == "handle-7");
+    });
+}};
 
-SCENARIO("A connection that is not the view of an embedded frontend reads only under a declared transport", "[read-binding]") {
-    GIVEN("the default declaration") {
+const Scenario connectionNot{"A connection that is not the view of an embedded frontend reads only under a declared transport", {"read-binding"}, [] {
+    given("the default declaration", [&] {
         Fixture fixture;
         const auto cookie = cookiePair(headers(fixture.bind(1, false), "Set-Cookie").front());
-        THEN("no URL is given to the system browser") { REQUIRE_THROWS_AS(fixture.url(1), ReadRefused); }
-        THEN("a connection that is closed has none either") { REQUIRE_THROWS_AS(fixture.url(9), ReadRefused); }
-        THEN("the embedded view reads") {
+        then("no URL is given to the system browser", [&] { requireThrows<ReadRefused>([&] { fixture.url(1); }); });
+        then("a connection that is closed has none either", [&] { requireThrows<ReadRefused>([&] { fixture.url(9); }); });
+        then("the embedded view reads", [&] {
             const auto viewCookie = cookiePair(headers(fixture.bind(2, true), "Set-Cookie").front());
-            REQUIRE(call(fixture.read, fixture.url(2), viewCookie).status == http::Response::ok);
-        }
-    }
+            require(call(fixture.read, fixture.url(2), viewCookie).status == http::Response::ok);
+        });
+    });
     for (const auto transport : {RemoteFileTransport::loopbackAttested, RemoteFileTransport::encryptedByDeployment, RemoteFileTransport::httpsByDeployment, RemoteFileTransport::plaintextAccepted}) {
-        GIVEN("the declared transport " << static_cast<int>(transport)) {
+        given("the declared transport ", static_cast<int>(transport), [&] {
             Fixture fixture{transport};
             const auto bound  = fixture.bind(1, false);
             const auto cookie = cookiePair(headers(bound, "Set-Cookie").front());
             const auto url    = fixture.url(1);
-            THEN("the system browser reads with its cookie, whatever the forwarding headers claim") {
-                REQUIRE(call(fixture.read, url, cookie, "X-Forwarded-Proto: https\r\nForwarded: for=127.0.0.1;proto=https\r\n").status == http::Response::ok);
-                REQUIRE(call(fixture.read, url).status == http::Response::forbidden);
-            }
-            THEN("the cookie is Secure only when the browser is declared to use https://, not for an encrypted tunnel under http://") {
-                REQUIRE(headers(bound, "Set-Cookie").front().contains("; Secure") == (transport == RemoteFileTransport::httpsByDeployment));
-            }
-        }
+            then("the system browser reads with its cookie, whatever the forwarding headers claim", [&] {
+                require(call(fixture.read, url, cookie, "X-Forwarded-Proto: https\r\nForwarded: for=127.0.0.1;proto=https\r\n").status == http::Response::ok);
+                require(call(fixture.read, url).status == http::Response::forbidden);
+            });
+            then("the cookie is Secure only when the browser is declared to use https://, not for an encrypted tunnel under http://", [&] {
+                require(headers(bound, "Set-Cookie").front().contains("; Secure") == (transport == RemoteFileTransport::httpsByDeployment));
+            });
+        });
     }
-    GIVEN("a request through a local proxy that forges the forwarding headers, with the default declaration") {
+    given("a request through a local proxy that forges the forwarding headers, with the default declaration", [&] {
         Fixture fixture;
         fixture.bind(1, false);
-        THEN("nothing makes the connection local: the headers and the address are never consulted") {
-            REQUIRE_THROWS_AS(fixture.url(1), ReadRefused);
-        }
-    }
-}
+        then("nothing makes the connection local: the headers and the address are never consulted", [&] {
+            requireThrows<ReadRefused>([&] { fixture.url(1); });
+        });
+    });
+}};
 
-SCENARIO("A declaration of a loopback server is checked against the address it listens on", "[read-binding]") {
+const Scenario declarationLoopback{"A declaration of a loopback server is checked against the address it listens on", {"read-binding"}, [] {
     for (const auto* address : {"127.0.0.1", "127.1.2.3", "::1", "[::1]", "0:0:0:0:0:0:0:1", "0000:0000:0000:0000:0000:0000:0000:0001", "0::1", "::0001", "[0:0::1]"})
-        THEN("'" << address << "' is a loopback address") { REQUIRE(detail::isLoopbackName(address)); }
+        then("'", address, "' is a loopback address", [&] { require(detail::isLoopbackName(address)); });
     for (const auto* address : {"0.0.0.0", "::", "", "192.168.1.5", "10.0.0.1", "127.0.0", "127.0.0.1.5", "127.a.0.1", "127..0.1", "example.com", "localhost", "LocalHost", "127.0.0.1.", "127.256.0.1", "127.0.256.1", "127.0.0.1000", "127.0.0.010", "127.00.0.1", "127.0.0.", ":::1", "0:0:0:0:0:0:0:2", "1:0:0:0:0:0:0:1", "0:0:0:0:0:0:0:0:1", "::1::", "::12345", "::g"})
-        THEN("'" << address << "' is not") { REQUIRE_FALSE(detail::isLoopbackName(address)); }
-    THEN("loopbackAttested is refused for a server that listens elsewhere, and accepted on the loopback") {
-        REQUIRE_THROWS_AS(detail::checkedAddress(WebFrontConfig{.address = "0.0.0.0", .remoteFileTransport = RemoteFileTransport::loopbackAttested}),
-                          std::invalid_argument);
-        REQUIRE_NOTHROW(detail::checkedAddress(WebFrontConfig{.address = "127.0.0.1", .remoteFileTransport = RemoteFileTransport::loopbackAttested}));
-        REQUIRE_NOTHROW(detail::checkedAddress(WebFrontConfig{.address = "0.0.0.0", .remoteFileTransport = RemoteFileTransport::plaintextAccepted}));
-    }
-}
+        then("'", address, "' is not", [&] { require(!detail::isLoopbackName(address)); });
+    then("loopbackAttested is refused for a server that listens elsewhere, and accepted on the loopback", [&] {
+        requireThrows<std::invalid_argument>([&] { detail::checkedAddress(WebFrontConfig{.address = "0.0.0.0", .remoteFileTransport = RemoteFileTransport::loopbackAttested}); });
+        requireNothrow([&] { detail::checkedAddress(WebFrontConfig{.address = "127.0.0.1", .remoteFileTransport = RemoteFileTransport::loopbackAttested}); });
+        requireNothrow([&] { detail::checkedAddress(WebFrontConfig{.address = "0.0.0.0", .remoteFileTransport = RemoteFileTransport::plaintextAccepted}); });
+    });
+}};
 
-SCENARIO("Read responses neutralize active content", "[read-binding]") {
+const Scenario readResponses{"Read responses neutralize active content", {"read-binding"}, [] {
     const auto present = [](std::string contentType, std::string rest = "dir/file.bin") {
         http::RouteReply reply;
         if (!contentType.empty())
@@ -394,83 +394,83 @@ SCENARIO("Read responses neutralize active content", "[read-binding]") {
         detail::hardenRead(reply, rest);
         return reply;
     };
-    GIVEN("any response") {
+    given("any response", [&] {
         const auto reply = present("image/png");
-        THEN("it carries the protective headers") {
-            REQUIRE(header(reply, "Cache-Control") == "no-store");
-            REQUIRE(header(reply, "Referrer-Policy") == "no-referrer");
-            REQUIRE(header(reply, "Content-Security-Policy") == "sandbox; default-src 'none'");
-            REQUIRE(header(reply, "X-Content-Type-Options") == "nosniff");
-            REQUIRE(header(reply, "Cross-Origin-Resource-Policy") == "same-origin");
-        }
-    }
-    GIVEN("passive types") {
+        then("it carries the protective headers", [&] {
+            require(header(reply, "Cache-Control") == "no-store");
+            require(header(reply, "Referrer-Policy") == "no-referrer");
+            require(header(reply, "Content-Security-Policy") == "sandbox; default-src 'none'");
+            require(header(reply, "X-Content-Type-Options") == "nosniff");
+            require(header(reply, "Cross-Origin-Resource-Policy") == "same-origin");
+        });
+    });
+    given("passive types", [&] {
         for (const auto* type : {"image/png", "image/jpeg", "image/gif", "image/webp", "audio/mpeg", "video/mp4", "text/plain", "text/plain; charset=utf-8", "VIDEO/WEBM"}) {
-            THEN(type << " is shown inline with its type") {
+            then(type, " is shown inline with its type", [&] {
                 const auto reply = present(type);
-                REQUIRE(header(reply, "Content-Type") == type);
-                REQUIRE_FALSE(header(reply, "Content-Disposition"));
-            }
+                require(header(reply, "Content-Type") == type);
+                require(!header(reply, "Content-Disposition"));
+            });
         }
-    }
-    GIVEN("active types") {
+    });
+    given("active types", [&] {
         for (const auto* type : {"text/html", "text/html; charset=utf-8", "application/xhtml+xml", "text/xml", "application/xml", "application/atom+xml",
                                  "text/javascript", "application/javascript", "application/ecmascript", "text/javascript1.5", "application/x-ecmascript", "text/jscript", "text/livescript", "text/css", "application/wasm", "TEXT/HTML"}) {
-            THEN(type << " is a download announced as octet-stream") {
+            then(type, " is a download announced as octet-stream", [&] {
                 const auto reply = present(type);
-                REQUIRE(header(reply, "Content-Type") == "application/octet-stream");
-                REQUIRE(header(reply, "Content-Disposition")->starts_with("attachment; filename=\"file.bin\""));
-            }
+                require(header(reply, "Content-Type") == "application/octet-stream");
+                require(header(reply, "Content-Disposition")->starts_with("attachment; filename=\"file.bin\""));
+            });
         }
-    }
-    GIVEN("an SVG") {
+    });
+    given("an SVG", [&] {
         const auto reply = present("image/svg+xml", "logo.svg");
-        THEN("it keeps its type, for <img>, and a navigation downloads it") {
-            REQUIRE(header(reply, "Content-Type") == "image/svg+xml");
-            REQUIRE(header(reply, "Content-Disposition")->starts_with("attachment; filename=\"logo.svg\""));
-        }
-    }
-    GIVEN("a type outside the closed list, or none") {
-        THEN("it is a download") {
-            REQUIRE(header(present("application/pdf"), "Content-Disposition")->starts_with("attachment"));
-            REQUIRE(header(present("application/pdf"), "Content-Type") == "application/pdf");
-            REQUIRE(header(present("text/css"), "Content-Disposition")->starts_with("attachment"));
-            REQUIRE(header(present(""), "Content-Type") == "application/octet-stream");
-            REQUIRE(header(present(""), "Content-Disposition")->starts_with("attachment"));
-        }
-    }
-    GIVEN("a hostile file name") {
+        then("it keeps its type, for <img>, and a navigation downloads it", [&] {
+            require(header(reply, "Content-Type") == "image/svg+xml");
+            require(header(reply, "Content-Disposition")->starts_with("attachment; filename=\"logo.svg\""));
+        });
+    });
+    given("a type outside the closed list, or none", [&] {
+        then("it is a download", [&] {
+            require(header(present("application/pdf"), "Content-Disposition")->starts_with("attachment"));
+            require(header(present("application/pdf"), "Content-Type") == "application/pdf");
+            require(header(present("text/css"), "Content-Disposition")->starts_with("attachment"));
+            require(header(present(""), "Content-Type") == "application/octet-stream");
+            require(header(present(""), "Content-Disposition")->starts_with("attachment"));
+        });
+    });
+    given("a hostile file name", [&] {
         const auto reply = present("text/html", "a\"b\r\nSet-Cookie: x;\\c/é.html");
-        THEN("the header stays one well-formed line") {
+        then("the header stays one well-formed line", [&] {
             const auto disposition = *header(reply, "Content-Disposition");
-            REQUIRE(disposition.find('\r') == std::string::npos);
-            REQUIRE(disposition.find('\n') == std::string::npos);
-            REQUIRE(disposition.starts_with("attachment; filename=\""));
-            REQUIRE(disposition.contains("filename*=UTF-8''"));
-            REQUIRE(disposition.contains("%C3%A9.html"));
-        }
-    }
-    GIVEN("a response a handler built with headers of its own") {
+            require(disposition.find('\r') == std::string::npos);
+            require(disposition.find('\n') == std::string::npos);
+            require(disposition.starts_with("attachment; filename=\""));
+            require(disposition.contains("filename*=UTF-8''"));
+            require(disposition.contains("%C3%A9.html"));
+        });
+    });
+    given("a response a handler built with headers of its own", [&] {
         http::RouteReply reply;
         reply.headers.emplace_back("Content-Type", "text/plain");
         reply.headers.emplace_back("cache-control", "public, max-age=3600");
         reply.headers.emplace_back("Content-Security-Policy", "default-src *");
         detail::hardenRead(reply, "a.txt");
-        THEN("its caching and policy are replaced, not duplicated") {
-            REQUIRE(headers(reply, "Cache-Control") == std::vector<std::string>{"no-store"});
-            REQUIRE(headers(reply, "Content-Security-Policy") == std::vector<std::string>{"sandbox; default-src 'none'"});
-        }
-    }
-    GIVEN("a refusal") {
+        then("its caching and policy are replaced, not duplicated", [&] {
+            require(headers(reply, "Cache-Control") == std::vector<std::string>{"no-store"});
+            require(headers(reply, "Content-Security-Policy") == std::vector<std::string>{"sandbox; default-src 'none'"});
+        });
+    });
+    given("a refusal", [&] {
         Fixture fixture;
         const auto denied = call(fixture.read, std::string(readPrefix) + "nothing.here/x");
-        THEN("it is neutralized too, and tells nothing") {
-            REQUIRE(denied.status == http::Response::forbidden);
-            REQUIRE(header(denied, "Cache-Control") == "no-store");
-            REQUIRE(header(denied, "Referrer-Policy") == "no-referrer");
-        }
-    }
-}
+        then("it is neutralized too, and tells nothing", [&] {
+            require(denied.status == http::Response::forbidden);
+            require(header(denied, "Cache-Control") == "no-store");
+            require(header(denied, "Referrer-Policy") == "no-referrer");
+        });
+    });
+}};
 
 namespace {
 
@@ -558,7 +558,7 @@ struct OneRequest : CleanSocket {
         for (const char c : raw)
             bytes.push_back(static_cast<std::byte>(c));
         testing::InjectableSocket::receive(bytes);
-        REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
+        require(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
         log.stop();
         return log.text();
     }
@@ -567,7 +567,7 @@ struct OneRequest : CleanSocket {
 
 }  // namespace
 
-SCENARIO("The server never writes a read token to its logs", "[read-binding]") {
+const Scenario serverNever{"The server never writes a read token to its logs", {"read-binding"}, [] {
     OneRequest<> request;
     Fixture      fixture;
     const auto   cookie = cookiePair(headers(fixture.bind(1, true), "Set-Cookie").front());
@@ -575,82 +575,82 @@ SCENARIO("The server never writes a read token to its logs", "[read-binding]") {
     auto         route  = request.server.addRoute(std::string(readPrefix), fixture.read, true);
     const auto   logged = request.answer("GET " + url, "Cookie: " + cookie + "\r\n");
 
-    THEN("the response is the neutralized read, and no log line holds the token") {
+    then("the response is the neutralized read, and no log line holds the token", [&] {
         const auto response = request.response();
-        REQUIRE(response.starts_with("HTTP/1.1 200 OK\r\n"));
-        REQUIRE(response.contains("Content-Security-Policy: sandbox; default-src 'none'\r\n"));
+        require(response.starts_with("HTTP/1.1 200 OK\r\n"));
+        require(response.contains("Content-Security-Policy: sandbox; default-src 'none'\r\n"));
         const auto token = url.substr(readPrefix.size(), 16 + 1 + 64);
-        REQUIRE(logged.contains("Received request GET on /webfront/services/files/..."));
-        REQUIRE_FALSE(logged.contains(token));
-        REQUIRE_FALSE(logged.contains(token.substr(0, 16)));
-        REQUIRE_FALSE(logged.contains("secret-name"));
-    }
-}
+        require(logged.contains("Received request GET on /webfront/services/files/..."));
+        require(!logged.contains(token));
+        require(!logged.contains(token.substr(0, 16)));
+        require(!logged.contains("secret-name"));
+    });
+}};
 
-SCENARIO("No log line holds the token of a services target, whatever answers it", "[read-binding]") {
+const Scenario noLog{"No log line holds the token of a services target, whatever answers it", {"read-binding"}, [] {
     const std::string target = std::string(readPrefix) + "0123456789abcdef.TOKENSECRET/a.txt";
-    THEN("a target unfit for route dispatch, plain or spelled with an encoded letter and doubled separators, falls to the "
-         "file providers without being logged") {
+    then("a target unfit for route dispatch, plain or spelled with an encoded letter and doubled separators, falls to the "
+         "file providers without being logged", [&] {
         // "report..txt" makes the target unfit for route dispatch.
         for (const auto* unfit : {"/webfront/services/files/0123456789abcdef.TOKENSECRET/report..txt",
                                   "/%77ebfront//services/./files/0123456789abcdef.TOKENSECRET/report..txt"}) {
             OneRequest<> request;
             const auto   logged = request.answer(std::string("GET ") + unfit);
-            REQUIRE(logged.contains("Received request GET"));
-            REQUIRE_FALSE(logged.contains("TOKENSECRET"));
-            REQUIRE_FALSE(logged.contains("report"));
+            require(logged.contains("Received request GET"));
+            require(!logged.contains("TOKENSECRET"));
+            require(!logged.contains("report"));
         }
-    }
-    THEN("the error of a failing secret route is not logged") {
+    });
+    then("the error of a failing secret route is not logged", [&] {
         OneRequest<> request;
         auto         route = request.server.addRoute(std::string(readPrefix), [](const http::RouteRequest& failed) -> http::RouteReply {
             throw std::runtime_error("cannot open " + std::string(failed.path));
         }, true);
         const auto logged = request.answer("GET " + target);
-        REQUIRE(logged.contains("failed"));
-        REQUIRE_FALSE(logged.contains("TOKENSECRET"));
-    }
-    THEN("a file provider that fails on the target, with no route registered, does not log it") {
+        require(logged.contains("failed"));
+        require(!logged.contains("TOKENSECRET"));
+    });
+    then("a file provider that fails on the target, with no route registered, does not log it", [&] {
         OneRequest<ThrowingFileSystem> request;
         const auto                     logged = request.answer("GET " + target);
-        REQUIRE(logged.contains("failed"));
-        REQUIRE_FALSE(logged.contains("TOKENSECRET"));
-    }
-    THEN("a secret route lives under the services space, and the query of a request is never logged") {
+        require(logged.contains("failed"));
+        require(!logged.contains("TOKENSECRET"));
+    });
+    then("a secret route lives under the services space, and the query of a request is never logged", [&] {
         OneRequest<> request;
-        REQUIRE_THROWS_AS(request.server.addRoute("/files/", [](const http::RouteRequest&) { return http::RouteReply{}; }, true), std::invalid_argument);
+        requireThrows<std::invalid_argument>([&] { (void)request.server.addRoute("/files/", [](const http::RouteRequest&) { return http::RouteReply{}; }, true); });
         const auto logged = request.answer("GET /viewer?file=%2Fwebfront%2Fservices%2Ffiles%2FQUERYSECRET%2Fdoc");
-        REQUIRE(logged.contains("Received request GET on /viewer"));
-        REQUIRE_FALSE(logged.contains("QUERYSECRET"));
-    }
-}
+        require(logged.contains("Received request GET on /viewer"));
+        require(!logged.contains("QUERYSECRET"));
+    });
+}};
 
-SCENARIO("The answers the server writes for a read route are hardened too", "[read-binding]") {
+const Scenario answersServer{"The answers the server writes for a read route are hardened too", {"read-binding"}, [] {
     for (const auto* method : {"GET", "POST"}) {
         OneRequest<> request;
         auto route = request.server.addRoute(std::string(readPrefix), [](const http::RouteRequest&) -> http::RouteReply { throw std::runtime_error("boom"); }, true,
                                              [](http::RouteReply& reply) { detail::hardenRead(reply, {}); });
         request.answer(std::string(method) + " " + std::string(readPrefix) + "0123456789abcdef.SECRET/a.txt");
         const auto response = request.response();
-        THEN(std::string(method) + " is refused with the hardening headers") {
-            REQUIRE(response.starts_with(std::string_view(method) == "GET" ? "HTTP/1.1 500" : "HTTP/1.1 405"));
-            REQUIRE(response.contains("Cache-Control: no-store\r\n"));
-            REQUIRE(response.contains("Referrer-Policy: no-referrer\r\n"));
-            REQUIRE(response.contains("Content-Security-Policy: sandbox; default-src 'none'\r\n"));
-            REQUIRE(response.contains("X-Content-Type-Options: nosniff\r\n"));
-        }
+        then(std::string(method) + " is refused with the hardening headers", [&] {
+            require(response.starts_with(std::string_view(method) == "GET" ? "HTTP/1.1 500" : "HTTP/1.1 405"));
+            require(response.contains("Cache-Control: no-store\r\n"));
+            require(response.contains("Referrer-Policy: no-referrer\r\n"));
+            require(response.contains("Content-Security-Policy: sandbox; default-src 'none'\r\n"));
+            require(response.contains("X-Content-Type-Options: nosniff\r\n"));
+        });
     }
-}
+}};
 
-SCENARIO("A frame never logs the bytes of its payload", "[read-binding]") {
+const Scenario frameNever{"A frame never logs the bytes of its payload", {"read-binding"}, [] {
     LogCapture             log;
     std::vector<std::byte> bytes(64, static_cast<std::byte>('q'));
     websocket::Frame<ReadNet> frame{std::string_view{}};
     frame.addBuffer(bytes);
     log.stop();
-    REQUIRE_FALSE(log.text().contains("qqqq"));
-    REQUIRE_FALSE(log.text().contains("71 71"));
-}
+    require(!log.text().contains("qqqq"));
+    require(!log.text().contains("71 71"));
+}};
 
 namespace {
 
@@ -658,113 +658,112 @@ using ReadApp = BasicWF<ReadNet, fs::DefaultFS>;
 
 }  // namespace
 
-SCENARIO("An application registers read routes under the services path only", "[read-binding]") {
+const Scenario applicationRegisters{"An application registers read routes under the services path only", {"read-binding"}, [] {
     testing::InjectableSocket::reset();
     ReadNet::accepts = 100;
     ReadApp app{WebFrontConfig{.port = "0"}};
     const auto handler = [](const http::RouteRequest&, const ReadGrant&) { return http::RouteReply{}; };
-    THEN("a readPrefix outside the cookie's path, the path itself and the exchange route are refused") {
-        REQUIRE_THROWS_AS(static_cast<void>(app.addReadRoute("/files/", handler)), std::invalid_argument);
-        REQUIRE_THROWS_AS(static_cast<void>(app.addReadRoute("/webfront/services/", handler)), std::invalid_argument);
-        REQUIRE_THROWS_AS(static_cast<void>(app.addReadRoute("/webfront/services/bind/", handler)), std::invalid_argument);
-        REQUIRE_THROWS_AS(static_cast<void>(app.addReadRoute("/webfront/services/bind/more/", handler)), std::invalid_argument);
-        REQUIRE_THROWS_AS(static_cast<void>(app.addReadRoute("/webfront/services/files/", nullptr)), std::invalid_argument);
-    }
-    THEN("a readPrefix under it is accepted once, then free again when the route is dropped") {
+    then("a readPrefix outside the cookie's path, the path itself and the exchange route are refused", [&] {
+        requireThrows<std::invalid_argument>([&] { static_cast<void>(app.addReadRoute("/files/", handler)); });
+        requireThrows<std::invalid_argument>([&] { static_cast<void>(app.addReadRoute("/webfront/services/", handler)); });
+        requireThrows<std::invalid_argument>([&] { static_cast<void>(app.addReadRoute("/webfront/services/bind/", handler)); });
+        requireThrows<std::invalid_argument>([&] { static_cast<void>(app.addReadRoute("/webfront/services/bind/more/", handler)); });
+        requireThrows<std::invalid_argument>([&] { static_cast<void>(app.addReadRoute("/webfront/services/files/", nullptr)); });
+    });
+    then("a readPrefix under it is accepted once, then free again when the route is dropped", [&] {
         {
             auto route = app.addReadRoute("/webfront/services/files/", handler);
-            REQUIRE(route);
-            REQUIRE_THROWS_AS(static_cast<void>(app.addReadRoute("/webfront/services/files/", handler)), std::invalid_argument);
+            require(route);
+            requireThrows<std::invalid_argument>([&] { static_cast<void>(app.addReadRoute("/webfront/services/files/", handler)); });
         }
-        REQUIRE_NOTHROW(static_cast<void>(app.addReadRoute("/webfront/services/files/", handler)));
-    }
-    THEN("a route of another application grants nothing to this one's browser") {
+        requireNothrow([&] { static_cast<void>(app.addReadRoute("/webfront/services/files/", handler)); });
+    });
+    then("a route of another application grants nothing to this one's browser", [&] {
         ReadApp other{WebFrontConfig{.port = "0"}};
         auto    foreign = other.addReadRoute("/webfront/services/files/", handler);
         ReadApp::UI ui{app, 0, 1};
-        REQUIRE_THROWS_WITH(ui.grantRead(foreign, "a.txt"), Catch::Matchers::ContainsSubstring("another application"));
-    }
-    THEN("a loopback declaration is refused for an application that listens on all interfaces") {
-        REQUIRE_THROWS_AS(ReadApp(WebFrontConfig{.address = "0.0.0.0", .port = "0", .remoteFileTransport = RemoteFileTransport::loopbackAttested}),
-                          std::invalid_argument);
-    }
+        requireThrows([&] { (void)ui.grantRead(foreign, "a.txt"); }, contains("another application"));
+    });
+    then("a loopback declaration is refused for an application that listens on all interfaces", [&] {
+        requireThrows<std::invalid_argument>([&] { ReadApp(WebFrontConfig{.address = "0.0.0.0", .port = "0", .remoteFileTransport = RemoteFileTransport::loopbackAttested}); });
+    });
     testing::InjectableSocket::reset();
-}
+}};
 
-SCENARIO("Each application names its own cookies, and a namespace named after the port survives a restart", "[read-binding]") {
-    GIVEN("a client bound to each of two applications on one host, whose cookies the browser shares") {
+const Scenario eachApplication{"Each application names its own cookies, and a namespace named after the port survives a restart", {"read-binding"}, [] {
+    given("a client bound to each of two applications on one host, whose cookies the browser shares", [&] {
         Fixture    first, second;
         const auto cookieA = cookiePair(headers(first.bind(1, true), "Set-Cookie").front());
         const auto both    = cookieA + "; " + cookiePair(headers(second.bind(1, true), "Set-Cookie").front());
-        REQUIRE(cookieA.starts_with("wf-client-"));
-        REQUIRE(first.binding.clientCookiePrefix() != second.binding.clientCookiePrefix());
+        require(cookieA.starts_with("wf-client-"));
+        require(first.binding.clientCookiePrefix() != second.binding.clientCookiePrefix());
 
-        THEN("binding the second one erases nothing of the first, and the reads still pass") {
+        then("binding the second one erases nothing of the first, and the reads still pass", [&] {
             const auto again = second.bind(2, true, both);
             for (const auto& setCookie : headers(again, "Set-Cookie"))
-                REQUIRE_FALSE(setCookie.contains("Max-Age=0"));
+                require(!setCookie.contains("Max-Age=0"));
             const auto url = first.url(1);
-            REQUIRE(call(first.read, url, both).status == http::Response::ok);
-        }
-    }
-    GIVEN("an application restarted on the same port") {
+            require(call(first.read, url, both).status == http::Response::ok);
+        });
+    });
+    given("an application restarted on the same port", [&] {
         Fixture before, after;
         before.binding.useNamespace("9002");
         after.binding.useNamespace("9002");
         const auto cookie = cookiePair(headers(before.bind(1, true), "Set-Cookie").front());
-        THEN("it recognizes the cookie of its previous run and erases it") {
-            REQUIRE(cookie.starts_with("wf-client-9002-"));
+        then("it recognizes the cookie of its previous run and erases it", [&] {
+            require(cookie.starts_with("wf-client-9002-"));
             bool erased = false;
             for (const auto& line : headers(after.bind(1, true, cookie), "Set-Cookie"))
                 erased = erased || (line.starts_with(cookie.substr(0, cookie.find('=')) + "=;") && line.contains("Max-Age=0"));
-            REQUIRE(erased);
-        }
-    }
-}
+            require(erased);
+        });
+    });
+}};
 
-SCENARIO("A token opens only the path it was issued for, and only a path the server would route", "[read-binding]") {
+const Scenario tokenOpens{"A token opens only the path it was issued for, and only a path the server would route", {"read-binding"}, [] {
     Fixture fixture;
     const auto cookie = cookiePair(headers(fixture.bind(1, true), "Set-Cookie").front());
     const auto url    = fixture.url(1, "public.txt");
-    REQUIRE(call(fixture.read, url, cookie).status == http::Response::ok);
+    require(call(fixture.read, url, cookie).status == http::Response::ok);
     const auto other = url.substr(0, url.rfind('/')) + "/private.txt";
-    REQUIRE(call(fixture.read, other, cookie).status == http::Response::forbidden);
-    REQUIRE(fixture.lastRest == "public.txt");
+    require(call(fixture.read, other, cookie).status == http::Response::forbidden);
+    require(fixture.lastRest == "public.txt");
     const auto transferable = fixture.url(1, "public.txt", {.lifetime = 60s, .transferable = true});
-    REQUIRE(call(fixture.read, transferable).status == http::Response::ok);
-    REQUIRE(call(fixture.read, transferable.substr(0, transferable.rfind('/')) + "/private.txt").status == http::Response::forbidden);
+    require(call(fixture.read, transferable).status == http::Response::ok);
+    require(call(fixture.read, transferable.substr(0, transferable.rfind('/')) + "/private.txt").status == http::Response::forbidden);
     for (const std::string_view path : {"a//b", "report..txt", "../up.txt", "a/../b", "tab\there.txt", "line\nbreak"})
-        REQUIRE_THROWS_AS(fixture.url(1, path), ReadRefused);
-    REQUIRE_NOTHROW(fixture.url(1, "dir/report.v2.txt"));
-}
+        requireThrows<ReadRefused>([&] { fixture.url(1, path); });
+    requireNothrow([&] { fixture.url(1, "dir/report.v2.txt"); });
+}};
 
-SCENARIO("A grant's context is released when the grant expires or the binding shuts down", "[read-binding]") {
+const Scenario grantContext{"A grant's context is released when the grant expires or the binding shuts down", {"read-binding"}, [] {
     Fixture fixture;
     fixture.bind(1, true);
     auto               held  = std::make_shared<int>(7);
     std::weak_ptr<int> watch = held;
-    WHEN("the grant expires") {
+    when("the grant expires", [&] {
         (void)fixture.url(1, "a", {.lifetime = 60s, .context = held});
         held.reset();
-        REQUIRE_FALSE(watch.expired());
+        require(!watch.expired());
         fixture.time += 61s;
         (void)fixture.url(1, "b");  // issuing another grant sweeps the expired ones
-        THEN("its context is released without the grant being requested again") { REQUIRE(watch.expired()); }
-    }
-    WHEN("the binding shuts down") {
+        then("its context is released without the grant being requested again", [&] { require(watch.expired()); });
+    });
+    when("the binding shuts down", [&] {
         const auto url = fixture.url(1, "a", {.context = held});
         held.reset();
-        REQUIRE_FALSE(watch.expired());
+        require(!watch.expired());
         fixture.binding.shutdown();
-        THEN("it holds nothing and grants nothing") {
-            REQUIRE(watch.expired());
-            REQUIRE_THROWS_AS(fixture.url(1, "b"), ReadRefused);
-            REQUIRE(call(fixture.read, url).status == http::Response::forbidden);
-        }
-    }
-}
+        then("it holds nothing and grants nothing", [&] {
+            require(watch.expired());
+            requireThrows<ReadRefused>([&] { fixture.url(1, "b"); });
+            require(call(fixture.read, url).status == http::Response::forbidden);
+        });
+    });
+}};
 
-SCENARIO("Dropping a grant never runs its context's destructor under the lock", "[read-binding]") {
+const Scenario droppingGrant{"Dropping a grant never runs its context's destructor under the lock", {"read-binding"}, [] {
     Fixture fixture;
     fixture.bind(1, true);
     // A context whose deleter calls back into the binding would deadlock if it ran while the binding is locked.
@@ -774,20 +773,20 @@ SCENARIO("Dropping a grant never runs its context's destructor under the lock", 
             (void)fixture.binding.accepts("route-a", "none", "x", {});
         });
     };
-    WHEN("the grant expires") {
+    when("the grant expires", [&] {
         (void)fixture.url(1, "a", {.lifetime = 1s, .context = reentrant()});
         fixture.time += 2s;
-        THEN("the next grant sweeps it") { REQUIRE_NOTHROW(fixture.url(1, "b")); }
-    }
-    WHEN("the grant is revoked") {
+        then("the next grant sweeps it", [&] { requireNothrow([&] { fixture.url(1, "b"); }); });
+    });
+    when("the grant is revoked", [&] {
         fixture.binding.revoke(fixture.url(1, "a", {.context = reentrant()}));
-    }
-    WHEN("its connection closes") {
+    });
+    when("its connection closes", [&] {
         (void)fixture.url(1, "a", {.context = reentrant()});
         fixture.binding.close(1);
-    }
-    WHEN("the application shuts down") {
+    });
+    when("the application shuts down", [&] {
         (void)fixture.url(1, "a", {.context = reentrant()});
         fixture.binding.shutdown();
-    }
-}
+    });
+}};

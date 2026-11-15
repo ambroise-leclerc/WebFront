@@ -70,7 +70,7 @@ specs run programs the test's owner authorizes (`PROGRAMS`), with private tempor
 Linux only (the runner's unit tests also run on Windows and macOS).
 
 The CEF-off build and complete CTest commands are in [AGENTS.md](../AGENTS.md).
-The suite includes deterministic Catch2 regressions, CMake consumer/configuration checks,
+The suite includes deterministic C++ unit-test regressions, CMake consumer/configuration checks,
 asset freshness checks and, with an enabled engine, real-browser Jasmine and lifecycle tests.
 `Journey*` builds a UI with the rebuilt environment and local registry, then compiles and runs
 its generated provider from an empty directory. Configured tests need no public network.

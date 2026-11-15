@@ -1,6 +1,5 @@
 #include "Mocks.hpp"
-#include <catch2/catch_message.hpp>
-#include <catch2/catch_test_macros.hpp>
+#include "Bdd.hpp"
 #include <webfront/ContentPolicy.hpp>
 #include <webfront/http/HTTPServer.hpp>
 #include <webfront/networking/NetworkingMock.hpp>
@@ -14,6 +13,8 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+using namespace webfront::bdd;
 
 using namespace webfront;
 
@@ -62,26 +63,26 @@ struct WarningCapture {
 };
 }  // namespace
 
-SCENARIO("Content policy compares complete HTTP origins") {
+const Scenario contentPolicyCompares{"Content policy compares complete HTTP origins", [] {
     const detail::BoundContentPolicy policy{"http://127.0.0.1:9002/index.html"};
-    GIVEN("the default policy") {
-        THEN("same-origin URLs and native clients are allowed") {
-            REQUIRE(policy.allowsBridge("http://127.0.0.1:9002"));
-            REQUIRE(policy.allowsBridge(std::nullopt));
-            REQUIRE(policy.allowsNavigation("http://127.0.0.1:9002/next?x=1#fragment"));
-        }
-        THEN("a Blob of the application's origin (a generated download) is allowed, one of another origin is not") {
-            REQUIRE(policy.allowsNavigation("blob:http://127.0.0.1:9002/0b1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"));
-            REQUIRE(policy.allowsNavigation("BLOB:http://127.0.0.1:9002/id"));
+    given("the default policy", [&] {
+        then("same-origin URLs and native clients are allowed", [&] {
+            require(policy.allowsBridge("http://127.0.0.1:9002"));
+            require(policy.allowsBridge(std::nullopt));
+            require(policy.allowsNavigation("http://127.0.0.1:9002/next?x=1#fragment"));
+        });
+        then("a Blob of the application's origin (a generated download) is allowed, one of another origin is not", [&] {
+            require(policy.allowsNavigation("blob:http://127.0.0.1:9002/0b1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"));
+            require(policy.allowsNavigation("BLOB:http://127.0.0.1:9002/id"));
             for (const auto* url : {"blob:https://example.com/id", "blob:null/id", "blob:", "blob:http://127.0.0.1:9002@evil/id", "blob:blob:http://127.0.0.1:9002/id"}) {
-                INFO(url);
-                REQUIRE_FALSE(policy.allowsNavigation(url));
+                auto scope = info(url);
+                require(!policy.allowsNavigation(url));
             }
-        }
-        THEN("other origins and ambiguous syntax fail closed") {
+        });
+        then("other origins and ambiguous syntax fail closed", [&] {
             for (const auto* origin : invalidBridgeOrigins) {
-                INFO(origin);
-                REQUIRE_FALSE(policy.allowsBridge(origin));
+                auto scope = info(origin);
+                require(!policy.allowsBridge(origin));
             }
             for (const auto* url : {"https://example.com/",
                                     "http://127.0.0.1:9002@evil/",
@@ -90,69 +91,68 @@ SCENARIO("Content policy compares complete HTTP origins") {
                                     "file:///tmp/index.html",
                                     "about:blank",
                                     "http://127.0.0.1:9002\\@evil/"}) {
-                INFO(url);
-                REQUIRE_FALSE(policy.allowsNavigation(url));
+                auto scope = info(url);
+                require(!policy.allowsNavigation(url));
             }
-        }
-    }
-    GIVEN("explicit allow-lists and mandatory Origin") {
+        });
+    });
+    given("explicit allow-lists and mandatory Origin", [&] {
         const ContentPolicy              options{.bridgeAllowedOrigins     = {"HTTPS://UI.EXAMPLE:443"},
                                                  .navigationAllowedOrigins = {"https://docs.example"},
                                                  .allowMissingOrigin       = false};
         const detail::BoundContentPolicy configured{"http://127.0.0.1:9002", options};
-        REQUIRE(configured.allowsBridge("https://ui.example"));
-        REQUIRE_FALSE(configured.allowsBridge(std::nullopt));
-        REQUIRE_FALSE(configured.allowsBridge("https://docs.example"));
-        REQUIRE(configured.allowsNavigation("https://docs.example/help"));
-        REQUIRE_FALSE(configured.allowsNavigation("https://ui.example/"));
-        REQUIRE_THROWS_AS((detail::BoundContentPolicy{"http://127.0.0.1:9002", {.bridgeAllowedOrigins = {"*"}}}), std::invalid_argument);
-        REQUIRE_THROWS_AS((detail::BoundContentPolicy{"http://127.0.0.1:9002", {.navigationAllowedOrigins = {"https://example.com/path"}}}),
-                          std::invalid_argument);
-    }
-    GIVEN("the explicit permissive HTTP(S) development options") {
+        require(configured.allowsBridge("https://ui.example"));
+        require(!configured.allowsBridge(std::nullopt));
+        require(!configured.allowsBridge("https://docs.example"));
+        require(configured.allowsNavigation("https://docs.example/help"));
+        require(!configured.allowsNavigation("https://ui.example/"));
+        requireThrows<std::invalid_argument>([&] { (detail::BoundContentPolicy{"http://127.0.0.1:9002", {.bridgeAllowedOrigins = {"*"}}}); });
+        requireThrows<std::invalid_argument>([&] { (detail::BoundContentPolicy{"http://127.0.0.1:9002", {.navigationAllowedOrigins = {"https://example.com/path"}}}); });
+    });
+    given("the explicit permissive HTTP(S) development options", [&] {
         const detail::BoundContentPolicy configured{
             "http://localhost:80",
             {.allowAnyBridgeOrigin = true, .allowAnyNavigation = true}
         };
-        REQUIRE(configured.allowsBridge("https://other.example"));
-        REQUIRE(configured.allowsNavigation("http://other.example/path"));
-        REQUIRE_FALSE(configured.allowsBridge("null"));
-        REQUIRE_FALSE(configured.allowsNavigation("javascript:alert(1)"));
-    }
-    GIVEN("default ports, case and bracketed IPv6") {
-        REQUIRE(detail::BoundContentPolicy{"http://LOCALHOST:80"}.allowsBridge("http://localhost"));
-        REQUIRE(detail::BoundContentPolicy{"https://[::1]:443"}.allowsBridge("https://[::1]"));
-        REQUIRE_FALSE(detail::BoundContentPolicy{"http://[::1]:9002"}.allowsBridge("http://[::1]:9003"));
-    }
-}
+        require(configured.allowsBridge("https://other.example"));
+        require(configured.allowsNavigation("http://other.example/path"));
+        require(!configured.allowsBridge("null"));
+        require(!configured.allowsNavigation("javascript:alert(1)"));
+    });
+    given("default ports, case and bracketed IPv6", [&] {
+        require(detail::BoundContentPolicy{"http://LOCALHOST:80"}.allowsBridge("http://localhost"));
+        require(detail::BoundContentPolicy{"https://[::1]:443"}.allowsBridge("https://[::1]"));
+        require(!(detail::BoundContentPolicy{"http://[::1]:9002"}.allowsBridge("http://[::1]:9003")));
+    });
+}};
 
-SCENARIO("Content policy controls popup delegation") {
+const Scenario contentPolicyControls{"Content policy controls popup delegation", [] {
     std::vector<std::string> opened;
     auto                     launch = [&](const std::string& url) {
         opened.push_back(url);
     };
-    GIVEN("the default policy") {
+    given("the default policy", [&] {
         detail::BoundContentPolicy{}.handlePopup("https://example.com/help", true, launch);
-        REQUIRE(opened.empty());
-    }
-    GIVEN("system browser popups are explicitly enabled") {
+        require(opened.empty());
+    });
+    given("system browser popups are explicitly enabled", [&] {
         const detail::BoundContentPolicy policy{"http://127.0.0.1:9002", {.popups = PopupPolicy::systemBrowser}};
         policy.handlePopup("https://example.com/help", true, launch);
         policy.handlePopup("file:///etc/passwd", true, launch);
         policy.handlePopup("javascript:alert(1)", true, launch);
-        REQUIRE(opened == std::vector<std::string>{"https://example.com/help"});
-        WHEN("a script requests repeated popups without a user gesture") {
+        require(opened == std::vector<std::string>{"https://example.com/help"});
+        when("a script requests repeated popups without a user gesture", [&] {
             opened.clear();
             for (int count = 0; count < 100; ++count)
                 policy.handlePopup("https://example.com/help", false, launch);
-            THEN("no URL reaches the external launcher") {
-                REQUIRE(opened.empty());
-            }
-        }
-    }
-}
+            then("no URL reaches the external launcher", [&] {
+                require(opened.empty());
+            });
+        });
+    });
+}};
 
-SCENARIO("WebSocket upgrades authorize Origin before returning 101") {
+const Scenario webSocketUpgrades{"WebSocket upgrades authorize Origin before returning 101", [] {
     using namespace webfront::http;
     using Net    = networking::NetworkingMock;
     auto upgrade = [](const std::string& headers, ContentPolicy policy = {}) {
@@ -160,42 +160,42 @@ SCENARIO("WebSocket upgrades authorize Origin before returning 101") {
                                   "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
                                   + headers + "\r\n";
         Request           request;
-        REQUIRE(request.parseSomeData(input.begin(), input.end()));
+        require(request.parseSomeData(input.begin(), input.end()));
         RequestHandler<Net, MockFileSystem<>> handler{
             ".",
             detail::BoundContentPolicy{"http://127.0.0.1:9002/", std::move(policy)}
         };
         return handler.handleRequest(request);
     };
-    THEN("the configured application origin and absent Origin are accepted independently of Host") {
-        REQUIRE(upgrade("Origin: http://127.0.0.1:9002\r\n").statusCode == Response::switchingProtocols);
-        REQUIRE(upgrade("").statusCode == Response::switchingProtocols);
-    }
-    THEN("cross-origin, opaque, malformed and duplicate Origin receive a deterministic 403") {
+    then("the configured application origin and absent Origin are accepted independently of Host", [&] {
+        require(upgrade("Origin: http://127.0.0.1:9002\r\n").statusCode == Response::switchingProtocols);
+        require(upgrade("").statusCode == Response::switchingProtocols);
+    });
+    then("cross-origin, opaque, malformed and duplicate Origin receive a deterministic 403", [&] {
         for (const auto* headers : {"Origin: https://attacker.example\r\n",
                                     "Origin: null\r\n",
                                     "Origin: http://127.0.0.1:9002/path\r\n",
                                     "Origin: http://127.0.0.1:9002\r\norigin: https://attacker.example\r\n",
                                     "Origin: http://127.0.0.1:9002\r\nOrigin: http://127.0.0.1:9002\r\n"}) {
             const auto response = upgrade(headers);
-            REQUIRE(response.statusCode == Response::forbidden);
-            REQUIRE_FALSE(response.getHeaderValue("Sec-WebSocket-Accept"));
-            REQUIRE_FALSE(response.getHeaderValue("Upgrade"));
-            REQUIRE(response.content.contains("WebSocket Origin rejected by content policy"));
-            REQUIRE(response.content.contains("bridgeAllowedOrigins"));
-            REQUIRE(response.getHeaderValue("Content-Type") == "text/plain; charset=utf-8");
-            REQUIRE(response.getHeaderValue("Content-Length") == std::to_string(response.content.size()));
+            require(response.statusCode == Response::forbidden);
+            require(!response.getHeaderValue("Sec-WebSocket-Accept"));
+            require(!response.getHeaderValue("Upgrade"));
+            require(response.content.contains("WebSocket Origin rejected by content policy"));
+            require(response.content.contains("bridgeAllowedOrigins"));
+            require(response.getHeaderValue("Content-Type") == "text/plain; charset=utf-8");
+            require(response.getHeaderValue("Content-Length") == std::to_string(response.content.size()));
         }
-    }
-    THEN("the allow-list and native-client opt-out reach the handshake") {
-        REQUIRE(upgrade("Origin: https://ui.example\r\n", {.bridgeAllowedOrigins = {"https://ui.example"}}).statusCode == Response::switchingProtocols);
-        REQUIRE(upgrade("", {.allowMissingOrigin = false}).statusCode == Response::forbidden);
-    }
-    THEN("a refusal logs an actionable diagnostic for alternate hosts and wildcard binds") {
+    });
+    then("the allow-list and native-client opt-out reach the handshake", [&] {
+        require(upgrade("Origin: https://ui.example\r\n", {.bridgeAllowedOrigins = {"https://ui.example"}}).statusCode == Response::switchingProtocols);
+        require(upgrade("", {.allowMissingOrigin = false}).statusCode == Response::forbidden);
+    });
+    then("a refusal logs an actionable diagnostic for alternate hosts and wildcard binds", [&] {
         WarningCapture capture;
-        REQUIRE(upgrade("Origin: http://192.168.1.2:9002\r\n").statusCode == Response::forbidden);
-        REQUIRE_FALSE(capture.messages.empty());
-        REQUIRE(capture.messages.back().contains("bridgeAllowedOrigins"));
-        REQUIRE(capture.messages.back().contains("wildcard binds authorize loopback only"));
-    }
-}
+        require(upgrade("Origin: http://192.168.1.2:9002\r\n").statusCode == Response::forbidden);
+        require(!capture.messages.empty());
+        require(capture.messages.back().contains("bridgeAllowedOrigins"));
+        require(capture.messages.back().contains("wildcard binds authorize loopback only"));
+    });
+}};

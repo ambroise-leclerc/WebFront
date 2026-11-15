@@ -88,7 +88,7 @@ ressource (sept sources de moins de 40 Kio, quelques dixièmes de seconde) et co
 versionné. Le choix d'un générateur CMake pur plutôt que d'un script exécuté par `wf` tient à ce que la fraîcheur des
 en-têtes doit être vérifiable par un build qui n'a pas de navigateur (la CI CEF-off, les sanitizers) ; une seule
 implémentation du rendu subsiste, la compression gzip n'ayant plus d'usage dans le cœur (elle reste celle de `wf embed`,
-dans l'environnement, avec le `fflate` verrouillé). Un test Catch2 décode chaque en-tête avec les données C++ qu'il
+dans l'environnement, avec le `fflate` verrouillé). Un test unitaire décode chaque en-tête avec les données C++ qu'il
 déclare et le compare au fichier source ; un test CMake vérifie les sommes de contrôle des entrées des bundles
 (`bundles.json`) : une source modifiée sans reconstruction est détectée sans navigateur. La reconstruction effective
 sources → bundle est prouvée dans la suite navigateur par `wf run` (`SelfBuildRefreshMatchesSources`), puis bundle →

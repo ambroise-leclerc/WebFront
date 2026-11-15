@@ -27,7 +27,7 @@ The README introduces WebFront through the Game of Life walkthrough, demonstrati
 - `js/services/`: optional `@webfront/services` package, the browser side of the system services (ADR-020; a skeleton so far), built like `@webfront/react` by `wf run services-package`; outside the core's embedded resource list.
 - `js/react/`: optional `@webfront/react` package (`createStore`, `useStore`, `Island`), declarations and package-local license. `wf run react-package` assembles it; tests verify the exact archive installed by the registry. It is outside the core's embedded resource list.
 - `test/fixtures/`, `test/web/fixtures/`: retained regression fixtures, not public example applications.
-- `test/unit/`: Catch2 unit tests; `test/web/`: real-browser integration (`suite/` is the WebFront project of the Jasmine specs, run by `webtest` through `wf test`); `test/driver/`: `webfront-wf`, the non-interactive `wf` driver for tests; `test/fuzz/`, `test/fixtures/`; `test/cmake/`: CMake test scripts and sub-projects. The `RepositoryLayout` CTest case pins the tracked root.
+- `test/unit/`: C++ unit tests, written with `test/unit/Bdd.hpp` (a single-header BDD framework); `test/web/`: real-browser integration (`suite/` is the WebFront project of the Jasmine specs, run by `webtest` through `wf test`); `test/driver/`: `webfront-wf`, the non-interactive `wf` driver for tests; `test/fuzz/`, `test/fixtures/`; `test/cmake/`: CMake test scripts and sub-projects. The `RepositoryLayout` CTest case pins the tracked root.
 - `cmake/`: build modules (frontends, CEF, CPM, compiler options); `.github/`: workflows, `.github/CONTRIBUTING.md`.
 - `docs/`: current reference guides, architecture decisions and `docs/CHANGELOG.md`.
 - `docs/PROJECT_STATUS.md`: current supported paths, validation scope and known limitations; completed work belongs in the changelog and Git history.
@@ -55,7 +55,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure --parallel 4
 
-# Run one Catch2 scenario directly
+# Run one unit-test scenario directly (`tests --help` lists the filters)
 ./build/test/unit/tests "Scenario: JsFunction"
 
 # Linux real-browser integration test: configure downloads and verifies the pinned bootstrap environment and the packages
@@ -89,7 +89,7 @@ without network access.
 - `WEBFRONT_EMBED_WEBVIEW2=OFF` (default): Windows-only opt-in SDK and static loader for `WebView2Frontend`; requires the separately installed Evergreen runtime. Select it explicitly with `WebFrontWithFrontend<frontend::WebView2Frontend>`. With tests enabled, `WEBFRONT_WEBTEST_FRONTEND=WebView2` runs the shared Jasmine suite and lifecycle cases.
 - `WEBFRONT_EMBED_WKWEBVIEW=OFF` (default): macOS 13.3+ opt-in Cocoa/WebKit frontend, with no engine download. Select `WebFrontWithFrontend<frontend::WKWebViewFrontend>` on the main thread; `WEBFRONT_WEBTEST_FRONTEND=WKWebView` runs Jasmine and lifecycle coverage.
 
-- `WEBFRONT_ENABLE_TESTING=ON` (default `OFF`): build Catch2 and Jasmine test targets. CI and contributor commands must pass it explicitly. The test, fuzzing, coverage and sanitizer options (`WEBFRONT_ENABLE_SANITIZER_*`) carry the `WEBFRONT_` prefix so that a parent's own `ENABLE_TESTING` or `ENABLE_SANITIZER_ADDRESS` never builds or instruments WebFront's tests; the former unprefixed names no longer configure WebFront (`cmake/WebFrontTestOptions.cmake` documents the options).
+- `WEBFRONT_ENABLE_TESTING=ON` (default `OFF`): build the C++ unit-test and Jasmine test targets. CI and contributor commands must pass it explicitly. The test, fuzzing, coverage and sanitizer options (`WEBFRONT_ENABLE_SANITIZER_*`) carry the `WEBFRONT_` prefix so that a parent's own `ENABLE_TESTING` or `ENABLE_SANITIZER_ADDRESS` never builds or instruments WebFront's tests; the former unprefixed names no longer configure WebFront (`cmake/WebFrontTestOptions.cmake` documents the options).
 - `WEBFRONT_BUILD_EXAMPLES` (default `ON` only for the top-level project): build the examples. As a subproject (`add_subdirectory`), link `WebFront::WebFront`; no examples, tests or global compiler settings are added.
 - `WEBFRONT_ENABLE_COVERAGE=ON`: add GCC/Clang coverage instrumentation to the C++ tests.
 - The project has no CMake presets: the defaults are the quick local build (`WEBFRONT_TEST_UNITY_BATCH=4`, `WEBFRONT_MSVC_ANALYZE=OFF`, `WEBFRONT_TEST_REPRODUCIBILITY=OFF`) and every CI job passes these options explicitly (`docs/TEST_TIERS.md`).
@@ -117,7 +117,7 @@ Exception: a purely C++ change that reuses an existing encoding, introduces no n
 - Use C++23, four-space indentation, the `.clang-format` of the directory (`include/webfront/`, `test/`, `examples/`), and the naming rules in `.github/CONTRIBUTING.md`.
 - Keep production implementation header-only under `include/`; `examples/` contains the three public examples; browser resources live in `js/`.
 - Prefer standard-library facilities and explicit ownership. Keep public headers ODR-safe (`inline`/templates as appropriate).
-- Catch2 tests use `SCENARIO`/`GIVEN`/`WHEN`/`THEN` and deterministic mocks.
+- Unit tests are named `const Scenario` objects whose `given`/`when`/`then` sections are lambdas, checked with `require`/`check` (`test/unit/Bdd.hpp`), and use deterministic mocks.
 - Jasmine specs are the project `test/web/suite/`, built by esbuild-wasm and run by `wf test` under the locked `jasmine-core` (installed from the local registry by `WebSuiteInstall`); `webtest` is the `webfront-wf` driver plus the C++ callbacks of the specs. The specs tell C++ they are done (`specsFinished`), the process status is that of `wf test` (or 1 when C++ did not observe every call), and the CTest case has a timeout. The registry the suite installs from is built by `wf run test-registry` (the `TestRegistry` case), from the packages that configure downloaded.
 - Every bug fix needs a failing regression test at the lowest useful level. Bridge changes also need the browser integration test.
 - Tests must not require user input, a fixed pre-existing browser session, or public network access after dependencies are configured.
