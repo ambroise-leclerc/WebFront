@@ -6,3 +6,5 @@ describe('Unicode reports 😀', () => {
     it('long-name-' + 'x'.repeat(3000) + '-end', () => fail('short diagnostic'));
 });
 it('\ufefftop-level name', () => fail('keeps a leading U+FEFF'));
+// A plain failing expectation keeps its spec name and diagnostic (the former fail mode).
+describe('A failing consumer', () => { it('reports the failure', () => { expect(1).toBe(2); }); });
