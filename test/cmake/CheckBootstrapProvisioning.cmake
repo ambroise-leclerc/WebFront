@@ -198,6 +198,28 @@ foreach(round mounted unmounted)
     file(REMOVE_RECURSE "${WORK}/offline")
 endforeach()
 
+# The default cache: an environment variable set to nothing counts as unset, so that it never makes a path at the root. The
+# probe runs as a consuming project would (its source is not WebFront's), which keeps its downloads in its build tree.
+file(WRITE "${WORK}/default-cache.cmake" [[
+include("${ROOT}/cmake/WebFrontBootstrap.cmake")
+message(STATUS "cache=[${WEBFRONT_DOWNLOAD_CACHE}]")
+]])
+function(default_cache output)
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E env --unset=WEBFRONT_DOWNLOAD_CACHE --unset=CPM_SOURCE_CACHE ${ARGN}
+            "${CMAKE_COMMAND}" -DROOT=${ROOT} -P "${WORK}/default-cache.cmake"
+        WORKING_DIRECTORY "${WORK}" RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err)
+    if(NOT result EQUAL 0 OR NOT out MATCHES "cache=\\[([^]]*)\\]")
+        message(FATAL_ERROR "The default cache could not be read: ${result} ${out}${err}")
+    endif()
+    set(${output} "${CMAKE_MATCH_1}" PARENT_SCOPE)
+endfunction()
+default_cache(chosen "CPM_SOURCE_CACHE=")
+expect_equal("${chosen}" "" "An empty CPM_SOURCE_CACHE must not choose a cache for a consuming project")
+default_cache(chosen "WEBFRONT_DOWNLOAD_CACHE=" "CPM_SOURCE_CACHE=${WORK}/cpm")
+expect_equal("${chosen}" "${WORK}/cpm/webfront-downloads" "An empty WEBFRONT_DOWNLOAD_CACHE must leave the choice to CPM's cache")
+default_cache(chosen "WEBFRONT_DOWNLOAD_CACHE=${WORK}/chosen" "CPM_SOURCE_CACHE=${WORK}/cpm")
+expect_equal("${chosen}" "${WORK}/chosen" "WEBFRONT_DOWNLOAD_CACHE comes first")
+
 # A malformed integrity is refused before anything is downloaded.
 provision(malformed result text URL "${url}" INTEGRITY "sha256-abc")
 if(result EQUAL 0 OR NOT text MATCHES "sha512- SRI")

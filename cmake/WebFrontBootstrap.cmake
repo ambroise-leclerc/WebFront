@@ -17,22 +17,24 @@ set(WEBFRONT_BOOTSTRAP_DIR "" CACHE PATH "Directory with the pinned bootstrap en
 
 # The verified downloads of the configure, kept once per machine: a new build tree links them instead of downloading them
 # again. WEBFRONT_DOWNLOAD_CACHE or CPM's cache chooses the place; WebFront's own build otherwise uses the user's cache
-# directory, and a project that consumes WebFront keeps each download in its build tree unless it asks. Empty disables it.
+# directory, and a project that consumes WebFront keeps each download in its build tree unless it asks. An environment
+# variable set to nothing counts as unset, so that it never makes a path at the root; -DWEBFRONT_DOWNLOAD_CACHE= disables
+# the cache.
 get_filename_component(_webfront_source "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 set(_webfront_download_cache "")
-if(DEFINED ENV{WEBFRONT_DOWNLOAD_CACHE})
+if(NOT "$ENV{WEBFRONT_DOWNLOAD_CACHE}" STREQUAL "")
     set(_webfront_download_cache "$ENV{WEBFRONT_DOWNLOAD_CACHE}")
-elseif(DEFINED ENV{CPM_SOURCE_CACHE})
+elseif(NOT "$ENV{CPM_SOURCE_CACHE}" STREQUAL "")
     set(_webfront_download_cache "$ENV{CPM_SOURCE_CACHE}/webfront-downloads")
 elseif(NOT CMAKE_SOURCE_DIR STREQUAL _webfront_source)
     # A consuming project: each download stays in its build tree.
-elseif(CMAKE_HOST_WIN32 AND DEFINED ENV{LOCALAPPDATA})
+elseif(CMAKE_HOST_WIN32 AND NOT "$ENV{LOCALAPPDATA}" STREQUAL "")
     set(_webfront_download_cache "$ENV{LOCALAPPDATA}/WebFront/downloads")
-elseif(CMAKE_HOST_APPLE AND DEFINED ENV{HOME})
+elseif(CMAKE_HOST_APPLE AND NOT "$ENV{HOME}" STREQUAL "")
     set(_webfront_download_cache "$ENV{HOME}/Library/Caches/WebFront/downloads")
-elseif(DEFINED ENV{XDG_CACHE_HOME})
+elseif(NOT "$ENV{XDG_CACHE_HOME}" STREQUAL "")
     set(_webfront_download_cache "$ENV{XDG_CACHE_HOME}/webfront/downloads")
-elseif(DEFINED ENV{HOME})
+elseif(NOT "$ENV{HOME}" STREQUAL "")
     set(_webfront_download_cache "$ENV{HOME}/.cache/webfront/downloads")
 endif()
 set(WEBFRONT_DOWNLOAD_CACHE "${_webfront_download_cache}" CACHE PATH "Directory keeping the verified configure downloads for every build tree (empty: none)")
