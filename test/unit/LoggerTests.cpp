@@ -200,6 +200,18 @@ const Scenario requestLog{"The request log keeps what the HTTP layer says about 
     given("bridge traffic logged at the information level", [&] {
         then("it is left out", [&] {
             check(!isRequestLine("[I] Call 12 to cppFunction x"));
+            check(!isRequestLine("[I] Call 12 to cppFunction [W]"));
+        });
+    });
+    given("a warning whose message spans several lines", [&] {
+        then("it is kept whole, as the sink receives it in one call", [&] {
+            check(isRequestLine("[W] 12:00:00 | Route /api failed: first line\nsecond line\nthird line"));
+        });
+    });
+    given("the rows of a hex dump, which carry no level tag", [&] {
+        then("they are left out", [&] {
+            check(!isRequestLine("00000010  5b 57 5d 20 20 20 20 20  20 20 20 20 20 20 20 20  |[W]             |"));
+            check(!isRequestLine("00000000  47 45 54 20 2f 20 48 54  54 50 2f 31 2e 31 0d 0a  |GET / HTTP/1.1..|"));
         });
     });
 }};
