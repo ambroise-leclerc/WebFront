@@ -454,7 +454,7 @@ jobs:
       # The suite must not pass against an x86-64 archive by accident.
       - name: Verify the CEF architecture
         run: |
-          lib="$(find .cache/CPM -name libcef.so -print -quit)"
+          lib="$(find build-cef/_deps/cef_binaries-src -name libcef.so -print -quit)"
           test -n "$lib"
           file "$lib" | grep -q aarch64 || { echo "::error::CEF is not linuxarm64: $(file "$lib")"; exit 1; }
       - name: Build browser test
