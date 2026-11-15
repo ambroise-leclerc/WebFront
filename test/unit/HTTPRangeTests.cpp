@@ -70,14 +70,6 @@ struct RangeNet : webfront::testing::InjectableNetworking {
     }
 };
 
-bool waitFor(auto condition) {
-    for (auto waited = 0ms; waited < 10s; waited += 1ms) {
-        if (condition()) return true;
-        std::this_thread::sleep_for(1ms);
-    }
-    return false;
-}
-
 /// What the provider below serves, whatever the path asked.
 struct Served {
     static inline std::string                content;
@@ -121,7 +113,7 @@ std::string fetch(const std::string& text) {
     std::vector<std::byte>           bytes;
     for (const char c : text) bytes.push_back(static_cast<std::byte>(c));
     InjectableSocket::receive(bytes);
-    require(waitFor([] { return InjectableSocket::shutdownCount() > 0; }));
+    requireEventually([] { return InjectableSocket::shutdownCount() > 0; });
     auto written = InjectableSocket::writtenText();
     InjectableSocket::reset();
     return written;
@@ -447,7 +439,7 @@ const Scenario dynamicRoute{"A dynamic route serves a file by ranges", [] {
                 std::vector<std::byte> bytes;
                 for (const char c : text) bytes.push_back(static_cast<std::byte>(c));
                 InjectableSocket::receive(bytes);
-                require(waitFor([] { return InjectableSocket::shutdownCount() > 0; }));
+                requireEventually([] { return InjectableSocket::shutdownCount() > 0; });
                 auto written = InjectableSocket::writtenText();
                 InjectableSocket::reset();
                 return written;
@@ -509,7 +501,7 @@ const Scenario routeServing{"A route serving a stored encoding keeps it and nego
         std::vector<std::byte> bytes;
         for (const char c : text) bytes.push_back(static_cast<std::byte>(c));
         InjectableSocket::receive(bytes);
-        require(waitFor([] { return InjectableSocket::shutdownCount() > 0; }));
+        requireEventually([] { return InjectableSocket::shutdownCount() > 0; });
         auto written = InjectableSocket::writtenText();
         InjectableSocket::reset();
         return written;

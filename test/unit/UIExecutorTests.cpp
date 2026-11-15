@@ -126,16 +126,6 @@ struct Connected {
     }
 };
 
-template <typename Pred>
-bool waitFor(Pred pred) {
-    const auto deadline = std::chrono::steady_clock::now() + 30s;
-    while (!pred()) {
-        if (std::chrono::steady_clock::now() > deadline)
-            return false;
-        std::this_thread::sleep_for(1ms);
-    }
-    return true;
-}
 }  // namespace
 
 const Scenario interfaceThread{"The interface thread runs scheduled operations", [] {
@@ -151,7 +141,7 @@ const Scenario interfaceThread{"The interface thread runs scheduled operations",
             auto                    op = ex::connect(executor.schedule(), Receiver{observed, stop.get_token()});
             ex::start(op);
             then("it completes on the interface thread", [&] {
-                require(waitFor([&] { return observed.completions == 1; }));
+                requireEventually([&] { return observed.completions == 1; });
                 check(observed.valueThread == loop.uiThread);
                 check(!observed.stopped);
                 check(!observed.errored);
@@ -179,7 +169,7 @@ const Scenario interfaceThread{"The interface thread runs scheduled operations",
             for (auto& worker : workers)
                 worker->join();
             then("each one completes exactly once", [&] {
-                require(waitFor([&] { return observed.completions == threads * each; }));
+                requireEventually([&] { return observed.completions == threads * each; });
                 check(!observed.stopped);
             });
         });
@@ -414,7 +404,7 @@ const Scenario shutdownWhile{"Shutdown while operations are racing stops or runs
             for (auto& op : ops)
                 op->start();
             closer.join();
-            require(waitFor([&] { return observed.completions == count; }));
+            requireEventually([&] { return observed.completions == count; });
         }
     });
 }};
@@ -489,14 +479,14 @@ const Scenario systemBrowserCan{"The system browser can run an interface-thread 
         // so that a timeout fails the test instead of hanging or terminating the process.
         std::jthread client([&] {
             const auto executor = Browser::uiExecutor();
-            if (waitFor([&] { return executor.available(); })) {
+            if (checkEventually([&] { return executor.available(); })) {
                 // A function-local receiver type keeps the helper simple: schedule one operation and wait for it.
                 struct Holder {
                     decltype(ex::connect(std::declval<decltype(executor.schedule())>(), std::declval<LoopReceiver>())) op;
                     Holder(const UIExecutor& e, LoopOutcome& o) : op(ex::connect(e.schedule(), LoopReceiver{o})) { }
                 } holder(executor, outcome);
                 ex::start(holder.op);
-                clientOk = waitFor([&] { return outcome.completions == 1; });
+                clientOk = checkEventually([&] { return outcome.completions == 1; });
             }
             Browser::requestStop();
         });
@@ -522,8 +512,7 @@ const Scenario systemBrowserCan{"The system browser can run an interface-thread 
             std::jthread client([&] {
                 const auto executor = Browser::uiExecutor();
                 // The loop of this test ends only because the client asks, after it has run: a remembered request would end it first.
-                const bool ran = waitFor([&] { return executor.available(); });
-                check(ran);
+                checkEventually([&] { return executor.available(); });
                 Browser::requestStop();
             });
             Browser::loop("127.0.0.1", "9002", "index.html", fakeLaunch);
@@ -534,7 +523,7 @@ const Scenario systemBrowserCan{"The system browser can run an interface-thread 
             std::jthread      client([&] {
                 const auto executor = Browser::uiExecutor();
                 // The executor is available slightly before the loop can be stopped: repeat the request until accepted.
-                accepted = waitFor([&] { return executor.available() && Browser::requestClose(); });
+                accepted = checkEventually([&] { return executor.available() && Browser::requestClose(); });
                 if (!accepted)
                     Browser::requestStop();  // never leave the loop running if the request was not accepted in time
             });
@@ -557,14 +546,14 @@ const Scenario systemBrowserCan{"The system browser can run an interface-thread 
         std::atomic<bool> clientOk{false};
         std::jthread      client([&] {
             const auto executor = Browser::uiExecutor();
-            if (waitFor([&] { return executor.available(); })) {
+            if (checkEventually([&] { return executor.available(); })) {
                 struct Holder {
                     decltype(ex::connect(std::declval<decltype(Browser::uiExecutor().schedule())>(), std::declval<LoopReceiver>())) op;
                     Holder(const UIExecutor& e, LoopOutcome& o) : op(ex::connect(e.schedule(), LoopReceiver{o})) { }
                 } holder(executor, outcome);
                 ex::start(holder.op);
                 Browser::requestStop();  // the loop may run the job first or close with it still queued
-                clientOk = waitFor([&] { return outcome.completions >= 1; });
+                clientOk = checkEventually([&] { return outcome.completions >= 1; });
             } else {
                 Browser::requestStop();
             }
@@ -584,7 +573,7 @@ const Scenario systemBrowserCan{"The system browser can run an interface-thread 
         std::atomic<bool> clientOk{false};
         std::jthread     client([&] {
             const auto executor = Browser::uiExecutor();
-            clientOk = waitFor([&] { return executor.available(); });
+            clientOk = checkEventually([&] { return executor.available(); });
             // Each request may queue a source in the platform loop: none may outlive it or touch what it freed.
             do
                 Browser::requestStop();
@@ -650,7 +639,7 @@ const Scenario closingWaits{"Closing waits for the wake-ups in flight, which may
             closed = true;
         });
         when("the loop closes meanwhile", [&] {
-            check(waitFor([&] { return !host.executor().available(); }));
+            check(checkEventually([&] { return !host.executor().available(); }));
             then("close() does not return before the wake-up is over", [&] {
                 check(!closed);
                 {

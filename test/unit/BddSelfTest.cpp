@@ -3,9 +3,11 @@
 /// Some scenarios fail on purpose: main() runs each one and compares what it did with what is expected.
 #include "Bdd.hpp"
 
+#include <chrono>
 #include <clocale>
 #include <cstdio>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <iterator>
 #include <optional>
@@ -187,6 +189,43 @@ const Scenario throwsMismatch{"throws of another type", [] {
                                   });
                               }};
 
+const Scenario eventuallyHolds{"eventually holds", [] {
+                                   using namespace std::chrono_literals;
+                                   std::atomic<int> value{0};
+                                   std::thread      worker{[&] {
+                                       std::this_thread::sleep_for(20ms);
+                                       value = 2;
+                                   }};
+                                   requireEventually([&] { return value == 2; });
+                                   check(checkEventually([&] { return value == 2; }, 1s));
+                                   worker.join();
+                                   std::promise<int> promise;
+                                   auto              future = promise.get_future();
+                                   promise.set_value(1);
+                                   requireReady(future);
+                                   check(checkReady(future, 1s));
+                                   check(future.get() == 1);
+                                   trace.push_back("held");
+                               }};
+
+const Scenario eventuallyTimesOut{"eventually times out", [] {
+                                      using namespace std::chrono_literals;
+                                      check(!checkEventually([] { return false; }, 20ms));
+                                      trace.push_back("after check");
+                                      requireEventually([] { return false; }, 20ms);
+                                      trace.push_back("not reached");
+                                  }};
+
+const Scenario readyTimesOut{"a future that is never ready", [] {
+                                 using namespace std::chrono_literals;
+                                 std::promise<void> promise;
+                                 auto               future = promise.get_future();
+                                 check(!checkReady(future, 10ms));
+                                 trace.push_back("after check");
+                                 requireReady(future, 10ms);
+                                 trace.push_back("not reached");
+                             }};
+
 int failures = 0;
 
 void expect(std::string_view title, int code, std::vector<std::string> expectedTrace) {
@@ -230,6 +269,22 @@ int main() {
     expect("skip", 4, {});
     expect("assertions pass", 0, {});
     expect("throws of another type", 1, {});
+    expect("eventually holds", 0, {"held"});
+    expect("eventually times out", 1, {"after check"});
+    expect("a future that is never ready", 1, {"after check"});
+    {
+        using webfront::bdd::impl::parseFactor;
+        using webfront::bdd::impl::timeoutMessage;
+        if (timeoutMessage(std::chrono::milliseconds{30000}, 30.0012345) != "not met within 30.000000 s (waited 30.001234 s)") {
+            ++failures;
+            std::cerr << "MISMATCH: the report of a timeout is \"" << timeoutMessage(std::chrono::milliseconds{30000}, 30.0012345) << "\"\n";
+        }
+        if (parseFactor(nullptr) != 1.0 || parseFactor("") != 1.0 || parseFactor("x") != 1.0 || parseFactor("-2") != 1.0 || parseFactor("0") != 1.0 || parseFactor("3x") != 1.0
+            || parseFactor("3") != 3.0 || parseFactor("0.5") != 0.5) {
+            ++failures;
+            std::cerr << "MISMATCH: parseFactor\n";
+        }
+    }
     expectExit({"[passing]"}, 0);
     expectExit({"[passing][tagged]"}, 0);
     expectExit({"[skipping],[passing]"}, 0);

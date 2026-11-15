@@ -23,10 +23,12 @@
 
 #include <atomic>
 #include <charconv>
+#include <chrono>
 #include <clocale>
 #include <concepts>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <exception>
 #include <fstream>
@@ -35,6 +37,7 @@
 #include <source_location>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -638,6 +641,107 @@ inline bool checkNothrow(impl::Body operation, std::source_location location = s
 inline void requireNothrow(impl::Body operation, std::source_location location = std::source_location::current()) {
     if (!checkNothrow(operation, location)) [[unlikely]]
         throw AssertionFailure{};
+}
+
+namespace impl {
+
+/// A condition seen through a pointer, like Body: waiting for one costs the compiler a small instantiation.
+struct Condition {
+    void* object        = nullptr;
+    bool (*call)(void*) = nullptr;
+
+    template <typename F>
+        requires(std::invocable<F&> && !std::same_as<std::remove_cvref_t<F>, Condition>)
+    Condition(F&& predicate)
+        : object{const_cast<void*>(static_cast<const void*>(std::addressof(predicate)))}, call{[](void* target) { return static_cast<bool>((*static_cast<std::remove_reference_t<F>*>(target))()); }} { }
+    bool operator()() const {
+        return call(object);
+    }
+};
+
+/// The delay of requireEventually() and company when none is given.
+inline constexpr std::chrono::milliseconds defaultTimeout{30000};
+
+/// The factor of WEBFRONT_TEST_TIMEOUT_FACTOR: a slow job (sanitizers, emulation) lengthens every wait. Anything but a
+/// positive number is ignored.
+inline double parseFactor(const char* text) {
+    if (!text)
+        return 1.0;
+    char* end    = nullptr;
+    auto  factor = std::strtod(text, &end);
+    return end != text && *end == '\0' && factor > 0.0 && factor < 1e6 ? factor : 1.0;
+}
+inline double timeoutFactor() {
+    static const double factor = parseFactor(std::getenv("WEBFRONT_TEST_TIMEOUT_FACTOR"));
+    return factor;
+}
+
+inline std::string timeoutMessage(std::chrono::milliseconds limit, double elapsed) {
+    return concat("not met within ", seconds(std::chrono::duration<double>(limit).count()), " s (waited ", seconds(elapsed), " s)");
+}
+
+/// Evaluates a condition until it holds or the delay (times the factor) is over. Returns the time waited and whether it held.
+inline std::pair<double, bool> pollCondition(Condition condition, std::chrono::milliseconds limit) {
+    using Clock         = std::chrono::steady_clock;
+    const auto start    = Clock::now();
+    const auto deadline = start + std::chrono::duration_cast<Clock::duration>(limit * timeoutFactor());
+    for (;;) {
+        if (condition())
+            return {std::chrono::duration<double>(Clock::now() - start).count(), true};
+        if (Clock::now() >= deadline)
+            return {std::chrono::duration<double>(Clock::now() - start).count(), false};
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+}
+/// Called through a volatile pointer for the reason sectionRunner is.
+inline std::pair<double, bool> (*volatile conditionPoller)(Condition, std::chrono::milliseconds) = pollCondition;
+
+}  // namespace impl
+
+/// Waits for an observable condition instead of sleeping a fixed time: a loaded machine only makes it take longer. The
+/// condition is evaluated every millisecond until it holds; a failure reports the delay and the time waited. The delay
+/// is 30 seconds unless given, and WEBFRONT_TEST_TIMEOUT_FACTOR multiplies every delay.
+inline bool checkEventually(impl::Condition condition, std::chrono::milliseconds limit, std::source_location location = std::source_location::current()) {
+    impl::count();
+    auto [elapsed, held] = impl::conditionPoller(condition, limit);
+    if (held) [[likely]]
+        return true;
+    impl::reportFailure(location, impl::timeoutMessage(limit, elapsed));
+    return false;
+}
+inline bool checkEventually(impl::Condition condition, std::source_location location = std::source_location::current()) {
+    return checkEventually(condition, impl::defaultTimeout, location);
+}
+inline void requireEventually(impl::Condition condition, std::chrono::milliseconds limit, std::source_location location = std::source_location::current()) {
+    if (!checkEventually(condition, limit, location)) [[unlikely]]
+        throw AssertionFailure{};
+}
+inline void requireEventually(impl::Condition condition, std::source_location location = std::source_location::current()) {
+    requireEventually(condition, impl::defaultTimeout, location);
+}
+
+/// Waits for a std::future or std::shared_future to be ready, which does not consume it.
+template <typename Future>
+    requires requires(const Future& future) { future.wait_for(std::chrono::milliseconds{0}); }
+bool checkReady(const Future& future, std::chrono::milliseconds limit, std::source_location location = std::source_location::current()) {
+    using Status = decltype(future.wait_for(std::chrono::milliseconds{0}));
+    return checkEventually([&] { return future.wait_for(std::chrono::milliseconds{0}) == Status::ready; }, limit, location);
+}
+template <typename Future>
+    requires requires(const Future& future) { future.wait_for(std::chrono::milliseconds{0}); }
+bool checkReady(const Future& future, std::source_location location = std::source_location::current()) {
+    return checkReady(future, impl::defaultTimeout, location);
+}
+template <typename Future>
+    requires requires(const Future& future) { future.wait_for(std::chrono::milliseconds{0}); }
+void requireReady(const Future& future, std::chrono::milliseconds limit, std::source_location location = std::source_location::current()) {
+    if (!checkReady(future, limit, location)) [[unlikely]]
+        throw AssertionFailure{};
+}
+template <typename Future>
+    requires requires(const Future& future) { future.wait_for(std::chrono::milliseconds{0}); }
+void requireReady(const Future& future, std::source_location location = std::source_location::current()) {
+    requireReady(future, impl::defaultTimeout, location);
 }
 
 /// A message and the location it comes from: the functions that take a variable message cannot default a location.

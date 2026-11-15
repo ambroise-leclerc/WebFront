@@ -28,6 +28,16 @@ declaration order, which is what makes four processes started separately split t
 share a process: `test/unit/ScenarioIsolation.cpp` restores the process-wide state a scenario may change. Run directly,
 `tests` draws a random order and prints its seed, which `tests --rng-seed <seed>` replays.
 
+## Waiting for an asynchronous state
+
+A unit test waits for an observable state, never for a fixed pause: `requireEventually(condition)` ends the scenario
+when the condition does not hold in time, `checkEventually(condition, 5s)` records the failure and returns the result,
+and `requireReady(future)` / `checkReady(future, 5s)` wait for a `std::future` or `std::shared_future` without consuming
+it. The condition is evaluated every millisecond; the delay is 30 seconds unless given. A failure reports the source
+line, the delay and the time waited, with the sections and `info()` messages of the scenario. A slow job (sanitizers,
+emulation) lengthens every delay of the process with `WEBFRONT_TEST_TIMEOUT_FACTOR=<number>` (positive; other values are
+ignored). `test/unit/BddSelfTest.cpp` covers these functions.
+
 ## Following a browser test live
 
 `DeveloperBrowserIntegration` and its siblings `DeveloperBrowserIntegration-scripts`, `-typescript`, `-jasmine`, `-terminal`

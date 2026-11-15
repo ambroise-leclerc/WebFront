@@ -526,15 +526,6 @@ struct ReadNet : testing::InjectableNetworking {
     }
 };
 
-bool waitFor(auto condition) {
-    for (auto waited = 0ms; waited < 10s; waited += 1ms) {
-        if (condition())
-            return true;
-        std::this_thread::sleep_for(1ms);
-    }
-    return false;
-}
-
 /// The injected socket starts clean before the server exists and is cleaned once it is gone.
 struct CleanSocket {
     CleanSocket() {
@@ -558,7 +549,7 @@ struct OneRequest : CleanSocket {
         for (const char c : raw)
             bytes.push_back(static_cast<std::byte>(c));
         testing::InjectableSocket::receive(bytes);
-        require(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
+        requireEventually([] { return testing::InjectableSocket::shutdownCount() > 0; });
         log.stop();
         return log.text();
     }

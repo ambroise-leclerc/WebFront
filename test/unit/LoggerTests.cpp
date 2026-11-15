@@ -93,7 +93,7 @@ const Scenario fallbackLogger{"Fallback logger removal waits for active delivery
     std::thread        producer([] {
         log::info("blocked delivery");
     });
-    const bool         running = ready.wait_for(30s) == std::future_status::ready;
+    const bool         running = checkReady(ready);
     check(running);
     std::promise<void> removed;
     auto               done = removed.get_future();
@@ -124,7 +124,7 @@ const Scenario secondRemoval{"A second removal of the same fallback sink also wa
     std::thread        producer([] {
         log::info("blocked delivery");
     });
-    const bool         running = ready.wait_for(30s) == std::future_status::ready;
+    const bool         running = checkReady(ready);
     check(running);
     std::promise<void> firstRemoved, secondRemoved;
     auto               firstDone  = firstRemoved.get_future();

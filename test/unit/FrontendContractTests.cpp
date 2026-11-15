@@ -483,22 +483,9 @@ struct UninitializableFrontend : HostFrontend<> {
 template <typename Frontend>
 using HostApp = BasicWFWithFrontend<ContractNet, MockFileSystem<>, Frontend>;
 
-template <typename Predicate>
-bool eventually(Predicate predicate) {
-    const auto deadline = std::chrono::steady_clock::now() + coordinationTimeout;
-    while (!predicate()) {
-        if (std::chrono::steady_clock::now() > deadline)
-            return false;
-        std::this_thread::yield();
-    }
-    return true;
-}
-
-bool waitForWindow(const std::shared_ptr<LoopState>& state) {
+bool windowOpen(const std::shared_ptr<LoopState>& state) {
     std::unique_lock lock(state->mutex);
-    return state->changed.wait_for(lock, coordinationTimeout, [&] {
-        return state->windowCreated && state->running;
-    });
+    return state->windowCreated && state->running;
 }
 
 static_assert(!frontend::requiresMainThread<frontend::DefaultBrowserFrontend>);
@@ -564,7 +551,7 @@ const Scenario requestCloseEnds{"requestClose() ends show() from another thread"
         std::jthread            caller([&] {
             app.show();
         });
-        require(waitForWindow(state));
+        requireEventually([&] { return windowOpen(state); });
         when("the host asks for the closure from its own thread", [&] {
             check(app.requestClose());
             caller.join();
@@ -592,7 +579,7 @@ const Scenario uIThreadRuns{"UIThread runs an application on its own thread whil
             check(port == "9002");
             check(ui.app().port() == "9002");
         });
-        require(waitForWindow(state));
+        requireEventually([&] { return windowOpen(state); });
         check(ui.running());
         check(!ui.waitFor(0ms));
         {
@@ -727,7 +714,7 @@ const Scenario startCalled{"start() is called once and replaces show()", [] {
         const auto      state = ContractIoContext::current;
         {
             std::jthread host([&] {
-                if (waitForWindow(state))
+                if (checkEventually([&] { return windowOpen(state); }))
                     while (!app.requestClose())
                         std::this_thread::yield();
             });
@@ -766,7 +753,7 @@ const Scenario uIThreadWaits{"UIThread waits for a window that takes longer than
             {
                 UIThread<HostApp<Slow>> ui(WebFrontConfig{}, [](auto&) { });
                 state = ContractIoContext::current;
-                require(waitForWindow(state));
+                requireEventually([&] { return windowOpen(state); });
             }  // an overflowing patience made this throw inside the destructor and terminate the process
             std::lock_guard lock(state->mutex);
             check(state->closeWindow);
@@ -781,7 +768,7 @@ const Scenario uIThreadJoins{"UIThread joins its thread when a close request thr
         using Flaky     = SlowCloseFrontend<3, true>;
         Flaky::requests = 0;
         UIThread<HostApp<Flaky>> ui(WebFrontConfig{}, [](auto&) { });
-        require(waitForWindow(ContractIoContext::current));
+        requireEventually([&] { return windowOpen(ContractIoContext::current); });
         when("the host stops the session", [&] {
             then("stop repeats the request until the window closes and joins", [&] {
                 requireNothrow([&] { ui.stop(); });
@@ -796,7 +783,7 @@ const Scenario uIThreadJoins{"UIThread joins its thread when a close request thr
         then("the destructor still joins", [&] {
             requireNothrow([&] { [&] {
                 UIThread<HostApp<Flaky>> ui(WebFrontConfig{}, [](auto&) { });
-                require(waitForWindow(ContractIoContext::current));
+                requireEventually([&] { return windowOpen(ContractIoContext::current); });
             }(); });
         });
     });
@@ -810,7 +797,7 @@ const Scenario applicationCloses{"An application closes only the window that it 
         HostApp<Shared> first;
         const auto      firstState = ContractIoContext::current;
         std::jthread    firstShow([&] { first.show(); });
-        require(waitForWindow(firstState));
+        requireEventually([&] { return windowOpen(firstState); });
         HostApp<Shared> second;  // shows nothing
         when("the second asks to close", [&] {
             then("nothing reaches the frontend: the window is the first application's (#567)", [&] {
@@ -839,7 +826,7 @@ const Scenario applicationCloses{"An application closes only the window that it 
         HostApp<Shared> first;
         const auto      firstState = ContractIoContext::current;
         std::jthread    firstShow([&] { first.show(); });
-        require(waitForWindow(firstState));
+        requireEventually([&] { return windowOpen(firstState); });
         const HoldGuard<Shared> held;  // the second open() would wait before it is refused
         HostApp<Shared>    second;
         const auto         secondState = ContractIoContext::current;
@@ -885,7 +872,7 @@ const Scenario showCannot{"A show() that cannot own the session is refused befor
         HostApp<Shared> first;
         const auto      firstState = ContractIoContext::current;
         std::jthread    firstShow([&] { first.show(); });
-        require(waitForWindow(firstState));
+        requireEventually([&] { return windowOpen(firstState); });
         HostApp<Shared> second;
         then("the second show() is refused and its close request reaches nothing (#567)", [&] {
             requireThrows<std::logic_error>([&] { second.show(); });
@@ -916,13 +903,13 @@ const Scenario showCannot{"A show() that cannot own the session is refused befor
             hookDone                   = true;
         };
         std::jthread firstShow([&] { first.show(); });
-        require(eventually([&] { return hookDone.load(); }));
+        requireEventually([&] { return hookDone.load(); });
         Shared::insideOpen = nullptr;
         then("it is refused, cannot close the first's window, and the first can close its own (#567)", [&] {
             check(refused);
             check(!second.requestClose());
             check(Shared::requests == 0);
-            require(waitForWindow(firstState));
+            requireEventually([&] { return windowOpen(firstState); });
             check(first.requestClose());
             check(Shared::requests == 1);
         });
@@ -939,7 +926,7 @@ const Scenario showCannot{"A show() that cannot own the session is refused befor
         HostApp<Shared> first;
         const auto      firstState = ContractIoContext::current;
         std::jthread    firstShow([&] { first.show(); });
-        require(waitForWindow(firstState));
+        requireEventually([&] { return windowOpen(firstState); });
         {
             HostApp<Shared> refused;  // a refused application is finished: its server was stopped with the refusal
             requireThrows<std::logic_error>([&] { refused.show(); });
@@ -953,9 +940,9 @@ const Scenario showCannot{"A show() that cannot own the session is refused befor
         HostApp<Shared> second;  // the next attempt, as a UIThread makes it: a new application
         const auto      secondState = ContractIoContext::current;
         std::jthread    secondShow([&] { second.show(); });
-        require(waitForWindow(secondState));
+        requireEventually([&] { return windowOpen(secondState); });
         then("it owns its window and the host can close it, instead of a window nobody can close (#567)", [&] {
-            check(eventually([&] { return second.requestClose(); }));
+            checkEventually([&] { return second.requestClose(); });
             check(Shared::requests >= 1);
         });
         std::lock_guard lock(secondState->mutex);
@@ -971,7 +958,7 @@ const Scenario showCannot{"A show() that cannot own the session is refused befor
         HostApp<Shared> first;
         const auto      firstState = ContractIoContext::current;
         std::jthread    firstShow([&] { first.show(); });
-        require(waitForWindow(firstState));
+        requireEventually([&] { return windowOpen(firstState); });
         std::optional<HoldGuard<Shared>> held{std::in_place};
         HostApp<Shared>   second;
         const auto        secondState = ContractIoContext::current;
@@ -985,7 +972,7 @@ const Scenario showCannot{"A show() that cannot own the session is refused befor
         });
         const ReleaseHold<Shared> release;
         // Refused at once, or (without the ownership rule) held in front of the frontend.
-        require(eventually([&] { return refused.load() || Shared::waiting == 1; }));
+        requireEventually([&] { return refused.load() || Shared::waiting == 1; });
         {
             std::lock_guard lock(firstState->mutex);
             firstState->closeWindow = true;
@@ -1045,14 +1032,14 @@ const Scenario secondShowSame{"A second show() on the same application leaves th
         const auto      state = ContractIoContext::current;
         when("show() is called again from another thread", [&] {
             std::jthread show([&] { app.show(); });
-            require(waitForWindow(state));
+            requireEventually([&] { return windowOpen(state); });
             then("it is refused and the server keeps running, with its window still closable (#567)", [&] {
                 requireThrows<std::logic_error>([&] { app.show(); });
                 {
                     std::lock_guard lock(state->mutex);
                     check(!state->stopped);
                 }
-                check(eventually([&] { return app.requestClose(); }));
+                checkEventually([&] { return app.requestClose(); });
             });
             std::lock_guard lock(state->mutex);
             state->closeWindow = true;
@@ -1075,13 +1062,13 @@ const Scenario secondShowSame{"A second show() on the same application leaves th
                 hookDone = true;
             };
             std::jthread show([&] { app.show(); });
-            require(eventually([&] { return hookDone.load(); }));
+            requireEventually([&] { return hookDone.load(); });
             Shared::insideOpen = nullptr;
             then("the nested call is refused without stopping the server of the first (#567)", [&] {
                 check(refused);
                 check(!stoppedByRefusal);
-                require(waitForWindow(state));
-                check(eventually([&] { return app.requestClose(); }));
+                requireEventually([&] { return windowOpen(state); });
+                checkEventually([&] { return app.requestClose(); });
             });
             std::lock_guard lock(state->mutex);
             state->closeWindow = true;
@@ -1096,9 +1083,9 @@ const Scenario frontendOffers{"A frontend that offers only the close request wit
         HostApp<SessionOnlyFrontend> app;
         const auto                   state = ContractIoContext::current;
         std::jthread                 show([&] { app.show(); });
-        require(waitForWindow(state));
+        requireEventually([&] { return windowOpen(state); });
         then("requestClose() reaches it with the session of its show() (#567)", [&] {
-            check(eventually([&] { return app.requestClose(); }));
+            checkEventually([&] { return app.requestClose(); });
             check(SessionOnlyFrontend::requests == 1);
         });
         std::lock_guard lock(state->mutex);
@@ -1114,7 +1101,7 @@ const Scenario nativeOrBrowserFrontendForwards{"NativeOrBrowserFrontend forwards
         const auto      state = ContractIoContext::current;
         check(!Either::publishesUIExecutor());
         std::jthread show([&] { app.show(); });
-        require(waitForWindow(state));
+        requireEventually([&] { return windowOpen(state); });
         then("the empty executor is not taken for a session that is not there (#567)", [&] {
             check(app.requestClose());
         });
@@ -1125,7 +1112,7 @@ const Scenario uIThreadStop{"UIThread::stop reports a window that does not close
     given("a window that ignores close requests", [&] {
         UIThread<HostApp<DeafFrontend>> ui(WebFrontConfig{}, [](auto&) { });
         const auto                      state = ContractIoContext::current;
-        require(waitForWindow(state));
+        requireEventually([&] { return windowOpen(state); });
         when("the host stops it with a bounded patience", [&] {
             then("stop throws, and the session is still running and usable", [&] {
                 requireThrows<UIThreadStalled>([&] { ui.stop(20ms); });
@@ -1195,7 +1182,7 @@ const Scenario systemBrowserLoop{"The system browser's loop ignores a close requ
         {
             std::jthread client([&] {
                 const auto executor = Browser::uiExecutor();
-                (void)eventually([&] { return executor.available(); });
+                (void)checkEventually([&] { return executor.available(); });
                 stale = executor.session();
                 Browser::requestStop();
             });
@@ -1207,10 +1194,10 @@ const Scenario systemBrowserLoop{"The system browser's loop ignores a close requ
             bool                ownAccepted   = false;
             std::jthread        client([&] {
                 const auto executor = Browser::uiExecutor();
-                (void)eventually([&] { return executor.available(); });
+                (void)checkEventually([&] { return executor.available(); });
                 const auto own = executor.session();
                 staleAccepted  = Browser::requestClose(stale);
-                ownAccepted    = eventually([&] { return Browser::requestClose(own); });
+                ownAccepted    = checkEventually([&] { return Browser::requestClose(own); });
                 if (!ownAccepted)
                     Browser::requestStop();
             });
@@ -1245,7 +1232,7 @@ const Scenario systemBrowserLoopUp{"The system browser's loop is up while its op
             std::atomic<bool> closed{false};
             std::jthread      host([&] {
                 // The host's own thread: the loop must be there to receive the request well before the opener ends.
-                closed = eventually([] { return Browser::requestClose(Browser::uiExecutor().session()); });
+                closed = checkEventually([] { return Browser::requestClose(Browser::uiExecutor().session()); });
                 if (!closed)
                     Browser::requestStop();
             });
