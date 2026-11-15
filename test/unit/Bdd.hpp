@@ -21,6 +21,7 @@
 /// once, behind a pointer no optimizer follows, rather than once per lambda: both keep the tests quick to compile.
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <charconv>
 #include <chrono>
@@ -679,7 +680,14 @@ inline double parseFactor(const char* text) {
     };
     if (whole.empty() || !plain(whole) || !plain(part) || (point != std::string_view::npos && part.empty()))
         return 1.0;
-    auto factor = std::strtod(text, nullptr);
+    // By hand, not strtod: the decimal point of the C locale a test may have changed does not matter.
+    double factor = 0.0, scale = 1.0;
+    for (char digit : whole)
+        factor = factor * 10.0 + (digit - '0');
+    for (char digit : part) {
+        scale  /= 10.0;
+        factor += (digit - '0') * scale;
+    }
     return factor > 0.0 && factor < 1e6 ? factor : 1.0;
 }
 inline double timeoutFactor() {
@@ -719,7 +727,7 @@ inline std::pair<double, bool> pollCondition(Condition condition, std::chrono::m
         if (Clock::now() >= deadline)
             return {std::chrono::duration<double>(Clock::now() - start).count(), false};
         std::this_thread::sleep_for(pause);
-        pause = pause < std::chrono::milliseconds{5} ? pause * 2 : pause;
+        pause = std::min<std::chrono::microseconds>(pause * 2, std::chrono::milliseconds{5});
     }
 }
 /// Called through a volatile pointer for the reason sectionRunner is.

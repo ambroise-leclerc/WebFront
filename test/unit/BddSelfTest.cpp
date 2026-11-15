@@ -414,6 +414,10 @@ int main() {
                 ++failures;
                 std::cerr << "MISMATCH: the decimal point depends on the locale " << locale << '\n';
             }
+            if (webfront::bdd::impl::parseFactor("2.5") != 2.5) {
+                ++failures;
+                std::cerr << "MISMATCH: the timeout factor depends on the locale " << locale << '\n';
+            }
             std::setlocale(LC_NUMERIC, "C");
             break;
         }
