@@ -326,13 +326,14 @@ const Scenario drainingPumps{"Draining pumps cancelled tasks while a route handl
     connect(client, port);
     const std::string request = "GET /webfront/services/wait/x HTTP/1.1\r\nHost: localhost\r\n\r\n";
     client.send(std::as_bytes(std::span(request)));
-    const bool handlerEntered = checkReady(entered.get_future(), 5s);
+    auto       enteredFuture  = entered.get_future();
+    const bool handlerEntered = waitReady(enteredFuture, 5s);
     server.stop();
     serverThread.join();  // before any assertion: a joinable thread would terminate the process
     require(handlerEntered);
     when("the server is drained", [&] {
         auto drained = std::async(std::launch::async, [&server] { server.drain(); });
-        const bool finished = checkReady(drained, 5s);
+        const bool finished = waitReady(drained, 5s);
         release();  // never leave the test hanging if the drain waited for the cleanup it was to run
         drained.wait();
         then("the drain ran the cleanup which released the handler", [&] { require(finished); });

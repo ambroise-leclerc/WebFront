@@ -714,7 +714,9 @@ const Scenario startCalled{"start() is called once and replaces show()", [] {
         const auto      state = ContractIoContext::current;
         {
             std::jthread host([&] {
-                if (checkEventually([&] { return windowOpen(state); }))
+                if (waitUntil([&] {
+                        return windowOpen(state);
+                    }))
                     while (!app.requestClose())
                         std::this_thread::yield();
             });
@@ -1182,7 +1184,9 @@ const Scenario systemBrowserLoop{"The system browser's loop ignores a close requ
         {
             std::jthread client([&] {
                 const auto executor = Browser::uiExecutor();
-                (void)checkEventually([&] { return executor.available(); });
+                (void)waitUntil([&] {
+                    return executor.available();
+                });
                 stale = executor.session();
                 Browser::requestStop();
             });
@@ -1194,10 +1198,14 @@ const Scenario systemBrowserLoop{"The system browser's loop ignores a close requ
             bool                ownAccepted   = false;
             std::jthread        client([&] {
                 const auto executor = Browser::uiExecutor();
-                (void)checkEventually([&] { return executor.available(); });
+                (void)waitUntil([&] {
+                    return executor.available();
+                });
                 const auto own = executor.session();
                 staleAccepted  = Browser::requestClose(stale);
-                ownAccepted    = checkEventually([&] { return Browser::requestClose(own); });
+                ownAccepted    = waitUntil([&] {
+                    return Browser::requestClose(own);
+                });
                 if (!ownAccepted)
                     Browser::requestStop();
             });
@@ -1232,7 +1240,9 @@ const Scenario systemBrowserLoopUp{"The system browser's loop is up while its op
             std::atomic<bool> closed{false};
             std::jthread      host([&] {
                 // The host's own thread: the loop must be there to receive the request well before the opener ends.
-                closed = checkEventually([] { return Browser::requestClose(Browser::uiExecutor().session()); });
+                closed = waitUntil([] {
+                    return Browser::requestClose(Browser::uiExecutor().session());
+                });
                 if (!closed)
                     Browser::requestStop();
             });

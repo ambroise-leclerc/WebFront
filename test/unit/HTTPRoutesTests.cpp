@@ -625,13 +625,13 @@ const Scenario blockedJob{"A blocked job does not delay the others of a worker w
         ~Release() { now(); }
     } releaseGuard{release};
     networking::ex::start(slow);
-    const bool started = checkEventually(
+    const bool started = waitUntil(
         [&] {
             return blocked.load();
         },
         10s);
     if (started) networking::ex::start(fast);
-    const bool quickDoneInTime = started && checkReady(quickEnded, 5s);
+    const bool quickDoneInTime  = started && waitReady(quickEnded, 5s);
     const bool slowStillBlocked = blockedEnded.wait_for(10ms) == std::future_status::timeout;
     releaseGuard.now();
     if (started) blockedEnded.wait();

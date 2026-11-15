@@ -93,7 +93,7 @@ const Scenario fallbackLogger{"Fallback logger removal waits for active delivery
     std::thread        producer([] {
         log::info("blocked delivery");
     });
-    const bool         running = checkReady(ready);
+    const bool         running = waitReady(ready);
     check(running);
     std::promise<void> removed;
     auto               done = removed.get_future();

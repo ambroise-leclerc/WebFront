@@ -226,6 +226,28 @@ const Scenario readyTimesOut{"a future that is never ready", [] {
                                  trace.push_back("not reached");
                              }};
 
+bool alwaysTrue() {
+    return true;
+}
+
+const Scenario waitingForms{"waiting forms", [] {
+                                using namespace std::chrono_literals;
+                                requireEventually(alwaysTrue);
+                                requireEventually(&alwaysTrue, 1s);
+                                check(waitUntil(alwaysTrue));
+                                check(!waitUntil(
+                                    [] {
+                                        return false;
+                                    },
+                                    5ms));  // records nothing
+                                std::future<int> deferred = std::async(std::launch::deferred, [] {
+                                    return 1;
+                                });
+                                check(!waitReady(deferred, 5ms));
+                                check(!checkReady(deferred, 5s));  // fails at once, not after 5 s
+                                trace.push_back("deferred");
+                            }};
+
 const Scenario timeoutReport{"a timeout in a section", [] {
                                  using namespace std::chrono_literals;
                                  given("a waiting test", [&] {
@@ -282,24 +304,40 @@ int main() {
     expect("assertions pass", 0, {});
     expect("throws of another type", 1, {});
     expect("eventually holds", 0, {"held"});
+    expect("waiting forms", 1, {"deferred"});
     expect("eventually times out", 1, {"after check"});
     expect("a future that is never ready", 1, {"after check"});
     {
         using webfront::bdd::impl::parseFactor;
         using webfront::bdd::impl::timeoutMessage;
         for (auto [factor, expected] : {
-                 std::pair{ 1.0,                     std::string{"not met within 30.000000 s (waited 30.001234 s)"}},
-                 std::pair{10.0, std::string{"not met within 300.000000 s (30.000000 s x 10) (waited 30.001234 s)"}}
+                 std::pair{ 1.0,                     std::string{"not met within 30.000000 s (waited 30.500000 s)"}},
+                 std::pair{10.0, std::string{"not met within 300.000000 s (30.000000 s x 10) (waited 30.500000 s)"}}
         })
-            if (auto text = timeoutMessage(std::chrono::milliseconds{30000}, factor, 30.0012345); text != expected) {
+            if (auto text = timeoutMessage(std::chrono::milliseconds{30000}, factor, 30.5); text != expected) {
                 ++failures;
                 std::cerr << "MISMATCH: the report of a timeout is \"" << text << "\"\n";
             }
-        if (parseFactor(nullptr) != 1.0 || parseFactor("") != 1.0 || parseFactor("x") != 1.0 || parseFactor("-2") != 1.0 || parseFactor("0") != 1.0 || parseFactor("3x") != 1.0
-            || parseFactor("3") != 3.0 || parseFactor("0.5") != 0.5) {
-            ++failures;
-            std::cerr << "MISMATCH: parseFactor\n";
-        }
+        for (auto [text, expected] : {
+                 std::pair<const char*, double>{nullptr, 1.0},
+                 {     "", 1.0},
+                 {    "x", 1.0},
+                 {   "-2", 1.0},
+                 {    "0", 1.0},
+                 {   "3x", 1.0},
+                 {  "1e2", 1.0},
+                 {   ".5", 1.0},
+                 {   "2.", 1.0},
+                 {  "inf", 1.0},
+                 { "0x10", 1.0},
+                 {    "3", 3.0},
+                 {  "0.5", 0.5},
+                 {  "2.5", 2.5}
+        })
+            if (parseFactor(text) != expected) {
+                ++failures;
+                std::cerr << "MISMATCH: parseFactor(" << (text ? text : "null") << ")\n";
+            }
     }
     expectExit({"[passing]"}, 0);
     expectExit({"[passing][tagged]"}, 0);
@@ -335,7 +373,7 @@ int main() {
     expectExit({"--exact", "a timeout in a section", "--junit", report}, 1);
     file.open(report);
     const std::string timeoutXml{std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
-    for (std::string_view part : {"not met within 0.005000 s (waited ", "Given: a waiting test", "with: waiting for call 3", "BddSelfTest.cpp:"})
+    for (std::string_view part : {"not met within ", "Given: a waiting test", "with: waiting for call 3", "BddSelfTest.cpp:"})
         if (timeoutXml.find(part) == std::string::npos) {
             ++failures;
             std::cerr << "MISMATCH: the report of a timeout lacks \"" << part << "\"\n";

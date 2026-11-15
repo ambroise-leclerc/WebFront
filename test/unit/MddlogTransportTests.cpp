@@ -98,7 +98,7 @@ struct Gate {
         released.wait();
     }
     [[nodiscard]] bool waitEntered() {
-        return checkReady(enteredFuture, 5s);
+        return waitReady(enteredFuture, 5s);
     }
     void open() {
         if (!opened.exchange(true))

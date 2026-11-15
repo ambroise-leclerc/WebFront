@@ -452,7 +452,7 @@ const Scenario callbacksRun{"Callbacks run one at a time on the server thread, a
                 static_cast<void>(ui.pendingWrites());
             });
         });
-        const bool called = checkReady(calls, 5s);
+        const bool called = waitReady(calls, 5s);
         unblock.set_value();
         then("browser calls from another thread return without waiting for it", [&] {
             require(called);

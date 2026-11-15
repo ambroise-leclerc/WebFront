@@ -232,9 +232,14 @@ const Scenario recordingLoses{"A recording that loses its window reports the fai
 
 namespace {
 template <typename Poll>
-double pollUntilDone(Poll poll) {
+double pollUntilDone(Poll poll, std::source_location location = std::source_location::current()) {
     double value = -1;
-    checkEventually([&] { return (value = poll()) >= 0; });
+    requireEventually(
+        [&] {
+            return (value = poll()) >= 0;
+        },
+        std::chrono::seconds{30},
+        location);
     return value;
 }
 }  // namespace
@@ -273,10 +278,15 @@ const Scenario asynchronousScreenshot{"An asynchronous screenshot reports a capt
                            }};
     store.beginScreenshot("x");
     std::optional<std::size_t> size;
-    requireThrows([&] { 
+    requireThrows(
         [&] {
-            checkEventually([&] { return (size = store.pollScreenshot()).has_value(); });
-        }(); }, equals("Capture failed: no window"));
+            [&] {
+                waitUntil([&] {
+                    return (size = store.pollScreenshot()).has_value();
+                });
+            }();
+        },
+        equals("Capture failed: no window"));
 }};
 
 const Scenario recordingStops{"A recording stops on request and reports its count by polling", [] {
