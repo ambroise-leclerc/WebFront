@@ -13,6 +13,10 @@ on:
         description: 'Also run GCC 13 ARM64 and its ASan/UBSan fast tests'
         type: boolean
         default: false
+      cef_arm64:
+        description: 'Also run the CEF linuxarm64 browser integration (GCC 13)'
+        type: boolean
+        default: false
       repeat_desktop_tests:
         description: 'Also run the desktop matrix, repeating the complete CTest suite desktop_passes times'
         type: boolean
@@ -406,6 +410,67 @@ jobs:
           path: |
             build/Testing/Temporary/LastTest.log
             build-sanitizers/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+
+  # CEF on Linux aarch64 (#524): the pinned CEF picks its linuxarm64 archive from the target, so the browser integration suite runs
+  # natively on the hosted arm runner with GCC 13 and Xvfb, once a week (on demand with cef_arm64), not on every pull request.
+  # A Jetson Orin Nano qualification passed the same cases as x86-64; this job guards against drift.
+  cef-arm64:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.cef_arm64)
+    timeout-minutes: 60
+    runs-on: ubuntu-24.04-arm
+    env:
+      CC: gcc-13
+      CXX: g++-13
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v4
+        with:
+          path: .cache/CPM
+          key: cpm-extended-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
+          restore-keys: cpm-extended-${{ runner.os }}-${{ runner.arch }}-
+      - uses: actions/cache@v4
+        with:
+          path: |
+            build-cef/bootstrap
+            build-cef/registry-archives
+          key: inputs-web-integration-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/WebFrontBootstrap.cmake', 'test/web/registry-packages.json') }}
+      - uses: ./.github/actions/remove-node
+      - uses: ./.github/actions/setup-cmake
+        with:
+          version: '4.4.4'
+      - name: Install GCC 13 and Xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-13 ninja-build xvfb
+      - name: Verify the compiler
+        run: |
+          test "$(uname -m)" = aarch64
+          case "$(g++-13 -dumpfullversion)" in 13.*) ;; *) echo "::error::Expected GCC 13, got $(g++-13 -dumpfullversion)"; exit 1 ;; esac
+      - name: Configure CEF integration build
+        run: >-
+          cmake -S . -B build-cef -G Ninja -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DWEBFRONT_BUILD_EXAMPLES=OFF
+          -DWEBFRONT_ENABLE_TESTING=ON -DWARNINGS_AS_ERRORS=OFF -DENABLE_CACHE=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+      # The suite must not pass against an x86-64 archive by accident.
+      - name: Verify the CEF architecture
+        run: |
+          lib="$(find build-cef/_deps/cef_binaries-src -name libcef.so -print -quit)"
+          test -n "$lib"
+          file "$lib" | grep -q aarch64 || { echo "::error::CEF is not linuxarm64: $(file "$lib")"; exit 1; }
+      - name: Build browser test
+        run: cmake --build build-cef --target webtest developer_integration webfront-wf --parallel 4
+      - name: Run Jasmine bridge test
+        run: >-
+          ctest --test-dir build-cef -L web-integration --output-on-failure --no-tests=error --parallel 2
+          --output-junit "${{ github.workspace }}/build-cef/test-results.xml"
+      - name: Retain test timings and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log-cef-arm64
+          path: |
+            build-cef/test-results.xml
+            build-cef/Testing/Temporary/LastTest.log
           if-no-files-found: ignore
 
   sanitizers:
