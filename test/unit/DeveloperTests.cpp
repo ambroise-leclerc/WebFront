@@ -898,7 +898,7 @@ const Scenario sha256Vectors{"SHA-256 matches the FIPS 180-4 vectors at every pa
         }
 }};
 
-const Scenario projectDirectoryDigested{"A project directory is digested without leaving the project or following links", [] {
+const Scenario projectDirectoryDigested{"A project directory is digested whole, its links marked and never followed", [] {
     TemporaryDirectory project;
     TemporaryDirectory outside;
     developer::Store   store{project.path()};
@@ -921,14 +921,17 @@ const Scenario projectDirectoryDigested{"A project directory is digested without
         requireThrows([&] { store.digests("ui/main.tsx"); }, contains("Cannot list project directory"));
         requireThrows<std::invalid_argument>([&] { store.digests("../outside"); });
     });
-    given("links to a directory outside the project and back to the directory itself", [&] {
+    given("an extra link to a file of the project, a link outside it and one back to the directory itself", [&] {
         std::ofstream(outside.path() / "secret.txt") << "secret";
-        std::error_code outError, loopError;
+        std::error_code fileError, outError, loopError;
+        std::filesystem::create_symlink(project.path() / "ui" / "main.tsx", project.path() / "ui" / "alias.txt", fileError);
         std::filesystem::create_directory_symlink(outside.path(), project.path() / "ui" / "escape", outError);
         std::filesystem::create_directory_symlink(project.path() / "ui", project.path() / "ui" / "parts" / "loop", loopError);
-        if (!outError && !loopError) {
-            then("they are absent from the digests, which neither leave the project nor loop", [&] {
-                require(text("ui") == expected);
+        if (!fileError && !outError && !loopError) {
+            then("each is a difference that no digest equals, and none is followed", [&] {
+                require(text("ui") == R"({"alias.txt":"link","b.css":"3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d",)"
+                                      R"("escape":"link","main.tsx":"0d6e4079e36703ebd37c00722f5891d28b0e2811dc114b129215123adcce3605",)"
+                                      R"("parts/a.ts":"ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb","parts/loop":"link"})");
             });
         }
     });

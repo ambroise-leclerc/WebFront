@@ -186,6 +186,8 @@ describe('The environment', () => {
             },
             commit: ([id]) => {
                 const {destination, directory, files} = transactions.get(id);
+                // A directory publication replaces the whole directory, as the C++ store does.
+                if (directory) for (const path of [...storage.keys()]) if (path.startsWith(destination + '/')) storage.delete(path);
                 for (const [path, bytes] of files) storage.set(directory ? `${destination}/${path}` : destination, bytes);
                 transactions.delete(id);
             },
@@ -224,8 +226,10 @@ describe('The environment', () => {
         storage.set(runtime, encode('tampered'));
         expect(await relaunch()).toContain('commit');
         expect(new TextDecoder().decode(storage.get(runtime))).toBe('export function mount() {}');
-        storage.set('.webfront/developer/environment/extra.mjs', encode('extra'));
+        // An entry the archive lacks (the C++ reports a link as "link") is removed by the next launch.
+        storage.set('.webfront/developer/environment/link.mjs', encode('served from elsewhere'));
         expect(await relaunch()).toContain('commit');
+        expect(storage.has('.webfront/developer/environment/link.mjs')).toBe(false);
         // The archive itself is verified and never published again from the cache.
         expect(bridge.calls.filter(name => name === 'begin').length).toBe(1);
     });

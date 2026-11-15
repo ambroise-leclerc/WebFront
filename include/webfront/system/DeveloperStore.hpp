@@ -83,9 +83,9 @@ public:
     }
 
     /// The SHA-256 of every file below a project directory, as a JSON object from its '/'-separated path below that
-    /// directory to its lowercase hexadecimal digest. It walks the entries list() names, skipping links: a published
-    /// directory holds none, and a link that would make the walk loop or leave the project is simply absent, which a
-    /// caller comparing with the files it expects sees as a difference. A missing directory throws like list().
+    /// directory to its lowercase hexadecimal digest, in path order. Every entry is there: a link, which is never
+    /// followed, maps to "link" and any other entry that is neither a file nor a directory to "other", so that a caller
+    /// comparing with the files it expects sees it as a difference. A missing directory, or one that is a link, throws.
     std::vector<std::uint8_t> digests(std::string directory) const {
         std::scoped_lock lock(mutex);
         std::string      text = "{";
@@ -258,27 +258,43 @@ public:
 
 private:
     // Appends to `text` the "path":"digest" members of digests() for `directory`, each path prefixed by `prefix`.
+    // Every entry counts, so that nothing the archive lacks can stay published unnoticed: a regular file gets its digest, a
+    // directory is walked, and anything else (a link, followed by nothing here, a special file, an entry whose type cannot
+    // be read) gets a value that no digest equals.
     void digestInto(std::string& text, const std::string& directory, const std::string& prefix) const {
-        for (const auto& listed : listedNames(directory)) {
-            const bool  isDirectory = listed.ends_with('/');
-            const auto  name        = isDirectory ? listed.substr(0, listed.size() - 1) : listed;
-            const auto  path        = directory.empty() ? name : directory + "/" + name;
-            const auto  source      = projectPath(root, path);
-            std::error_code error;
-            if (std::filesystem::is_symlink(source, error) || error)
+        const auto      source = directory.empty() ? root : projectPath(root, directory);
+        std::error_code error;
+        if (!std::filesystem::is_directory(source, error) || std::filesystem::is_symlink(source, error))
+            throw std::runtime_error("Cannot list project directory: " + directory);
+        std::vector<std::filesystem::directory_entry> sorted;
+        for (std::filesystem::directory_iterator entries(source, error); !error && entries != std::filesystem::directory_iterator{};
+             entries.increment(error))
+            sorted.push_back(*entries);
+        if (error)
+            throw std::runtime_error("Cannot list project directory: " + directory);
+        std::ranges::sort(sorted, {}, [](const auto& entry) { return entry.path().filename(); });
+        for (const auto& entry : sorted) {
+            const auto name   = entry.path().filename().generic_string();
+            const auto path   = directory.empty() ? name : directory + "/" + name;
+            const auto key    = json::quote(prefix + name);
+            const auto status = entry.symlink_status(error);
+            if (error || (!std::filesystem::is_regular_file(status) && !std::filesystem::is_directory(status))) {
+                text  += (text.size() > 1 ? "," : "") + key + ":\"" + (std::filesystem::is_symlink(status) ? "link" : "other") + "\"";
+                error  = {};
                 continue;
-            if (isDirectory) {
+            }
+            if (std::filesystem::is_directory(status)) {
                 digestInto(text, path, prefix + name + "/");
                 continue;
             }
-            auto                         file = openForReading(source, path, 0);
+            auto                         file = openForReading(entry.path(), path, 0);
             utils::Sha256                hasher;
             std::array<char, 64 * 1024> buffer{};
             while (file.read(buffer.data(), buffer.size()) || file.gcount() > 0)
                 hasher.update(std::as_bytes(std::span(buffer.data(), static_cast<std::size_t>(file.gcount()))));
             if (file.bad())
                 throw std::runtime_error("Cannot read project file: " + path);
-            text += (text.size() > 1 ? "," : "") + json::quote(prefix + name) + ":\"" + utils::Sha256::hex(hasher.finish()) + "\"";
+            text += (text.size() > 1 ? "," : "") + key + ":\"" + utils::Sha256::hex(hasher.finish()) + "\"";
         }
     }
 
