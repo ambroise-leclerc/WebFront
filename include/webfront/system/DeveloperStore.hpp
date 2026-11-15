@@ -7,7 +7,6 @@
 #include "../utils/Sha256.hpp"
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <chrono>
 #include <cstddef>
@@ -287,15 +286,21 @@ private:
                 digestInto(text, path, prefix + name + "/");
                 continue;
             }
-            auto                         file = openForReading(entry.path(), path, 0);
-            utils::Sha256                hasher;
-            std::array<char, 64 * 1024> buffer{};
-            while (file.read(buffer.data(), buffer.size()) || file.gcount() > 0)
-                hasher.update(std::as_bytes(std::span(buffer.data(), static_cast<std::size_t>(file.gcount()))));
-            if (file.bad())
-                throw std::runtime_error("Cannot read project file: " + path);
-            text += (text.size() > 1 ? "," : "") + key + ":\"" + utils::Sha256::hex(hasher.finish()) + "\"";
+            text += (text.size() > 1 ? "," : "") + key + ":\"" + fileDigest(entry.path(), path) + "\"";
         }
+    }
+
+    // The SHA-256 of a project file, read in blocks of a buffer on the heap: the recursion of digestInto() keeps no
+    // buffer in its frames, however deep the directories.
+    static std::string fileDigest(const std::filesystem::path& source, const std::string& path) {
+        auto              file = openForReading(source, path, 0);
+        utils::Sha256     hasher;
+        std::vector<char> buffer(64 * 1024);
+        while (file.read(buffer.data(), static_cast<std::streamsize>(buffer.size())) || file.gcount() > 0)
+            hasher.update(std::as_bytes(std::span(buffer.data(), static_cast<std::size_t>(file.gcount()))));
+        if (file.bad())
+            throw std::runtime_error("Cannot read project file: " + path);
+        return utils::Sha256::hex(hasher.finish());
     }
 
     // The sorted names of list(): directories end with '/'.

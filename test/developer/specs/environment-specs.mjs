@@ -232,6 +232,8 @@ describe('The environment', () => {
         expect(storage.has('.webfront/developer/environment/link.mjs')).toBe(false);
         // The archive itself is verified and never published again from the cache.
         expect(bridge.calls.filter(name => name === 'begin').length).toBe(1);
+        // The repaired publication matches again: the next launch rewrites nothing.
+        expect(await relaunch()).not.toContain('begin');
     });
 
     it('a C++ without the digests callback publishes the environment at every launch, as before', async () => {
