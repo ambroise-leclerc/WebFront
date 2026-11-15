@@ -682,7 +682,18 @@ inline double parseFactor(const char* text) {
     return factor > 0.0 && factor < 1e6 ? factor : 1.0;
 }
 inline double timeoutFactor() {
-    static const double factor = parseFactor(std::getenv("WEBFRONT_TEST_TIMEOUT_FACTOR"));
+    static const double factor = [] {
+#ifdef _WIN32
+        // MSVC deprecates getenv.
+        char*        value  = nullptr;
+        size_t       length = 0;
+        const double parsed = _dupenv_s(&value, &length, "WEBFRONT_TEST_TIMEOUT_FACTOR") == 0 ? parseFactor(value) : 1.0;
+        std::free(value);
+        return parsed;
+#else
+        return parseFactor(std::getenv("WEBFRONT_TEST_TIMEOUT_FACTOR"));
+#endif
+    }();
     return factor;
 }
 
