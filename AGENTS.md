@@ -82,8 +82,9 @@ Important CMake options:
 The headers of the embedded assets are generated, and checked by CTest, in pure CMake (`js/core/EmbedAsset.cmake`; the
 `webfront-embedded-assets` target regenerates them). Normal C++ builds consume the versioned headers. Configuring with
 `WEBFRONT_ENABLE_TESTING=ON` downloads the pinned bootstrap environment and the packages of the test registry, each verified
-against its SHA-512; `-DWEBFRONT_BOOTSTRAP_DIR` and `-DWEBFRONT_REGISTRY_DIR` replace those downloads on a machine
-without network access.
+against its SHA-512, tried three times and kept once per machine (`WEBFRONT_DOWNLOAD_CACHE`, by default in CPM's cache or
+the user's cache directory), so a new build tree links them instead of downloading them again; `-DWEBFRONT_BOOTSTRAP_DIR`
+and `-DWEBFRONT_REGISTRY_DIR` replace those downloads on a machine without network access.
 
 - `WEBFRONT_EMBED_CEF=OFF` (default): CEF is unavailable; this is the normal unit-test build. `ON` downloads/links CEF and enables the automated browser test; it makes `CEFFrontend` available but does not select it: `webfront::WebFront` always uses the system browser.
 - `WEBFRONT_EMBED_WEBVIEW2=OFF` (default): Windows-only opt-in SDK and static loader for `WebView2Frontend`; requires the separately installed Evergreen runtime. Select it explicitly with `WebFrontWithFrontend<frontend::WebView2Frontend>`. With tests enabled, `WEBFRONT_WEBTEST_FRONTEND=WebView2` runs the shared Jasmine suite and lifecycle cases.

@@ -1,4 +1,5 @@
-# Bootstrap provisioning at configure time: SRI conversion, verified download, local directory, integrity failures.
+# Bootstrap provisioning at configure time: SRI conversion, verified download, machine download cache, retries, local
+# directory, integrity failures.
 # Usage: cmake -DROOT=<source> -DWORK=<scratch directory> -P CheckBootstrapProvisioning.cmake
 include("${ROOT}/cmake/WebFrontBootstrap.cmake")
 
@@ -35,18 +36,23 @@ file(WRITE "${WORK}/local/environment.tgz" "${content}")
 file(WRITE "${WORK}/tampered.tgz" "tampered\n")
 file(WRITE "${WORK}/run.cmake" [[
 include("${ROOT}/cmake/WebFrontBootstrap.cmake")
+if(NOT DESTINATION)
+    set(DESTINATION "${WORK}/cache")
+endif()
 if(LOCAL)
-    webfront_provision_bootstrap(archive URL "${URL}" INTEGRITY "${INTEGRITY}" DESTINATION "${WORK}/cache" LOCAL_DIR "${LOCAL}")
+    webfront_provision_bootstrap(archive URL "${URL}" INTEGRITY "${INTEGRITY}" DESTINATION "${DESTINATION}" LOCAL_DIR "${LOCAL}")
 else()
-    webfront_provision_bootstrap(archive URL "${URL}" INTEGRITY "${INTEGRITY}" DESTINATION "${WORK}/cache")
+    webfront_provision_bootstrap(archive URL "${URL}" INTEGRITY "${INTEGRITY}" DESTINATION "${DESTINATION}")
 endif()
 message(STATUS "provisioned ${archive}")
 ]])
 
 function(provision name result_var output_var)
-    cmake_parse_arguments(ARG "" "URL;INTEGRITY;LOCAL" "" ${ARGN})
+    cmake_parse_arguments(ARG "" "URL;INTEGRITY;LOCAL;DESTINATION;CACHE" "" ${ARGN})
+    # No retry delay, and the machine cache only where a case names one.
     execute_process(COMMAND "${CMAKE_COMMAND}" -DROOT=${ROOT} -DWORK=${WORK} -DURL=${ARG_URL} -DINTEGRITY=${ARG_INTEGRITY}
-            -DLOCAL=${ARG_LOCAL} -P "${WORK}/run.cmake"
+            -DLOCAL=${ARG_LOCAL} -DDESTINATION=${ARG_DESTINATION} -DWEBFRONT_DOWNLOAD_CACHE=${ARG_CACHE}
+            -DWEBFRONT_DOWNLOAD_RETRY_DELAY=0 -P "${WORK}/run.cmake"
         RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err)
     set(${result_var} "${result}" PARENT_SCOPE)
     set(${output_var} "${out}${err}" PARENT_SCOPE)
@@ -83,10 +89,45 @@ if(EXISTS "${WORK}/cache/environment.tgz")
     message(FATAL_ERROR "A downloaded archive that fails its integrity check must be removed")
 endif()
 
-# A download failure names the offline alternative.
+# A download failure is tried again, then names the offline alternative.
 provision(missing result text URL "${scheme}${WORK}/absent/environment.tgz" INTEGRITY "${sri}")
-if(result EQUAL 0 OR NOT text MATCHES "WEBFRONT_BOOTSTRAP_DIR")
-    message(FATAL_ERROR "A failed download must point to WEBFRONT_BOOTSTRAP_DIR: ${result} ${text}")
+if(result EQUAL 0 OR NOT text MATCHES "WEBFRONT_BOOTSTRAP_DIR" OR NOT text MATCHES "3 attempts" OR NOT text MATCHES "trying again")
+    message(FATAL_ERROR "A failed download must be tried again, then point to WEBFRONT_BOOTSTRAP_DIR: ${result} ${text}")
+endif()
+
+# The machine download cache: a download fills it, and another build tree then gets the archive from it alone.
+file(WRITE "${WORK}/source/environment.tgz" "${content}")
+set(machine "${WORK}/machine")
+string(SUBSTRING "${hex}" 0 32 key)
+provision(cacheFill result text URL "${url}" INTEGRITY "${sri}" DESTINATION "${WORK}/tree-a" CACHE "${machine}")
+expect_equal("${result}" 0 "A download must fill the machine cache: ${text}")
+foreach(file "${machine}/${key}/environment.tgz" "${WORK}/tree-a/environment.tgz")
+    file(SHA512 "${file}" digest)
+    expect_equal("${digest}" "${hex}" "The cached and provisioned archives must be the verified one (${file})")
+endforeach()
+file(GLOB partials "${machine}/${key}/*.partial")
+expect_equal("${partials}" "" "No partial download may stay in the cache")
+file(REMOVE "${WORK}/source/environment.tgz")
+provision(cacheHit result text URL "${url}" INTEGRITY "${sri}" DESTINATION "${WORK}/tree-b" CACHE "${machine}")
+expect_equal("${result}" 0 "A new build tree must be provisioned from the machine cache without the source: ${text}")
+file(SHA512 "${WORK}/tree-b/environment.tgz" digest)
+expect_equal("${digest}" "${hex}" "The archive linked from the cache")
+# A damaged cache entry is downloaded again, never used.
+file(REMOVE "${machine}/${key}/environment.tgz")
+file(WRITE "${machine}/${key}/environment.tgz" "damaged")
+file(WRITE "${WORK}/source/environment.tgz" "${content}")
+provision(cacheRepair result text URL "${url}" INTEGRITY "${sri}" DESTINATION "${WORK}/tree-c" CACHE "${machine}")
+expect_equal("${result}" 0 "A damaged cache entry must be downloaded again: ${text}")
+foreach(file "${machine}/${key}/environment.tgz" "${WORK}/tree-c/environment.tgz")
+    file(SHA512 "${file}" digest)
+    expect_equal("${digest}" "${hex}" "The repaired archive (${file})")
+endforeach()
+# Data with another digest stops the configure and stays out of the cache.
+file(WRITE "${WORK}/source/environment.tgz" "tampered")
+file(REMOVE_RECURSE "${machine}")
+provision(cacheWrong result text URL "${url}" INTEGRITY "${sri}" DESTINATION "${WORK}/tree-d" CACHE "${machine}")
+if(result EQUAL 0 OR NOT text MATCHES "integrity check failed" OR EXISTS "${machine}/${key}/environment.tgz" OR EXISTS "${WORK}/tree-d/environment.tgz")
+    message(FATAL_ERROR "A wrong digest must fail and leave nothing in the cache or the build tree: ${result} ${text}")
 endif()
 
 # A local provisioning directory replaces the download and is verified too.

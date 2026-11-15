@@ -673,8 +673,12 @@ webfront-wf --project <dir> [--environment <environment.tgz> --integrity <sha512
 - Without `--environment`, it uses the **bootstrap environment** provisioned at configure time. `cmake/WebFrontBootstrap.cmake`
   pins its URL and SHA-512 (distinct from `DeveloperReleaseData.hpp`, the environment applications start from, and changed
   by an explicit pull request). With `WEBFRONT_ENABLE_TESTING=ON`, configure downloads it to `<build>/bootstrap/` and verifies the
-  digest; a wrong digest or an unreachable URL stops the configure. On a machine without network access, pass
-  `-DWEBFRONT_BOOTSTRAP_DIR=<directory holding environment.tgz>`: the archive is verified the same way.
+  digest; a wrong digest, or a URL still unreachable after three attempts, stops the configure. The verified downloads are
+  kept once per machine in `WEBFRONT_DOWNLOAD_CACHE` (the `WEBFRONT_DOWNLOAD_CACHE` environment variable, else
+  `$CPM_SOURCE_CACHE/webfront-downloads`, else the user's cache directory for WebFront's own build; a consuming project keeps
+  them in its build tree unless it sets one): a new build tree links them instead of downloading them again. On a machine
+  without network access, pass `-DWEBFRONT_BOOTSTRAP_DIR=<directory holding environment.tgz>`: the archive is verified the
+  same way.
 - `--environment` and `--integrity` run an archive built elsewhere, such as the one built from the current sources (the
   environment under test of #315). `--registry-dir` serves a local npm registry from the driver's origin and imposes it. `--manifest-dir` keeps the manifest and
   the lock in that directory of the project (usage error 64 when it is absolute, has an empty or dot component or leaves the project).
