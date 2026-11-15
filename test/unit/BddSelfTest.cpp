@@ -3,9 +3,11 @@
 /// Some scenarios fail on purpose: main() runs each one and compares what it did with what is expected.
 #include "Bdd.hpp"
 
+#include <chrono>
 #include <clocale>
 #include <cstdio>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <iterator>
 #include <optional>
@@ -187,6 +189,85 @@ const Scenario throwsMismatch{"throws of another type", [] {
                                   });
                               }};
 
+const Scenario eventuallyHolds{"eventually holds", [] {
+                                   using namespace std::chrono_literals;
+                                   std::atomic<int> value{0};
+                                   std::thread      worker{[&] {
+                                       std::this_thread::sleep_for(20ms);
+                                       value = 2;
+                                   }};
+                                   requireEventually([&] { return value == 2; });
+                                   checkEventually(
+                                       [&] {
+                                           return value == 2;
+                                       },
+                                       1s);
+                                   worker.join();
+                                   std::promise<int> promise;
+                                   auto              future = promise.get_future();
+                                   promise.set_value(1);
+                                   requireReady(future);
+                                   check(checkReady(future, 1s));
+                                   check(future.get() == 1);
+                                   trace.push_back("held");
+                               }};
+
+const Scenario eventuallyTimesOut{"eventually times out", [] {
+                                      using namespace std::chrono_literals;
+                                      check(!checkEventually([] { return false; }, 20ms));
+                                      trace.push_back("after check");
+                                      requireEventually([] { return false; }, 20ms);
+                                      trace.push_back("not reached");
+                                  }};
+
+const Scenario readyTimesOut{"a future that is never ready", [] {
+                                 using namespace std::chrono_literals;
+                                 std::promise<void> promise;
+                                 auto               future = promise.get_future();
+                                 check(!checkReady(future, 10ms));
+                                 trace.push_back("after check");
+                                 requireReady(future, 10ms);
+                                 trace.push_back("not reached");
+                             }};
+
+bool alwaysTrue() {
+    return true;
+}
+
+const Scenario waitingForms{"waiting forms", [] {
+                                using namespace std::chrono_literals;
+                                requireEventually(alwaysTrue);
+                                requireEventually(&alwaysTrue, 1s);
+                                check(waitUntil(alwaysTrue));
+                                check(!waitUntil(
+                                    [] {
+                                        return false;
+                                    },
+                                    5ms));  // records nothing
+                                std::future<int> deferred = std::async(std::launch::deferred, [] {
+                                    return 1;
+                                });
+                                check(!waitReady(deferred, 5ms));
+                                check(!checkReady(deferred, 5s));  // fails at once, not after 5 s
+                                check(!waitReady(deferred, 5s));   // returns at once too
+                                std::future<int> empty;
+                                check(!waitReady(empty, 5s));
+                                check(!checkReady(empty, 5s));
+                                trace.push_back("deferred");
+                            }};
+
+const Scenario timeoutReport{"a timeout in a section", [] {
+                                 using namespace std::chrono_literals;
+                                 given("a waiting test", [&] {
+                                     const auto context = info("waiting for call ", 3);
+                                     checkEventually(
+                                         [] {
+                                             return false;
+                                         },
+                                         5ms);
+                                 });
+                             }};
+
 int failures = 0;
 
 void expect(std::string_view title, int code, std::vector<std::string> expectedTrace) {
@@ -230,6 +311,42 @@ int main() {
     expect("skip", 4, {});
     expect("assertions pass", 0, {});
     expect("throws of another type", 1, {});
+    expect("eventually holds", 0, {"held"});
+    expect("waiting forms", 1, {"deferred"});
+    expect("eventually times out", 1, {"after check"});
+    expect("a future that is never ready", 1, {"after check"});
+    {
+        using webfront::bdd::impl::parseFactor;
+        using webfront::bdd::impl::timeoutMessage;
+        for (auto [factor, expected] : {
+                 std::pair{ 1.0,                     std::string{"not met within 30.000000 s (waited 30.500000 s)"}},
+                 std::pair{10.0, std::string{"not met within 300.000000 s (30.000000 s x 10) (waited 30.500000 s)"}}
+        })
+            if (auto text = timeoutMessage(std::chrono::milliseconds{30000}, factor, 30.5); text != expected) {
+                ++failures;
+                std::cerr << "MISMATCH: the report of a timeout is \"" << text << "\"\n";
+            }
+        for (auto [text, expected] : {
+                 std::pair<const char*, double>{nullptr, 1.0},
+                 {     "", 1.0},
+                 {    "x", 1.0},
+                 {   "-2", 1.0},
+                 {    "0", 1.0},
+                 {   "3x", 1.0},
+                 {  "1e2", 1.0},
+                 {   ".5", 1.0},
+                 {   "2.", 1.0},
+                 {  "inf", 1.0},
+                 { "0x10", 1.0},
+                 {    "3", 3.0},
+                 {  "0.5", 0.5},
+                 {  "2.5", 2.5}
+        })
+            if (parseFactor(text) != expected) {
+                ++failures;
+                std::cerr << "MISMATCH: parseFactor(" << (text ? text : "null") << ")\n";
+            }
+    }
     expectExit({"[passing]"}, 0);
     expectExit({"[passing][tagged]"}, 0);
     expectExit({"[skipping],[passing]"}, 0);
@@ -260,6 +377,18 @@ int main() {
     file.close();
     std::remove(report.c_str());
 
+    // The report of a timeout names the delay and the time waited, the section and the info messages.
+    expectExit({"--exact", "a timeout in a section", "--junit", report}, 1);
+    file.open(report);
+    const std::string timeoutXml{std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
+    for (std::string_view part : {"not met within ", "Given: a waiting test", "with: waiting for call 3", "BddSelfTest.cpp:"})
+        if (timeoutXml.find(part) == std::string::npos) {
+            ++failures;
+            std::cerr << "MISMATCH: the report of a timeout lacks \"" << part << "\"\n";
+        }
+    file.close();
+    std::remove(report.c_str());
+
     // Bytes that are not UTF-8 (a truncated sequence, an encoded surrogate) are escaped; valid UTF-8 is kept.
     expectExit({"--exact", "a failure with invalid UTF-8", "--junit", report}, 1);
     file.open(report);
@@ -284,6 +413,10 @@ int main() {
             if (webfront::bdd::impl::concat(0.5) != "0.5") {
                 ++failures;
                 std::cerr << "MISMATCH: the decimal point depends on the locale " << locale << '\n';
+            }
+            if (webfront::bdd::impl::parseFactor("2.5") != 2.5) {
+                ++failures;
+                std::cerr << "MISMATCH: the timeout factor depends on the locale " << locale << '\n';
             }
             std::setlocale(LC_NUMERIC, "C");
             break;

@@ -325,14 +325,6 @@ Object checkRequest(const Session& session) {
     }));
 }
 
-template <typename Predicate>
-bool eventually(Predicate done, std::chrono::milliseconds limit = std::chrono::seconds{30}) {
-    const auto deadline = std::chrono::steady_clock::now() + limit;
-    while (!done() && std::chrono::steady_clock::now() < deadline)
-        std::this_thread::sleep_for(std::chrono::milliseconds{10});
-    return done();
-}
-
 struct SupervisorClock {
     using Clock = std::chrono::steady_clock;
     inline static std::atomic<Clock::duration::rep> ticks{0}, sampled{0};
@@ -356,21 +348,21 @@ struct SupervisorClock {
 void advanceSupervisor(std::chrono::milliseconds amount) {
     const auto delta = std::chrono::duration_cast<SupervisorClock::Clock::duration>(amount).count();
     const auto tick  = SupervisorClock::ticks.fetch_add(delta) + delta;
-    require(eventually([&] {
+    requireEventually([&] {
         return SupervisorClock::sampled == tick;
-    }));
+    });
 }
 
 void awaitCloseGrace(const auto& automation) {
-    require(eventually([&] {
+    requireEventually([&] {
         return automation->controller()->isClosed();
-    }));
+    });
     const auto before = SupervisorClock::samples.load();
     // At most three reads precede the grace loop (operation expiry, startup expiry, grace deadline).
     // Observe a read inside that loop before advancing time: the deadline has captured the old tick.
-    require(eventually([&] {
+    requireEventually([&] {
         return SupervisorClock::samples >= before + 4;
-    }));
+    });
 }
 }  // namespace
 
@@ -408,9 +400,9 @@ const Scenario windowIgnores{"A window that ignores the deadline's close request
             advanceSupervisor(std::chrono::milliseconds{99});
             require(unresponsive.load() == 0);
             advanceSupervisor(std::chrono::milliseconds{1});
-            require(eventually([&] {
+            requireEventually([&] {
                 return unresponsive.load() == 1;
-            }));
+            });
             require(automation->controller()->isClosed());
             require(discovery::list(sessions).empty());
             require(!std::filesystem::exists(automation->endpoint() / "endpoint.json"));
@@ -439,9 +431,9 @@ const Scenario windowIgnores{"A window that ignores the deadline's close request
         then("the window is still declared unresponsive after the grace", [&] {
             awaitCloseGrace(automation);
             advanceSupervisor(std::chrono::milliseconds{100});
-            require(eventually([&] {
+            requireEventually([&] {
                 return unresponsive.load() == 1;
-            }));
+            });
             require(discovery::list(sessions).empty());
         });
     });
@@ -455,9 +447,9 @@ const Scenario windowIgnores{"A window that ignores the deadline's close request
             advanceSupervisor(std::chrono::milliseconds{99});
             require(unresponsive.load() == 0);
             advanceSupervisor(std::chrono::milliseconds{1});
-            require(eventually([&] {
+            requireEventually([&] {
                 return unresponsive.load() == 1;
-            }));
+            });
             require(automation->controller()->isClosed());
             require(discovery::list(sessions).empty());
             require(!std::filesystem::exists(automation->endpoint() / "endpoint.json"));
@@ -476,14 +468,14 @@ const Scenario windowIgnores{"A window that ignores the deadline's close request
         auto automation = enable(std::chrono::seconds{30});
         automation->controller()->close("Developer window disconnected");
         then("the record and the endpoint are withdrawn at once, and closing the automation confirms the window is gone", [&] {
-            require(eventually([&] {
+            requireEventually([&] {
                 return discovery::list(sessions).empty();
-            }));
+            });
             // Windows refuses to look at a file whose removal is pending: that is the withdrawal under way, not a failure.
-            require(eventually([&] {
+            requireEventually([&] {
                 std::error_code pending;
                 return !std::filesystem::exists(automation->endpoint() / "endpoint.json", pending);
-            }));
+            });
             automation->close();
             require(unresponsive.load() == 0);
         });
@@ -494,13 +486,13 @@ const Scenario windowIgnores{"A window that ignores the deadline's close request
         automation->controller()->close("Developer window disconnected");
         then("the withdrawal is immediate and the window is still declared unresponsive after the grace", [&] {
             awaitCloseGrace(automation);
-            require(eventually([&] {
+            requireEventually([&] {
                 return discovery::list(sessions).empty();
-            }));
+            });
             advanceSupervisor(std::chrono::milliseconds{100});
-            require(eventually([&] {
+            requireEventually([&] {
                 return unresponsive.load() == 1;
-            }));
+            });
         });
     });
 }};
@@ -520,9 +512,9 @@ const Scenario defaultAutomation{"The default automation clock supervises a rend
                                                 unresponsive = true;
                                                          },
                                                      .announce = false});
-    require(eventually([&] {
+    requireEventually([&] {
         return unresponsive.load();
-    }));
+    });
     require(automation->controller()->isClosed());
     require(discovery::list(root.path() / "sessions").empty());
 }};

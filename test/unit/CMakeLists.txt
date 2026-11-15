@@ -4,6 +4,14 @@ include(BddDiscoverTests.cmake)
 find_package(Threads)
 include(CTest)
 
+# WEBFRONT_TEST_TIMEOUT_FACTOR (Bdd.hpp) lengthens the waits of a slow job. It is read here, when CMake configures, and
+# handed to every unit test as its environment, so that the waits and the CTest limits agree whatever the environment of
+# ctest is (TimeoutFactor.cmake gives the rule, which the TimeoutFactor case checks).
+include(TimeoutFactor.cmake)
+webfront_unit_timeouts("$ENV{WEBFRONT_TEST_TIMEOUT_FACTOR}" _unit_timeout _shard_timeout _unit_test_environment)
+add_test(NAME TimeoutFactor COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckTimeoutFactor.cmake)
+set_tests_properties(TimeoutFactor PROPERTIES TIMEOUT 30 LABELS fast)
+
 add_test(NAME TestSuiteRepetition COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
     -DWORK=${CMAKE_CURRENT_BINARY_DIR}/suite-repetition -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckTestSuiteRepetition.cmake)
 set_tests_properties(TestSuiteRepetition PROPERTIES TIMEOUT 180)
@@ -105,10 +113,10 @@ if(WEBFRONT_TEST_UNIT_SHARDS GREATER 0)
         --junit "${CMAKE_BINARY_DIR}/unit-results-${_shard}.xml")
     # The scenarios of a shard share its time limit; the slowest of them takes a few seconds.
     # A shard whose every scenario is skipped exits with 4, as a single scenario does (BddDiscoverTests.cmake).
-    set_tests_properties(UnitTests-${_shard} PROPERTIES TIMEOUT 600 LABELS fast SKIP_RETURN_CODE 4)
+    set_tests_properties(UnitTests-${_shard} PROPERTIES TIMEOUT ${_shard_timeout} LABELS fast SKIP_RETURN_CODE 4 ${_unit_test_environment})
   endforeach()
 else()
-  bdd_discover_tests(tests PROPERTIES TIMEOUT 60 LABELS fast)
+  bdd_discover_tests(tests PROPERTIES TIMEOUT ${_unit_timeout} LABELS fast ${_unit_test_environment})
 endif()
 
 # The developer journey type-checks the declaration this tool writes from the hand-described settings (#383).

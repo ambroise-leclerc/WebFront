@@ -69,6 +69,10 @@ préexistant, ni d’une intervention humaine, ni du réseau public après confi
 - Pour chaque correction, qu’une régression échoue d’abord au niveau pertinent le plus bas.
 - Écrire les scénarios avec `Scenario`, `given`/`when`/`then` et `require`/`check` de `Bdd.hpp` ;
   traiter les Promises dans Jasmine.
+- Attendre un état asynchrone avec `requireEventually`/`checkEventually` et `requireReady`/`checkReady` de `Bdd.hpp`
+  (30 s par défaut, multiplié par `WEBFRONT_TEST_TIMEOUT_FACTOR`), jamais par une pause fixe ni par un helper local ;
+  l’échec indique la ligne de l’attente, le délai et le temps attendu. `waitUntil`/`waitReady` n’enregistrent rien :
+  ils servent à un thread qui ne peut pas affirmer, ou avant un nettoyage, et le scénario affirme ensuite le résultat.
 - Que toute modification du protocole couvre encodeur et décodeur dans les deux langages,
   ainsi que le trajet réel dans le navigateur.
 - Construire hors source, demander les options explicitement et préserver les builds existants.

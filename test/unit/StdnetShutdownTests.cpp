@@ -55,10 +55,6 @@ std::string freePort() {
 
 void connect(Stdnet::Socket& client, const std::string& port) { client.connect(Stdnet::Resolve("127.0.0.1", port)); }
 
-void waitUntil(auto condition) {
-    for (int i = 0; i < 500 && !condition(); ++i) std::this_thread::sleep_for(10ms);
-}
-
 void waitForHeaderData(Stdnet::Socket& socket, std::chrono::steady_clock::time_point deadline) {
     const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
     if (remaining <= 0)
@@ -146,8 +142,7 @@ const Scenario stoppingRunning{"Stopping a running server releases its connectio
             http::Server<CountingNet, fs::DefaultFS> server("127.0.0.1", port);
             std::thread                              serverThread([&server] { server.run(); });
             connect(client, port);
-            waitUntil([] { return CountingNet::liveSockets.load() > 0; });
-            check(CountingNet::liveSockets.load() > 0);
+            checkEventually([] { return CountingNet::liveSockets.load() > 0; }, 5s);
 
             server.stop();  // from another thread than the one running the server
             serverThread.join();
@@ -191,10 +186,11 @@ const Scenario destroyingWebFront{"Destroying WebFront closes its established We
             const std::array<unsigned char, 8>
                 handshake{0x82, 0x82, 0, 0, 0, 0, static_cast<unsigned char>(msg::Command::handshake), static_cast<unsigned char>(msg::JSEndian::little)};
             client.send(Stdnet::ConstBuffer(handshake.data(), handshake.size()));
-            waitUntil([&] {
-                return linked.load();
-            });
-            check(linked.load());
+            checkEventually(
+                [&] {
+                    return linked.load();
+                },
+                5s);
             webFront.stop();
             serverThread.join();
         }
@@ -236,15 +232,18 @@ const Scenario applicationTask{"Application task cancellation returns to the ser
             app.run();
         });
         const auto                     serverId = serverThread.get_id();
-        waitUntil([&] {
-            return state.started.load(std::memory_order_acquire);
-        });
-        check(state.started.load(std::memory_order_acquire));
+        checkEventually(
+            [&] {
+                return state.started.load(std::memory_order_acquire);
+            },
+            5s);
         when("another thread requests cancellation", [&] {
             handle.requestStop();
-            waitUntil([&] {
-                return state.destroyed.load(std::memory_order_acquire);
-            });
+            checkEventually(
+                [&] {
+                    return state.destroyed.load(std::memory_order_acquire);
+                },
+                5s);
             app.stop();
             serverThread.join();
             app.shutdown();
@@ -287,9 +286,11 @@ const Scenario rejectedWebSocket{"A rejected WebSocket Origin never reaches the 
         const auto allowedRequest = upgradeRequest.substr(0, upgradeRequest.size() - 2) + "Origin: http://127.0.0.1:" + port + "\r\n\r\n";
         authorized.send(std::as_bytes(std::span(allowedRequest)));
         check(readHeaders(authorized).starts_with("HTTP/1.1 101 Switching Protocols\r\n"));
-        waitUntil([&] {
-            return upgrades.load() != 0;
-        });
+        checkEventually(
+            [&] {
+                return upgrades.load() != 0;
+            },
+            5s);
         require(upgrades == 1);
     });
     then("an idle peer cannot block the header reader indefinitely", [&] {
@@ -325,13 +326,14 @@ const Scenario drainingPumps{"Draining pumps cancelled tasks while a route handl
     connect(client, port);
     const std::string request = "GET /webfront/services/wait/x HTTP/1.1\r\nHost: localhost\r\n\r\n";
     client.send(std::as_bytes(std::span(request)));
-    const bool handlerEntered = entered.get_future().wait_for(5s) == std::future_status::ready;
+    auto       enteredFuture  = entered.get_future();
+    const bool handlerEntered = waitReady(enteredFuture, 5s);
     server.stop();
     serverThread.join();  // before any assertion: a joinable thread would terminate the process
     require(handlerEntered);
     when("the server is drained", [&] {
         auto drained = std::async(std::launch::async, [&server] { server.drain(); });
-        const bool finished = drained.wait_for(5s) == std::future_status::ready;
+        const bool finished = waitReady(drained, 5s);
         release();  // never leave the test hanging if the drain waited for the cleanup it was to run
         drained.wait();
         then("the drain ran the cleanup which released the handler", [&] { require(finished); });

@@ -98,7 +98,7 @@ struct Gate {
         released.wait();
     }
     [[nodiscard]] bool waitEntered() {
-        return enteredFuture.wait_for(5s) == future_status::ready;
+        return waitReady(enteredFuture, 5s);
     }
     void open() {
         if (!opened.exchange(true))

@@ -28,6 +28,24 @@ declaration order, which is what makes four processes started separately split t
 share a process: `test/unit/ScenarioIsolation.cpp` restores the process-wide state a scenario may change. Run directly,
 `tests` draws a random order and prints its seed, which `tests --rng-seed <seed>` replays.
 
+## Waiting for an asynchronous state
+
+A unit test waits for an observable state, never for a fixed pause. `requireEventually(condition)` ends the scenario when
+the condition does not hold in time, `checkEventually(condition, 5s)` records the failure and returns the result, and
+`requireReady(future)` / `checkReady(future, 5s)` wait for a `std::future` or `std::shared_future` without consuming it
+(a deferred future, or one without a shared state, fails at once: waiting never makes the first ready). The condition is any callable, a free
+function included, evaluated after pauses that grow from 0.1 to 5 ms; the delay is 30 seconds unless given. A failure
+reports the source line of the call, the delay and the time waited, with the sections and `info()` messages of the
+scenario.
+
+A thread that cannot assert, or a wait that precedes a cleanup (joining a thread), uses `waitUntil(condition, limit)` or
+`waitReady(future, limit)` (false at once for a deferred or empty future), which record nothing and return the result, and the scenario asserts it afterwards.
+
+A slow job (sanitizers, emulation) lengthens every delay of the process with `WEBFRONT_TEST_TIMEOUT_FACTOR=<number>`: digits
+with an optional fraction such as `2` or `2.5`, anything else being ignored. Set it when CMake configures: it is then
+given to every unit test, whose CTest limit grows with it (60 s + 60 s per unit of the factor, rounded up). Running
+`tests` directly reads the variable from its own environment. `test/unit/BddSelfTest.cpp` covers these functions.
+
 ## Following a browser test live
 
 `DeveloperBrowserIntegration` and its siblings `DeveloperBrowserIntegration-scripts`, `-typescript`, `-jasmine`, `-terminal`
