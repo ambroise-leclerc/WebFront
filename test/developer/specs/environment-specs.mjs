@@ -186,13 +186,67 @@ describe('The environment', () => {
             },
             commit: ([id]) => {
                 const {destination, directory, files} = transactions.get(id);
+                // A directory publication replaces the whole directory, as the C++ store does.
+                if (directory) for (const path of [...storage.keys()]) if (path.startsWith(destination + '/')) storage.delete(path);
                 for (const [path, bytes] of files) storage.set(directory ? `${destination}/${path}` : destination, bytes);
                 transactions.delete(id);
             },
             abort: ([id]) => { transactions.delete(id); },
+            digests: async ([directory]) => {
+                const digests = {};
+                for (const [path, bytes] of storage)
+                    if (path.startsWith(directory + '/')) {
+                        const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+                        digests[path.slice(directory.length + 1)] = Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
+                    }
+                return new TextEncoder().encode(JSON.stringify(digests));
+            },
         };
-        return {cppFunction: name => async (...args) => operations[name.split('.').pop()](args)};
+        const bridge = {calls: [], cppFunction: name => async (...args) => {
+            bridge.calls.push(name.split('.').pop());
+            const operation = operations[name.split('.').pop()];
+            if (!operation) throw new Error('C++ function not found: ' + name);
+            return operation(args);
+        }};
+        return bridge;
     }
+
+    it('a launch from the verified cache rewrites nothing while every published file matches it', async () => {
+        const archive = compress(tar(new Map([['package/environment.json', encode({protocol: 1, entry: 'runtime.mjs'})], ['package/runtime.mjs', encode('export function mount() {}')]])));
+        const storage = new Map([['.webfront/developer/environment.tgz', archive]]);
+        const bridge = memoryBridge(storage);
+        const config = {environment: 'https://offline.test/environment.tgz', integrity: await integrity(archive)};
+        const offline = async () => { throw new Error('Offline'); };
+        await bootstrap(bridge, config, offline);  // first launch: nothing is published yet
+        expect(bridge.calls).toContain('commit');
+        const runtime = '.webfront/developer/environment/runtime.mjs';
+        const relaunch = async () => { bridge.calls.length = 0; await bootstrap(bridge, config, offline); return bridge.calls; };
+        expect(await relaunch()).not.toContain('begin');
+        // A published file changed on disk, or one that the archive does not have: everything is published again.
+        storage.set(runtime, encode('tampered'));
+        expect(await relaunch()).toContain('commit');
+        expect(new TextDecoder().decode(storage.get(runtime))).toBe('export function mount() {}');
+        // An entry the archive lacks (the C++ reports a link as "link") is removed by the next launch.
+        storage.set('.webfront/developer/environment/link.mjs', encode('served from elsewhere'));
+        expect(await relaunch()).toContain('commit');
+        expect(storage.has('.webfront/developer/environment/link.mjs')).toBe(false);
+        // The archive itself is verified and never published again from the cache.
+        expect(bridge.calls.filter(name => name === 'begin').length).toBe(1);
+        // The repaired publication matches again: the next launch rewrites nothing.
+        expect(await relaunch()).not.toContain('begin');
+    });
+
+    it('a C++ without the digests callback publishes the environment at every launch, as before', async () => {
+        const archive = compress(tar(new Map([['package/environment.json', encode({protocol: 1, entry: 'runtime.mjs'})], ['package/runtime.mjs', encode('')]])));
+        const storage = new Map([['.webfront/developer/environment.tgz', archive]]);
+        const bridge = memoryBridge(storage);
+        const plain = {calls: bridge.calls, cppFunction: name => name.endsWith('.digests') ? async () => { throw new Error('C++ function not found'); } : bridge.cppFunction(name)};
+        const config = {environment: 'https://offline.test/environment.tgz', integrity: await integrity(archive)};
+        await bootstrap(plain, config, async () => { throw new Error('Offline'); });
+        bridge.calls.length = 0;
+        await bootstrap(plain, config, async () => { throw new Error('Offline'); });
+        expect(bridge.calls).toContain('commit');
+    });
 
     it('a pinned cached environment bootstraps offline and failed refreshes preserve publications', async () => {
         const archive = compress(tar(new Map([['package/environment.json', encode({protocol: 1, entry: 'runtime.mjs'})], ['package/runtime.mjs', encode('export function mount() {}')]])));

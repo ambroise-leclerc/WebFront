@@ -115,6 +115,8 @@ private:
         expose<&Store::list, Bytes, std::string>("webfront.developer.list");
         // Added after API 1 was published: an environment looks for it and does without (ls -l) when it is missing.
         expose<&Store::entries, Bytes, std::string>("webfront.developer.entries");
+        // For the bootstrap shipped with this C++: it republishes the environment only when a published file differs.
+        expose<&Store::digests, Bytes, std::string>("webfront.developer.digests");
         expose<&Store::beginReplacing, std::string, std::string, bool>("webfront.developer.begin");
         expose<&Store::beginNew, std::string, std::string, bool>("webfront.developer.beginNew");
         expose<&Store::write, void, std::string, std::string, std::uint64_t, Bytes>("webfront.developer.write");

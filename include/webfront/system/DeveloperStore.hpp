@@ -4,6 +4,7 @@
 #include "DeveloperFiles.hpp"
 #include "DeveloperJournal.hpp"
 #include "../utils/Json.hpp"
+#include "../utils/Sha256.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -17,6 +18,7 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -76,6 +78,18 @@ public:
         for (const auto& name : listedNames(directory))
             text += (text.size() > 1 ? "," : "") + json::quote(name);
         text += "]";
+        return {text.begin(), text.end()};
+    }
+
+    /// The SHA-256 of every file below a project directory, as a JSON object from its '/'-separated path below that
+    /// directory to its lowercase hexadecimal digest, in path order. Every entry is there: a link, which is never
+    /// followed, maps to "link" and any other entry that is neither a file nor a directory to "other", so that a caller
+    /// comparing with the files it expects sees it as a difference. A missing directory, or one that is a link, throws.
+    std::vector<std::uint8_t> digests(std::string directory) const {
+        std::scoped_lock lock(mutex);
+        std::string      text = "{";
+        digestInto(text, directory, "");
+        text += "}";
         return {text.begin(), text.end()};
     }
 
@@ -242,6 +256,53 @@ public:
     }
 
 private:
+    // Appends to `text` the "path":"digest" members of digests() for `directory`, each path prefixed by `prefix`.
+    // Every entry counts, so that nothing the archive lacks can stay published unnoticed: a regular file gets its digest, a
+    // directory is walked, and anything else (a link, followed by nothing here, a special file, an entry whose type cannot
+    // be read) gets a value that no digest equals.
+    void digestInto(std::string& text, const std::string& directory, const std::string& prefix) const {
+        const auto      source = directory.empty() ? root : projectPath(root, directory);
+        std::error_code error;
+        if (!std::filesystem::is_directory(source, error) || std::filesystem::is_symlink(source, error))
+            throw std::runtime_error("Cannot list project directory: " + directory);
+        std::vector<std::filesystem::directory_entry> sorted;
+        for (std::filesystem::directory_iterator entries(source, error); !error && entries != std::filesystem::directory_iterator{};
+             entries.increment(error))
+            sorted.push_back(*entries);
+        if (error)
+            throw std::runtime_error("Cannot list project directory: " + directory);
+        std::ranges::sort(sorted, {}, [](const auto& entry) { return entry.path().filename(); });
+        for (const auto& entry : sorted) {
+            const auto name   = entry.path().filename().generic_string();
+            const auto path   = directory.empty() ? name : directory + "/" + name;
+            const auto key    = json::quote(prefix + name);
+            const auto status = entry.symlink_status(error);
+            if (error || (!std::filesystem::is_regular_file(status) && !std::filesystem::is_directory(status))) {
+                text  += (text.size() > 1 ? "," : "") + key + ":\"" + (std::filesystem::is_symlink(status) ? "link" : "other") + "\"";
+                error  = {};
+                continue;
+            }
+            if (std::filesystem::is_directory(status)) {
+                digestInto(text, path, prefix + name + "/");
+                continue;
+            }
+            text += (text.size() > 1 ? "," : "") + key + ":\"" + fileDigest(entry.path(), path) + "\"";
+        }
+    }
+
+    // The SHA-256 of a project file, read in blocks of a buffer on the heap: the recursion of digestInto() keeps no
+    // buffer in its frames, however deep the directories.
+    static std::string fileDigest(const std::filesystem::path& source, const std::string& path) {
+        auto              file = openForReading(source, path, 0);
+        utils::Sha256     hasher;
+        std::vector<char> buffer(64 * 1024);
+        while (file.read(buffer.data(), static_cast<std::streamsize>(buffer.size())) || file.gcount() > 0)
+            hasher.update(std::as_bytes(std::span(buffer.data(), static_cast<std::size_t>(file.gcount()))));
+        if (file.bad())
+            throw std::runtime_error("Cannot read project file: " + path);
+        return utils::Sha256::hex(hasher.finish());
+    }
+
     // The sorted names of list(): directories end with '/'.
     std::vector<std::string> listedNames(const std::string& directory) const {
         const auto      source = directory.empty() ? root : projectPath(root, directory);

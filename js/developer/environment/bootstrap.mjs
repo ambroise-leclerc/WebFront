@@ -1,5 +1,5 @@
 import {gunzip, readTar, verifyIntegrity} from './tarball.mjs';
-import {readProject, publish, responseBytes} from './io.mjs';
+import {call, readProject, publish, responseBytes} from './io.mjs';
 import {isUnsafe} from './paths.mjs';
 
 const safePath = path => !isUnsafe(path);
@@ -80,17 +80,37 @@ export function pinnedStarters(manifest, environmentUrl) {
     }));
 }
 
+const publishedPath = '.webfront/developer/environment';
+
+const hex = digest => Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+
+// Whether the published environment is exactly `files`: the C++ digests what it serves, without sending it back. Any
+// difference, a file of its own, a missing one, or a C++ without the callback, means it must be published again.
+async function publishedMatches(bridge, files) {
+    let published;
+    try { published = JSON.parse(decoder.decode(await call(bridge, 'digests', publishedPath))); }
+    catch { return false; }
+    if (Object.keys(published).length !== files.size) return false;
+    for (const [path, bytes] of files)
+        if (published[path] !== hex(await crypto.subtle.digest('SHA-256', bytes))) return false;
+    return true;
+}
+
 export async function bootstrap(bridge, config, fetchImpl = fetch, progress = () => {}) {
     let bytes = await verifiedCache(bridge, config.integrity, config.supported);
-    if (bytes) progress('Using verified cached developer environment');
+    const cached = bytes !== null;
+    if (cached) progress('Using verified cached developer environment');
     else {
         progress('Downloading developer environment');
         bytes = await downloadEnvironment(config, fetchImpl);
     }
     const {files, manifest} = await environmentFiles(bytes, config.integrity, config.supported);
     const starters = pinnedStarters(manifest, new URL(config.environment, location.href));
-    // All files and the trusted archive are published only after validation succeeds.
-    await publish(bridge, '.webfront/developer/environment', files);
-    await publish(bridge, cachedPath, new Map([['output', bytes]]), {directory: false});
+    // All files and the trusted archive are published only after validation succeeds. A launch from the verified cache
+    // whose published files all match it rewrites nothing: the served files are still those of the verified archive.
+    if (!cached || !await publishedMatches(bridge, files)) {
+        await publish(bridge, publishedPath, files);
+        if (!cached) await publish(bridge, cachedPath, new Map([['output', bytes]]), {directory: false});
+    }
     return {url: `/webfront/developer/environment/${manifest.entry}`, config: {...config, starters}};
 }
