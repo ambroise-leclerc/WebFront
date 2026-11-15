@@ -290,12 +290,13 @@ def watchdog(args):
 
     Only the test archive replaces the operation body. The real signed callback, runner, native
     deadline, window close grace, stdio EOF and endpoint cleanup remain on the production path.
+    The agent is driven through MCP, the way agents drive it; the CLI shares the same native
+    revocation, and its own exit statuses are checked by the failed relaunch below.
     """
     pathlib.Path(args.work).mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=args.work, prefix="watchdog-") as temporary:
         root = pathlib.Path(temporary)
-        if args.scenario == "cli-watchdog":
-            check_windows_profile_cleaner(args.agent, root)
+        check_windows_profile_cleaner(args.agent, root)
         project = root / "project"
         shutil.copytree(args.fixture, project)
         environment = root / "watchdog-environment.tgz"
@@ -315,17 +316,16 @@ def watchdog(args):
                     exports = re.findall(rb"([A-Za-z_$][A-Za-z0-9_$]*) as runNonInteractive(?=[,}])", data)
                     assert len(exports) == 1, "The watchdog fixture needs the real runNonInteractive export"
                     data += b"\n" + exports[0] + blocked
-                    if args.scenario == "mcp-watchdog":
-                        connect = re.findall(rb"([A-Za-z_$][A-Za-z0-9_$]*) as connectAutomation(?=[,}])", data)
-                        assert len(connect) == 1
-                        # A bridge RangeError (a message past the bridge's maximum, lowered for this call) consumes a JS
-                        # sequence without reaching native code.
-                        data += (b"\nconst beforeGap=" + connect[0] + b";" + connect[0] +
-                                 b"=context=>{const limit=context.bridge.maxMessageBytes;context.bridge.maxMessageBytes=70000;"
-                                 b"void context.call('poll','x'.repeat(70000)).then(()=>window.close(),"
-                                 b"()=>{context.bridge.maxMessageBytes=limit;beforeGap(context);});};")
-                        # Only this startup test needs a delay longer than the operation's two-second deadline.
-                        data = b"await new Promise(resolve => setTimeout(resolve,3000));\n" + data
+                    connect = re.findall(rb"([A-Za-z_$][A-Za-z0-9_$]*) as connectAutomation(?=[,}])", data)
+                    assert len(connect) == 1
+                    # A bridge RangeError (a message past the bridge's maximum, lowered for this call) consumes a JS
+                    # sequence without reaching native code.
+                    data += (b"\nconst beforeGap=" + connect[0] + b";" + connect[0] +
+                             b"=context=>{const limit=context.bridge.maxMessageBytes;context.bridge.maxMessageBytes=70000;"
+                             b"void context.call('poll','x'.repeat(70000)).then(()=>window.close(),"
+                             b"()=>{context.bridge.maxMessageBytes=limit;beforeGap(context);});};")
+                    # Only this startup test needs a delay longer than the operation's two-second deadline.
+                    data = b"await new Promise(resolve => setTimeout(resolve,3000));\n" + data
                     member.size = len(data)
                     replaced = True
                 output.addfile(member, io.BytesIO(data) if data is not None else None)
@@ -341,49 +341,44 @@ def watchdog(args):
             profiles = pathlib.Path(profile_root).resolve()
             forced_environment = dict(os.environ, TMPDIR=str(profiles), TEMP=str(profiles), TMP=str(profiles))
             with (pathlib.Path(args.work) / "watchdog.log").open("w") as log:
-                if args.scenario == "mcp-watchdog":
-                    client = Client([args.agent, *command, "--mcp", "--listen", str(endpoint)], log, env=forced_environment)
+                client = Client([args.agent, *command, "--mcp", "--listen", str(endpoint)], log, env=forced_environment)
+                try:
+                    client.initialize()
+                    client.start("build")
                     try:
-                        client.initialize()
-                        client.start("build")
-                        try:
-                            status = client.child.wait(timeout=30)
-                        except subprocess.TimeoutExpired:
-                            raise AssertionError(f"The forced exit did not happen\n{pathlib.Path(log.name).read_text()}") from None
-                        assert status == 71, f"exit {status}\n{pathlib.Path(log.name).read_text()}"
-                        assert isinstance(client.messages.get(timeout=2), EOFError), "A renderer retained MCP stdout"
-                    finally:
-                        client.close()
-                else:
-                    cli = subprocess.run([args.agent, *command, "--listen", str(endpoint), "--operation", "build"],
-                                         stdout=subprocess.PIPE, stderr=log, text=True, timeout=45, env=forced_environment)
-                    assert cli.returncode == 71, f"exit {cli.returncode}\n{cli.stdout}\n{pathlib.Path(log.name).read_text()}"
+                        status = client.child.wait(timeout=30)
+                    except subprocess.TimeoutExpired:
+                        raise AssertionError(f"The forced exit did not happen\n{pathlib.Path(log.name).read_text()}") from None
+                    assert status == 71, f"exit {status}\n{pathlib.Path(log.name).read_text()}"
+                    assert isinstance(client.messages.get(timeout=2), EOFError), "A renderer retained MCP stdout"
+                finally:
+                    client.close()
             assert (project / "renderer.started").is_file(), "The deadline expired before the renderer actually blocked"
             assert not endpoint.exists(), "The forced exit left its attachment capability behind"
             left, contents = remaining_profiles(profiles)
             assert not left, f"The forced exit left its native profile behind: {left} {contents}\n{pathlib.Path(log.name).read_text()}"
-        if args.scenario == "cli-watchdog":
-            # This same-path relaunch must reach its authenticated page before the intentional error.
-            # It checks directory reuse and Unicode failure reporting in one process; normal builds
-            # are exercised by the functional MCP/shared-window scenario.
-            failed_environment = root / "failed-bootstrap.tgz"
-            with tarfile.open(environment, "r:gz") as archive, tarfile.open(failed_environment, "w:gz", compresslevel=1) as output:
-                for member in archive.getmembers():
-                    data = archive.extractfile(member).read() if member.isfile() else None
-                    if member.name == "package/runtime.mjs":
-                        connect = re.findall(rb"([A-Za-z_$][A-Za-z0-9_$]*) as connectAutomation(?=[,}])", data)
-                        assert len(connect) == 1
-                        data += b"\n" + connect[0] + b"=()=>{throw new Error('B'+String.fromCodePoint(0xe9).repeat(1022)+String.fromCodePoint(0x1f600)+'tail');};"
-                        member.size = len(data)
-                    output.addfile(member, io.BytesIO(data) if data is not None else None)
-            failed_command = list(command)
-            failed_command[failed_command.index("--environment") + 1] = str(failed_environment)
-            failed_command[failed_command.index("--integrity") + 1] = "sha512-" + base64.b64encode(hashlib.sha512(failed_environment.read_bytes()).digest()).decode()
-            failed = subprocess.run([args.agent, *failed_command, "--listen", str(endpoint), "--operation", "build"],
-                                    capture_output=True, text=True, encoding="utf-8", timeout=45)
-            assert failed.returncode == 70, (failed.returncode, failed.stdout, failed.stderr)
-            assert "Automation startup: B" + "é" * 511 + "\n" in failed.stderr, failed.stderr
-            assert not endpoint.exists()
+        # This same-path relaunch, through the CLI, must reach its authenticated page before the intentional error.
+        # It checks endpoint reuse and Unicode failure reporting in one process; normal builds
+        # are exercised by the functional MCP scenario.
+        failed_environment = root / "failed-bootstrap.tgz"
+        # From the original archive: the blocked one also delays its startup by three seconds.
+        with tarfile.open(args.environment, "r:gz") as archive, tarfile.open(failed_environment, "w:gz", compresslevel=1) as output:
+            for member in archive.getmembers():
+                data = archive.extractfile(member).read() if member.isfile() else None
+                if member.name == "package/runtime.mjs":
+                    connect = re.findall(rb"([A-Za-z_$][A-Za-z0-9_$]*) as connectAutomation(?=[,}])", data)
+                    assert len(connect) == 1
+                    data += b"\n" + connect[0] + b"=()=>{throw new Error('B'+String.fromCodePoint(0xe9).repeat(1022)+String.fromCodePoint(0x1f600)+'tail');};"
+                    member.size = len(data)
+                output.addfile(member, io.BytesIO(data) if data is not None else None)
+        failed_command = list(command)
+        failed_command[failed_command.index("--environment") + 1] = str(failed_environment)
+        failed_command[failed_command.index("--integrity") + 1] = "sha512-" + base64.b64encode(hashlib.sha512(failed_environment.read_bytes()).digest()).decode()
+        failed = subprocess.run([args.agent, *failed_command, "--listen", str(endpoint), "--operation", "build"],
+                                capture_output=True, text=True, encoding="utf-8", timeout=45)
+        assert failed.returncode == 70, (failed.returncode, failed.stdout, failed.stderr)
+        assert "Automation startup: B" + "é" * 511 + "\n" in failed.stderr, failed.stderr
+        assert not endpoint.exists()
     print(f"{args.scenario}: blocked renderer, native deadline, EOF and private endpoint cleanup passed")
 
 
@@ -489,7 +484,7 @@ def main():
     parser = argparse.ArgumentParser()
     for name in ("agent", "driver", "environment", "provision", "registry", "fixture", "work"):
         parser.add_argument("--" + name, required=True)
-    parser.add_argument("--scenario", choices=("session", "mcp-watchdog", "cli-watchdog", "consumer"), default="session")
+    parser.add_argument("--scenario", choices=("session", "mcp-watchdog", "consumer"), default="session")
     parser.add_argument("--consumer", help="the automation_consumer executable of the consumer scenario")
     args = parser.parse_args()
     if args.scenario == "consumer":

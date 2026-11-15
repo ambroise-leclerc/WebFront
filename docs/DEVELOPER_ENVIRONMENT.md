@@ -820,7 +820,7 @@ cmake -S . -B build-native -DCMAKE_BUILD_TYPE=Release \
   -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WKWEBVIEW=ON \
   -DWEBFRONT_WEBTEST_FRONTEND=WKWebView -DWEBFRONT_ENABLE_TESTING=ON
 cmake --build build-native --parallel
-ctest --test-dir build-native -R 'Developer|LifeEmbedded' --output-on-failure
+ctest --test-dir build-native -R 'Developer|Journey' --output-on-failure
 ```
 
 The CTest fixtures prepare the registry and the environment under test in every browser job (WKWebView, WebKitGTK, WebView2, CEF). The initial 0.2.0 Life version passed
@@ -829,8 +829,8 @@ WKWebView and all 14 Linux CEF/Xvfb cases with both GCC and Clang in
 The packed 0.3.0 version passes WKWebView and all 14 GCC CEF/Xvfb cases in
 [run 39490581423](https://github.com/ambroise-leclerc/WebFront/actions/runs/39490581423).
 For Linux, select CEF and Xvfb instead; the same developer tests use the selected test frontend.
-`DeveloperBrowserIntegration` (the application part: starter, build, `wf dev`, Life preview, embedding) and `DeveloperBrowserIntegration-scripts`, `-typescript`, `-jasmine`, `-terminal` and `-workspace` (the page layout: first launch, launch on an existing interface, floating terminal and its session) exercise, in parallel and each from its own project, the real WASM compiler, local registry, `wf test` under the locked jasmine-core (pass, fail, pending, asynchronous failures, pattern, time limit, Ctrl+C, non-interactive report to C++), build without navigation, incremental dev reload/error/recovery/Ctrl+C, the Life preview, C++ generation/animation and repeatable header generation. Its CTest fixtures then build that
-**browser-generated** header and run `LifeEmbeddedIntegration` from an empty working directory
+`DeveloperBrowserIntegration` (the application part: starter, build, `wf dev`, Life preview, embedding) and `DeveloperBrowserIntegration-scripts`, `-typescript`, `-jasmine`, `-terminal` and `-workspace` (the page layout: first launch, launch on an existing interface, floating terminal and its session) exercise, in parallel and each from its own project, the real WASM compiler, local registry, `wf test` under the locked jasmine-core (pass, fail, pending, asynchronous failures, pattern, time limit, Ctrl+C, non-interactive report to C++), build without navigation, incremental dev reload/error/recovery/Ctrl+C, the Life preview, C++ generation/animation and repeatable header generation. The developer journey (`Journey*`) then
+builds the header that its own `wf embed` generated and runs `JourneyEmbeddedRun` from an empty working directory
 with no developer callbacks.
 Deadline and grace-period regressions advance a scoped clock instead of sleeping for seconds; Worker startup,
 bridge transfers and UI rendering still use the real browser. Dev polling is advanced explicitly after a committed
