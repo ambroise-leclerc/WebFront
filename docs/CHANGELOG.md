@@ -24,6 +24,7 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Changed
 
+- Launch the developer environment from its verified cache without rewriting it: the bootstrap compares the SHA-256 of the published files, which the new `webfront.developer.digests` callback computes in C++, with the verified archive, and publishes it again only when a file differs. A `wf` command of the tests starts in 1.6 s instead of 2.5 s (#570, `docs/DEVELOPER_ENVIRONMENT.md`).
 - Replace Catch2 with `test/unit/Bdd.hpp`, a single-header BDD framework: scenarios are `Scenario` objects whose `given`/`when`/`then` sections are lambdas, checked with `require`/`check`. The tests no longer download or compile Catch2; `tests` takes `--exact`, `--list`, `--junit` and the former filters, order and shard options (ADR-012, `docs/TEST_TIERS.md`).
 - Wait for asynchronous states in unit tests with `requireEventually`, `checkEventually`, `requireReady` and `checkReady` of `Bdd.hpp`, which report the delay and the time waited and replace nine local helpers; `WEBFRONT_TEST_TIMEOUT_FACTOR` lengthens the delays of a slow job (#582, `docs/TEST_TIERS.md`, ADR-012).
 - Keep automated browser windows visible (#544, #556, `docs/TEST_PERFORMANCE.md`).

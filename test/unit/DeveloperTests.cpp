@@ -875,6 +875,65 @@ const Scenario secondOpener{"A second opener of the project waits for a publicat
     });
 }};
 
+const Scenario sha256Vectors{"SHA-256 matches the FIPS 180-4 vectors at every padding boundary, fed whole or in pieces", [] {
+    using utils::Sha256;
+    const auto digest = [](std::string_view text, std::size_t piece) {
+        Sha256 hasher;
+        for (std::size_t offset = 0; offset < text.size(); offset += piece)
+            hasher.update(text.substr(offset, piece));
+        return Sha256::hex(hasher.finish());
+    };
+    const std::string million(1000000, 'a');
+    for (const auto& [text, expected] : std::initializer_list<std::pair<std::string_view, std::string_view>>{
+             {"", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+             {"abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"},
+             {"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"},
+             {std::string_view(million).substr(0, 55), "9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318"},
+             {std::string_view(million).substr(0, 56), "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a"},
+             {std::string_view(million).substr(0, 64), "ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb"},
+             {million, "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"}})
+        for (const std::size_t piece : {std::size_t{1}, std::size_t{63}, std::size_t{4096}, std::max<std::size_t>(text.size(), 1)}) {
+            auto scope = info("length ", text.size(), ", pieces of ", piece);
+            require(digest(text, piece) == expected);
+        }
+}};
+
+const Scenario projectDirectoryDigested{"A project directory is digested without leaving the project or following links", [] {
+    TemporaryDirectory project;
+    TemporaryDirectory outside;
+    developer::Store   store{project.path()};
+    publishFile(store, "ui/main.tsx", "main");
+    publishFile(store, "ui/parts/a.ts", "a");
+    publishFile(store, "ui/b.css", "b");
+    const auto text = [&](std::string path) {
+        const auto bytes = store.digests(std::move(path));
+        return std::string(bytes.begin(), bytes.end());
+    };
+    const std::string expected = R"({"b.css":"3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d",)"
+                                 R"("main.tsx":"0d6e4079e36703ebd37c00722f5891d28b0e2811dc114b129215123adcce3605",)"
+                                 R"("parts/a.ts":"ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"})";
+    then("every file below the directory, nested ones included, maps its relative path to its SHA-256", [&] {
+        require(text("ui") == expected);
+        require(text("ui/parts") == R"({"a.ts":"ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"})");
+    });
+    then("a missing directory, a file or a path leaving the project is refused", [&] {
+        requireThrows([&] { store.digests("missing"); }, contains("Cannot list project directory"));
+        requireThrows([&] { store.digests("ui/main.tsx"); }, contains("Cannot list project directory"));
+        requireThrows<std::invalid_argument>([&] { store.digests("../outside"); });
+    });
+    given("links to a directory outside the project and back to the directory itself", [&] {
+        std::ofstream(outside.path() / "secret.txt") << "secret";
+        std::error_code outError, loopError;
+        std::filesystem::create_directory_symlink(outside.path(), project.path() / "ui" / "escape", outError);
+        std::filesystem::create_directory_symlink(project.path() / "ui", project.path() / "ui" / "parts" / "loop", loopError);
+        if (!outError && !loopError) {
+            then("they are absent from the digests, which neither leave the project nor loop", [&] {
+                require(text("ui") == expected);
+            });
+        }
+    });
+}};
+
 const Scenario projectDirectoryListed{"A project directory is listed without leaving the project", [] {
     TemporaryDirectory project;
     TemporaryDirectory outside;

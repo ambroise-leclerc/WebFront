@@ -4,8 +4,10 @@
 #include "DeveloperFiles.hpp"
 #include "DeveloperJournal.hpp"
 #include "../utils/Json.hpp"
+#include "../utils/Sha256.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cstddef>
@@ -17,6 +19,7 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -76,6 +79,18 @@ public:
         for (const auto& name : listedNames(directory))
             text += (text.size() > 1 ? "," : "") + json::quote(name);
         text += "]";
+        return {text.begin(), text.end()};
+    }
+
+    /// The SHA-256 of every file below a project directory, as a JSON object from its '/'-separated path below that
+    /// directory to its lowercase hexadecimal digest. It walks the entries list() names, skipping links: a published
+    /// directory holds none, and a link that would make the walk loop or leave the project is simply absent, which a
+    /// caller comparing with the files it expects sees as a difference. A missing directory throws like list().
+    std::vector<std::uint8_t> digests(std::string directory) const {
+        std::scoped_lock lock(mutex);
+        std::string      text = "{";
+        digestInto(text, directory, "");
+        text += "}";
         return {text.begin(), text.end()};
     }
 
@@ -242,6 +257,31 @@ public:
     }
 
 private:
+    // Appends to `text` the "path":"digest" members of digests() for `directory`, each path prefixed by `prefix`.
+    void digestInto(std::string& text, const std::string& directory, const std::string& prefix) const {
+        for (const auto& listed : listedNames(directory)) {
+            const bool  isDirectory = listed.ends_with('/');
+            const auto  name        = isDirectory ? listed.substr(0, listed.size() - 1) : listed;
+            const auto  path        = directory.empty() ? name : directory + "/" + name;
+            const auto  source      = projectPath(root, path);
+            std::error_code error;
+            if (std::filesystem::is_symlink(source, error) || error)
+                continue;
+            if (isDirectory) {
+                digestInto(text, path, prefix + name + "/");
+                continue;
+            }
+            auto                         file = openForReading(source, path, 0);
+            utils::Sha256                hasher;
+            std::array<char, 64 * 1024> buffer{};
+            while (file.read(buffer.data(), buffer.size()) || file.gcount() > 0)
+                hasher.update(std::as_bytes(std::span(buffer.data(), static_cast<std::size_t>(file.gcount()))));
+            if (file.bad())
+                throw std::runtime_error("Cannot read project file: " + path);
+            text += (text.size() > 1 ? "," : "") + json::quote(prefix + name) + ":\"" + utils::Sha256::hex(hasher.finish()) + "\"";
+        }
+    }
+
     // The sorted names of list(): directories end with '/'.
     std::vector<std::string> listedNames(const std::string& directory) const {
         const auto      source = directory.empty() ? root : projectPath(root, directory);

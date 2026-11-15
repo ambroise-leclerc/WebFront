@@ -97,7 +97,10 @@ See [publication instructions](../js/developer/tools/PUBLISHING.md) for deployme
 
 The bootstrap verifies SHA-512 before unpacking or executing the archive, validates its manifest
 and paths, then publishes it under the application's local origin. The cached **archive** is
-verified again before reuse, allowing subsequent launches without network access. Failure leaves
+verified again before reuse, allowing subsequent launches without network access. Such a launch
+asks the C++ for the SHA-256 of every published file (`webfront.developer.digests`, which the bootstrap
+shipped with the same library uses) and publishes the environment again only when one differs from the
+verified archive, or is missing or extra: the files served are always those of the archive. Failure leaves
 a readable status and Retry button. A different pinned hash requires a matching archive; the old
 environment is not silently substituted.
 

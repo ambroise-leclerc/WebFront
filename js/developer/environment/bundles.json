@@ -12,7 +12,7 @@
   "js/developer/environment/typecheck-snapshot.mjs": "ec2336781df84bf8a739d578437a0ff737478d3ca57fecf534f18e699487ec94",
   "js/developer/environment/typecheck-worker.mjs": "9f89315a8f7dcb2a19141c321a79aa47eabefdf60d05c60d39016663f1bafecd",
   "js/developer/environment/packages-entry.mjs": "e0b4acd4330b8b51eb0e695384c8df2b103a4be4f598ac83277838022f747e30",
-  "js/developer/environment/bootstrap.mjs": "c39265627ba42bf17d810a46e0104f35cb63fda1477a92fe3e83507d638f7343",
+  "js/developer/environment/bootstrap.mjs": "e0a42c5cdaede1f32b34d6c4df64f2cade3b0ef10d74284461b101f4b5cb6cb8",
   "js/developer/environment/bootstrap-entry.mjs": "a79cbe2ccdfecd615434f3beba7d46ee3f5fb1fa256eca3f0ec2d127e70dfef7",
   "js/developer/environment/packages.mjs": "37fe2a410e211264cfeaedbff3df50f7e62b02f8088130127d94f92081e2a5ad",
   "js/developer/environment/starter.mjs": "fd43db1861121577c48a0327436ce39cb9076d7cad0e9e273d40955747cc6a48",
@@ -50,7 +50,7 @@
   "js/developer/tools/distribution.mjs": "43dfdccc912693db46fd095fd78ae79325abab672d99f89fd569914ef3499cad",
   "js/developer/scripts/build.mjs": "a577f4396ab867096bc6fe6876e16e5220121ec8e8dd234fa1e4819d0a1173e1",
   "js/developer/webfront.project.json": "a31b7313bedc47bd437fe68decb23e0788dcaa9903c4c5c2a31841b296a40776",
-  "js/core/bootstrap/bootstrap.bundle.mjs": "bd78d70acb13a492e510ef0982e982f652ea1558f37071d0adb3e717611367e8",
+  "js/core/bootstrap/bootstrap.bundle.mjs": "65af2f899f7ff4752400148933284e702b0bcb3285a7bd89f2db31da99080698",
   "js/developer/environment/packages.bundle.mjs": "5598a590a9e859a4128075387a6c32963b2246ca120c2d7775851c780ad437f2",
   "include/webfront/system/DeveloperReleaseData.hpp": "494086e6d8aaf8e6900fa8e4a9f7725c92db7feb847b24c8360c5cc39f9ab7a1"
 }
