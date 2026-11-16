@@ -47,6 +47,31 @@ VALIDATION_CONTROL = """  jetson-validation:
     steps:
 """
 
+HOSTED = re.compile(r'(?:ubuntu|windows|macos)-(?:latest|[0-9]+(?:\.[0-9]+)?)(?:-arm)?')
+
+
+def check_hosted(name, body):
+    # Generic Linux/ARM64 labels can select this runner without spelling
+    # self-hosted. Permit only literal hosted labels and the audited static os
+    # matrices; reject unfamiliar YAML rather than guessing how GitHub routes it.
+    for line in body.splitlines():
+        if line.lstrip().startswith('#'):
+            continue
+        if 'runs-on' in line:
+            match = re.fullmatch(r"\s*['\"]?runs-on['\"]?:\s*(.*?)\s*", line)
+            value = match[1].strip("'\"") if match else ''
+            if HOSTED.fullmatch(value):
+                continue
+            if name == 'BuildAndTest.yml' and value == '${{ matrix.os }}':
+                continue
+            raise ValueError(f'{name}: unaudited runner selection: {line.strip()}')
+        matrix = re.fullmatch(r'\s*(matrix|include|exclude):\s*(.*)', line)
+        if matrix and matrix[2]:
+            raise ValueError(f'{name}: dynamic or inline matrix requires a routing audit')
+    for value in re.findall(r'\bos:\s*([^,}\n]+)', body):
+        if not HOSTED.fullmatch(value.strip().strip("'\"")):
+            raise ValueError(f'{name}: os matrix must contain literal hosted labels')
+
 
 def check(workflows):
     hardware = workflows.get('JetsonOrin.yml', '')
@@ -68,6 +93,8 @@ def check(workflows):
             body = body[:match.start()] + body[match.end():]
         if name != 'JetsonOrin.yml' and re.search(r'self-hosted|jetson-orin', body, re.I):
             raise ValueError(f'{name}: hardware runners are confined to JetsonOrin.yml')
+        if name != 'JetsonOrin.yml':
+            check_hosted(name, body)
 
 
 class HardwareWorkflows(unittest.TestCase):
@@ -111,6 +138,21 @@ class HardwareWorkflows(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 check({'JetsonOrin.yml': CONTROL,
                        'BuildAndTest.yml': 'jobs:\n' + VALIDATION_CONTROL + '    ' + key + '\n'})
+
+    def test_rejects_generic_and_dynamic_runner_routes(self):
+        for route in ['Linux', 'ARM64', '[linux, arm64]', '${{ inputs.runner }}',
+                      '\n      labels: Linux', '{labels: ARM64}']:
+            with self.subTest(route=route), self.assertRaises(ValueError):
+                check({'JetsonOrin.yml': CONTROL,
+                       'fork.yml': 'on: [pull_request]\njobs:\n  fork:\n    runs-on: ' + route + '\n'})
+
+    def test_rejects_untrusted_os_matrices(self):
+        body = (ROOT / '.github/workflows/BuildAndTest.yml').read_text()
+        for changed in [body.replace('os: ubuntu-26.04', 'os: Linux'),
+                        body.replace('      matrix:\n', '      matrix: ${{ fromJSON(inputs.matrix) }}\n'),
+                        body.replace('        include:\n', '        include: ${{ fromJSON(inputs.jobs) }}\n')]:
+            with self.assertRaises(ValueError):
+                check({'JetsonOrin.yml': CONTROL, 'BuildAndTest.yml': changed})
 
 
 if __name__ == '__main__':
