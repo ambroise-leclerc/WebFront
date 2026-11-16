@@ -26,7 +26,7 @@ concurrency:
 jobs:
   jetson-orin:
     if: >-
-      github.repository == 'ambroise-leclerc/WebFront' &&
+      github.repository == 'ambroise-leclerc/WebFront' && !cancelled() &&
       (github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
       (github.event_name == 'workflow_dispatch' && github.actor == 'ambroise-leclerc' && github.ref_type == 'branch'))
     runs-on: [self-hosted, linux, arm64, jetson-orin]
@@ -37,7 +37,7 @@ jobs:
 
 VALIDATION_CONTROL = """  jetson-validation:
     if: >-
-      github.repository == 'ambroise-leclerc/WebFront' && github.event_name == 'workflow_dispatch' &&
+      github.repository == 'ambroise-leclerc/WebFront' && !cancelled() && github.event_name == 'workflow_dispatch' &&
       github.actor == 'ambroise-leclerc' && github.ref_type == 'branch' && inputs.jetson_orin
     runs-on: [self-hosted, linux, arm64, jetson-orin]
     timeout-minutes: 180
