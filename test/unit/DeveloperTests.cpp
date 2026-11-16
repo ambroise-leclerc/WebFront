@@ -4,6 +4,7 @@
 #include <webfront/http/MimeType.hpp>
 
 #include <array>
+#include <cstring>
 #include <chrono>
 #include <fstream>
 #include <future>
@@ -14,6 +15,7 @@
 #include <sstream>
 #include <thread>
 #include <utility>
+#include <vector>
 
 using namespace webfront::bdd;
 
@@ -1045,3 +1047,56 @@ const Scenario projectWhose{"A project whose own directory exceeds the 260 chara
         });
     });
 }};
+
+#ifdef _WIN32
+const Scenario faultingMemory{"Published files are copied from memory that may fault, reporting a failed read by value", [] {
+    given("a committed page, a page that cannot be read and a guard page", [&] {
+        SYSTEM_INFO info{};
+        ::GetSystemInfo(&info);
+        const auto page   = static_cast<std::size_t>(info.dwPageSize);
+        auto*      region = static_cast<char*>(::VirtualAlloc(nullptr, 3 * page, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+        require(region != nullptr);
+        struct Free {
+            char* region;
+            ~Free() {
+                ::VirtualFree(region, 0, MEM_RELEASE);
+            }
+        } free{region};
+        std::memset(region, 'x', page);
+        DWORD previous = 0;
+        require(::VirtualProtect(region + page, page, PAGE_NOACCESS, &previous) != 0);
+        require(::VirtualProtect(region + 2 * page, page, PAGE_READWRITE | PAGE_GUARD, &previous) != 0);
+        std::vector<char> out(2 * page);
+        then("a readable range is copied", [&] {
+            check(fs::detail::copyReadable(out.data(), region, page));
+            check(out[0] == 'x');
+            check(out[page - 1] == 'x');
+        });
+        then("a range that reaches an unreadable page fails without an exception", [&] {
+            check(!fs::detail::copyReadable(out.data(), region, 2 * page));
+            check(!fs::detail::copyReadable(out.data(), region + page, 1));
+        });
+        then("a guard page does not raise a structured exception either", [&] {
+            check(!fs::detail::copyReadable(out.data(), region + 2 * page, 1));
+        });
+    });
+    given("a published file of 200 kB", [&] {
+        TemporaryDirectory project;
+        developer::Store   store{project.path()};
+        const auto         id = store.begin(".webfront/developer/preview", true);
+        const std::string  content(200000, 'p');
+        store.write(id, "big.bin", 0, bytes(content));
+        store.commit(id);
+        fs::DeveloperFS filesystem{project.path()};
+        then("it is read whole through its mapped windows, whatever the block size", [&] {
+            auto file = filesystem.open("/webfront/developer/preview/big.bin");
+            require(file.has_value());
+            std::string       got;
+            std::vector<char> block(70001);
+            for (std::size_t n; (n = file->read(block)) != 0;)
+                got.append(block.data(), n);
+            check(got == content);
+        });
+    });
+}};
+#endif
