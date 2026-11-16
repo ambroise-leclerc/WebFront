@@ -8,3 +8,4 @@ Both files are self-contained vectors with explicit forest-green, lime and white
 The artwork is available for reuse; adding the developer-tools button and its behaviour is separate application work.
 
 - `automation-agent.svg`: the animated transcript of the README's automation section (an agent attaching to an application's own window). It is a self-contained SVG with SMIL animation and no script or external resource; the commands and answers are abridged from the `AutomationConsumerWindow` regression test.
+- `host-loop-boing.jpg`: the host-loop example in its native WebKitGTK window on a Jetson Orin Nano, with the glass ball and its beams computed by CUDA ([guide](../HOST_LOOP_EXAMPLE.md)).

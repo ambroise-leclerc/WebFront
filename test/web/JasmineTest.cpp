@@ -8,6 +8,7 @@
 #include <webfront/WebFront.hpp>
 
 #include "../driver/WfDriver.hpp"
+#include "../../examples/host-loop/HostLoopUI.hpp"
 #include "../../examples/life/react/LifeReact.hpp"
 #include "RejectedWebSocketServer.hpp"
 #include "../unit/FormsSettings.hpp"
@@ -67,6 +68,8 @@ struct TestState {
     atomic<bool> senderResultsObserved{false};
     atomic<bool> senderCancellationObserved{false};
     atomic<bool> specsFinished{false};
+    atomic<bool> hostLoopEnded{false};
+    atomic<bool> hostLoopStoppedByPage{false};
     atomic<bool> subscriberNotified{false};
 };
 
@@ -104,6 +107,7 @@ public:
     using Pages = TestPages;
 
     ~BrowserIntegrationTest() {
+        joinHostLoop();
         joinBitsetFutureChecks();
         error_code ignored;
         if (!mediaFile.empty()) filesystem::remove(mediaFile, ignored);
@@ -119,6 +123,7 @@ public:
         registerBitsetCallbacks();
         registerListCallbacks();
         lifeReactSubscription = demo::installLifeReact(app);
+        registerHostLoop(app);
         registerMediaRoute(app);
         registerReadRoute(app);
         streamRoute           = app.addRoute("/webfront/services/test-stream/", [](const http::RouteRequest& request) {
@@ -142,6 +147,7 @@ public:
 
     /// The status of `wf test` (the specs), unless the specs passed and C++ did not observe every call they make.
     int finish(int status) {
+        joinHostLoop();
         joinBitsetFutureChecks();
         if (status != 0) {
             log::error("wf test did not pass (status {})", status);
@@ -202,6 +208,28 @@ private:
     future<string> cppResult;
     jthread bitsetFutureThread;
     static constexpr chrono::seconds cppResultWaitTimeout{10};
+
+    // The host of examples/host-loop, with its loop on a thread of this program as the example runs it beside a native
+    // window. The page of the example is added on request of its specs, which also stop the loop from its button.
+    boing::Host hostLoop{{boing::Engine::cpu, false, false, 0}, 2};
+    jthread     hostLoopThread;
+
+    void registerHostLoop(TestWF& app) {
+        boing::install(app, hostLoop);
+        app.cppFunction("hostLoopTest.mount", [](TestWF::UI ui) { ui.addScript(boing::page); });
+        app.cppFunction("hostLoopTest.ended", [this] { return state.hostLoopEnded.load(); });
+        hostLoopThread = jthread([this] {
+            hostLoop.run();
+            state.hostLoopEnded = true;
+        });
+    }
+
+    /// No call of the loop into WebFront may still run when the application shuts down.
+    void joinHostLoop() {
+        hostLoop.stop();
+        if (hostLoopThread.joinable())
+            hostLoopThread.join();
+    }
 
     void joinBitsetFutureChecks() {
         if (bitsetFutureThread.joinable())
@@ -815,6 +843,8 @@ private:
 
     /// The last spec: everything the specs sent over this connection has been handled.
     void specsFinished() {
+        state.hostLoopStoppedByPage = state.hostLoopEnded.load();
+        joinHostLoop();
         shutdownDocument.emplace(connectedUI->document());
         shutdownNode            = shutdownDocument->text("pending at shutdown");
         state.cppResultObserved = cppResultMatches();
@@ -841,7 +871,7 @@ private:
             return 1;
         }
         if (!(state.domDocumentObserved && state.domAwaitObserved && state.domBatchSent && state.domRejectionObserved && state.domEventsObserved && state.formsObserved && state.browserReady
-              && state.subscriberNotified && browserCallsObserved() && cppCallsObserved() && rejectedWebSocket->rejectedRequests() >= 2)) {
+              && state.subscriberNotified && state.hostLoopStoppedByPage && browserCallsObserved() && cppCallsObserved() && rejectedWebSocket->rejectedRequests() >= 2)) {
             log::error("The specs passed but one of the bridge-direction checks failed");
             return 1;
         }

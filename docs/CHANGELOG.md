@@ -17,6 +17,7 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Added
 
+- Turn the `WebFrontHostLoop` example into a ray-traced Boing Ball computed by the host's own loop on the CPU or with an optional CUDA unit, shown full-window by an embedded page that receives at most one image at a time; a glass ball with coloured beams is the workload that separates the two engines. Measured on a Jetson Orin Nano (#530, `docs/HOST_LOOP_EXAMPLE.md`).
 - Generate a per-executable AppArmor profile for application packaging with `webfront_generate_webkitgtk_profile`; select the distribution policy per target with `webfront_use_distribution`, without adding a runtime (#596, `docs/WEBKITGTK.md`).
 - Document the Jetson Orin Nano Super qualification after the JetPack 7 upgrade and its L4T R39.2.1 toolchain; add a manual Canvas 2D/WebGL capture probe for the remaining real-display qualification (#528, `docs/JETSON.md`).
 - Look at the project from the terminal with `ls`, `cat`, `tree` and `mounts` (read-only), and at the installed packages with `wf list --tree`, `wf why <package>` and `wf info <package>`; a `wf` command typed without its prefix answers with the line to type. The `wf` prefix stays (#575, ADR-023, `docs/DEVELOPER_ENVIRONMENT.md`).
@@ -44,6 +45,8 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Fixed
 
+- Deduplicate the host-loop example's frame requests through rendering until each delivery starts, and expose its status messages to assistive technologies (#599, `docs/HOST_LOOP_EXAMPLE.md`).
+- Make the host-loop example reject `--capture` without a native window or with `--benchmark`, and return a failure when the capture cannot be saved or the window closes before it completes (#599, `docs/HOST_LOOP_EXAMPLE.md`).
 - Enforce the WebKitGTK distribution policy across translation units and inherited environments; bound launcher checks and restore the development opt-out before callbacks or system-browser fallback (#596, `docs/WEBKITGTK.md`).
 - Give `CheckConsumerJasmineReports.cmake` the policies of CMake 3.31, without which it compared the report status with a variable (#596).
 - On Windows, a slow HTTP client no longer blocks the publication of developer resources, and removing a log sink no longer returns while one of its callbacks is still running (#542, `docs/validation/ci-flakes-542.md`).

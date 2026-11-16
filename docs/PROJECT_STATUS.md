@@ -39,7 +39,8 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   `NativeAppWithAssets<Provider>` runs without project files, developer callbacks or tool cache.
   Native-engine deployment remains application work. The [README walkthrough](../README.md)
   covers the console, developer and embedded Game of Life stages; Hello World and the host loop
-  (`examples/host-loop/`) are the other public examples.
+  (`examples/host-loop/`, a Boing Ball ray-traced by the host on the CPU or with optional CUDA; see
+  [the host-loop example](HOST_LOOP_EXAMPLE.md) for its measurements and limits) are the other public examples.
 - **Developer automation (opt-in).** `webfront-agent` provides local stdio MCP and a JSON CLI
   for an explicitly launched developer window. Native grants select check/build/test/preview,
   bounded inspection and semantic actions. [Automation](AUTOMATION.md) documents provisioning,

@@ -178,6 +178,12 @@ if(WEBFRONT_ENABLE_FUZZING)
   add_subdirectory(test/fuzz)
 endif()
 
+# The host-loop example and its tests share one optional CUDA unit; the language is enabled here, above both.
+if(WEBFRONT_ENABLE_TESTING OR WEBFRONT_BUILD_EXAMPLES)
+  include(BoingCuda)
+  webfront_enable_host_loop_cuda()
+endif()
+
 if(WEBFRONT_ENABLE_TESTING)
   enable_testing()
   add_subdirectory(test/unit)
