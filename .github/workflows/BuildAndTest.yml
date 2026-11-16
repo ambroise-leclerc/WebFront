@@ -430,6 +430,8 @@ jobs:
         run: ctest --test-dir build -L fast --output-on-failure --no-tests=error --parallel 4
       # Exercise coroutine lifetimes with the oldest supported compiler as well (#525).
       - name: Configure GCC 13 ASan and UBSan
+        env:
+          WEBFRONT_TEST_TIMEOUT_FACTOR: '2'
         run: >-
           cmake -S . -B build-sanitizers -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
           -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=OFF -DWEBFRONT_ENABLE_TESTING=ON
