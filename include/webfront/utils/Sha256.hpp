@@ -47,17 +47,18 @@ public:
     /// The digest of everything added. The object is then spent.
     Digest finish() {
         const auto bits = static_cast<std::uint64_t>(length) * 8;
-        block[filled++] = 0x80;
-        if (filled > 56) {
-            while (filled < block.size())
-                block[filled++] = 0;
+        // `filled` is below 64 between calls; masking it lets static analysis see that every index stays in the block.
+        std::size_t at = filled & (block.size() - 1);
+        block[at++]    = 0x80;
+        if (at > 56) {
+            std::fill(block.begin() + static_cast<std::ptrdiff_t>(at), block.end(), std::uint8_t{0});
             compress(block.data());
-            filled = 0;
+            at = 0;
         }
-        while (filled < 56)
-            block[filled++] = 0;
-        for (int shift = 56; shift >= 0; shift -= 8)
-            block[filled++] = static_cast<std::uint8_t>((bits >> shift) & 255);
+        std::fill(block.begin() + static_cast<std::ptrdiff_t>(at), block.begin() + 56, std::uint8_t{0});
+        for (std::size_t i = 0; i < 8; ++i)
+            block[56 + i] = static_cast<std::uint8_t>((bits >> (56 - 8 * i)) & 255);
+        filled = 0;
         compress(block.data());
         Digest digest{};
         for (std::size_t i = 0; i < state.size(); ++i)
