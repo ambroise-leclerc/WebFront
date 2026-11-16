@@ -21,6 +21,10 @@ const Scenario nativeInterrupt{"Native interrupt handlers record catchable signa
 const Scenario windowsMCP{"Windows MCP stdin drains a final unterminated line after its pipe closes", [] {
     struct Pipe {
         HANDLE saved = GetStdHandle(STD_INPUT_HANDLE), reader = nullptr, writer = nullptr;
+        Pipe() {
+            if (!CreatePipe(&reader, &writer, nullptr, 0))
+                throw std::runtime_error{"CreatePipe failed"};
+        }
         ~Pipe() {
             SetStdHandle(STD_INPUT_HANDLE, saved);
             if (reader)
@@ -29,8 +33,6 @@ const Scenario windowsMCP{"Windows MCP stdin drains a final unterminated line af
                 CloseHandle(writer);
         }
     } pipe;
-    if (!CreatePipe(&pipe.reader, &pipe.writer, nullptr, 0))
-        throw std::runtime_error{"CreatePipe failed"};
     require(SetStdHandle(STD_INPUT_HANDLE, pipe.reader));
     DWORD written = 0;
     require(WriteFile(pipe.writer, "one\ntwo\npart", 12, &written, nullptr));
@@ -42,8 +44,8 @@ const Scenario windowsMCP{"Windows MCP stdin drains a final unterminated line af
     require(input.read(line) == webfront::automation::StdioInput::Status::line);
     require(line == "two");
     require(input.read(line) == webfront::automation::StdioInput::Status::waiting);
-    require(CloseHandle(pipe.writer));
-    pipe.writer = nullptr;
+    const auto writer = std::exchange(pipe.writer, nullptr);
+    require(CloseHandle(writer));
     require(input.read(line) == webfront::automation::StdioInput::Status::line);
     require(line == "part");
     require(input.read(line) == webfront::automation::StdioInput::Status::closed);
