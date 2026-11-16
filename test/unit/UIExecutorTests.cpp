@@ -462,10 +462,18 @@ const Scenario linuxContextOwner{"The Linux interface loop refuses a default GLi
         when("the loop is run", [&] {
             UIExecutorHost host;
             UILoopStop     stop;
+            // A stop already pending ends a loop that does start at its first check, before it iterates the context. Were the
+            // refusal lost, run() would return at once and the check below would fail, instead of the loop waiting for a
+            // context that the helper thread only gives up after run() returns.
+            stop.request();
             then("it throws before it attaches, instead of letting that thread run its wake callback", [&] {
-                checkThrows<std::runtime_error>([&] {
+                bool refused = false;
+                try {
                     detail::uiloop::run(host, stop);
-                });
+                } catch (const std::runtime_error&) {
+                    refused = true;
+                }
+                check(refused);
                 check(!host.executor().onUIThread());
             });
         });
