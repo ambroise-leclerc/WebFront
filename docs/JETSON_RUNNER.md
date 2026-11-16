@@ -82,7 +82,7 @@ Environment=PATH=/usr/local/cuda/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin
 Nice=15
 IOSchedulingClass=idle
 CPUQuota=150%
-MemoryHigh=4G
+MemoryHigh=4608M
 MemoryMax=5G
 MemorySwapMax=512M
 ProtectHome=true
@@ -97,6 +97,7 @@ prepended to the service PATH and to the runner's `.path` file (which its startu
 script reads in preference to the service environment). CMake must be available in this PATH (minimum version in `CMakeLists.txt`). If
 nvcc needs a different host compiler, supply `CUDAHOSTCXX`; do not disable its
 version check. Then `systemctl daemon-reload` and start the runner service.
+The soft threshold is 4.5 GiB: two GCC units can exceed 4 GiB together.
 These limits leave resources for the desktop; memory pressure can still make a
 build fail, which is preferable to making the workstation unusable. The job
 never changes the power mode; `nvpmodel -q` is read-only.

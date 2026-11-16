@@ -76,6 +76,12 @@ asset freshness checks and, with an enabled engine, real-browser Jasmine and lif
 `Journey*` builds a UI with the rebuilt environment and local registry, then compiles and runs
 its generated provider from an empty directory. Configured tests need no public network.
 
+The [Jetson hardware runner](JETSON_RUNNER.md) adds trusted weekly and maintainer-dispatched
+CEF-off, CUDA and WebKitGTK validation on the board (#529). It is S2 evidence and never
+blocks a PR or merge when the workstation is unavailable. Three consecutive green weekly
+runs and observed workstation usability remain acceptance criteria, not a claim made by
+adding the workflow.
+
 [Tiers](TEST_TIERS.md) defines the desktop and extended CI scope, including the GCC 13 Linux aarch64 job (#548) and its weekly CEF and WebKitGTK browser jobs (#524).
 The [Jetson Orin qualification](JETSON.md) records the separate on-board work (#528):
 the JetPack 7 upgrade identifies L4T R39.2.1, Ubuntu 24.04 and GCC 13.3 on an Orin

@@ -80,6 +80,8 @@ class HardwareWorkflows(unittest.TestCase):
             ('branches: [master]', 'branches: [develop, master]'),
             ("github.ref == 'refs/heads/master'", 'true'),
             ("github.actor == 'ambroise-leclerc'", 'true'),
+            ("github.repository == 'ambroise-leclerc/WebFront'", 'true'),
+            ("github.ref_type == 'branch'", 'true'),
             ("github.event_name == 'push'", "github.event_name == 'pull_request'"),
             ('contents: read', 'contents: write'),
         ]:
