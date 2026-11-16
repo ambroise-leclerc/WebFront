@@ -186,7 +186,8 @@ include a hash of that path so unrelated packages with a target called `app` do
 not replace each other's policies. It grants `userns` to the application to let
 WebKit establish its own sandbox; it is not a confinement profile for the C++ host.
 
-For a Debian/Ubuntu application package, add `dh-apparmor` to its build dependencies,
+The generated template uses AppArmor ABI 4.0, as qualified on Ubuntu 24.04.
+For an Ubuntu 24.04+ application package, add `dh-apparmor` to its build dependencies,
 ship the generated file in `/etc/apparmor.d/`, and let the packaging machinery
 reload it on installation. For example, with debhelper configured to build in
 `build/`, `debian/my-app.install` includes:
@@ -202,7 +203,12 @@ In `debian/rules`, after `dh_install` in `override_dh_install`, run:
 ```
 
 Configure that package with `-DCMAKE_INSTALL_PREFIX=/usr` and
-`-DWEBFRONT_DISTRIBUTION=ON`. The packaging hook is required: copying the file
+`-DWEBFRONT_DISTRIBUTION=ON`. Declare the WebKitGTK runtime dependency explicitly
+(`libwebkitgtk-6.0-4` on Ubuntu); `dlopen` dependencies are not discovered by
+ordinary ELF dependency scanning. The profile-installation recipe also needs the
+AppArmor loader supplied by `apparmor`. For older distributions, adapt the
+profile to their supported ABI/policy rather than installing this template
+unconditionally. The packaging hook is required: copying the file
 alone does not activate a profile. Use the normal package manager to install and
 remove the application; no manual AppArmor editing is part of the end-user flow.
 See [`dh_apparmor`](https://manpages.debian.org/trixie/dh-apparmor/dh_apparmor.1.en.html).
