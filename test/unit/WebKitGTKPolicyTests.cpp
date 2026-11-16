@@ -153,8 +153,19 @@ const Scenario webKitGTKDevelopment{"WebKitGTK development opens without a sandb
                                         then("the development policy works even without bubblewrap and overrides the upstream value 0", [&] {
                                             setenv(sandboxOptOut, "0", 1);
                                             require(prepareSandboxLaunch(folder.path() / "missing", SandboxMode::development).has_value());
-                                            check(std::string(std::getenv(sandboxOptOut)) == "1");
-                                            check(!sandboxLauncherApplies());
+                                            check(std::string(std::getenv(sandboxOptOut)) == "0");
+                                            {
+                                                DevelopmentSandboxEnvironment scope(SandboxMode::development);
+                                                check(std::string(std::getenv(sandboxOptOut)) == "1");
+                                                check(!sandboxLauncherApplies());
+                                            }
+                                            check(std::string(std::getenv(sandboxOptOut)) == "0");
+                                            unsetenv(sandboxOptOut);
+                                            try {
+                                                DevelopmentSandboxEnvironment scope(SandboxMode::development);
+                                                throw std::runtime_error("display failure");
+                                            } catch (const std::runtime_error&) {}
+                                            check(std::getenv(sandboxOptOut) == nullptr);
                                         });
                                     }};
 
@@ -229,4 +240,59 @@ const Scenario webKitGTKWorkingLauncher{
             check(std::getenv(sandboxOptOut) == nullptr);
         });
     }};
+const Scenario webKitGTKProbeLifecycle{"WebKitGTK probes tolerate host child management and enforce deadlines", [] {
+                                           const webfront::test::TemporaryDirectory folder;
+                                           const auto                               working = fakeLauncher(folder.path(), "success", "", 0);
+                                           then("SIGCHLD ignored by the host does not turn a healthy probe into a refusal", [&] {
+                                               const auto previous = signal(SIGCHLD, SIG_IGN);
+                                               const auto failure  = sandboxLauncherFailure(working);
+                                               signal(SIGCHLD, previous);
+                                               check(!failure);
+                                           });
+                                           then("a host reaper cannot steal the launcher status", [&] {
+                                               const auto previous = signal(
+                                                   SIGCHLD,
+                                                   +[](int) {
+                                                       int status;
+                                                       while (waitpid(-1, &status, WNOHANG) > 0) {}
+                                                   });
+                                               const auto failure = sandboxLauncherFailure(working);
+                                               signal(SIGCHLD, previous);
+                                               check(!failure);
+                                           });
+                                           then("a stalled launcher is killed at its deadline", [&] {
+                                               const auto path = folder.path() / "stalled";
+                                               std::ofstream(path) << "#!/bin/sh\nsleep 30\n";
+                                               std::filesystem::permissions(path, std::filesystem::perms::owner_all);
+                                               const auto start   = std::chrono::steady_clock::now();
+                                               const auto failure = sandboxLauncherFailure(path, std::chrono::milliseconds(50));
+                                               require(failure.has_value());
+                                               check(failure->find("timed out") != std::string::npos);
+                                               check(std::chrono::steady_clock::now() - start < std::chrono::seconds(2));
+                                           });
+                                       }};
+
+const Scenario webKitGTKUnverifiedSnap{"WebKitGTK distribution rejects inherited Snap claims", [] {
+                                           const SandboxEnvironment   environment;
+                                           std::optional<std::string> previous[3];
+                                           const char*                names[] = {"SNAP", "SNAP_NAME", "SNAP_REVISION"};
+                                           for (int i = 0; i < 3; ++i) {
+                                               if (const auto* value = std::getenv(names[i]))
+                                                   previous[i] = value;
+                                               setenv(names[i], "webfront-test-not-a-real-snap", 1);
+                                           }
+                                           then("environment alone cannot delegate the sandbox", [] {
+                                               check(!snapConfinementVerified());
+                                               requireThrows([] {
+                                                   requireSandboxEnvironment(SandboxMode::distribution);
+                                               });
+                                           });
+                                           for (int i = 0; i < 3; ++i) {
+                                               if (previous[i])
+                                                   setenv(names[i], previous[i]->c_str(), 1);
+                                               else
+                                                   unsetenv(names[i]);
+                                           }
+                                       }};
+
 #endif

@@ -53,7 +53,10 @@ lève, `show()`/`openAndRun()` arrêtent et joignent avant de relancer l’excep
 Pour WebKitGTK, le mode de compilation est explicite et indépendant de Debug/Release.
 Le développement, mode par défaut, désactive le sandbox WebKit pour permettre fenêtres
 natives et tests Jasmine sans préparation du système. La configuration et le lancement
-l'annoncent. `WEBFRONT_DISTRIBUTION=ON` ou `webfront_use_distribution(cible)` exige
+l'annoncent (logger filtrable au lancement). L'opt-out est limité à la création du
+contexte WebKit, puis l'environnement est restauré avant les callbacks ou le repli
+navigateur. Les politiques nomment deux spécialisations de frontend distinctes ;
+leur mélange dans un processus est refusé. `WEBFRONT_DISTRIBUTION=ON` ou `webfront_use_distribution(cible)` exige
 le sandbox ; une variable d'environnement ne peut pas affaiblir ce choix. Une
 configuration contradictoire ou un refus de l'espace utilisateur lève avant que WebKit
 n'abandonne le processus. `WEBFRONT_REQUIRE_WEBKIT_SANDBOX=1` garde ce comportement

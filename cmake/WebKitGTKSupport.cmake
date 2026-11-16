@@ -12,6 +12,10 @@ endif()
 # The adapter uses dlopen rather than linking GTK into all executables (including CEF subprocesses).
 # Do not propagate its SDK include paths or GTK/GLib headers through WebFront.
 target_compile_definitions(WebFront INTERFACE WEBFRONT_EMBED_WEBKITGTK)
+find_program(WEBFRONT_WEBKITGTK_BWRAP_EXECUTABLE NAMES bwrap DOC "Bubblewrap path compiled into the target WebKitGTK engine")
+if(WEBFRONT_WEBKITGTK_BWRAP_EXECUTABLE)
+    target_compile_definitions(WebFront INTERFACE WEBFRONT_WEBKITGTK_BWRAP_EXECUTABLE="${WEBFRONT_WEBKITGTK_BWRAP_EXECUTABLE}")
+endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/../test/cmake/WebKitGTKTestEnvironment.cmake")
 
@@ -24,7 +28,7 @@ function(webfront_add_webkitgtk_tests)
     target_link_libraries(webkitgtk_lifecycle PRIVATE WebFront_test_hardening WebFront WebFront_warnings WebFront_options)
     add_dependencies(webtest webkitgtk_lifecycle)
     webfront_find_xvfb(display_runner)
-    foreach(mode sandbox-recheck no-display worker-thread native-close repeated-show http-error pre-run-failure poll-failure profile-permissions window-title download download-user-dir choose-file cancel-choose close-with-dialog script-dialogs close-with-script-dialog)
+    foreach(mode sandbox-environment sandbox-recheck no-display worker-thread native-close repeated-show http-error pre-run-failure poll-failure profile-permissions window-title download download-user-dir choose-file cancel-choose close-with-dialog script-dialogs close-with-script-dialog)
         if(mode MATCHES "^(no-display|worker-thread|pre-run-failure|profile-permissions)$")
             add_test(NAME WebKitGTKAdapter-${mode} COMMAND webkitgtk_lifecycle ${mode})
         elseif(display_runner)

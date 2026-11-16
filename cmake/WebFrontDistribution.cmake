@@ -37,13 +37,16 @@ function(webfront_use_distribution)
     endforeach()
 endfunction()
 
-# webfront_generate_webkitgtk_profile(TARGET app EXECUTABLE /usr/bin/app OUTPUT generated/profile)
+# webfront_generate_webkitgtk_profile(APPARMOR_ABI 4.0 TARGET app EXECUTABLE /usr/bin/app OUTPUT generated/profile)
 # EXECUTABLE is the final installed path, not the build path. Packaging owns installation/reload (dh_apparmor).
 # Generating the file never changes the target mode, installs it or changes the host's AppArmor policy.
 function(webfront_generate_webkitgtk_profile)
-    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "TARGET;EXECUTABLE;OUTPUT" "")
+    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "TARGET;EXECUTABLE;OUTPUT;APPARMOR_ABI" "")
     if(ARG_UNPARSED_ARGUMENTS OR ARG_KEYWORDS_MISSING_VALUES OR NOT ARG_TARGET OR NOT ARG_EXECUTABLE OR NOT ARG_OUTPUT)
         message(FATAL_ERROR "webfront_generate_webkitgtk_profile requires TARGET, EXECUTABLE and OUTPUT")
+    endif()
+    if(NOT ARG_APPARMOR_ABI STREQUAL "4.0")
+        message(FATAL_ERROR "webfront_generate_webkitgtk_profile requires APPARMOR_ABI 4.0 for the target OS; older AppArmor releases do not use this userns authorization profile")
     endif()
     if(NOT ARG_TARGET MATCHES "^[A-Za-z0-9_.-]+$")
         message(FATAL_ERROR "webfront_generate_webkitgtk_profile: target must have a literal profile name")

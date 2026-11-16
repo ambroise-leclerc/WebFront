@@ -107,15 +107,19 @@ WebKitGTK has two **build modes**, independent of Debug/Release, `NDEBUG`,
 | Development (default) | `WEBFRONT_DISTRIBUTION=OFF` | Sandbox explicitly disabled; native windows and Jasmine run without configuring the OS |
 | Distribution | `WEBFRONT_DISTRIBUTION=ON` or `webfront_use_distribution(target)` | Sandbox required; a conflicting environment or refused namespace is an initialization error |
 
-The CMake configuration announces the default mode. In development, initialization
-prints once per process:
+For top-level builds, CMake announces the default policy; a per-target selection
+can override it. Initialization reports the selected policy through the library's
+logger (warning for development, information for distribution), so the application
+can filter it or choose its sink.
 
-```text
-WebFront: WebKitGTK development mode: sandbox disabled. Use WEBFRONT_DISTRIBUTION=ON for packaged applications (docs/WEBKITGTK.md).
-```
-
-This mode sets `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` in the application's
-process before GTK initialization, on every system, without probing bubblewrap.
+Development temporarily sets `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` while
+constructing an explicit WebKit context. WebKit snapshots this setting into its
+process pool; WebFront restores the previous environment before creating the
+window or calling application callbacks, including on failure. The system-browser
+fallback therefore does not inherit an opt-out introduced by WebFront. This brief
+operation still changes the process environment: applications must not concurrently
+mutate it or launch unrelated children during native context construction.
+It disables the native renderer sandbox on every system without probing bubblewrap.
 It is for trusted development interfaces and specs. The web process has the
 application's OS rights; the origin policy does not isolate HTTP(S) iframes,
 subresources or a vulnerable renderer. A native Jasmine pass in development
@@ -136,7 +140,10 @@ For a consumer with separate development and packaged executables, call
 List every library that compiles native UI code: executable definitions are private;
 library definitions propagate to their consumers. The helper does not traverse
 linked dependencies or rebuild imported libraries. Prefer the global option when
-all WebFront targets belong to the distribution. Header-only consumers
+all WebFront targets belong to the distribution. The selected frontends are distinct
+C++ template specializations, so the linker cannot substitute development methods
+for distribution methods from another translation unit. Attempting to initialize
+both policies in one process is rejected. Header-only consumers
 without CMake can define the same macro consistently in all their translation
 units. This switch currently controls the WebKitGTK sandbox policy; it does not
 embed assets, remove developer callbacks or generate an installer.
@@ -156,12 +163,23 @@ Distribution initialization checks the launcher before opening the window. Some
 Ubuntu 24.04 installations lack the AppArmor integration that allows this setup;
 Ubuntu introduced a `bwrap-userns-restrict` profile in later releases
 ([release notes](https://documentation.ubuntu.com/release-notes/25.04/#apparmor-profile-for-bwrap)).
-Only Flatpak and Snap delegate isolation to their package sandbox and skip this
-probe. Docker and Podman still run the bubblewrap probe, including its proc/dev
+Flatpak delegates isolation to its package sandbox. Snap variables are accepted
+only when `/proc/self/attr/current` confirms an enforced `snap.<name>.*` AppArmor
+label matching `SNAP_NAME`; inherited variables alone are rejected in distribution.
+These verified package environments skip this probe. Docker and Podman still run the bubblewrap probe, including its proc/dev
 mounts and `--unshare-all` setup. A missing launcher or any unsuccessful probe
 rejects distribution initialization, even when stderr is empty. This prevents
 WebKit's unsupported-container fallback from silently disabling its sandbox.
-The environment opt-out is checked again on every initialization call.
+The environment opt-out is checked again on every initialization call. The probe
+has a three-second deadline; its supervisor owns the launcher child, so a host
+that ignores `SIGCHLD` or reaps its own children does not invalidate its result.
+
+CMake discovers `bwrap` on its search path. Set
+`WEBFRONT_WEBKITGTK_BWRAP_EXECUTABLE` to **the path compiled into the target WebKit
+engine** when it differs (for example, a Nix/Guix store path). Standalone headers
+use `bwrap` on `PATH`, or accept the same quoted compile definition. This is a
+preflight of that launcher, not an attestation of every WebKit build or its full
+sandbox; nonstandard builds must be qualified with their actual engine.
 
 ### Package the application's profile
 
@@ -177,6 +195,7 @@ webfront_use_native_window(my_app)
 install(TARGETS my_app RUNTIME DESTINATION bin)
 if(WEBFRONT_DISTRIBUTION)
     webfront_generate_webkitgtk_profile(
+        APPARMOR_ABI 4.0 # Declare the target OS policy ABI, not the build host ABI.
         TARGET my_app
         EXECUTABLE /usr/bin/my_app
         OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/apparmor/webfront.my_app")
@@ -191,7 +210,13 @@ include a hash of that path so unrelated packages with a target called `app` do
 not replace each other's policies. It grants `userns` to the application to let
 WebKit establish its own sandbox; it is not a confinement profile for the C++ host.
 
-The generated template uses AppArmor ABI 4.0, as qualified on Ubuntu 24.04.
+Generation requires an explicit `APPARMOR_ABI 4.0`, as qualified on Ubuntu 24.04.
+Other values are rejected during configuration. This profile is intended for
+targets with AppArmor 4 and restricted unprivileged user namespaces. Do not ship it
+unconditionally on Ubuntu 22.04 or Debian 12: those older policy parsers do not
+support this template, and their ordinary namespace setup does not need this
+AppArmor 4 authorization. Build a separate package variant without the generated
+profile and qualify the sandbox on that target.
 For an Ubuntu 24.04+ application package, add `dh-apparmor` to its build dependencies,
 ship the generated file in `/etc/apparmor.d/`, and let the packaging machinery
 reload it on installation. For example, with debhelper configured to build in
@@ -211,9 +236,7 @@ Configure that package with `-DCMAKE_INSTALL_PREFIX=/usr` and
 `-DWEBFRONT_DISTRIBUTION=ON`. Declare the WebKitGTK runtime dependency explicitly
 (`libwebkitgtk-6.0-4` on Ubuntu); `dlopen` dependencies are not discovered by
 ordinary ELF dependency scanning. The profile-installation recipe also needs the
-AppArmor loader supplied by `apparmor`. For older distributions, adapt the
-profile to their supported ABI/policy rather than installing this template
-unconditionally. The packaging hook is required: copying the file
+AppArmor loader supplied by `apparmor`. For older distributions, omit this template as described above. The packaging hook is required: copying the file
 alone does not activate a profile. Use the normal package manager to install and
 remove the application; no manual AppArmor editing is part of the end-user flow.
 See [`dh_apparmor`](https://manpages.debian.org/trixie/dh-apparmor/dh_apparmor.1.en.html).
