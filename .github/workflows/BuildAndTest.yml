@@ -38,7 +38,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.jetson_orin && 'jetson' || 'hosted' }}
   # Never cancel a push to a release branch: its coverage upload must complete.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 

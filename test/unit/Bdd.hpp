@@ -885,7 +885,8 @@ namespace impl {
 
 inline double now() {
     std::timespec time{};
-    std::timespec_get(&time, TIME_UTC);
+    if (std::timespec_get(&time, TIME_UTC) != TIME_UTC)
+        return 0.;
     return static_cast<double>(time.tv_sec) + static_cast<double>(time.tv_nsec) / 1e9;
 }
 
