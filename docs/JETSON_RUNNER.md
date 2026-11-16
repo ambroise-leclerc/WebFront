@@ -90,6 +90,8 @@ ProtectSystem=full
 PrivateTmp=true
 NoNewPrivileges=true
 UMask=0077
+KillMode=control-group
+TimeoutStopSec=30
 ```
 
 The provisioned board uses CMake 4.4.4 under `/opt/webfront-runner-tools/cmake/data/bin`,
