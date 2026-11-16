@@ -63,6 +63,12 @@ void sandboxEnvironment() {
 
 void sandboxRecheck() {
     Frontend::initialize();
+    setenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", "0", 1);
+    expectFailure(
+        [] {
+            webfront::frontend::BasicWebKitGTKFrontend<gtk::SandboxMode::distribution>::initialize();
+        },
+        "cannot mix development and distribution");
     setenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", "1", 1);
     setenv("WEBFRONT_REQUIRE_WEBKIT_SANDBOX", "1", 1);
     expectFailure(

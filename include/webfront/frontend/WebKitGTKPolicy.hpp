@@ -219,8 +219,16 @@ inline std::optional<std::string> sandboxLauncherFailure(const std::filesystem::
     return message.empty() ? "bubblewrap probe failed without a diagnostic" : message;
 }
 
-inline void requireSandboxEnvironment(SandboxMode mode) {
+inline bool webKitContainerFallbackPossible() {
+    std::error_code error;
+    return std::filesystem::exists("/run/.containerenv", error);
+}
+
+inline void requireSandboxEnvironment(SandboxMode mode, bool containerFallbackPossible = webKitContainerFallbackPossible()) {
     const bool required = mode == SandboxMode::distribution || sandboxRequiredByEnvironment();
+    if (required && containerFallbackPossible)
+        throw std::runtime_error("WebKitGTK: distribution mode refuses containers with /run/.containerenv because WebKit may silently disable its sandbox "
+                                 "after the preflight probe");
     if (required && snapEnvironmentPresent() && !snapConfinementVerified())
         throw std::runtime_error(
             "WebKitGTK: distribution mode rejects unverified Snap environment variables; launch outside Snap or use an enforced Snap profile");

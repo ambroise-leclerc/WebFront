@@ -166,10 +166,14 @@ Ubuntu introduced a `bwrap-userns-restrict` profile in later releases
 Flatpak delegates isolation to its package sandbox. Snap variables are accepted
 only when `/proc/self/attr/current` confirms an enforced `snap.<name>.*` AppArmor
 label matching `SNAP_NAME`; inherited variables alone are rejected in distribution.
-These verified package environments skip this probe. Docker and Podman still run the bubblewrap probe, including its proc/dev
-mounts and `--unshare-all` setup. A missing launcher or any unsuccessful probe
-rejects distribution initialization, even when stderr is empty. This prevents
-WebKit's unsupported-container fallback from silently disabling its sandbox.
+These verified package environments skip this probe. Docker runs the bubblewrap
+probe, including its proc/dev mounts and `--unshare-all` setup. Distribution
+rejects environments with `/run/.containerenv` (including Podman): WebKit can
+silently disable bubblewrap if its later container probe fails, even after a
+successful WebFront preflight. WebKitGTK exposes no supported fail-closed hook
+for that fallback. Development remains available there; distribution must use a
+qualified environment without that marker. A missing launcher or any unsuccessful probe
+rejects distribution initialization, even when stderr is empty. The container refusal prevents WebKit's fallback from silently disabling its sandbox.
 The environment opt-out is checked again on every initialization call. The probe
 has a three-second deadline; its supervisor owns the launcher child, so a host
 that ignores `SIGCHLD` or reaps its own children does not invalidate its result.

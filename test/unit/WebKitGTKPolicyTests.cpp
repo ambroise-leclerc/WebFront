@@ -272,6 +272,20 @@ const Scenario webKitGTKProbeLifecycle{"WebKitGTK probes tolerate host child man
                                            });
                                        }};
 
+const Scenario webKitGTKContainerFallback{"WebKitGTK distribution rejects WebKit container fallback", [] {
+                                              const SandboxEnvironment environment;
+                                              then("a successful preflight cannot authorize a later unsandboxed fallback", [] {
+                                                  requireThrows([] {
+                                                      requireSandboxEnvironment(SandboxMode::distribution, true);
+                                                  });
+                                                  requireSandboxEnvironment(SandboxMode::development, true);
+                                                  setenv("WEBFRONT_REQUIRE_WEBKIT_SANDBOX", "1", 1);
+                                                  requireThrows([] {
+                                                      requireSandboxEnvironment(SandboxMode::development, true);
+                                                  });
+                                              });
+                                          }};
+
 const Scenario webKitGTKUnverifiedSnap{"WebKitGTK distribution rejects inherited Snap claims", [] {
                                            const SandboxEnvironment   environment;
                                            std::optional<std::string> previous[3];

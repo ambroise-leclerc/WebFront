@@ -36,5 +36,9 @@ describe('Native graphics qualification', () => {
     it('captures the composed page for visual inspection', async () => {
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         expect(await webFrontCapture.screenshot('graphics')).toBeGreaterThan(100);
-    });
+        const instruction = document.createElement('p');
+        instruction.textContent = 'Capture this native window with the desktop screenshot tool now; it closes in 30 seconds.';
+        document.body.append(instruction);
+        await new Promise(resolve => setTimeout(resolve, 30000));
+    }, 45000);
 });

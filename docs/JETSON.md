@@ -374,12 +374,21 @@ env -u GSK_RENDERER -u LIBGL_ALWAYS_SOFTWARE -u WEBKIT_DISABLE_DMABUF_RENDERER \
   XDG_DATA_HOME="$out/data" \
   XDG_CACHE_HOME="$out/cache" \
   WEBFRONT_JASMINE_CONFIG="$out/config.json" \
-  timeout 60s ./build-528-webkitgtk/test/web/jasmine_consumer \
+  timeout 90s ./build-528-webkitgtk/test/web/jasmine_consumer \
   "$PWD/test/web/jasmine-consumer"
 test -s "$out/report.json"
 cat "$out/report.json"
 )
 ```
+
+While the native window is visible, the manual spec pauses for 30 seconds after
+its WebKit snapshot. Use the desktop's screenshot UI to capture the **actual
+window or desktop**, saving `native-window.png` in the fresh directory printed
+by the recipe. The capture must show both the red Canvas 2D square and the green
+WebGL square, together with the renderer name. Inspect that desktop capture as
+well as `captures/graphics.png`; the latter is a WebKit view snapshot and cannot
+prove that those pixels reached the physical display. A missing, black or
+incorrect desktop capture leaves presentation unqualified.
 
 The subshell stops on a failed or timed-out launch and prints no report. Each
 attempt has a fresh result directory. Inspect `captures/graphics.png` there: it must show a red Canvas 2D square,
