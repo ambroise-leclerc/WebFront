@@ -17,11 +17,11 @@
 | 1.10 | 2026-10-20 | Acceptée | Ambroise Leclerc | WKWebView respecte les bundles agents LSUIElement ; les exécutables de test ne créent plus d’icônes Dock. | À renseigner après intégration. |
 | 1.11 | 2026-11-09 | Acceptée | Ambroise Leclerc | Contrat facultatif `static UIExecutor uiExecutor()` : le thread d'interface d'un frontend, disponible pendant que `open()` fait tourner sa boucle (ADR-020, #462). Frontend `BrowserWithUILoopFrontend` : navigateur système avec boucle facultative. | Branche `462-ui-thread-executor` |
 | 1.12 | 2026-11-13 | Acceptée | Ambroise Leclerc | Intégration dans une application hôte : contrats facultatifs `launch()`, `requestClose()` et `requiresMainThread` ; `BasicWF::start()`, `BasicWF::requestClose()` et `webfront::UIThread` (#567). | Branche `567-host-integration` |
-| 1.13 | 2026-11-16 | Acceptée | Ambroise Leclerc | Modes WebKitGTK développement par défaut et distribution exigeant le sandbox ; profil par exécutable généré pour le paquet applicatif, sans runtime (#596/#597). | Branche `596-jetson-native-launch` |
+| 1.13 | 2026-11-16 | Proposée | Ambroise Leclerc | Modes WebKitGTK développement par défaut et distribution exigeant le sandbox ; profil par exécutable généré pour le paquet applicatif, sans runtime (#596/#597). | Branche `596-jetson-native-launch` |
 
 ## État et chronologie
 
-**Acceptée.** Décision initiale : **2026-05-31** (version 1.0).
+**Acceptée jusqu’à 1.12 ; révision 1.13 proposée.** Décision initiale : **2026-05-31** (version 1.0).
 Dernière révision : **2026-11-16** (version 1.13).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 

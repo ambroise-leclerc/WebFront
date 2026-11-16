@@ -114,11 +114,11 @@ inline bool webKitSandboxDisabled() {
     return value && std::string_view(value) != "0";
 }
 
-/// Whether WebKit would use bubblewrap here: not with its sandbox switched off, nor inside Flatpak, Snap or a container.
+/// Flatpak and Snap delegate isolation to their package sandbox. Other containers still require bubblewrap.
 inline bool sandboxLauncherApplies() {
     const auto set = [](const char* name) {
         const auto* value = std::getenv(name);
-        return value && *value;
+        return value != nullptr;
     };
     const auto exists = [](const char* path) {
         std::error_code error;
@@ -128,26 +128,26 @@ inline bool sandboxLauncherApplies() {
         return false;
     if (set("SNAP") && set("SNAP_NAME") && set("SNAP_REVISION"))
         return false;
-    return !exists("/.flatpak-info") && !exists("/.dockerenv") && !exists("/run/.containerenv");
+    return !exists("/.flatpak-info");
 }
 
-/// Runs `launcher --ro-bind / / launcher --version`. Returns the launcher's own message when it could not set up its
-/// user namespace, nullopt when it could or when nothing can be concluded (no launcher, another kind of failure).
-inline std::optional<std::string> sandboxLauncherRefusal(const std::filesystem::path& launcher) {
+/// Match WebKit's container capability probe. Every failure must preserve the distribution requirement.
+inline std::optional<std::string> sandboxLauncherFailure(const std::filesystem::path& launcher) {
     if (access(launcher.c_str(), X_OK) != 0)
-        return std::nullopt;
+        return "bubblewrap launcher is missing or not executable";
     int report[2];
     if (pipe2(report, O_CLOEXEC) != 0)
-        return std::nullopt;
+        return "cannot create bubblewrap diagnostic pipe";
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
     posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
     posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
     posix_spawn_file_actions_adddup2(&actions, report[1], STDERR_FILENO);
     const std::string path   = launcher.string();
-    char              bind[] = "--ro-bind", root[] = "/", version[] = "--version";
-    std::string       program = path, inner = path;
-    char* const       arguments[] = {program.data(), bind, root, root, inner.data(), version, nullptr};
+    char              bind[] = "--ro-bind", root[] = "/", proc[] = "--proc", procPath[] = "/proc";
+    char              dev[] = "--dev", devPath[] = "/dev", unshare[] = "--unshare-all", command[] = "true";
+    std::string       program     = path;
+    char* const       arguments[] = {program.data(), bind, root, root, proc, procPath, dev, devPath, unshare, command, nullptr};
     pid_t             child       = 0;
     const int         spawned     = posix_spawn(&child, path.c_str(), &actions, nullptr, arguments, ::environ);
     posix_spawn_file_actions_destroy(&actions);
@@ -165,20 +165,25 @@ inline std::optional<std::string> sandboxLauncherRefusal(const std::filesystem::
     }
     close(report[0]);
     if (spawned != 0)
-        return std::nullopt;
+        return "cannot spawn bubblewrap launcher";
     int   status = 0;
     pid_t waited;
     do
         waited = waitpid(child, &status, 0);
     while (waited < 0 && errno == EINTR);
-    if (waited != child || (WIFEXITED(status) && WEXITSTATUS(status) == 0))
-        return std::nullopt;
-    // bubblewrap's wording for a refused namespace; anything else is left for WebKit to report.
-    if (message.find("uid map") == std::string::npos && message.find("namespace") == std::string::npos)
+    if (waited != child)
+        return "cannot wait for bubblewrap launcher";
+    if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
         return std::nullopt;
     while (!message.empty() && (message.back() == '\n' || message.back() == '\r'))
         message.pop_back();
-    return message;
+    return message.empty() ? "bubblewrap probe failed without a diagnostic" : message;
+}
+
+inline void requireSandboxEnvironment(SandboxMode mode = buildSandboxMode) {
+    if ((mode == SandboxMode::distribution || sandboxRequiredByEnvironment()) && webKitSandboxDisabled())
+        throw std::runtime_error("WebKitGTK: distribution mode requires the sandbox, but "
+                                 "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS disables it; unset it or set it to 0");
 }
 
 /// Development explicitly disables WebKit's sandbox. Distribution (or the legacy REQUIRE environment switch)
@@ -190,12 +195,10 @@ inline std::optional<std::string> prepareSandboxLaunch(const std::filesystem::pa
             throw std::runtime_error("WebKitGTK: cannot configure the development sandbox policy");
         return "development";
     }
-    if (webKitSandboxDisabled())
-        throw std::runtime_error("WebKitGTK: distribution mode requires the sandbox, but "
-                                 "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS disables it; unset it or set it to 0");
+    requireSandboxEnvironment(mode);
     if (!sandboxLauncherApplies())
         return std::nullopt;
-    if (const auto refusal = sandboxLauncherRefusal(launcher))
+    if (const auto refusal = sandboxLauncherFailure(launcher))
         throw std::runtime_error("WebKitGTK: the distribution sandbox cannot start (" + *refusal
                                  + "); install the application's AppArmor profile or use a configured system browser; "
                                    "see docs/WEBKITGTK.md, \"Distribution\"");

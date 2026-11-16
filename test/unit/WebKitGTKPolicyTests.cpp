@@ -170,7 +170,7 @@ const Scenario webKitGTKDistributionConflict{"WebKitGTK distribution refuses an 
                                                      check(std::string(std::getenv(sandboxOptOut)) == "1");
                                                  });
                                                  then("the legacy requirement also rejects the contradictory environment in development", [&] {
-        setenv(sandboxOptOut, "1", 1);
+                                                     setenv(sandboxOptOut, "1", 1);
                                                      setenv("WEBFRONT_REQUIRE_WEBKIT_SANDBOX", "1", 1);
                                                      requireThrows([&] {
                                                          prepareSandboxLaunch(folder.path() / "missing", SandboxMode::development);
@@ -183,14 +183,14 @@ const Scenario webKitGTKLauncher{"WebKitGTK distribution diagnoses a refused nam
                                      const webfront::test::TemporaryDirectory folder;
                                      const auto refused = fakeLauncher(folder.path(), "refused", "bwrap: setting up uid map: Permission denied", 1);
                                      then("the real subprocess diagnostic is returned", [&] {
-                                         const auto refusal = sandboxLauncherRefusal(refused);
+                                         const auto refusal = sandboxLauncherFailure(refused);
                                          require(refusal.has_value());
                                          check(*refusal == "bwrap: setting up uid map: Permission denied");
                                      });
                                      then("the upstream value 0 keeps the launcher check active", [&] {
                                          setenv(sandboxOptOut, "0", 1);
                                          check(!webKitSandboxDisabled());
-                                         // Containers use the engine's outer-sandbox integration instead of bubblewrap.
+                                         // Flatpak and Snap delegate isolation to their package sandbox.
                                          if (!sandboxLauncherApplies())
                                              return;
                                          requireThrows([&] {
@@ -205,20 +205,28 @@ const Scenario webKitGTKLauncher{"WebKitGTK distribution diagnoses a refused nam
                                      });
                                  }};
 
-const Scenario webKitGTKWorkingLauncher{"WebKitGTK distribution preserves a working sandbox", [] {
-                                            const SandboxEnvironment                 environment;
-                                            const webfront::test::TemporaryDirectory folder;
-                                            then("a successful probe leaves the upstream environment unchanged", [&] {
-                                                const auto working = fakeLauncher(folder.path(), "working", "", 0);
-                                                check(!prepareSandboxLaunch(working, SandboxMode::distribution));
-                                                check(std::getenv(sandboxOptOut) == nullptr);
-                                                check(!sandboxLauncherRefusal(working));
-                                                check(!sandboxLauncherRefusal(fakeLauncher(folder.path(), "noisy", "warning: namespace already shared", 0)));
-                                            });
-                                            then("missing launchers and unrelated failures are left for WebKit to diagnose", [&] {
-                                                check(!sandboxLauncherRefusal(folder.path() / "missing"));
-                                                check(!sandboxLauncherRefusal(fakeLauncher(folder.path(), "other", "bwrap: Unknown option --ro-bind", 1)));
-                                                check(std::getenv(sandboxOptOut) == nullptr);
-                                            });
-                                        }};
+const Scenario webKitGTKWorkingLauncher{
+    "WebKitGTK distribution preserves a working sandbox",
+    [] {
+        const SandboxEnvironment                 environment;
+        const webfront::test::TemporaryDirectory folder;
+        then("a successful probe leaves the upstream environment unchanged", [&] {
+            const auto working = fakeLauncher(folder.path(), "working", "", 0);
+            check(!prepareSandboxLaunch(working, SandboxMode::distribution));
+            check(std::getenv(sandboxOptOut) == nullptr);
+            check(!sandboxLauncherFailure(working));
+            setenv(sandboxOptOut, "1", 1);
+            requireThrows([] {
+                requireSandboxEnvironment(SandboxMode::distribution);
+            });
+            unsetenv(sandboxOptOut);
+            check(!sandboxLauncherFailure(fakeLauncher(folder.path(), "noisy", "warning: namespace already shared", 0)));
+        });
+        then("missing launchers and every failed probe reject distribution", [&] {
+            check(sandboxLauncherFailure(folder.path() / "missing").has_value());
+            check(sandboxLauncherFailure(fakeLauncher(folder.path(), "other", "bwrap: Unknown option --ro-bind", 1)).has_value());
+            check(sandboxLauncherFailure(fakeLauncher(folder.path(), "silent", "", 1)).has_value());
+            check(std::getenv(sandboxOptOut) == nullptr);
+        });
+    }};
 #endif

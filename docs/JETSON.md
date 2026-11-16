@@ -350,13 +350,14 @@ registered in the software-rendered CTest suite. Run from the repository root
 after the test build, on the desktop being qualified:
 
 ```bash
-python3 - <<'PY'
-import json
+(
+set -e
+out=$(python3 - <<'PY'
+import json, tempfile
 from pathlib import Path
 root = Path.cwd()
 build = root / 'build-528-webkitgtk'
-out = build / 'jetson-graphics'
-out.mkdir(exist_ok=True)
+out = Path(tempfile.mkdtemp(prefix='jetson-graphics-', dir=build))
 config = {
     'files': [str(build / 'test/web/webfront-jasmine/package/package/lib/jasmine-core/jasmine.js'),
               str(root / 'test/web/jasmine-consumer/graphics.manual.spec.js')],
@@ -364,18 +365,24 @@ config = {
     'captures': str(out / 'captures'),
 }
 (out / 'config.json').write_text(json.dumps(config))
+print(out)
 PY
+)
+printf 'Results: %s\n' "$out"
 env -u GSK_RENDERER -u LIBGL_ALWAYS_SOFTWARE -u WEBKIT_DISABLE_DMABUF_RENDERER \
   GDK_BACKEND=x11 \
-  XDG_DATA_HOME="$PWD/build-528-webkitgtk/jetson-graphics/data" \
-  XDG_CACHE_HOME="$PWD/build-528-webkitgtk/jetson-graphics/cache" \
-  WEBFRONT_JASMINE_CONFIG="$PWD/build-528-webkitgtk/jetson-graphics/config.json" \
+  XDG_DATA_HOME="$out/data" \
+  XDG_CACHE_HOME="$out/cache" \
+  WEBFRONT_JASMINE_CONFIG="$out/config.json" \
   timeout 60s ./build-528-webkitgtk/test/web/jasmine_consumer \
   "$PWD/test/web/jasmine-consumer"
-cat build-528-webkitgtk/jetson-graphics/report.json
+test -s "$out/report.json"
+cat "$out/report.json"
+)
 ```
 
-Inspect `jetson-graphics/captures/graphics.png`: it must show a red Canvas 2D square,
+The subshell stops on a failed or timed-out launch and prints no report. Each
+attempt has a fresh result directory. Inspect `captures/graphics.png` there: it must show a red Canvas 2D square,
 a green WebGL square and the renderer name. Successful readback alone cannot
 prove that the native window presents those pixels. A software renderer name
 does not qualify NVIDIA acceleration. If the default path fails, preserve its

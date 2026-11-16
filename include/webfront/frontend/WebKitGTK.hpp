@@ -168,6 +168,7 @@ inline void requireMainThread() {
 
 inline void initialize() {
     requireMainThread();
+    requireSandboxEnvironment();
     // Once per process and before GTK starts its threads: the launch switch is an environment variable.
     static const bool sandboxPrepared = [] {
         if (prepareSandboxLaunch())

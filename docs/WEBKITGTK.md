@@ -132,8 +132,11 @@ cmake -S . -B build-distribution -DWEBFRONT_EMBED_WEBKITGTK=ON \
 ```
 
 For a consumer with separate development and packaged executables, call
-`webfront_use_distribution(my_app)` after creating the packaged target. The helper
-adds `WEBFRONT_DISTRIBUTION=1` to that executable only. Header-only consumers
+`webfront_use_distribution(my_app native_ui)` after creating the packaged targets.
+List every library that compiles native UI code: executable definitions are private;
+library definitions propagate to their consumers. The helper does not traverse
+linked dependencies or rebuild imported libraries. Prefer the global option when
+all WebFront targets belong to the distribution. Header-only consumers
 without CMake can define the same macro consistently in all their translation
 units. This switch currently controls the WebKitGTK sandbox policy; it does not
 embed assets, remove developer callbacks or generate an installer.
@@ -153,10 +156,12 @@ Distribution initialization checks the launcher before opening the window. Some
 Ubuntu 24.04 installations lack the AppArmor integration that allows this setup;
 Ubuntu introduced a `bwrap-userns-restrict` profile in later releases
 ([release notes](https://documentation.ubuntu.com/release-notes/25.04/#apparmor-profile-for-bwrap)).
-The check is skipped where WebKit uses its container integration (Flatpak, Snap,
-Docker/Podman markers), when the launcher is absent, or when its failure is
-unrelated to namespaces; WebKit retains responsibility for those launch paths.
-A successful probe is not an attestation of WebKit's complete sandbox.
+Only Flatpak and Snap delegate isolation to their package sandbox and skip this
+probe. Docker and Podman still run the bubblewrap probe, including its proc/dev
+mounts and `--unshare-all` setup. A missing launcher or any unsuccessful probe
+rejects distribution initialization, even when stderr is empty. This prevents
+WebKit's unsupported-container fallback from silently disabling its sandbox.
+The environment opt-out is checked again on every initialization call.
 
 ### Package the application's profile
 

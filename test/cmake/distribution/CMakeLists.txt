@@ -38,7 +38,7 @@ elseif(CASE STREQUAL "missing-target")
     webfront_use_distribution(absent)
 elseif(CASE STREQUAL "library")
     add_library(not_an_application INTERFACE)
-    webfront_use_distribution(not_an_application)
+    webfront_generate_webkitgtk_profile(TARGET not_an_application EXECUTABLE /usr/bin/app OUTPUT profiles/invalid)
 endif()
 webfront_use_distribution(app)
 webfront_generate_webkitgtk_profile(TARGET development EXECUTABLE /usr/bin/development OUTPUT profiles/development)
@@ -53,8 +53,21 @@ enable_language(CXX)
 foreach(name app development)
     target_compile_features(${name} PRIVATE cxx_std_23)
 endforeach()
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ui.cpp" "
+#ifndef WEBFRONT_DISTRIBUTION
+#error Native UI library must use distribution policy
+#endif
+int native_policy() { return 0; }")
+add_library(native_ui STATIC "${CMAKE_CURRENT_BINARY_DIR}/ui.cpp")
+webfront_use_distribution(native_ui)
+add_executable(linked_app "${CMAKE_CURRENT_BINARY_DIR}/main.cpp")
+target_include_directories(linked_app PRIVATE "${WEBFRONT_ROOT}/include")
+target_compile_features(linked_app PRIVATE cxx_std_23)
+target_link_libraries(linked_app PRIVATE native_ui)
 # Stage the package's profile without installing or loading anything on the host.
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/profiles/webfront.app" DESTINATION etc/apparmor.d)
 enable_testing()
 add_test(NAME distribution-policy COMMAND app)
 add_test(NAME development-policy COMMAND development)
+
+add_test(NAME library-distribution-policy COMMAND linked_app)

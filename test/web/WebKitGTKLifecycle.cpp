@@ -43,6 +43,14 @@ void noDisplay() {
         "display");
 }
 
+void sandboxRecheck() {
+    Frontend::initialize();
+    setenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", "1", 1);
+    setenv("WEBFRONT_REQUIRE_WEBKIT_SANDBOX", "1", 1);
+    expectFailure([] { Frontend::initialize(); }, "requires the sandbox");
+    expectFailure([] { Frontend::open("9002", "index.html"); }, "requires the sandbox");
+}
+
 void workerThread() {
     std::exception_ptr failure;
     std::jthread       worker([&] {
@@ -482,6 +490,7 @@ void profilePermissions() {
 
 void run(std::string_view mode) {
     const std::map<std::string_view, void (*)()> cases{
+        {"sandbox-recheck", sandboxRecheck},
         {         "no-display",          noDisplay},
         {      "worker-thread",       workerThread},
         {      "repeated-show",       repeatedShow},
