@@ -17,6 +17,7 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Added
 
+- Add an isolated, low-priority Jetson Orin hardware workflow with persistent caches, complete CEF-off tests, WebKitGTK integration, required CUDA regression and workflow security checks (#529, `docs/JETSON_RUNNER.md`).
 - Turn the `WebFrontHostLoop` example into a ray-traced Boing Ball computed by the host's own loop on the CPU or with an optional CUDA unit, shown full-window by an embedded page that receives at most one image at a time; a glass ball with coloured beams is the workload that separates the two engines. Measured on a Jetson Orin Nano (#530, `docs/HOST_LOOP_EXAMPLE.md`).
 - Generate a per-executable AppArmor profile for application packaging with `webfront_generate_webkitgtk_profile`; select the distribution policy per target with `webfront_use_distribution`, without adding a runtime (#596, `docs/WEBKITGTK.md`).
 - Document the Jetson Orin Nano Super qualification after the JetPack 7 upgrade and its L4T R39.2.1 toolchain; add a manual Canvas 2D/WebGL capture probe for the remaining real-display qualification (#528, `docs/JETSON.md`).

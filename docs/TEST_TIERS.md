@@ -125,7 +125,9 @@ dispatch with `repeat_desktop_tests`:
   2026 generator. There is no compiler cache: a new user compiles everything;
 - the `gcc13-arm64` job (#548): GCC 13 on a hosted Linux aarch64 runner (`ubuntu-24.04-arm`), compiling the library, the examples and
   the tests with warnings that are not errors (libstdc++ 13 reports false `-Wnull-dereference` positives, #526), then running
-  the fast tier, then rebuilding the tests under GCC 13 ASan/UBSan and repeating the fast tier (#525, S2 support). It has no browser frontend. A compile error or a failing fast test under GCC 13 on aarch64 turns it red;
+  the fast tier, then rebuilding the tests under GCC 13 ASan/UBSan and repeating the fast tier (#525, S2 support).
+  The instrumented configuration uses `WEBFRONT_TEST_TIMEOUT_FACTOR=2` for the CPU rendering tests on ARM64.
+  It has no browser frontend. A compile error or a failing fast test under GCC 13 on aarch64 turns it red;
 - the `cef-arm64` job (#524): the `web-integration` suite under CEF `linuxarm64` (GCC 13, Xvfb) on `ubuntu-24.04-arm`, weekly and on demand with `cef_arm64=true`, not on pull requests; it fails if the CEF library is not aarch64;
 - the `webkitgtk-arm64` job (#524): the same suite through the WebKitGTK 6.0 frontend of Ubuntu 24.04 (GCC 13, Xvfb) on `ubuntu-24.04-arm`, weekly and on demand with `webkitgtk_arm64=true`, not on pull requests;
 - the address/undefined and thread sanitizers, the five fuzzers, and the GCC and Clang CEF browser integration.
@@ -145,6 +147,15 @@ The portability matrix does not vary the CMake version: `setup-cmake` pins the S
 another version needs its checksum added first.
 
 ## Required checks for `master`
+
+The on-board [Jetson Orin runner](JETSON_RUNNER.md) is S2 hardware evidence, separate from
+the hosted ARM64 jobs. It runs at Monday 01:17 UTC, on pushes to `master`, and on a
+maintainer's manual branch dispatch, never on a PR. It builds CEF-off and runs the complete
+CTest suite, the CUDA image regression (a skip fails), then WebKitGTK `web-integration`
+under Xvfb on Tegra. Persistent ccache/CPM caches, two workers and low CPU/I/O priority
+keep its footprint bounded. It is never required for a PR or merge: an offline workstation
+does not block either. Three green weekly runs and workstation usability remain the
+hardware acceptance criteria, independently of a successful manual validation.
 
 A pull request into `master` must pass all of: the desktop jobs, `portability` (except the experimental Visual Studio
 leg), `gcc13-arm64`, `sanitizers` and `web-integration`. GitHub only enforces this once the checks are marked required in the branch

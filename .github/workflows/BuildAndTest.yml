@@ -9,6 +9,10 @@ on:
     - cron: '23 4 * * 1'
   workflow_dispatch:
     inputs:
+      jetson_orin:
+        description: 'Validate a trusted branch on the Jetson hardware runner (maintainer only)'
+        type: boolean
+        default: false
       gcc13_arm64:
         description: 'Also run GCC 13 ARM64 and its ASan/UBSan fast tests'
         type: boolean
@@ -34,7 +38,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.jetson_orin && 'jetson' || 'hosted' }}
   # Never cancel a push to a release branch: its coverage upload must complete.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -47,6 +51,36 @@ env:
 
 # Third-party actions are pinned to commit SHAs; GitHub-owned actions/* use version tags.
 jobs:
+  # Pre-merge entry point: the standalone workflow cannot be dispatched until it is on the default branch.
+  jetson-validation:
+    if: >-
+      github.repository == 'ambroise-leclerc/WebFront' && !cancelled() && github.event_name == 'workflow_dispatch' &&
+      github.actor == 'ambroise-leclerc' && github.ref_type == 'branch' && inputs.jetson_orin
+    runs-on: [self-hosted, linux, arm64, jetson-orin]
+    timeout-minutes: 180
+    concurrency:
+      group: jetson-orin
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Build and test at low priority
+        run: nice -n 15 ionice -c 3 bash .github/scripts/jetson-orin.sh
+      - name: Retain diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jetson-orin-${{ github.run_id }}
+          path: |
+            build-jetson-*/Testing/Temporary/LastTest.log
+            build-jetson-*/*results.xml
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Remove job build directories
+        if: always()
+        run: rm -rf -- build-jetson-core build-jetson-webkitgtk
+
   # The Linux toolchain image is tagged with the hash of its Dockerfile and built only when that tag is missing from ghcr.io,
   # so a change of the Dockerfile is validated by the very run that carries it. A pull request from a fork cannot push it
   # (read-only token): its Linux job then fails at the pull, which a maintainer re-run on a branch of this repository fixes.
@@ -185,7 +219,7 @@ jobs:
           ${{ env.FULL_TIER == 'true' && '-DWEBFRONT_MSVC_ANALYZE=ON -DWEBFRONT_BUILD_EXAMPLES=ON' || '-DWEBFRONT_MSVC_ANALYZE=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF' }}
           ${{ matrix.options }}
       - name: Build
-        run: cmake --build build --config ${{ matrix.build_type }} --parallel 4
+        run: cmake --build build --config ${{ matrix.build_type }} --parallel 4 ${{ runner.os == 'Windows' && '-- -k 0' || '' }}
       - name: Ensure WebView2 Evergreen runtime
         if: runner.os == 'Windows'
         shell: pwsh
@@ -396,6 +430,8 @@ jobs:
         run: ctest --test-dir build -L fast --output-on-failure --no-tests=error --parallel 4
       # Exercise coroutine lifetimes with the oldest supported compiler as well (#525).
       - name: Configure GCC 13 ASan and UBSan
+        env:
+          WEBFRONT_TEST_TIMEOUT_FACTOR: '2'
         run: >-
           cmake -S . -B build-sanitizers -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
           -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=OFF -DWEBFRONT_ENABLE_TESTING=ON
