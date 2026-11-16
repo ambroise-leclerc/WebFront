@@ -17,6 +17,7 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Added
 
+- Qualify real X11 Canvas/WebGL presentation on NVIDIA EGL, the GNOME file portal and fullscreen Life React on Orin Nano Super; retain captures, an EGL diagnostic and the limits of nested Wayland testing (#528, `docs/JETSON.md`).
 - Add an isolated, low-priority Jetson Orin hardware workflow with persistent caches, complete CEF-off tests, WebKitGTK integration, required CUDA regression and workflow security checks (#529, `docs/JETSON_RUNNER.md`).
 - Turn the `WebFrontHostLoop` example into a ray-traced Boing Ball computed by the host's own loop on the CPU or with an optional CUDA unit, shown full-window by an embedded page that receives at most one image at a time; a glass ball with coloured beams is the workload that separates the two engines. Measured on a Jetson Orin Nano (#530, `docs/HOST_LOOP_EXAMPLE.md`).
 - Generate a per-executable AppArmor profile for application packaging with `webfront_generate_webkitgtk_profile`; select the distribution policy per target with `webfront_use_distribution`, without adding a runtime (#596, `docs/WEBKITGTK.md`).
