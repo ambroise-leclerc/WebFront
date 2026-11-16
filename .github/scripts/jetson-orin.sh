@@ -41,7 +41,7 @@ common=(-G Ninja -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_ENABLE_TESTING=ON
 cmake -S . -B build-jetson-core "${common[@]}" -DWEBFRONT_EMBED_WEBKITGTK=OFF
 cmake --build build-jetson-core --parallel 2
 # Select one scenario directly: Bdd exits 4 if it skips for lack of a GPU. CTest permits skips.
-build-jetson-core/test/unit/tests 'Scenario: Host loop: CUDA computes the image of the CPU, within the rounding of the device'
+build-jetson-core/test/unit/tests --exact 'Host loop: CUDA computes the image of the CPU, within the rounding of the device'
 ctest --test-dir build-jetson-core --output-on-failure --no-tests=error --parallel 2 \
     --output-junit core-results.xml
 cmake -S . -B build-jetson-webkitgtk "${common[@]}" -DWEBFRONT_EMBED_WEBKITGTK=ON \
