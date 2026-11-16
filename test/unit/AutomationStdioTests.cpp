@@ -29,7 +29,8 @@ const Scenario windowsMCP{"Windows MCP stdin drains a final unterminated line af
                 CloseHandle(writer);
         }
     } pipe;
-    require(CreatePipe(&pipe.reader, &pipe.writer, nullptr, 0));
+    if (!CreatePipe(&pipe.reader, &pipe.writer, nullptr, 0))
+        throw std::runtime_error{"CreatePipe failed"};
     require(SetStdHandle(STD_INPUT_HANDLE, pipe.reader));
     DWORD written = 0;
     require(WriteFile(pipe.writer, "one\ntwo\npart", 12, &written, nullptr));

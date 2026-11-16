@@ -219,7 +219,7 @@ jobs:
           ${{ env.FULL_TIER == 'true' && '-DWEBFRONT_MSVC_ANALYZE=ON -DWEBFRONT_BUILD_EXAMPLES=ON' || '-DWEBFRONT_MSVC_ANALYZE=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF' }}
           ${{ matrix.options }}
       - name: Build
-        run: cmake --build build --config ${{ matrix.build_type }} --parallel 4
+        run: cmake --build build --config ${{ matrix.build_type }} --parallel 4 ${{ runner.os == 'Windows' && '-- -k 0' || '' }}
       - name: Ensure WebView2 Evergreen runtime
         if: runner.os == 'Windows'
         shell: pwsh
