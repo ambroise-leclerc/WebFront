@@ -45,6 +45,11 @@ const Scenario windowsMCP{"Windows MCP stdin drains a final unterminated line af
     require(line == "two");
     require(input.read(line) == webfront::automation::StdioInput::Status::waiting);
     const auto writer = std::exchange(pipe.writer, nullptr);
+#ifdef _MSC_VER
+    // CreatePipe succeeded and this is its live opaque handle. MSVC 14.51
+    // incorrectly treats the memory behind HANDLE as uninitialized here.
+#pragma warning(suppress : 6001)
+#endif
     require(CloseHandle(writer));
     require(input.read(line) == webfront::automation::StdioInput::Status::line);
     require(line == "part");
