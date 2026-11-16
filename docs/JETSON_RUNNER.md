@@ -9,7 +9,7 @@ criteria; a manual pass does not establish those criteria.
 
 ## Trust boundary
 
-The dedicated workflow accepts only Monday 01:17 UTC, pushes to `master`, and
+The dedicated workflow accepts only Monday 01:17 UTC on the default branch (`develop`), pushes to `master`, and
 manual dispatch by `ambroise-leclerc` on a branch of this repository. There is no
 PR, PR-target, reusable-workflow, or workflow-run trigger. Manual dispatch checks
 the selected branch, so review its contents before launching it. No user input
@@ -93,7 +93,8 @@ UMask=0077
 ```
 
 The provisioned board uses CMake 4.4.4 under `/opt/webfront-runner-tools/cmake/data/bin`,
-prepended to the service PATH. CMake must be available in this PATH (minimum version in `CMakeLists.txt`). If
+prepended to the service PATH and to the runner's `.path` file (which its startup
+script reads in preference to the service environment). CMake must be available in this PATH (minimum version in `CMakeLists.txt`). If
 nvcc needs a different host compiler, supply `CUDAHOSTCXX`; do not disable its
 version check. Then `systemctl daemon-reload` and start the runner service.
 These limits leave resources for the desktop; memory pressure can still make a
