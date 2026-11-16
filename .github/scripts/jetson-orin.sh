@@ -10,6 +10,7 @@ export CCACHE_DIR="$WEBFRONT_JETSON_CACHE/ccache"
 export CPM_SOURCE_CACHE="$WEBFRONT_JETSON_CACHE/cpm"
 export CUDA_CACHE_PATH="$WEBFRONT_JETSON_CACHE/cuda"
 export CUDA_CACHE_MAXSIZE=268435456
+export WEBFRONT_TEST_TIMEOUT_FACTOR=2
 mkdir -p "$CCACHE_DIR" "$CPM_SOURCE_CACHE" "$CUDA_CACHE_PATH"
 ccache --max-size 6G
 # Never inherit a desktop display or a software-renderer override. CTest creates Xvfb.

@@ -118,6 +118,10 @@ not open windows on the maintainer's session. Xvfb does not qualify physical
 presentation or prove WebGL acceleration: the manual checks in `JETSON.md` still
 apply.
 
+The configuration uses `WEBFRONT_TEST_TIMEOUT_FACTOR=2` for the throttled board:
+the mandatory GPU comparison took about 58 seconds with the default 60-second
+CTest limit. This scales the documented unit-test budget without skipping work.
+
 The job builds CEF-off with WebKitGTK disabled and runs the complete CTest suite,
 then builds WebKitGTK 6.0 and runs `web-integration` on the real Tegra stack.
 CUDA is required (`WEBFRONT_HOST_LOOP_CUDA=ON`, Orin SM 87); its CPU/GPU image
