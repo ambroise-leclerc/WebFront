@@ -170,14 +170,17 @@ add_executable(my_app main.cpp)
 target_link_libraries(my_app PRIVATE WebFront::WebFront)
 webfront_use_native_window(my_app)
 install(TARGETS my_app RUNTIME DESTINATION bin)
-webfront_generate_webkitgtk_profile(
-    TARGET my_app
-    EXECUTABLE /usr/bin/my_app
-    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/apparmor/webfront.my_app")
+if(WEBFRONT_DISTRIBUTION)
+    webfront_generate_webkitgtk_profile(
+        TARGET my_app
+        EXECUTABLE /usr/bin/my_app
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/apparmor/webfront.my_app")
+endif()
 ```
 
-The profile helper also selects distribution mode for `my_app`. The installed
-path must match the package, including the executable's final name; it must be
+Generating a profile does not change the target's build mode; the project stays
+in development by default even when preparing packaging files. Select distribution
+with the option or `webfront_use_distribution(my_app)`. The installed path must match the package, including the executable's final name; it must be
 stable and controlled by the installer. Patterns are rejected. Profile identifiers
 include a hash of that path so unrelated packages with a target called `app` do
 not replace each other's policies. It grants `userns` to the application to let
