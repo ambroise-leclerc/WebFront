@@ -35,6 +35,19 @@ jobs:
 """
 
 
+VALIDATION_CONTROL = """  jetson-validation:
+    if: >-
+      github.repository == 'ambroise-leclerc/WebFront' && github.event_name == 'workflow_dispatch' &&
+      github.actor == 'ambroise-leclerc' && github.ref_type == 'branch' && inputs.jetson_orin
+    runs-on: [self-hosted, linux, arm64, jetson-orin]
+    timeout-minutes: 180
+    concurrency:
+      group: jetson-orin
+      cancel-in-progress: false
+    steps:
+"""
+
+
 def check(workflows):
     hardware = workflows.get('JetsonOrin.yml', '')
     lines = [line for line in hardware.splitlines() if line.strip() and not line.lstrip().startswith('#')]
@@ -45,6 +58,11 @@ def check(workflows):
     if any(not line.startswith('      ') for line in lines[len(prefix):]):
         raise ValueError('Unexpected control-plane YAML after Jetson steps')
     for name, body in workflows.items():
+        if name == 'BuildAndTest.yml':
+            match = re.search(r'^  jetson-validation:\n(?:(?:[ ]{4,}[^\n]*|[ ]*)\n)*', body, re.M)
+            if not match or not match[0].startswith(VALIDATION_CONTROL):
+                raise ValueError('Manual Jetson validation must require maintainer dispatch')
+            body = body[:match.start()] + body[match.end():]
         if name != 'JetsonOrin.yml' and re.search(r'self-hosted|jetson-orin', body, re.I):
             raise ValueError(f'{name}: hardware runners are confined to JetsonOrin.yml')
 
@@ -70,6 +88,12 @@ class HardwareWorkflows(unittest.TestCase):
         for suffix in ['on: [pull_request]\n', '  unsafe:\n    runs-on: self-hosted\n', '---\n']:
             with self.subTest(suffix=suffix), self.assertRaises(ValueError):
                 check({'JetsonOrin.yml': CONTROL + suffix})
+
+    def test_rejects_weakened_manual_guard(self):
+        body = (ROOT / '.github/workflows/BuildAndTest.yml').read_text()
+        for old in ["github.event_name == 'workflow_dispatch'", "github.actor == 'ambroise-leclerc'", 'inputs.jetson_orin']:
+            with self.subTest(guard=old), self.assertRaises(ValueError):
+                check({'JetsonOrin.yml': CONTROL, 'BuildAndTest.yml': body.replace(old, 'true')})
 
     def test_rejects_hardware_in_other_workflows(self):
         for label in ['self-hosted', 'jetson-orin', 'SELF-HOSTED']:

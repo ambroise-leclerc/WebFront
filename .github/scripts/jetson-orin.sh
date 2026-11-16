@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Trusted master only. The service supplies PATH, CC/CXX and CUDAHOSTCXX where needed.
+# Trusted master or a maintainer-dispatched branch only. The service supplies PATH, CC/CXX and CUDAHOSTCXX where needed.
 set -euo pipefail
 umask 077
 test "$(uname -m)" = aarch64

@@ -16,8 +16,18 @@ the selected branch, so review its contents before launching it. No user input
 is interpolated into shell code, checkout persists no credentials, and the job
 has only `contents: read` permission. The board has no deployment secrets.
 
+For pre-merge validation, the existing `BuildAndTest.yml` accepts
+`jetson_orin=true` on maintainer dispatch only. Its `jetson-validation` job has
+the same resource limits and runner labels, and cannot run on PR events. This
+entry point is necessary because GitHub cannot dispatch a new workflow before
+it exists on the default branch. Dispatch it with:
+
+```sh
+gh workflow run BuildAndTest.yml --ref <trusted-branch> -f jetson_orin=true
+```
+
 `HardwareWorkflows` in the fast CTest tier fixes the hardware workflow's literal
-control plane and rejects hardware labels in other workflows. Its mutation tests
+control plane and the manual validation job, and rejects hardware labels elsewhere. Its mutation tests
 cover fork PR and PR-target triggers, additional jobs, weakened ref/actor checks
 and write permissions. It intentionally fails closed on control-plane edits.
 This is regression coverage, not an access-control boundary: a PR author can
@@ -75,9 +85,15 @@ CPUQuota=150%
 MemoryHigh=4G
 MemoryMax=5G
 MemorySwapMax=512M
+ProtectHome=true
+ProtectSystem=full
+PrivateTmp=true
+NoNewPrivileges=true
+UMask=0077
 ```
 
-CMake must be available in this PATH (minimum version in `CMakeLists.txt`). If
+The provisioned board uses CMake 4.4.4 under `/opt/webfront-runner-tools/cmake/data/bin`,
+prepended to the service PATH. CMake must be available in this PATH (minimum version in `CMakeLists.txt`). If
 nvcc needs a different host compiler, supply `CUDAHOSTCXX`; do not disable its
 version check. Then `systemctl daemon-reload` and start the runner service.
 These limits leave resources for the desktop; memory pressure can still make a
