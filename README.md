@@ -5,7 +5,7 @@
 [![macOS · Apple Clang](https://img.shields.io/badge/CI-macOS%20%C2%B7%20Apple%20Clang-555555)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
 [![Linux · GCC](https://img.shields.io/badge/CI-Linux%20%C2%B7%20GCC-E95420)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
 [![Linux · aarch64](https://img.shields.io/badge/CI-Linux%20%C2%B7%20aarch64%20%C2%B7%20GCC%2013-E95420)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
-[![Jetson Orin Nano Super · native launch and bridge](https://img.shields.io/badge/qualified-Jetson%20Orin%20Nano%20Super%20%C2%B7%20native%20launch%20%26%20bridge-76B900)](docs/JETSON.md)
+[![Jetson Orin Nano](https://img.shields.io/badge/qualified-Jetson%20Orin%20Nano%20Super%20%C2%B7%20native%20launch%20%26%20bridge-76B900)](docs/JETSON.md)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C)](CMakeLists.txt)
 [![Header-only](https://img.shields.io/badge/library-header--only-2EA043)](include/)
 
