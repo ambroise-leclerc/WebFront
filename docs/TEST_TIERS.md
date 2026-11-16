@@ -146,6 +146,15 @@ another version needs its checksum added first.
 
 ## Required checks for `master`
 
+The on-board [Jetson Orin runner](JETSON_RUNNER.md) is S2 hardware evidence, separate from
+the hosted ARM64 jobs. It runs at Monday 01:17 UTC, on pushes to `master`, and on a
+maintainer's manual branch dispatch, never on a PR. It builds CEF-off and runs the complete
+CTest suite, the CUDA image regression (a skip fails), then WebKitGTK `web-integration`
+under Xvfb on Tegra. Persistent ccache/CPM caches, two workers and low CPU/I/O priority
+keep its footprint bounded. It is never required for a PR or merge: an offline workstation
+does not block either. Three green weekly runs and workstation usability remain the
+hardware acceptance criteria, independently of a successful manual validation.
+
 A pull request into `master` must pass all of: the desktop jobs, `portability` (except the experimental Visual Studio
 leg), `gcc13-arm64`, `sanitizers` and `web-integration`. GitHub only enforces this once the checks are marked required in the branch
 protection rules of `master`; the workflow cannot set that itself.
