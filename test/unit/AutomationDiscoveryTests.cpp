@@ -518,3 +518,90 @@ const Scenario defaultAutomation{"The default automation clock supervises a rend
     require(automation->controller()->isClosed());
     require(discovery::list(root.path() / "sessions").empty());
 }};
+
+const Scenario startupDeadlineSaturates{"A delay too large for the clock never expires, whatever the clock origin", [] {
+    using namespace std::chrono;
+    const auto now      = steady_clock::now();
+    const auto negative = steady_clock::time_point{steady_clock::duration{-1'000'000'000'000}};
+    const auto limit    = steady_clock::time_point::max();
+    given("an ordinary timeout", [&] {
+        then("the deadline is the origin plus the timeout, for a positive or a negative origin", [&] {
+            check(startupDeadline(now, seconds{30}) == now + seconds{30});
+            check(startupDeadline(negative, seconds{30}) == negative + seconds{30});
+            check(deadlineAfter(now, milliseconds{100}) == now + milliseconds{100});
+        });
+    });
+    given("a zero or negative delay", [&] {
+        then("the deadline is the origin itself", [&] {
+            check(startupDeadline(negative, seconds{0}) == negative);
+            check(startupDeadline(now, seconds{-5}) == now);
+            check(deadlineAfter(negative, milliseconds{-1}) == negative);
+        });
+    });
+    given("the largest representable delay", [&] {
+        then("the deadline saturates instead of overflowing into the past", [&] {
+            check(startupDeadline(now, seconds::max()) == limit);
+            check(startupDeadline(negative, seconds::max()) == limit);
+            check(startupDeadline(steady_clock::time_point::min(), seconds::max()) == limit);
+            check(deadlineAfter(now, milliseconds::max()) == limit);
+            check(deadlineAfter(negative, milliseconds::max()) == limit);
+        });
+    });
+    given("a delay beyond the clock's tick range from an origin that makes the deadline representable", [&] {
+        then("the deadline is exact instead of overflowing in the conversion", [&] {
+            if constexpr (std::is_same_v<steady_clock::duration, nanoseconds> && sizeof(steady_clock::rep) == 8) {
+                const auto from = steady_clock::time_point::min();
+                // min() + 1e10 s = -9223372036854775808 + 1e19 ticks
+                check(deadlineAfter(from, seconds{10'000'000'000}) == steady_clock::time_point{nanoseconds{776'627'963'145'224'192LL}});
+                check(deadlineAfter(from, milliseconds{10'000'000'000'000}) == steady_clock::time_point{nanoseconds{776'627'963'145'224'192LL}});
+            }
+        });
+    });
+}};
+
+const Scenario unboundedDelaysKeepTheSession{"Unbounded startup and grace options neither revoke the session nor end the window", [] {
+    SupervisorClock::reset();
+    webfront::test::TemporaryDirectory root;
+    std::filesystem::create_directory(root.path() / "project");
+    ConsumerApp      app{.project = root.path() / "project"};
+    std::atomic<int> unresponsive{0};
+    const auto       options = [&](std::chrono::seconds startup, std::chrono::milliseconds grace) {
+        return AutomationOptions{.grants         = {"check"},
+                                 .listen         = root.path() / "endpoint",
+                                 .discovery      = root.path() / "sessions",
+                                 .startupTimeout = startup,
+                                 .closeGrace     = grace,
+                                 .onUnresponsive =
+                                     [&] {
+                                         ++unresponsive;
+                                     },
+                                 .announce = false};
+    };
+    given("a startup timeout of seconds::max()", [&] {
+        Automation<ConsumerApp, SupervisorClock> automation{app, options(std::chrono::seconds::max(), std::chrono::milliseconds{100})};
+        then("a window that never claims the session is not revoked", [&] {
+            advanceSupervisor(std::chrono::hours{24});
+            require(!automation.controller()->isClosed());
+            require(unresponsive.load() == 0);
+        });
+    });
+    given("a close grace of milliseconds::max()", [&] {
+        Automation<ConsumerApp, SupervisorClock> automation{app, options(std::chrono::seconds{120}, std::chrono::milliseconds::max())};
+        automation.controller()->close("Developer window disconnected");
+        awaitCloseGrace(&automation);
+        then("the window is never declared unresponsive", [&] {
+            advanceSupervisor(std::chrono::hours{24});
+            require(unresponsive.load() == 0);
+        });
+    });
+    given("a non-positive startup timeout or a negative grace", [&] {
+        then("the activation is refused before anything is registered", [&] {
+            requireThrows<std::invalid_argument>([&] {
+                Automation<ConsumerApp, SupervisorClock>{app, options(std::chrono::seconds{0}, std::chrono::milliseconds{100})};
+            });
+            requireThrows<std::invalid_argument>([&] {
+                Automation<ConsumerApp, SupervisorClock>{app, options(std::chrono::seconds{120}, std::chrono::milliseconds{-1})};
+            });
+        });
+    });
+}};
