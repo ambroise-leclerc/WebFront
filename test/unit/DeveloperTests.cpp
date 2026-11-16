@@ -1055,7 +1055,8 @@ const Scenario faultingMemory{"Published files are copied from memory that may f
         ::GetSystemInfo(&info);
         const auto page   = static_cast<std::size_t>(info.dwPageSize);
         auto*      region = static_cast<char*>(::VirtualAlloc(nullptr, 3 * page, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
-        require(region != nullptr);
+        if (region == nullptr)
+            throw std::runtime_error{"VirtualAlloc failed"};
         struct Free {
             char* region;
             ~Free() {
