@@ -45,6 +45,7 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Fixed
 
+- Make the host-loop example reject `--capture` without a native window or with `--benchmark`, and return a failure when the capture cannot be saved or the window closes before it completes (#599, `docs/HOST_LOOP_EXAMPLE.md`).
 - Enforce the WebKitGTK distribution policy across translation units and inherited environments; bound launcher checks and restore the development opt-out before callbacks or system-browser fallback (#596, `docs/WEBKITGTK.md`).
 - Give `CheckConsumerJasmineReports.cmake` the policies of CMake 3.31, without which it compared the report status with a variable (#596).
 - On Windows, a slow HTTP client no longer blocks the publication of developer resources, and removing a log sink no longer returns while one of its callbacks is still running (#542, `docs/validation/ci-flakes-542.md`).

@@ -1,9 +1,13 @@
 #include "../../examples/host-loop/BoingHost.hpp"
+#include "../../examples/host-loop/HostLoopCapture.hpp"
 #include "Bdd.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <stdexcept>
 #include <thread>
@@ -55,6 +59,52 @@ struct Consumer {
     }
 };
 }  // namespace
+
+const Scenario hostLoopCapture{"Host loop: capture refuses unsupported modes and reports failures", [] {
+    using webfront::frontend::CaptureResult;
+    then("capture needs a native window, including when benchmark would otherwise take precedence", [] {
+        validateCapture(true, true, false, false);
+        validateCapture(false, false, true, true);
+        requireThrows<std::invalid_argument>([] { validateCapture(true, false, false, false); });
+        requireThrows<std::invalid_argument>([] { validateCapture(true, true, true, false); });
+        requireThrows<std::invalid_argument>([] { validateCapture(true, true, false, true); });
+    });
+    then("an unavailable or timed out capture preserves its diagnostic", [] {
+        requireThrows<std::runtime_error>([] {
+            saveCapture(CaptureResult{std::unexpected("window did not answer")}, "unused.png");
+        }, contains("window did not answer"));
+    });
+    then("an unwritable destination fails", [] {
+        // Opening an existing directory as a file fails on every supported platform.
+        requireThrows<std::runtime_error>([] {
+            saveCapture(CaptureResult{std::vector<std::uint8_t>{1, 2, 3}}, ".");
+        }, contains("cannot write"));
+    });
+    then("a successful capture writes every byte", [] {
+        const auto directory = std::filesystem::temp_directory_path()
+            / ("webfront-capture-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        require(std::filesystem::create_directory(directory));
+        struct Cleanup {
+            std::filesystem::path directory;
+            ~Cleanup() { std::filesystem::remove_all(directory); }
+        } cleanup{directory};
+        const auto path = directory / "capture.png";
+        saveCapture(CaptureResult{std::vector<std::uint8_t>{1, 2, 3}}, path.string());
+        std::ifstream file{path, std::ios::binary};
+        std::array<char, 3> bytes{};
+        file.read(bytes.data(), 3);
+        require(file.gcount() == 3);
+        require(bytes == std::array<char, 3>{1, 2, 3});
+        require(file.peek() == std::char_traits<char>::eof());
+    });
+#ifdef __linux__
+    then("a buffered write failure also fails when the file is closed", [] {
+        requireThrows<std::runtime_error>([] {
+            saveCapture(CaptureResult{std::vector<std::uint8_t>{1, 2, 3}}, "/dev/full");
+        }, contains("cannot write"));
+    });
+#endif
+}};
 
 const Scenario hostLoopIntersections{"Host loop: rays meet the ball and the floor where geometry says", [] {
     const Scene scene = sceneAt(0.F, false, 320, 240, 1);

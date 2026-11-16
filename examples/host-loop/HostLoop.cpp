@@ -1,3 +1,4 @@
+#include "HostLoopCapture.hpp"
 #include "HostLoopUI.hpp"
 #include <webfront/frontend/Capture.hpp>
 #include <webfront/WebFront.hpp>
@@ -8,7 +9,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <exception>
-#include <fstream>
 #include <iostream>
 #include <mutex>
 #include <span>
@@ -95,7 +95,9 @@ int runWithWindow(boing::Host& host, const Options& options) {
     });
     // --capture: WebFront itself gives a PNG of what the window shows, to any thread but the window's. The host takes
     // one after six seconds of animation, then ends its loop, which closes the window.
-    std::jthread capturer;
+    std::exception_ptr captureFailure;
+    bool               captureCompleted = false;  // read only after the capturer is joined
+    std::jthread       capturer;
     if (!options.capture.empty())
         capturer = std::jthread([&](std::stop_token stopping) {
             std::mutex                  mutex;
@@ -106,13 +108,13 @@ int runWithWindow(boing::Host& host, const Options& options) {
             });
             if (stopping.stop_requested())
                 return;
-            if (const auto png = webfront::frontend::capturePng();
-                png
-                && std::ofstream{options.capture, std::ios::binary}.write(reinterpret_cast<const char*>(png->data()),
-                                                                          static_cast<std::streamsize>(png->size())))
+            try {
+                boing::saveCapture(webfront::frontend::capturePng(), options.capture);
+                captureCompleted = true;
                 std::cout << "Captured the window in " << options.capture << '\n';
-            else
-                std::cerr << "No capture: " << (png ? "cannot write " + options.capture : png.error()) << '\n';
+            } catch (...) {
+                captureFailure = std::current_exception();
+            }
             host.stop();
         });
     app.show();
@@ -122,6 +124,10 @@ int runWithWindow(boing::Host& host, const Options& options) {
     loop.join();          // no call into WebFront is running when the application is destroyed
     if (loopFailure)
         std::rethrow_exception(loopFailure);
+    if (captureFailure)
+        std::rethrow_exception(captureFailure);
+    if (!options.capture.empty() && !captureCompleted)
+        throw std::runtime_error("No capture: the window closed before capture completed");
     return 0;
 }
 
@@ -198,6 +204,7 @@ int main(int argc, char** argv) {
     webfront::log::setLogLevel(webfront::log::Warn);
     webfront::log::addSinks(webfront::log::clogSink);
     try {
+        boing::validateCapture(!options.capture.empty(), webfront::frontend::nativeWebViewAvailable, options.browser, options.benchmark);
         // Declared before the application, hence destroyed after it: the callbacks refer to the host.
         boing::Host host{options.settings};
         if (options.benchmark)
