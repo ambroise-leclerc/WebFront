@@ -353,6 +353,37 @@ const Scenario hostLoopPublication{"Host loop: a consumer receives one image per
         require(!host.iterate(0.1));
         require(first.received == before + 1);
     });
+    then("a duplicate after the batch was taken still receives only its original image", [&] {
+        // Consumer 1 is delivered first: consumer 2 has left waiting but has not begun receiving its image.
+        host.request(1, [&](const Frame& frame) {
+            first.deliver()(frame);
+            host.request(2, second.deliver());
+        });
+        host.request(2, second.deliver());
+        require(host.iterate(0.1));
+        require(first.received == 1);
+        require(second.received == 1);
+        require(!host.iterate(0.1));
+        require(second.received == 1);
+    });
+    then("a consumer can request its next image as soon as its delivery begins", [&] {
+        host.request(1, [&](const Frame& frame) {
+            first.deliver()(frame);
+            host.request(1, first.deliver());
+        });
+        require(host.iterate(0.1));
+        require(host.iterate(0.1));
+        require(first.received == 2);
+        require(!host.iterate(0.1));
+    });
+    then("a failed delivery releases the remaining in-flight consumers", [&] {
+        host.request(1, [](const Frame&) { throw std::runtime_error("delivery failed"); });
+        host.request(2, second.deliver());
+        requireThrows<std::runtime_error>([&] { host.iterate(0.1); });
+        host.request(2, second.deliver());
+        require(host.iterate(0.1));
+        require(second.received == 1);
+    });
     then("two consumers receive the same image, and a slow one misses images instead of queuing them", [&] {
         first = {};
         host.request(1, first.deliver());

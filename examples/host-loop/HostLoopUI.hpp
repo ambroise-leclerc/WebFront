@@ -21,7 +21,8 @@
 
 namespace boing {
 
-/// The whole page, added to WebFront's embedded one: no file, no network, no JavaScript engine of its own. The image
+/// The whole page, added to WebFront's embedded one: no local file or remote resource to load. WebFront serves it over
+/// loopback HTTP and carries calls over WebSocket. The image
 /// fills the window and the controls float over it. The page draws the pixels it receives, after expanding their runs
 /// when they come packed, and asks for the next image only once the previous one is on screen.
 inline constexpr std::string_view page = R"js(
@@ -40,7 +41,7 @@ inline constexpr std::string_view page = R"js(
         #host-loop .stats { left: 20px; top: 20px; max-width: calc(100% - 230px); padding: 10px 14px; font: 11px/1.5 ui-monospace, monospace;
                             white-space: pre-wrap; }
         #host-loop .status { left: 50%; bottom: 84px; transform: translateX(-50%); padding: 8px 14px; color: #ffd27d; }
-        #host-loop .status:empty { display: none; }
+        #host-loop .status:empty { padding: 0; border: 0; }
         #host-loop .chip, #host-loop select, #host-loop button { font: inherit; color: inherit; background: rgba(255, 255, 255, .08);
             border: 1px solid transparent; border-radius: 9px; padding: 7px 12px; cursor: pointer; }
         #host-loop select { appearance: none; -webkit-appearance: none; }
@@ -71,6 +72,7 @@ inline constexpr std::string_view page = R"js(
     const paused = chip("Pause", "paused");
     const stop = add(controls, "button", {name: "stop", textContent: "Stop the host"});
     const status = add(root, "p", {className: "status panel"});
+    status.setAttribute("role", "status");
     const context = canvas.getContext("2d");
 
     let device = "", cpuThreads = 0, wantCuda = false, stopping = false, sending = 0, settled = 0, requestedAt = 0;

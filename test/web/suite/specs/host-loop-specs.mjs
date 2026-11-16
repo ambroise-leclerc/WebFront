@@ -68,6 +68,10 @@ describe('Host-loop example', () => {
         canvas = root.querySelector('canvas');
         stats = root.querySelector('.stats');
         status = root.querySelector('.status');
+        expect(status.getAttribute('role')).toBe('status');
+        expect(status.textContent).toBe('');
+        expect(getComputedStyle(status).display).not.toBe('none');
+        expect(getComputedStyle(status).visibility).toBe('visible');
         await nextFrame(() => true, 'the first image');
     }, limit);
 

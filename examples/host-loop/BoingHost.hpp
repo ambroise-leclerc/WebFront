@@ -16,6 +16,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <set>
 #include <stdexcept>
 #include <stop_token>
 #include <string>
@@ -151,11 +152,11 @@ public:
     }
 
     /// `consumer` has shown its last image and wants the next one: it will receive exactly one, the first the loop
-    /// computes from now on. A consumer that asks again before receiving it still receives one. So at most one image
-    /// per consumer is on its way, and a slow consumer makes the loop compute less, never queue.
+    /// computes from now on. A duplicate before delivery starts still receives one image, including during rendering.
+    /// Delivery may request the next image immediately; a slow consumer makes the loop compute less, never queue.
     void request(std::uint64_t consumer, Deliver deliver, Displayed displayed = {}) {
         const std::scoped_lock lock{mutex};
-        if (ended)
+        if (ended || inFlight.contains(consumer))
             return;
         waiting.insert_or_assign(consumer, std::move(deliver));
         lastDisplayed = displayed;
@@ -175,11 +176,20 @@ public:
     /// not anyone is watching, and an image is computed only if a consumer waits for it. Returns whether one was.
     bool iterate(double elapsed) {
         std::map<std::uint64_t, Deliver> consumers;
+        struct ReleaseInFlight {
+            Host& host;
+            ~ReleaseInFlight() {
+                const std::scoped_lock lock{host.mutex};
+                host.inFlight.clear();
+            }
+        } release{*this};
         {
             const std::scoped_lock lock{mutex};
             frame.settings = settings;
             frame.revision = revision;
             consumers.swap(waiting);
+            for (const auto& [consumer, deliver] : consumers)
+                inFlight.insert(consumer);
         }
         if (!frame.settings.paused)
             seconds += elapsed;
@@ -194,8 +204,13 @@ public:
         if (!frame.settings.glass)
             pack(frame.pixels, frame.packed);
         frame.packMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-        for (const auto& [consumer, deliver] : consumers)
+        for (const auto& [consumer, deliver] : consumers) {
+            {
+                const std::scoped_lock lock{mutex};
+                inFlight.erase(consumer);  // delivery may immediately request the consumer's next image
+            }
             deliver(frame);
+        }
         return true;
     }
 
@@ -248,6 +263,7 @@ private:
     Settings                         settings;
     std::uint32_t                    revision{0};
     std::map<std::uint64_t, Deliver> waiting;
+    std::set<std::uint64_t>         inFlight;  // retained until this consumer's delivery begins
     Displayed                        lastDisplayed;
     bool                             stopping{false}, ended{false};
 

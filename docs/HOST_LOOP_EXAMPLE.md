@@ -7,7 +7,8 @@ loop ray-traces a red and white checkered ball that bounces and rolls above a gr
 sharp shadow and a reflection on the floor. On request the ball turns into tinted glass that reflects and refracts, and
 sends a coloured beam through each of its red squares: the beams show in a haze and light the floor. Every pixel is
 computed in C++, on the CPU or with CUDA; the page only draws a typed array of pixels on a canvas. No WebGL, no
-JavaScript renderer, no file and no network: the page is a string in the executable.
+JavaScript renderer: the page is a string in the executable and loads no local file or remote resource. WebFront
+serves it over loopback HTTP and carries calls over WebSocket.
 
 ![The example in its native window on a Jetson Orin Nano: the glass ball and its beams, computed with CUDA](images/host-loop-boing.jpg)
 
