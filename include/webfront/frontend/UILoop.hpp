@@ -108,6 +108,11 @@ private:
 
 namespace detail::uiloop {
 
+/// What a frontend does once the loop is ready to run, normally opening the page. `run` calls it after every step of its
+/// setup that can fail (the platform loop is acquired, its sources created) and before it attaches the executor: a loop that
+/// cannot run never opens the page, and what the loop owns is held from before the page opens until the loop leaves.
+using Launch = std::function<void()>;
+
 /// Closes the host when the loop leaves, also by exception.
 struct CloseGuard {
     UIExecutorHost& host;
@@ -134,7 +139,7 @@ struct LoopWindow {
     }
 };
 
-inline void run(UIExecutorHost& host, UILoopStop& stop) {
+inline void run(UIExecutorHost& host, UILoopStop& stop, const Launch& launch = {}) {
     const wchar_t* className = L"WebFrontUILoop";
     WNDCLASSW      windowClass{};
     windowClass.lpfnWndProc   = LoopWindow::procedure;
@@ -165,6 +170,8 @@ inline void run(UIExecutorHost& host, UILoopStop& stop) {
     if (!stopEvent.handle)
         throw std::runtime_error("UI loop: cannot create the stop event");
     // A wake that cannot be posted (a full message queue) throws: the host fails the operations that relied on it.
+    if (launch)
+        launch();
     host.attach([window] {
         if (!PostMessageW(window, drainMessage, 0, 0))
             throw std::runtime_error("UI loop: cannot wake the interface thread (the message queue is full)");
@@ -331,7 +338,7 @@ private:
     Id     defaultMode{};
 };
 
-inline void run(UIExecutorHost& host, UILoopStop& stop) {
+inline void run(UIExecutorHost& host, UILoopStop& stop, const Launch& launch = {}) {
     // AppKit belongs to the main thread: fail before initializing it or attaching the executor.
     if (!pthread_main_np())
         throw std::runtime_error("UI loop: the system browser's interface loop must run on the main thread on macOS");
@@ -360,6 +367,8 @@ inline void run(UIExecutorHost& host, UILoopStop& stop) {
         if (pump.ok)
             pump.wake();  // nextEvent only returns for an event: the source ran, the loop must also look at its flags
     };
+    if (launch)
+        launch();
     host.attach(signalLoop);
     CloseGuard guard{host, stop};
     // A stop request signals the same way: the loop reads the flag again after each turn, so a request made between the
@@ -447,7 +456,7 @@ private:
     }
 };
 
-inline void run(UIExecutorHost& host, UILoopStop& stop) {
+inline void run(UIExecutorHost& host, UILoopStop& stop, const Launch& launch = {}) {
     const auto& glib    = GLib::get();
     const auto  context = glib.contextDefault();
     // The wake watch lives in the default context, which the calling thread must own while the loop runs: no other thread
@@ -507,6 +516,8 @@ inline void run(UIExecutorHost& host, UILoopStop& stop) {
             glib.sourceRemove(source);
         }
     } remove{glib, source};
+    if (launch)
+        launch();
     host.attach([&dispatch] {
         dispatch.wake.signal();
     });
@@ -522,7 +533,7 @@ inline void run(UIExecutorHost& host, UILoopStop& stop) {
 
 #else
 
-inline void run(UIExecutorHost&, UILoopStop&) {
+inline void run(UIExecutorHost&, UILoopStop&, const Launch& = {}) {
     throw std::runtime_error("UI loop: this platform has no interface-thread loop");
 }
 

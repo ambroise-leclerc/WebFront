@@ -435,6 +435,15 @@ const Scenario linuxInterface{"The Linux interface loop coalesces wake-ups witho
     });
 }};
 
+namespace {
+std::atomic<int> pagesOpened{0};
+// Stops the loop too: were the page opened by a loop that cannot refuse, the scenario would end instead of waiting.
+void countingLauncher(const std::string&) {
+    ++pagesOpened;
+    BrowserWithUILoopFrontend::requestStop();
+}
+}  // namespace
+
 const Scenario linuxContextOwner{"The Linux interface loop refuses a default GLib context that another thread iterates", [] {
     using namespace webfront::frontend;
     const auto&        glib = detail::uiloop::GLib::get();
@@ -475,6 +484,19 @@ const Scenario linuxContextOwner{"The Linux interface loop refuses a default GLi
                 }
                 check(refused);
                 check(!host.executor().onUIThread());
+            });
+        });
+        when("the frontend opens its page", [&] {
+            pagesOpened = 0;
+            then("the context is refused before the page is opened, so no tab is left without a server", [&] {
+                bool refused = false;
+                try {
+                    BrowserWithUILoopFrontend::loop("127.0.0.1", "9002", "index.html", countingLauncher);
+                } catch (const std::runtime_error&) {
+                    refused = true;
+                }
+                check(refused);
+                check(pagesOpened == 0);
             });
         });
     });
