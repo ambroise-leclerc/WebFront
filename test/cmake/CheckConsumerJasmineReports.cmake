@@ -1,3 +1,5 @@
+# The policies of 3.31: without them the quoted "failed" below is read as the variable of that name (CMP0054).
+cmake_minimum_required(VERSION 3.31)
 foreach(mode pass pending broken)
     file(READ "${DIRECTORY}/ConsumerJasmine-${mode}/report.json" report)
     string(JSON status GET "${report}" status)

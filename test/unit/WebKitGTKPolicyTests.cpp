@@ -2,6 +2,14 @@
 #include <webfront/frontend/WebKitGTKPolicy.hpp>
 
 #include <array>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <string>
+
+#if defined(__linux__)
+    #include <unistd.h>
+#endif
 
 using namespace webfront::bdd;
 
@@ -95,3 +103,67 @@ const Scenario webKitGTKHandles{"WebKitGTK handles missing native navigation dia
         check(initialNavigationError("connection refused") == "initial navigation failed: connection refused; check the local server and page path");
     });
 }};
+
+#if defined(__linux__)
+namespace {
+// A stand-in for bubblewrap: a script with the given standard error and exit status.
+std::filesystem::path fakeLauncher(std::string_view name, std::string_view message, int status) {
+    const auto folder = std::filesystem::temp_directory_path() / ("webfront-launcher-" + std::to_string(getpid()));
+    std::filesystem::create_directories(folder);
+    const auto path = folder / name;
+    {
+        std::ofstream script(path);
+        script << "#!/bin/sh\n";
+        if (!message.empty())
+            script << "echo '" << message << "' >&2\n";
+        script << "exit " << status << "\n";
+    }
+    std::filesystem::permissions(path, std::filesystem::perms::owner_all);
+    return path;
+}
+}  // namespace
+
+const Scenario webKitGTKSandboxLauncher{"WebKitGTK opens its window where the system refuses the sandbox launcher", [] {
+    const auto* optOut = "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS";
+    unsetenv(optOut);
+    unsetenv("WEBFRONT_REQUIRE_WEBKIT_SANDBOX");
+    const auto refused = fakeLauncher("refused", "bwrap: setting up uid map: Permission denied", 1);
+    when("the launcher cannot set up its user namespace", [&] {
+        then("its message is returned", [&] {
+            const auto refusal = sandboxLauncherRefusal(refused);
+            require(refusal.has_value());
+            check(*refusal == "bwrap: setting up uid map: Permission denied");
+        });
+        if (!sandboxLauncherApplies())
+            return;  // inside a container WebKit does not use the launcher
+        then("the web process is launched without it, instead of letting WebKit abort the process", [&] {
+            const auto refusal = prepareSandboxLaunch(refused);
+            require(refusal.has_value());
+            check(*refusal == "bwrap: setting up uid map: Permission denied");
+            require(std::getenv(optOut) != nullptr);
+            check(std::string(std::getenv(optOut)) == "1");
+            check(!sandboxLauncherApplies());
+            unsetenv(optOut);
+        });
+        then("a deployment that requires the sandbox gets an initialization error", [&] {
+            setenv("WEBFRONT_REQUIRE_WEBKIT_SANDBOX", "1", 1);
+            requireThrows([&] { prepareSandboxLaunch(refused); },
+                          equals("WebKitGTK: the web process sandbox cannot start (bwrap: setting up uid map: Permission denied) and "
+                                 "WEBFRONT_REQUIRE_WEBKIT_SANDBOX is set; see docs/WEBKITGTK.md, \"Sandbox and user namespaces\""));
+            check(std::getenv(optOut) == nullptr);
+            unsetenv("WEBFRONT_REQUIRE_WEBKIT_SANDBOX");
+        });
+    });
+    when("the launcher works, is absent or fails for another reason", [&] {
+        then("nothing is concluded and WebKit keeps its sandbox", [&] {
+            check(!prepareSandboxLaunch(fakeLauncher("working", "", 0)));
+            check(std::getenv(optOut) == nullptr);
+            check(!sandboxLauncherRefusal(fakeLauncher("working", "", 0)));
+            check(!sandboxLauncherRefusal(fakeLauncher("noisy", "warning: namespace already shared", 0)));
+            check(!sandboxLauncherRefusal(fakeLauncher("other", "bwrap: Unknown option --ro-bind", 1)));
+            check(!sandboxLauncherRefusal(refused.parent_path() / "missing"));
+        });
+    });
+    std::filesystem::remove_all(refused.parent_path());
+}};
+#endif

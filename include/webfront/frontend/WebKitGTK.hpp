@@ -168,6 +168,16 @@ inline void requireMainThread() {
 
 inline void initialize() {
     requireMainThread();
+    // Once per process and before GTK starts its threads: the launch switch is an environment variable.
+    static const bool sandboxPrepared = [] {
+        if (const auto refusal = prepareSandboxLaunch())
+            std::fprintf(stderr,
+                         "WebFront: this system refuses WebKitGTK's web process sandbox (%s); the window opens without it. "
+                         "Display only content you trust (docs/WEBKITGTK.md, \"Sandbox and user namespaces\").\n",
+                         refusal->c_str());
+        return true;
+    }();
+    (void)sandboxPrepared;
     if (!api().init())
         throw std::runtime_error("WebKitGTK: cannot open a display; set DISPLAY or WAYLAND_DISPLAY for a working desktop, or run under xvfb-run -a");
 }

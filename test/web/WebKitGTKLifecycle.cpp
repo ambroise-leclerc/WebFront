@@ -1,6 +1,7 @@
 #include <webfront/system/NativeFS.hpp>
 #include <webfront/WebFront.hpp>
 
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <dlfcn.h>
@@ -192,7 +193,15 @@ void pollFailure() {
 
 std::string readFile(const std::filesystem::path& path) {
     std::ifstream stream(path, std::ios::binary);
-    return {std::istreambuf_iterator<char>(stream), {}};
+    if (!stream)
+        throw std::runtime_error("Cannot open downloaded file: " + path.string());
+    std::string result;
+    std::array<char, 4096> buffer;
+    while (stream.read(buffer.data(), buffer.size()) || stream.gcount() != 0)
+        result.append(buffer.data(), static_cast<std::size_t>(stream.gcount()));
+    if (stream.bad())
+        throw std::runtime_error("Cannot read downloaded file: " + path.string());
+    return result;
 }
 
 void download() {

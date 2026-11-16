@@ -1,0 +1,367 @@
+# Jetson Orin qualification (#528)
+
+WebFront uses the distribution's WebKitGTK 6.0 for a native Linux window. The
+qualification below is on an **Orin Nano Super 8 GB**, not on every Orin board.
+NX and AGX use the same aarch64 software path, but have not been tested here.
+CUDA interoperability and a locked-down kiosk session are outside this qualification.
+
+**Current result (#596):** a WebFront application builds and opens its native
+window on this installation with no change to the operating system. Ubuntu 24.04
+refuses WebKit's bubblewrap sandbox here; the frontend detects the refusal, opens
+the window without that sandbox and says so on standard error
+([WebKitGTK, "Sandbox and user namespaces"](WEBKITGTK.md#sandbox-and-user-namespaces)).
+No AppArmor profile was loaded and no sysctl was changed. The DMA-BUF renderer
+was not disabled. Canvas/WebGL, real portal dialogs, fullscreen Life and Wayland
+remain unqualified on this board (#528).
+
+## Identify the installation
+
+Run these on the board before comparing results. A JetPack marketing version alone
+does not identify the kernel, browser engine or compiler actually used.
+
+```bash
+cat /proc/device-tree/model
+cat /etc/nv_tegra_release
+cat /etc/os-release
+uname -a
+g++ --version
+cmake --version
+pkg-config --modversion webkitgtk-6.0
+printenv XDG_SESSION_TYPE DISPLAY WAYLAND_DISPLAY
+```
+
+The installation inspected on 2026-11-16 after the JetPack 7 upgrade reports:
+
+| Component | Observed version |
+| --- | --- |
+| Board | NVIDIA Jetson Orin Nano Engineering Reference Developer Kit Super, 7.4 GiB RAM |
+| L4T | R39, revision 2.1 (`nvidia-l4t-core` 39.2.1-20260806224157) |
+| OS / kernel | Ubuntu 24.04.5 / 6.8.12-1021-tegra, aarch64 |
+| Compiler | Ubuntu GCC 13.3.0-6ubuntu2~24.04.1 |
+| CMake | System 3.28.3; qualification uses 3.31.10 |
+| WebKitGTK / GTK | 2.52.6 / 4.14.5 |
+| Portal | xdg-desktop-portal 1.18.4, GNOME backend 46.2 |
+| Desktop | X11, `DISPLAY=:1` |
+
+The `nvidia-jetpack` metapackage is absent. These results identify L4T R39.2.1;
+they do not independently establish a JetPack 7.2 package set.
+
+## Evidence from the first pass (before #596)
+
+The table below is the state that #596 started from: every native launch failed.
+The results after the correction are in [Native launch restored](#native-launch-restored-596).
+
+Source baseline: `develop` at `08bec61`, 2026-11-16. Builds use GCC 13.3, Release,
+CEF off and warnings enabled without `-Werror`.
+
+| Check | Result |
+| --- | --- |
+| Examples-only configuration with WebKitGTK enabled | Passed, 11.35 s including dependency setup |
+| HelloWorld clean rebuild, without tests | Passed, 69.83 s wall time (`--parallel 1`, no compiler cache) |
+| HelloWorld, host loop, console Life, developer Life and React Life compilation | Passed |
+| Complete CEF-off build with WebKitGTK tests enabled | Passed; completed with one compiler process after the memory-pressure stop |
+| HelloWorld in the system browser | Launched in the existing Brave session; fallback page returned HTTP 200 and a Brave-to-server connection was established; Enter stopped the application with exit 0 |
+| CTest `-L fast --parallel 2` | **553/553 passed**, 18.70 s wall time |
+| Complete CTest `--parallel 2` | **605 passed, 40 failed, 60 not run**, 705 total, 194.55 s; exit status 8 |
+| Native X11 `frontend_lifecycle native-window` | Failed before navigation: bubblewrap UID map denied |
+| Controlled minimal native launch: #558 head `3dcdf1d` vs current `08bec61` | Both exited 133 under Xvfb with the same bubblewrap UID-map error on the upgraded installation |
+| Xvfb `WebKitGTKLifecycle-ui-executor`, `-native-window`, `-second-open` | All three failed with the same sandbox launch error |
+| Repository layout, newcomer documentation, agent guidance and minimal asset checks | Passed |
+| Manual graphics spec | JavaScriptCore syntax check passed; browser execution not run |
+| Tegra acceleration / DMA-BUF workaround / real portal / fullscreen / Wayland | Not qualified |
+
+The examples-only configuration was timed with the shell's `time` builtin.
+The HelloWorld figure is a subsequent clean rebuild timed with `/usr/bin/time -p`;
+dependencies were already downloaded and one compiler from the contributor build
+was also running. It is an observed board measurement, not a fresh-flash total
+or a performance guarantee.
+The CEF result from JetPack 6 below is historical and was not repeated in this pass.
+All 100 failed or blocked cases carry the `web-integration` label. Every one of
+the 40 executed failures contains the bubblewrap launch error; the other 60
+depend on failed fixtures. All 592 cases outside `web-integration` passed.
+
+## Native launch restored (#596)
+
+Same board, same installation, same build directory and options as above
+(Release, CEF off, WebKitGTK tests enabled, GCC 13.3, CMake 3.31.10), rebuilt with
+the #596 branch on 2026-11-16. No AppArmor profile, sysctl or package was changed,
+and `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS` was absent from the environment of
+every command: each test process set it for itself after bubblewrap's refusal and
+printed the notice described under [Ubuntu 24.04 user namespaces](#ubuntu-2404-user-namespaces).
+
+| Check | Result |
+| --- | --- |
+| Unit scenario "WebKitGTK opens its window where the system refuses the sandbox launcher" | Passed (15 assertions) |
+| `frontend_lifecycle native-window` and `second-open` under Xvfb (X11, Cairo, software rendering) | Both exit 0 (133 before) |
+| `frontend_lifecycle native-window` on the real X11 desktop, without renderer overrides | Exit 0 (bubblewrap error before) |
+| Same case with `WEBFRONT_REQUIRE_WEBKIT_SANDBOX=1` | Exit 1 with the initialization error naming bubblewrap's message, no abort |
+| CTest `-L web-integration --parallel 2` | **113/113 passed**, 418 s; includes the WebKitGTK adapter/lifecycle cases, the Jasmine suite and the developer journeys |
+| Complete CTest `--parallel 2` | **705 passed, 1 failed** of 706, 506 s: `ConsumerJasmineReports`, a defect of the check script under CMake 3.31 (CMP0054) that the blocked fixtures had hidden; corrected in #596 and passing in the selection above |
+
+`AutomationMcpWatchdog` blocks a renderer on purpose and forces its owner to
+exit; on this desktop each run leaves an Apport report for `WebKitWebProcess`
+(SIGTRAP) in `/var/crash`. Running that case alone reproduces it. The process
+peaked at 321 MB resident and the kernel logged no out-of-memory kill: it is the
+test's forced exit, not a memory failure.
+
+What this does **not** establish: a sandboxed web process on this installation
+(none ran), Tegra acceleration, portals, Wayland and fullscreen, which remain in
+#528. The JetPack 6 results of #558 below were obtained with the sandbox active
+and are not replaced by these.
+
+## Prerequisites
+
+On this Ubuntu 24.04 installation the system GCC 13 is sufficient. Keep the
+default compiler for the baseline. Install the native engine and test display:
+
+```bash
+sudo apt-get install -y libwebkitgtk-6.0-dev pkg-config xvfb
+```
+
+WebFront requires CMake **3.31 or newer**; Ubuntu's 3.28.3 is too old. An isolated
+installation avoids replacing the system tool. Python's venv support is needed
+(`python3-venv` if missing):
+
+```bash
+python3 -m venv /tmp/webfront-528-tools
+/tmp/webfront-528-tools/bin/pip install cmake==3.31.10
+export PATH="/tmp/webfront-528-tools/bin:$PATH"
+cmake --version
+```
+
+This temporary tool installation must be recreated after `/tmp` is cleared.
+For a persistent installation, use a venv in your home directory as described in
+the [README](../README.md#build-tools-on-lts-distributions).
+Configuration downloads dependencies; the developer environment also downloads
+its pinned tools and packages on first use. No Node.js installation is needed.
+
+JetPack 6 evidence remains separate. The initial #528 pass recorded CEF 115/115
+and CEF-off 570/571 (the old Git check was subsequently corrected by #527).
+The later [draft PR #558](https://github.com/ambroise-leclerc/WebFront/pull/558)
+records **28/28 WebKitGTK adapter/lifecycle cases and 7/7 Jasmine/fixture cases
+passing under Xvfb**, on Ubuntu 22.04.5, L4T R36.4.7, GCC 13.4 and WebKitGTK
+2.50.4. Its source was `a238090` plus a GCC 13 file-reader fix, before rebasing.
+Real-screen acceleration, portals and fullscreen remained untested there.
+PR #558 is not merged: its validation note and file-reader fix were absent from
+the `develop` baseline of the first JetPack 7 pass. #596 carries that fix
+(`readFile` in `test/web/WebKitGTKLifecycle.cpp`) and this record of its results. These prior successful
+WebKitGTK tests must not be described as never having been run.
+
+The JetPack 7 result is a loss of native-launch functionality relative to that
+JetPack 6 evidence. The present error identifies a sandbox startup failure on
+the upgraded system; it does not establish which WebFront revision, runtime or
+policy change caused the difference. A subsequent controlled comparison compiled
+the same minimal `WebFrontWithFrontend<WebKitGTKFrontend>` application against
+the complete headers at #558 head `3dcdf1d8774b17dcd29895ca6ab28c206d1964d5`
+and current `08bec61`. Both used GCC 13.3, `-O0`, the same configured
+stdnet/stdexec headers, and Xvfb with X11/Cairo/software rendering, without the
+WebKit sandbox escape hatch. Both exited **133** with
+`bwrap: setting up uid map: Permission denied` and a failed dbus-proxy launch.
+No AppArmor settings were changed. The stdnet revision is identical in the two
+source trees. This comparison demonstrates that the #558 source also fails to
+launch on the upgraded system; reverting to that PR alone does not restore the
+previous working configuration. It is a minimal startup check, not a repeat of
+its complete qualification, and its rebased head differs from the historical
+`a238090` used for the original measurements.
+
+The 40 failures and 60 blocked tests are consequences of that common launch
+error, not evidence of 100 independent regressions.
+
+## Build examples first
+
+From the repository root, without the contributor test suite:
+
+```bash
+cmake -S . -B build-528-quick -DCMAKE_BUILD_TYPE=Release \
+  -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=ON \
+  -DWEBFRONT_ENABLE_TESTING=OFF -DWARNINGS_AS_ERRORS=OFF
+cmake --build build-528-quick --target HelloWorld --parallel 2
+./build-528-quick/examples/HelloWorld
+```
+
+HelloWorld deliberately opens the system browser. Life selects the native engine
+when it is enabled and a desktop session exists:
+
+```bash
+cmake --build build-528-quick --target WebFrontLifeReact --parallel 2
+mkdir life-react-project
+cp -n examples/life/react/main.tsx examples/life/react/webfront.project.json life-react-project/
+./build-528-quick/examples/WebFrontLifeReact life-react-project
+```
+
+Keep the application's terminal output: it reports a browser fallback if no native
+session is available. In the developer terminal, install the example's dependencies
+with `wf install`, then run `wf dev main.tsx`.
+The configured registry must provide `@webfront/react@0.1.0`, which is not yet
+published to npm. For evaluation from this checkout, prepare the contributor
+build below and its local mirror before launching Life:
+
+```bash
+ctest --test-dir build-528-webkitgtk -R '^TestRegistry$' --output-on-failure --no-tests=error
+cp -R build-528-webkitgtk/test/web/self-build-project/build-registry life-react-project/registry
+python3 - <<'PY'
+import json
+from pathlib import Path
+path = Path('life-react-project/webfront.project.json')
+manifest = json.loads(path.read_text())
+manifest['registry'] = '/registry/'
+path.write_text(json.dumps(manifest, indent=2) + '\n')
+PY
+```
+
+Use a fresh project directory for this copy. The mirror is served from this
+development project's document root. The [React guide](REACT.md) describes the
+C++ panel and coordinated unmount. The ordinary Life starter in the README does
+not need the optional `@webfront/react` adapter or this local mirror.
+
+Use at most **two compiler processes on 8 GB**. The earlier JetPack 6 complete
+build took about 35 minutes and used swap; a single Jasmine translation unit used
+2.2 GB. On this JetPack 7 installation, compiling the unit-test unity file and
+Jasmine simultaneously reached approximately 2.56 and 2.15 GB resident memory,
+with the desktop still open; all 2 GB of swap filled. The build was stopped before
+an out-of-memory failure and resumed with **`--parallel 1` for the complete test
+build**. Two processes remain suitable for the examples observed here;
+`--parallel 4` is not qualified. `WARNINGS_AS_ERRORS=OFF` follows the GCC 13
+S2 profile and avoids treating libstdc++ diagnostics as a release gate; it does
+not disable warnings. See [ADR-022](adr/ADR-022-profils-et-niveaux-de-support.md).
+
+## Contributor qualification
+
+This CEF-off build also exercises the native engine. Keep the complete test run
+in addition to the selected browser pass:
+
+```bash
+cmake -S . -B build-528-webkitgtk -DCMAKE_BUILD_TYPE=Release \
+  -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=ON \
+  -DWEBFRONT_ENABLE_TESTING=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK \
+  -DWARNINGS_AS_ERRORS=OFF
+cmake --build build-528-webkitgtk --parallel 1
+ctest --test-dir build-528-webkitgtk -L web-integration \
+  --output-on-failure --no-tests=error --parallel 2
+ctest --test-dir build-528-webkitgtk --output-on-failure --parallel 2
+```
+
+The registered WebKitGTK tests use Xvfb, `GSK_RENDERER=cairo` and
+`LIBGL_ALWAYS_SOFTWARE=1`. Passing them demonstrates bridge, developer tooling and
+window lifecycle compatibility; it does **not** demonstrate NVIDIA acceleration.
+See [WebKitGTK](WEBKITGTK.md) for display and sandbox requirements. On this
+installation every one of these windows runs without WebKit's sandbox, as the
+notice printed by each test process states; the results below qualify the launch,
+the bridge and the lifecycle, not a sandboxed web process.
+
+### Ubuntu 24.04 user namespaces
+
+On the inspected installation the first native launches failed before navigation:
+`bwrap: setting up uid map: Permission denied`, followed by
+`Failed to fully launch dbus-proxy`. `unshare -Ur true` also failed writing
+`uid_map`; `kernel.apparmor_restrict_unprivileged_userns` was `1` and
+`kernel.unprivileged_userns_clone` was `1`.
+`unshare -U sh -c 'cat /proc/self/attr/current'` reported
+`unprivileged_userns (enforce)`: the namespace enters Ubuntu's restrictive
+AppArmor profile. The installed profile contains `audit deny capability,`.
+
+Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor. Its
+[release notes](https://documentation.ubuntu.com/release-notes/24.04/)
+describe allowing an application with a named `flags=(unconfined)` profile and
+the `userns,` rule.
+
+This is not a universal WebFront or Ubuntu limitation. Starting with Ubuntu
+25.04, the distribution introduced a system `bwrap-userns-restrict` profile
+which lets bubblewrap establish a sandbox, then strips capabilities from the
+programs inside it ([official release notes](https://documentation.ubuntu.com/release-notes/25.04/#apparmor-profile-for-bwrap)).
+That integration can account for native windows working without per-application
+configuration on a newer Ubuntu installation. On this board, AppArmor
+`4.0.1really4.0.1-0ubuntu0.24.04.9` has no loaded `bwrap` profile and neither
+`/etc/apparmor.d/bwrap-userns-restrict` nor `/etc/apparmor.d/bwrap` exists.
+The owner's Ubuntu 26.04 machine was not inspected in this pass, so its exact
+effective policy is not asserted here.
+
+### What WebFront does about it (#596)
+
+An unprivileged process cannot grant itself the namespace, and WebKitGTK 6.0 has
+no API to start its web process any other way. The frontend therefore tries
+bubblewrap before creating the window; when the namespace is refused it sets
+WebKit's own `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` for its process, prints
+the notice below once and opens the window:
+
+```text
+WebFront: this system refuses WebKitGTK's web process sandbox (bwrap: setting up uid map: Permission denied); the window opens without it. Display only content you trust (docs/WEBKITGTK.md, "Sandbox and user namespaces").
+```
+
+This is a WebFront change, not a system correction: the policy of the
+installation is untouched. `WEBFRONT_REQUIRE_WEBKIT_SANDBOX=1` restores the strict
+behavior (an initialization error, and the system browser with
+`NativeOrBrowserFrontend`).
+
+### Keeping the sandbox: an administrator's option, not executed here
+
+A deployment that must keep the web process sandboxed needs the administrator to
+allow bubblewrap. Ubuntu 24.04 ships the profile that later releases enable, in
+the `apparmor-profiles` package (not installed on this board), disabled by default:
+`/usr/share/apparmor/extra-profiles/bwrap-userns-restrict`. Its content was read
+from the package of version `4.0.1really4.0.1-0ubuntu0.24.04.9` without installing
+it: `bwrap` may create user namespaces, and what it starts runs under a stacked
+`unpriv_bwrap` profile that denies capabilities. The alternative is the mechanism
+Ubuntu 24.04 uses for its own applications (`/etc/apparmor.d/epiphany` on this
+board): a named `flags=(unconfined)` profile with the `userns,` rule, attached to
+one executable's absolute path.
+
+**Neither was loaded or tested on this board**: no result here establishes that
+WebKitGTK 2.52.6 starts under either profile. Both are system policy changes to
+be reviewed by whoever administers the machine; WebFront neither needs nor
+performs them.
+
+## Real-display graphics probe
+
+The manual spec uses the existing consumer test application, checks Canvas 2D and
+WebGL pixel readback, and captures the composed page. It is intentionally not
+registered in the software-rendered CTest suite. Run from the repository root
+after the test build, on the desktop being qualified:
+
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
+root = Path.cwd()
+build = root / 'build-528-webkitgtk'
+out = build / 'jetson-graphics'
+out.mkdir(exist_ok=True)
+config = {
+    'files': [str(build / 'test/web/webfront-jasmine/package/package/lib/jasmine-core/jasmine.js'),
+              str(root / 'test/web/jasmine-consumer/graphics.manual.spec.js')],
+    'report': str(out / 'report.json'),
+    'captures': str(out / 'captures'),
+}
+(out / 'config.json').write_text(json.dumps(config))
+PY
+env -u GSK_RENDERER -u LIBGL_ALWAYS_SOFTWARE -u WEBKIT_DISABLE_DMABUF_RENDERER \
+  GDK_BACKEND=x11 \
+  XDG_DATA_HOME="$PWD/build-528-webkitgtk/jetson-graphics/data" \
+  XDG_CACHE_HOME="$PWD/build-528-webkitgtk/jetson-graphics/cache" \
+  WEBFRONT_JASMINE_CONFIG="$PWD/build-528-webkitgtk/jetson-graphics/config.json" \
+  timeout 60s ./build-528-webkitgtk/test/web/jasmine_consumer \
+  "$PWD/test/web/jasmine-consumer"
+cat build-528-webkitgtk/jetson-graphics/report.json
+```
+
+Inspect `jetson-graphics/captures/graphics.png`: it must show a red Canvas 2D square,
+a green WebGL square and the renderer name. Successful readback alone cannot
+prove that the native window presents those pixels. A software renderer name
+does not qualify NVIDIA acceleration. If the default path fails, preserve its
+report and stderr, then repeat with `WEBKIT_DISABLE_DMABUF_RENDERER=1` instead of
+unsetting that variable; record this as a workaround, not a default requirement.
+For Wayland repeat in a real Wayland session with `GDK_BACKEND=wayland` and a new
+output/profile directory. Setting that variable inside X11 does not qualify Wayland.
+
+For the real parented dialog and portal export, build and run the existing manual
+probe (it reports both checked assertions and points requiring visual confirmation):
+
+```bash
+cmake --build build-528-webkitgtk --target native_integration_manual --parallel 2
+./build-528-webkitgtk/test/web/native_integration_manual embedded 15000
+```
+
+The fullscreen/kiosk launch, Wayland rendering, and real dialog appearance require
+separate observations. `WindowOptions` currently exposes title and initial size,
+not a fullscreen or kiosk option. A desktop window-manager fullscreen action does
+not by itself provide a kiosk session or prevent leaving the application.

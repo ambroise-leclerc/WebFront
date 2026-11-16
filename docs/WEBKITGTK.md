@@ -2,6 +2,9 @@
 
 WebKitGTKFrontend is an optional GTK 4 embedded window using the distribution's
 WebKitGTK 6.0 runtime. It never changes the system-browser default.
+For NVIDIA Jetson Orin, see the [Jetson qualification guide](JETSON.md), including
+the separate real-display Canvas/WebGL probe; Xvfb software rendering does not
+qualify the Tegra GPU.
 
 ```cpp
 #include <webfront/WebFront.hpp>
@@ -86,13 +89,61 @@ CTest runs Jasmine and all shared lifecycle cases under Xvfb, plus missing-displ
 worker-thread, repeated-show, HTTP-error, pre-run failure and profile-permission
 cases. Native-close schedules a GTK timeout, checks that the loop is running and
 then closes the real window. Errors recorded before `run()` are also propagated. Software rendering
-uses `GSK_RENDERER=cairo` and `LIBGL_ALWAYS_SOFTWARE=1`. WebKit's sandbox uses bubblewrap
-and user namespaces. Restricted containers may reject its namespace setup. For a
-trusted, isolated CI runner only, `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` is an
-upstream diagnostic escape hatch; the library never sets it. Prefer enabling user
-namespaces. Do not use that escape hatch for browsing untrusted content.
+uses `GSK_RENDERER=cairo` and `LIBGL_ALWAYS_SOFTWARE=1`.
 
 Adapter-specific CTest names use `WebKitGTKAdapter-<case>`; the
 `WebKitGTKLifecycle-<case>` names identify the shared lifecycle suite. Toolkit-free
-unit tests cover the policy decision table, null error diagnostics and preserving
-the first failure when a timeout or callback reports a later error.
+unit tests cover the policy decision table, null error diagnostics, preserving
+the first failure when a timeout or callback reports a later error, and the
+sandbox launcher check described below.
+
+## Sandbox and user namespaces
+
+WebKit starts its web process through bubblewrap (`/usr/bin/bwrap`), which needs an
+unprivileged user namespace. Some systems refuse one: Ubuntu 24.04 restricts user
+namespaces through AppArmor and ships no profile for `bwrap`, and restricted
+containers may reject the namespace setup. WebKit then aborts the whole process
+before any navigation (`bwrap: setting up uid map: Permission denied`, exit 133).
+
+`WebKitGTKFrontend::initialize()` therefore tries the launcher once per process
+before creating the window (`bwrap --ro-bind / / bwrap --version`). When
+bubblewrap reports that it cannot set up its namespace, WebFront sets WebKit's own
+switch, `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1`, for this process and prints
+once on standard error:
+
+```text
+WebFront: this system refuses WebKitGTK's web process sandbox (bwrap: setting up uid map: Permission denied); the window opens without it. Display only content you trust (docs/WEBKITGTK.md, "Sandbox and user namespaces").
+```
+
+**An application therefore builds and opens its native window on such a system
+with no change to the operating system.** This is the only case in which the
+library sets that variable: where bubblewrap works, the sandbox is kept, and the
+library never changes system policy.
+
+What this means: the web process then runs with the rights of the application,
+like the application's own C++ code. The page of a WebFront application is its own
+interface, served by its own process, and the content policy keeps top-level
+navigation on that origin; that policy does not cover HTTP(S) iframes and
+subresources. An application that displays content it does not control should not
+rely on this mode:
+
+- set `WEBFRONT_REQUIRE_WEBKIT_SANDBOX=1` in its environment: a refused sandbox is
+  then an initialization error (`std::runtime_error` carrying bubblewrap's
+  message), which `frontend::NativeOrBrowserFrontend` turns into the system
+  browser;
+- or let the administrator allow bubblewrap. Ubuntu 25.04 and later load a
+  `bwrap-userns-restrict` AppArmor profile that lets bubblewrap set up a sandbox
+  and strips capabilities from what runs inside it
+  ([release notes](https://documentation.ubuntu.com/release-notes/25.04/#apparmor-profile-for-bwrap));
+  Ubuntu 24.04 ships the same profile, disabled, in the `apparmor-profiles`
+  package (`/usr/share/apparmor/extra-profiles/bwrap-userns-restrict`). The
+  [Jetson guide](JETSON.md#ubuntu-2404-user-namespaces) records what was observed
+  on such an installation.
+
+The check is skipped where WebKit does not use bubblewrap (Flatpak, Snap, Docker
+or Podman containers, or the variable already set), when `/usr/bin/bwrap` is
+absent, and when bubblewrap fails for a reason other than its namespace; WebKit
+then reports its own error.
+
+On a trusted, isolated CI runner the variable can also be set by hand, as this
+project's workflows do. Do not set it for browsing untrusted content.
