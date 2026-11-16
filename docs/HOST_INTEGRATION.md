@@ -59,7 +59,10 @@ for (std::int32_t tick = 0; !stopRequested; ++tick) {  // the host's own loop
 app.shutdown();                              // stops and joins the server
 ```
 
-[`examples/host-loop/HostLoop.cpp`](../examples/host-loop/HostLoop.cpp) is this program, complete (`WebFrontHostLoop`).
+[`examples/host-loop/`](../examples/host-loop/HostLoop.cpp) (`WebFrontHostLoop`) is this pattern with a real workload: its
+loop ray-traces a Boing Ball on the CPU or with CUDA and sends each image to the page that asked for it. It follows this
+path with the system browser and [the third one](#3-the-interface-owns-the-main-thread-show-and-requestclose) with a
+native window; see [the host-loop example](HOST_LOOP_EXAMPLE.md).
 
 - **Readiness.** After `start()` returns the server is listening (`app.port()`); a browser has connected when the
   `onUIStarted` handler or a `subscribeUIStarted` subscriber runs. WebFront cannot observe that the external browser

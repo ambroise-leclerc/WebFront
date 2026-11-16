@@ -23,9 +23,10 @@ add_executable(HelloWorld hello-world/HelloWorld.cpp)
 target_link_libraries(HelloWorld PRIVATE WebFront WebFront_warnings WebFront_options)
 webfront_setup_frontends_for_target(HelloWorld)
 
-# An existing application keeps its own loop: start() returns at once (docs/HOST_INTEGRATION.md).
+# An existing application keeps its own loop (docs/HOST_INTEGRATION.md): a ray-traced Boing Ball, computed on the CPU
+# or, when a CUDA toolkit was found, on the GPU (cmake/BoingCuda.cmake). See docs/HOST_LOOP_EXAMPLE.md.
 add_executable(WebFrontHostLoop host-loop/HostLoop.cpp)
-target_link_libraries(WebFrontHostLoop PRIVATE WebFront WebFront_warnings WebFront_options)
+target_link_libraries(WebFrontHostLoop PRIVATE WebFront WebFront_boing WebFront_warnings WebFront_options)
 webfront_setup_frontends_for_target(WebFrontHostLoop)
 
 # The simulation can be explored before adding a UI or enabling a native engine.
