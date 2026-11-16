@@ -1,4 +1,5 @@
 #include "Bdd.hpp"
+#include "TemporaryDirectory.hpp"
 #include <webfront/frontend/WebKitGTKPolicy.hpp>
 
 #include <array>
@@ -106,64 +107,118 @@ const Scenario webKitGTKHandles{"WebKitGTK handles missing native navigation dia
 
 #if defined(__linux__)
 namespace {
-// A stand-in for bubblewrap: a script with the given standard error and exit status.
-std::filesystem::path fakeLauncher(std::string_view name, std::string_view message, int status) {
-    const auto folder = std::filesystem::temp_directory_path() / ("webfront-launcher-" + std::to_string(getpid()));
-    std::filesystem::create_directories(folder);
-    const auto path = folder / name;
-    {
-        std::ofstream script(path);
-        script << "#!/bin/sh\n";
-        if (!message.empty())
-            script << "echo '" << message << "' >&2\n";
-        script << "exit " << status << "\n";
+class SandboxEnvironment {
+    std::optional<std::string>        optOut   = read("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS");
+    std::optional<std::string>        required = read("WEBFRONT_REQUIRE_WEBKIT_SANDBOX");
+    static std::optional<std::string> read(const char* name) {
+        if (const auto* value = std::getenv(name))
+            return std::string(value);
+        return std::nullopt;
     }
+    static void restore(const char* name, const std::optional<std::string>& value) {
+        if (value)
+            setenv(name, value->c_str(), 1);
+        else
+            unsetenv(name);
+    }
+
+public:
+    SandboxEnvironment() {
+        unsetenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS");
+        unsetenv("WEBFRONT_REQUIRE_WEBKIT_SANDBOX");
+    }
+    ~SandboxEnvironment() {
+        restore("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", optOut);
+        restore("WEBFRONT_REQUIRE_WEBKIT_SANDBOX", required);
+    }
+};
+
+std::filesystem::path fakeLauncher(const std::filesystem::path& folder, std::string_view name, std::string_view message, int status) {
+    const auto    path = folder / name;
+    std::ofstream script(path);
+    script << "#!/bin/sh\n";
+    if (!message.empty())
+        script << "echo '" << message << "' >&2\n";
+    script << "exit " << status << "\n";
+    script.close();
     std::filesystem::permissions(path, std::filesystem::perms::owner_all);
     return path;
 }
+constexpr const char* sandboxOptOut = "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS";
 }  // namespace
 
-const Scenario webKitGTKSandboxLauncher{"WebKitGTK opens its window where the system refuses the sandbox launcher", [] {
-    const auto* optOut = "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS";
-    unsetenv(optOut);
-    unsetenv("WEBFRONT_REQUIRE_WEBKIT_SANDBOX");
-    const auto refused = fakeLauncher("refused", "bwrap: setting up uid map: Permission denied", 1);
-    when("the launcher cannot set up its user namespace", [&] {
-        then("its message is returned", [&] {
-            const auto refusal = sandboxLauncherRefusal(refused);
-            require(refusal.has_value());
-            check(*refusal == "bwrap: setting up uid map: Permission denied");
-        });
-        if (!sandboxLauncherApplies())
-            return;  // inside a container WebKit does not use the launcher
-        then("the web process is launched without it, instead of letting WebKit abort the process", [&] {
-            const auto refusal = prepareSandboxLaunch(refused);
-            require(refusal.has_value());
-            check(*refusal == "bwrap: setting up uid map: Permission denied");
-            require(std::getenv(optOut) != nullptr);
-            check(std::string(std::getenv(optOut)) == "1");
-            check(!sandboxLauncherApplies());
-            unsetenv(optOut);
-        });
-        then("a deployment that requires the sandbox gets an initialization error", [&] {
-            setenv("WEBFRONT_REQUIRE_WEBKIT_SANDBOX", "1", 1);
-            requireThrows([&] { prepareSandboxLaunch(refused); },
-                          equals("WebKitGTK: the web process sandbox cannot start (bwrap: setting up uid map: Permission denied) and "
-                                 "WEBFRONT_REQUIRE_WEBKIT_SANDBOX is set; see docs/WEBKITGTK.md, \"Sandbox and user namespaces\""));
-            check(std::getenv(optOut) == nullptr);
-            unsetenv("WEBFRONT_REQUIRE_WEBKIT_SANDBOX");
-        });
-    });
-    when("the launcher works, is absent or fails for another reason", [&] {
-        then("nothing is concluded and WebKit keeps its sandbox", [&] {
-            check(!prepareSandboxLaunch(fakeLauncher("working", "", 0)));
-            check(std::getenv(optOut) == nullptr);
-            check(!sandboxLauncherRefusal(fakeLauncher("working", "", 0)));
-            check(!sandboxLauncherRefusal(fakeLauncher("noisy", "warning: namespace already shared", 0)));
-            check(!sandboxLauncherRefusal(fakeLauncher("other", "bwrap: Unknown option --ro-bind", 1)));
-            check(!sandboxLauncherRefusal(refused.parent_path() / "missing"));
-        });
-    });
-    std::filesystem::remove_all(refused.parent_path());
-}};
+const Scenario webKitGTKDevelopment{"WebKitGTK development opens without a sandbox or a launcher", [] {
+                                        const SandboxEnvironment                 environment;
+                                        const webfront::test::TemporaryDirectory folder;
+                                        then("the development policy works even without bubblewrap and overrides the upstream value 0", [&] {
+                                            setenv(sandboxOptOut, "0", 1);
+                                            require(prepareSandboxLaunch(folder.path() / "missing", SandboxMode::development).has_value());
+                                            check(std::string(std::getenv(sandboxOptOut)) == "1");
+                                            check(!sandboxLauncherApplies());
+                                        });
+                                    }};
+
+const Scenario webKitGTKDistributionConflict{"WebKitGTK distribution refuses an inherited sandbox opt-out", [] {
+                                                 const SandboxEnvironment                 environment;
+                                                 const webfront::test::TemporaryDirectory folder;
+                                                 then("the distribution build cannot be weakened by its environment", [&] {
+                                                     setenv(sandboxOptOut, "1", 1);
+                                                     setenv("WEBFRONT_REQUIRE_WEBKIT_SANDBOX", "0", 1);
+                                                     requireThrows([&] {
+                                                         prepareSandboxLaunch(folder.path() / "missing", SandboxMode::distribution);
+                                                     });
+                                                     check(std::string(std::getenv(sandboxOptOut)) == "1");
+                                                 });
+                                                 then("the legacy requirement also rejects the contradictory environment in development", [&] {
+        setenv(sandboxOptOut, "1", 1);
+                                                     setenv("WEBFRONT_REQUIRE_WEBKIT_SANDBOX", "1", 1);
+                                                     requireThrows([&] {
+                                                         prepareSandboxLaunch(folder.path() / "missing", SandboxMode::development);
+                                                     });
+                                                 });
+                                             }};
+
+const Scenario webKitGTKLauncher{"WebKitGTK distribution diagnoses a refused namespace without disabling the sandbox", [] {
+                                     const SandboxEnvironment                 environment;
+                                     const webfront::test::TemporaryDirectory folder;
+                                     const auto refused = fakeLauncher(folder.path(), "refused", "bwrap: setting up uid map: Permission denied", 1);
+                                     then("the real subprocess diagnostic is returned", [&] {
+                                         const auto refusal = sandboxLauncherRefusal(refused);
+                                         require(refusal.has_value());
+                                         check(*refusal == "bwrap: setting up uid map: Permission denied");
+                                     });
+                                     then("the upstream value 0 keeps the launcher check active", [&] {
+                                         setenv(sandboxOptOut, "0", 1);
+                                         check(!webKitSandboxDisabled());
+                                         // Containers use the engine's outer-sandbox integration instead of bubblewrap.
+                                         if (!sandboxLauncherApplies())
+                                             return;
+                                         requireThrows([&] {
+                                             prepareSandboxLaunch(refused, SandboxMode::distribution);
+                                         });
+                                         check(std::string(std::getenv(sandboxOptOut)) == "0");
+                                         setenv("WEBFRONT_REQUIRE_WEBKIT_SANDBOX", "1", 1);
+                                         requireThrows([&] {
+                                             prepareSandboxLaunch(refused, SandboxMode::development);
+                                         });
+                                         check(std::string(std::getenv(sandboxOptOut)) == "0");
+                                     });
+                                 }};
+
+const Scenario webKitGTKWorkingLauncher{"WebKitGTK distribution preserves a working sandbox", [] {
+                                            const SandboxEnvironment                 environment;
+                                            const webfront::test::TemporaryDirectory folder;
+                                            then("a successful probe leaves the upstream environment unchanged", [&] {
+                                                const auto working = fakeLauncher(folder.path(), "working", "", 0);
+                                                check(!prepareSandboxLaunch(working, SandboxMode::distribution));
+                                                check(std::getenv(sandboxOptOut) == nullptr);
+                                                check(!sandboxLauncherRefusal(working));
+                                                check(!sandboxLauncherRefusal(fakeLauncher(folder.path(), "noisy", "warning: namespace already shared", 0)));
+                                            });
+                                            then("missing launchers and unrelated failures are left for WebKit to diagnose", [&] {
+                                                check(!sandboxLauncherRefusal(folder.path() / "missing"));
+                                                check(!sandboxLauncherRefusal(fakeLauncher(folder.path(), "other", "bwrap: Unknown option --ro-bind", 1)));
+                                                check(std::getenv(sandboxOptOut) == nullptr);
+                                            });
+                                        }};
 #endif

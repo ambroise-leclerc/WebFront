@@ -170,11 +170,12 @@ inline void initialize() {
     requireMainThread();
     // Once per process and before GTK starts its threads: the launch switch is an environment variable.
     static const bool sandboxPrepared = [] {
-        if (const auto refusal = prepareSandboxLaunch())
+        if (prepareSandboxLaunch())
             std::fprintf(stderr,
-                         "WebFront: this system refuses WebKitGTK's web process sandbox (%s); the window opens without it. "
-                         "Display only content you trust (docs/WEBKITGTK.md, \"Sandbox and user namespaces\").\n",
-                         refusal->c_str());
+                         "WebFront: WebKitGTK development mode: sandbox disabled. Use WEBFRONT_DISTRIBUTION=ON "
+                         "for packaged applications (docs/WEBKITGTK.md).\n");
+        else
+            std::fprintf(stderr, "WebFront: WebKitGTK distribution mode: sandbox required.\n");
         return true;
     }();
     (void)sandboxPrepared;

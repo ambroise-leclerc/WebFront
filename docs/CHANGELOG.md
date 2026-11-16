@@ -12,10 +12,12 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Breaking
 
+- WebKitGTK defaults to development mode with its sandbox disabled; packaged applications must select `WEBFRONT_DISTRIBUTION=ON` or `webfront_use_distribution(target)` to require it, independently of Debug/Release (#596, `docs/WEBKITGTK.md`).
 - Reserve more command names for the terminal: an application command named `ls`, `cat`, `tree`, `mounts`, `cd`, `pwd`, `cp`, `mv`, `rm`, `mkdir`, `rmdir`, `touch`, `edit`, `find`, `grep`, `head`, `tail`, `less`, `stat`, `du` or `df` is now refused by `webfront::Commands::add` and must be renamed (#575, ADR-023).
 
 ### Added
 
+- Generate a per-executable AppArmor profile for application packaging with `webfront_generate_webkitgtk_profile`; select the distribution policy per target with `webfront_use_distribution`, without adding a runtime (#596, `docs/WEBKITGTK.md`).
 - Document the Jetson Orin Nano Super qualification after the JetPack 7 upgrade and its L4T R39.2.1 toolchain; add a manual Canvas 2D/WebGL capture probe for the remaining real-display qualification (#528, `docs/JETSON.md`).
 - Look at the project from the terminal with `ls`, `cat`, `tree` and `mounts` (read-only), and at the installed packages with `wf list --tree`, `wf why <package>` and `wf info <package>`; a `wf` command typed without its prefix answers with the line to type. The `wf` prefix stays (#575, ADR-023, `docs/DEVELOPER_ENVIRONMENT.md`).
 - Add WebFront to an application that keeps its own loop: `app.start()` opens the system browser and returns at once, `app.requestClose()` ends an embedded window's `show()` from any thread, and `webfront::UIThread<App>` runs an application on a secondary thread where the frontend allows it (WebView2). New `WebFrontHostLoop` example (#567, `docs/HOST_INTEGRATION.md`, ADR-007).
@@ -42,7 +44,7 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Fixed
 
-- Open the WebKitGTK window where the system refuses bubblewrap's user namespace (Ubuntu 24.04, Jetson L4T R39) instead of aborting with exit 133: the frontend then starts WebKit without its sandbox and says so on standard error; `WEBFRONT_REQUIRE_WEBKIT_SANDBOX=1` makes it an initialization error. Nothing changes where bubblewrap works (#596, `docs/WEBKITGTK.md`).
+- Enforce the WebKitGTK distribution sandbox policy even when an upstream opt-out is inherited, and interpret the upstream value `0` correctly (#596, `docs/WEBKITGTK.md`).
 - Give `CheckConsumerJasmineReports.cmake` the policies of CMake 3.31, without which it compared the report status with a variable (#596).
 - On Windows, a slow HTTP client no longer blocks the publication of developer resources, and removing a log sink no longer returns while one of its callbacks is still running (#542, `docs/validation/ci-flakes-542.md`).
 - Serialize the developer session's phase logs and keep CI timing analysis running if a duration is malformed: report and omit that timing while retaining the other phases and test results (#542).

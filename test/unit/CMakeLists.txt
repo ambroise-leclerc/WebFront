@@ -273,6 +273,10 @@ add_test(NAME AgentGuidance
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/agent-guidance
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckAgentGuide.cmake)
 set_tests_properties(AgentGuidance PROPERTIES TIMEOUT 30 LABELS fast)
+add_test(NAME WebFrontDistribution
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/distribution
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckWebFrontDistribution.cmake)
+set_tests_properties(WebFrontDistribution PROPERTIES TIMEOUT 120 LABELS configuration)
 add_test(NAME BuildToolRequirements
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/build-tool-requirements
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckBuildToolRequirements.cmake)

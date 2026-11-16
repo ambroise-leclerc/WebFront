@@ -1,0 +1,37 @@
+cmake_minimum_required(VERSION 3.31)
+if(NOT ROOT OR NOT WORK)
+    message(FATAL_ERROR "ROOT and WORK are required")
+endif()
+foreach(case positive relative pattern traversal missing-target library)
+    execute_process(COMMAND "${CMAKE_COMMAND}" -S "${ROOT}/test/cmake/distribution" -B "${WORK}/${case}"
+        "-DWEBFRONT_ROOT=${ROOT}" "-DCASE=${case}"
+        RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    if(case STREQUAL "positive")
+        if(NOT status EQUAL 0)
+            message(FATAL_ERROR "Distribution consumer failed: ${output}\n${error}")
+        endif()
+    elseif(status EQUAL 0 OR NOT "${output}${error}" MATCHES "webfront_(use_distribution|generate_webkitgtk_profile)")
+        message(FATAL_ERROR "Invalid distribution request '${case}' was not rejected by the helper: ${output}\n${error}")
+    endif()
+endforeach()
+set(build "${WORK}/positive")
+execute_process(COMMAND "${CMAKE_COMMAND}" --build "${build}" --config Release --parallel 2 RESULT_VARIABLE status
+    OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT status EQUAL 0)
+    message(FATAL_ERROR "Distribution consumer did not compile: ${output}\n${error}")
+endif()
+execute_process(COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${build}" -C Release --output-on-failure
+    RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT status EQUAL 0)
+    message(FATAL_ERROR "Consumer policies did not execute correctly: ${output}\n${error}")
+endif()
+execute_process(COMMAND "${CMAKE_COMMAND}" --install "${build}" --prefix "${WORK}/package"
+    RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT status EQUAL 0)
+    message(FATAL_ERROR "Cannot stage the profile: ${output}\n${error}")
+endif()
+file(READ "${WORK}/package/etc/apparmor.d/webfront.app" profile)
+if(NOT profile MATCHES "profile webfront-app-[a-f0-9]+ \"/opt/WebFront Example/bin/app\" flags=\\(unconfined\\)"
+    OR NOT profile MATCHES "userns,")
+    message(FATAL_ERROR "The package must grant userns only to the literal installed executable: ${profile}")
+endif()

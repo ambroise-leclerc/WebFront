@@ -92,13 +92,27 @@ struct FailureState {
 
 #if defined(__linux__)
 
-// WebKitGTK starts its web process through bubblewrap, which needs an unprivileged user namespace. Where the system
-// refuses one (Ubuntu 24.04's AppArmor restriction without a profile for bwrap or for the application), WebKit aborts
-// the whole process before any navigation, so no window can ever open. The launcher is therefore tried once before
-// the window is created. When it is refused, the window opens without that sandbox, through WebKit's own switch, and
-// says so: the page of a WebFront application is the application's own interface, served by its own process, and the
-// content policy keeps top-level navigation on that origin. WEBFRONT_REQUIRE_WEBKIT_SANDBOX turns the refusal into an
-// initialization error instead, for a deployment that must not run a web process unsandboxed.
+// Development is the default, independently of optimization level. A distribution binary requires the sandbox;
+// an inherited environment variable cannot weaken its build policy.
+enum class SandboxMode { development, distribution };
+
+inline constexpr SandboxMode buildSandboxMode =
+    #if defined(WEBFRONT_DISTRIBUTION) && WEBFRONT_DISTRIBUTION
+    SandboxMode::distribution;
+    #else
+    SandboxMode::development;
+    #endif
+
+inline bool sandboxRequiredByEnvironment() {
+    const auto* value = std::getenv("WEBFRONT_REQUIRE_WEBKIT_SANDBOX");
+    return value && *value && std::string_view(value) != "0";
+}
+
+// WebKit treats the value "0" as keeping the sandbox; other present values disable it.
+inline bool webKitSandboxDisabled() {
+    const auto* value = std::getenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS");
+    return value && std::string_view(value) != "0";
+}
 
 /// Whether WebKit would use bubblewrap here: not with its sandbox switched off, nor inside Flatpak, Snap or a container.
 inline bool sandboxLauncherApplies() {
@@ -110,7 +124,7 @@ inline bool sandboxLauncherApplies() {
         std::error_code error;
         return std::filesystem::exists(path, error);
     };
-    if (set("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS"))
+    if (webKitSandboxDisabled())
         return false;
     if (set("SNAP") && set("SNAP_NAME") && set("SNAP_REVISION"))
         return false;
@@ -130,7 +144,7 @@ inline std::optional<std::string> sandboxLauncherRefusal(const std::filesystem::
     posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
     posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
     posix_spawn_file_actions_adddup2(&actions, report[1], STDERR_FILENO);
-    const std::string path = launcher.string();
+    const std::string path   = launcher.string();
     char              bind[] = "--ro-bind", root[] = "/", version[] = "--version";
     std::string       program = path, inner = path;
     char* const       arguments[] = {program.data(), bind, root, root, inner.data(), version, nullptr};
@@ -167,20 +181,25 @@ inline std::optional<std::string> sandboxLauncherRefusal(const std::filesystem::
     return message;
 }
 
-/// Prepares the launch of the web process. Returns bubblewrap's message when the system refused the sandbox and the
-/// window will run without it (the upstream switch is then set for this process), nullopt when nothing was changed.
-/// Throws instead when WEBFRONT_REQUIRE_WEBKIT_SANDBOX is set.
-inline std::optional<std::string> prepareSandboxLaunch(const std::filesystem::path& launcher = "/usr/bin/bwrap") {
+/// Development explicitly disables WebKit's sandbox. Distribution (or the legacy REQUIRE environment switch)
+/// rejects an inherited sandbox opt-out and reports a refused launcher before WebKit can abort the process.
+/// Returns a notice only when the development policy was selected.
+inline std::optional<std::string> prepareSandboxLaunch(const std::filesystem::path& launcher = "/usr/bin/bwrap", SandboxMode mode = buildSandboxMode) {
+    if (mode == SandboxMode::development && !sandboxRequiredByEnvironment()) {
+        if (setenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", "1", 1) != 0)
+            throw std::runtime_error("WebKitGTK: cannot configure the development sandbox policy");
+        return "development";
+    }
+    if (webKitSandboxDisabled())
+        throw std::runtime_error("WebKitGTK: distribution mode requires the sandbox, but "
+                                 "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS disables it; unset it or set it to 0");
     if (!sandboxLauncherApplies())
         return std::nullopt;
-    auto refusal = sandboxLauncherRefusal(launcher);
-    if (!refusal)
-        return std::nullopt;
-    if (const auto* required = std::getenv("WEBFRONT_REQUIRE_WEBKIT_SANDBOX"); required && *required)
-        throw std::runtime_error("WebKitGTK: the web process sandbox cannot start (" + *refusal +
-                                 ") and WEBFRONT_REQUIRE_WEBKIT_SANDBOX is set; see docs/WEBKITGTK.md, \"Sandbox and user namespaces\"");
-    setenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", "1", 1);
-    return refusal;
+    if (const auto refusal = sandboxLauncherRefusal(launcher))
+        throw std::runtime_error("WebKitGTK: the distribution sandbox cannot start (" + *refusal
+                                 + "); install the application's AppArmor profile or use a configured system browser; "
+                                   "see docs/WEBKITGTK.md, \"Distribution\"");
+    return std::nullopt;
 }
 
 #endif

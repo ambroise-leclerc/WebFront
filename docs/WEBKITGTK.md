@@ -97,53 +97,118 @@ unit tests cover the policy decision table, null error diagnostics, preserving
 the first failure when a timeout or callback reports a later error, and the
 sandbox launcher check described below.
 
-## Sandbox and user namespaces
+## Development and distribution
 
-WebKit starts its web process through bubblewrap (`/usr/bin/bwrap`), which needs an
-unprivileged user namespace. Some systems refuse one: Ubuntu 24.04 restricts user
-namespaces through AppArmor and ships no profile for `bwrap`, and restricted
-containers may reject the namespace setup. WebKit then aborts the whole process
-before any navigation (`bwrap: setting up uid map: Permission denied`, exit 133).
+WebKitGTK has two **build modes**, independent of Debug/Release, `NDEBUG`,
+`wf embed`, and whether the application calls `bootstrap("developer")`:
 
-`WebKitGTKFrontend::initialize()` therefore tries the launcher once per process
-before creating the window (`bwrap --ro-bind / / bwrap --version`). When
-bubblewrap reports that it cannot set up its namespace, WebFront sets WebKit's own
-switch, `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1`, for this process and prints
-once on standard error:
+| Mode | Selection | Web process |
+| --- | --- | --- |
+| Development (default) | `WEBFRONT_DISTRIBUTION=OFF` | Sandbox explicitly disabled; native windows and Jasmine run without configuring the OS |
+| Distribution | `WEBFRONT_DISTRIBUTION=ON` or `webfront_use_distribution(target)` | Sandbox required; a conflicting environment or refused namespace is an initialization error |
+
+The CMake configuration announces the default mode. In development, initialization
+prints once per process:
 
 ```text
-WebFront: this system refuses WebKitGTK's web process sandbox (bwrap: setting up uid map: Permission denied); the window opens without it. Display only content you trust (docs/WEBKITGTK.md, "Sandbox and user namespaces").
+WebFront: WebKitGTK development mode: sandbox disabled. Use WEBFRONT_DISTRIBUTION=ON for packaged applications (docs/WEBKITGTK.md).
 ```
 
-**An application therefore builds and opens its native window on such a system
-with no change to the operating system.** This is the only case in which the
-library sets that variable: where bubblewrap works, the sandbox is kept, and the
-library never changes system policy.
+This mode sets `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` in the application's
+process before GTK initialization, on every system, without probing bubblewrap.
+It is for trusted development interfaces and specs. The web process has the
+application's OS rights; the origin policy does not isolate HTTP(S) iframes,
+subresources or a vulnerable renderer. A native Jasmine pass in development
+therefore validates the page, bridge and lifecycle, not renderer isolation.
+Neither mode changes AppArmor, sysctls or installed packages at run time.
 
-What this means: the web process then runs with the rights of the application,
-like the application's own C++ code. The page of a WebFront application is its own
-interface, served by its own process, and the content policy keeps top-level
-navigation on that origin; that policy does not cover HTTP(S) iframes and
-subresources. An application that displays content it does not control should not
-rely on this mode:
+### Distribution
 
-- set `WEBFRONT_REQUIRE_WEBKIT_SANDBOX=1` in its environment: a refused sandbox is
-  then an initialization error (`std::runtime_error` carrying bubblewrap's
-  message), which `frontend::NativeOrBrowserFrontend` turns into the system
-  browser;
-- or let the administrator allow bubblewrap. Ubuntu 25.04 and later load a
-  `bwrap-userns-restrict` AppArmor profile that lets bubblewrap set up a sandbox
-  and strips capabilities from what runs inside it
-  ([release notes](https://documentation.ubuntu.com/release-notes/25.04/#apparmor-profile-for-bwrap));
-  Ubuntu 24.04 ships the same profile, disabled, in the `apparmor-profiles`
-  package (`/usr/share/apparmor/extra-profiles/bwrap-userns-restrict`). The
-  [Jetson guide](JETSON.md#ubuntu-2404-user-namespaces) records what was observed
-  on such an installation.
+Select the policy in the build, rather than relying on the launching environment:
 
-The check is skipped where WebKit does not use bubblewrap (Flatpak, Snap, Docker
-or Podman containers, or the variable already set), when `/usr/bin/bwrap` is
-absent, and when bubblewrap fails for a reason other than its namespace; WebKit
-then reports its own error.
+```bash
+cmake -S . -B build-distribution -DWEBFRONT_EMBED_WEBKITGTK=ON \
+  -DWEBFRONT_DISTRIBUTION=ON -DCMAKE_BUILD_TYPE=Release
+```
 
-On a trusted, isolated CI runner the variable can also be set by hand, as this
-project's workflows do. Do not set it for browsing untrusted content.
+For a consumer with separate development and packaged executables, call
+`webfront_use_distribution(my_app)` after creating the packaged target. The helper
+adds `WEBFRONT_DISTRIBUTION=1` to that executable only. Header-only consumers
+without CMake can define the same macro consistently in all their translation
+units. This switch currently controls the WebKitGTK sandbox policy; it does not
+embed assets, remove developer callbacks or generate an installer.
+
+An inherited `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` is rejected, including
+inside containers. Unset the variable or set it to `0`, the upstream value that
+keeps the sandbox enabled. Environment variables cannot downgrade a distribution
+build. In a development build, `WEBFRONT_REQUIRE_WEBKIT_SANDBOX=1` selects the
+same strict policy; `0` does not. A refusal throws before WebKit can abort.
+`NativeOrBrowserFrontend` may then use its documented system-browser fallback;
+applications requiring the embedded window select `WebKitGTKFrontend` directly.
+
+### Sandbox and user namespaces
+
+On ordinary Linux hosts, WebKit uses bubblewrap and unprivileged user namespaces.
+Distribution initialization checks the launcher before opening the window. Some
+Ubuntu 24.04 installations lack the AppArmor integration that allows this setup;
+Ubuntu introduced a `bwrap-userns-restrict` profile in later releases
+([release notes](https://documentation.ubuntu.com/release-notes/25.04/#apparmor-profile-for-bwrap)).
+The check is skipped where WebKit uses its container integration (Flatpak, Snap,
+Docker/Podman markers), when the launcher is absent, or when its failure is
+unrelated to namespaces; WebKit retains responsibility for those launch paths.
+A successful probe is not an attestation of WebKit's complete sandbox.
+
+### Package the application's profile
+
+A distribution executable can ship its own AppArmor namespace authorization.
+WebFront generates a profile for **one literal installed executable**, without
+adding a runtime or changing the development machine:
+
+```cmake
+add_subdirectory(WebFront)
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE WebFront::WebFront)
+webfront_use_native_window(my_app)
+install(TARGETS my_app RUNTIME DESTINATION bin)
+webfront_generate_webkitgtk_profile(
+    TARGET my_app
+    EXECUTABLE /usr/bin/my_app
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/apparmor/webfront.my_app")
+```
+
+The profile helper also selects distribution mode for `my_app`. The installed
+path must match the package, including the executable's final name; it must be
+stable and controlled by the installer. Patterns are rejected. Profile identifiers
+include a hash of that path so unrelated packages with a target called `app` do
+not replace each other's policies. It grants `userns` to the application to let
+WebKit establish its own sandbox; it is not a confinement profile for the C++ host.
+
+For a Debian/Ubuntu application package, add `dh-apparmor` to its build dependencies,
+ship the generated file in `/etc/apparmor.d/`, and let the packaging machinery
+reload it on installation. For example, with debhelper configured to build in
+`build/`, `debian/my-app.install` includes:
+
+```text
+build/apparmor/webfront.my_app etc/apparmor.d
+```
+
+In `debian/rules`, after `dh_install` in `override_dh_install`, run:
+
+```make
+	dh_apparmor --profile-name=webfront.my_app -pmy-app
+```
+
+Configure that package with `-DCMAKE_INSTALL_PREFIX=/usr` and
+`-DWEBFRONT_DISTRIBUTION=ON`. The packaging hook is required: copying the file
+alone does not activate a profile. Use the normal package manager to install and
+remove the application; no manual AppArmor editing is part of the end-user flow.
+See [`dh_apparmor`](https://manpages.debian.org/trixie/dh-apparmor/dh_apparmor.1.en.html).
+The library itself still has no install/export rules; these are application
+packaging steps.
+
+The installed profile does not cover arbitrary executables under `build/`.
+Development windows and Jasmine use development mode without installation.
+Before shipping, additionally test the installed distribution application with
+its sandbox active and without the upstream opt-out. Generated-profile syntax
+and staging tests do not replace that on-system qualification; the generated
+profile has not been loaded on the Jetson in this pass.

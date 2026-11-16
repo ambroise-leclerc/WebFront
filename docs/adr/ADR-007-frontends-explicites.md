@@ -16,13 +16,13 @@
 | 1.9 | 2026-10-19 | Acceptée | Ambroise Leclerc | Alias NativeWebViewFrontend avec sélection explicite par plateforme. | [7be859f](https://github.com/ambroise-leclerc/WebFront/commit/7be859f18957e770cc0db8382e7d9641689ba403) |
 | 1.10 | 2026-10-20 | Acceptée | Ambroise Leclerc | WKWebView respecte les bundles agents LSUIElement ; les exécutables de test ne créent plus d’icônes Dock. | À renseigner après intégration. |
 | 1.11 | 2026-11-09 | Acceptée | Ambroise Leclerc | Contrat facultatif `static UIExecutor uiExecutor()` : le thread d'interface d'un frontend, disponible pendant que `open()` fait tourner sa boucle (ADR-020, #462). Frontend `BrowserWithUILoopFrontend` : navigateur système avec boucle facultative. | Branche `462-ui-thread-executor` |
-
 | 1.12 | 2026-11-13 | Acceptée | Ambroise Leclerc | Intégration dans une application hôte : contrats facultatifs `launch()`, `requestClose()` et `requiresMainThread` ; `BasicWF::start()`, `BasicWF::requestClose()` et `webfront::UIThread` (#567). | Branche `567-host-integration` |
+| 1.13 | 2026-11-16 | Acceptée | Ambroise Leclerc | Modes WebKitGTK développement par défaut et distribution exigeant le sandbox ; profil par exécutable généré pour le paquet applicatif, sans runtime (#596/#597). | Branche `596-jetson-native-launch` |
 
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2026-05-31** (version 1.0).
-Dernière révision : **2026-11-13** (version 1.12).
+Dernière révision : **2026-11-16** (version 1.13).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -49,6 +49,19 @@ du toolkit (notamment COM compatible STA pour WebView2). `open()` s’exécute c
 avec le serveur sur un thread distinct. `Action::closeServerAfterOpen` entraîne l’arrêt et la
 jonction après fermeture ; `keepServerRunning` laisse le serveur actif au retour. Si l’ouverture
 lève, `show()`/`openAndRun()` arrêtent et joignent avant de relancer l’exception d’origine.
+
+Pour WebKitGTK, le mode de compilation est explicite et indépendant de Debug/Release.
+Le développement, mode par défaut, désactive le sandbox WebKit pour permettre fenêtres
+natives et tests Jasmine sans préparation du système. La configuration et le lancement
+l'annoncent. `WEBFRONT_DISTRIBUTION=ON` ou `webfront_use_distribution(cible)` exige
+le sandbox ; une variable d'environnement ne peut pas affaiblir ce choix. Une
+configuration contradictoire ou un refus de l'espace utilisateur lève avant que WebKit
+n'abandonne le processus. `WEBFRONT_REQUIRE_WEBKIT_SANDBOX=1` garde ce comportement
+strict en développement. Le paquet peut intégrer l'autorisation AppArmor de son seul
+exécutable installé, générée par `webfront_generate_webkitgtk_profile`. La bibliothèque
+ne charge aucune politique à l'exécution et n'ajoute aucun runtime. La validation de
+distribution doit exercer le paquet installé avec le sandbox actif ; les tests de
+développement ne prouvent pas cette isolation (voir [WebKitGTK](../WEBKITGTK.md)).
 
 Une application hôte qui conserve sa boucle ne cède pas son thread à `show()` (#567). Trois
 contrats facultatifs le permettent. `launch()` ouvre l’interface et rend la main : seul un

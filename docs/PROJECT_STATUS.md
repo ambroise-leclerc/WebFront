@@ -82,10 +82,14 @@ Nano Super 8 GB. Native rendering, portals and kiosk behavior require board
 evidence beyond the hosted arm64 software-rendered jobs; NX, AGX and Wayland are
 not inferred from that CI coverage. Ubuntu 24.04's AppArmor user-namespace policy
 refuses WebKit's bubblewrap sandbox on that installation (`bwrap` cannot write the
-UID map). The WebKitGTK frontend detects the refusal and opens the native window
-without that sandbox, with a notice, so an application builds and runs there with
-no system change (#596, [WebKitGTK](WEBKITGTK.md#sandbox-and-user-namespaces));
-the system policy was left as installed. No Tegra rendering qualification is claimed.
+UID map). Development builds explicitly disable the WebKit sandbox by default,
+so native windows and Jasmine run without a system change. Distribution builds
+select `WEBFRONT_DISTRIBUTION=ON` (or `webfront_use_distribution(target)`) and
+require the sandbox; `webfront_generate_webkitgtk_profile` prepares the application's
+per-executable authorization for normal package installation. Neither the library
+nor its CMake helpers load policy on the development machine. See
+[WebKitGTK](WEBKITGTK.md#development-and-distribution). No Tegra rendering
+qualification is claimed.
 This does not erase the earlier JetPack 6 WebKitGTK qualification recorded in
 [draft PR #558](https://github.com/ambroise-leclerc/WebFront/pull/558): 28/28
 adapter/lifecycle cases and 7/7 Jasmine/fixture cases passed under Xvfb. That PR
