@@ -107,7 +107,10 @@ never changes the power mode; `nvpmodel -q` is read-only.
 A single concurrency group serializes all board work; manual dispatch is an
 explicit exception to the nocturnal slot. The timeout is 180 minutes, allowing
 cold builds on a throttled 8 GB board. Every build and CTest uses `--parallel 2`,
-under `nice` and idle I/O priority. The script clears inherited display and
+under `nice` and idle I/O priority. A Ninja compile pool admits one compiler at
+a time: two GCC unity units together exceeded 4.5 GiB and caused sustained page
+reclaim on the workstation even within the service's memory cap. Linking and
+CTest can still use two workers. The script clears inherited display and
 software-renderer overrides; browser tests use the suite's Xvfb wrapper. They do
 not open windows on the maintainer's session. Xvfb does not qualify physical
 presentation or prove WebGL acceleration: the manual checks in `JETSON.md` still
