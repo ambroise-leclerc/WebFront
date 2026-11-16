@@ -1,6 +1,7 @@
 #include <webfront/system/NativeFS.hpp>
 #include <webfront/WebFront.hpp>
 
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <dlfcn.h>
@@ -40,6 +41,46 @@ void noDisplay() {
             Frontend::initialize();
         },
         "display");
+}
+
+void sandboxEnvironment() {
+    setenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", "0", 1);
+    Frontend::initialize();
+    {
+        gtk::Session session(webfront::detail::BoundContentPolicy{});
+        session.create();
+        if (std::string_view(std::getenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS")) != "0")
+            throw std::runtime_error("Native context leaked its development sandbox opt-out");
+    }
+    unsetenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS");
+    {
+        gtk::Session session(webfront::detail::BoundContentPolicy{});
+        session.create();
+        if (std::getenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS"))
+            throw std::runtime_error("Native context did not restore an absent sandbox switch");
+    }
+}
+
+void sandboxRecheck() {
+    Frontend::initialize();
+    setenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", "0", 1);
+    expectFailure(
+        [] {
+            webfront::frontend::BasicWebKitGTKFrontend<gtk::SandboxMode::distribution>::initialize();
+        },
+        "cannot mix development and distribution");
+    setenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", "1", 1);
+    setenv("WEBFRONT_REQUIRE_WEBKIT_SANDBOX", "1", 1);
+    expectFailure(
+        [] {
+            Frontend::initialize();
+        },
+        "requires the sandbox");
+    expectFailure(
+        [] {
+            Frontend::open("9002", "index.html");
+        },
+        "requires the sandbox");
 }
 
 void workerThread() {
@@ -192,7 +233,15 @@ void pollFailure() {
 
 std::string readFile(const std::filesystem::path& path) {
     std::ifstream stream(path, std::ios::binary);
-    return {std::istreambuf_iterator<char>(stream), {}};
+    if (!stream)
+        throw std::runtime_error("Cannot open downloaded file: " + path.string());
+    std::string result;
+    std::array<char, 4096> buffer;
+    while (stream.read(buffer.data(), buffer.size()) || stream.gcount() != 0)
+        result.append(buffer.data(), static_cast<std::size_t>(stream.gcount()));
+    if (stream.bad())
+        throw std::runtime_error("Cannot read downloaded file: " + path.string());
+    return result;
 }
 
 void download() {
@@ -473,6 +522,8 @@ void profilePermissions() {
 
 void run(std::string_view mode) {
     const std::map<std::string_view, void (*)()> cases{
+        {"sandbox-recheck", sandboxRecheck},
+        {"sandbox-environment", sandboxEnvironment},
         {         "no-display",          noDisplay},
         {      "worker-thread",       workerThread},
         {      "repeated-show",       repeatedShow},

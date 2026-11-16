@@ -12,10 +12,13 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Breaking
 
+- WebKitGTK defaults to development mode with its sandbox disabled; packaged applications must select `WEBFRONT_DISTRIBUTION=ON` or `webfront_use_distribution(target)` to require it, independently of Debug/Release (#596, `docs/WEBKITGTK.md`).
 - Reserve more command names for the terminal: an application command named `ls`, `cat`, `tree`, `mounts`, `cd`, `pwd`, `cp`, `mv`, `rm`, `mkdir`, `rmdir`, `touch`, `edit`, `find`, `grep`, `head`, `tail`, `less`, `stat`, `du` or `df` is now refused by `webfront::Commands::add` and must be renamed (#575, ADR-023).
 
 ### Added
 
+- Generate a per-executable AppArmor profile for application packaging with `webfront_generate_webkitgtk_profile`; select the distribution policy per target with `webfront_use_distribution`, without adding a runtime (#596, `docs/WEBKITGTK.md`).
+- Document the Jetson Orin Nano Super qualification after the JetPack 7 upgrade and its L4T R39.2.1 toolchain; add a manual Canvas 2D/WebGL capture probe for the remaining real-display qualification (#528, `docs/JETSON.md`).
 - Look at the project from the terminal with `ls`, `cat`, `tree` and `mounts` (read-only), and at the installed packages with `wf list --tree`, `wf why <package>` and `wf info <package>`; a `wf` command typed without its prefix answers with the line to type. The `wf` prefix stays (#575, ADR-023, `docs/DEVELOPER_ENVIRONMENT.md`).
 - Add WebFront to an application that keeps its own loop: `app.start()` opens the system browser and returns at once, `app.requestClose()` ends an embedded window's `show()` from any thread, and `webfront::UIThread<App>` runs an application on a secondary thread where the frontend allows it (WebView2). New `WebFrontHostLoop` example (#567, `docs/HOST_INTEGRATION.md`, ADR-007).
 - Tell an agent at first contact how an application is developed (C++ with a TypeScript/TSX interface in `ui/`, `wf dev`) and that it can run `wf` itself in JSON or MCP: a README section before the tutorial, `webfront_write_agent_guide()`, and notices at configuration, in the terminal and at startup (#561, `docs/DEVELOPING_WITH_AGENTS.md`).
@@ -41,6 +44,8 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Fixed
 
+- Enforce the WebKitGTK distribution policy across translation units and inherited environments; bound launcher checks and restore the development opt-out before callbacks or system-browser fallback (#596, `docs/WEBKITGTK.md`).
+- Give `CheckConsumerJasmineReports.cmake` the policies of CMake 3.31, without which it compared the report status with a variable (#596).
 - On Windows, a slow HTTP client no longer blocks the publication of developer resources, and removing a log sink no longer returns while one of its callbacks is still running (#542, `docs/validation/ci-flakes-542.md`).
 - Serialize the developer session's phase logs and keep CI timing analysis running if a duration is malformed: report and omit that timing while retaining the other phases and test results (#542).
 - The Linux interface loop shuts down without leaving work behind, and the automation deadlines are decided consistently when a window is ready at the moment its startup expires. The ThreadSanitizer job no longer needs its GLib suppression (#542, `docs/validation/ci-flakes-542.md`).

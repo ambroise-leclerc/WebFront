@@ -20,6 +20,12 @@ Keep application logic in C++ and create reactive interfaces with TypeScript, Re
 - **Ready for AI harnesses.** An optional local launcher (MCP or JSON CLI) lets an agent create, check, build and test a screen under explicit grants.
 
 Desktop Windows, macOS and Linux are the qualified platforms; embedded targets and microcontrollers are not. WebFront already drives a real application: [SiliconForge](https://github.com/ambroise-leclerc/SiliconForge), a microcontroller simulator.
+The [Jetson Orin guide](docs/JETSON.md) records the ongoing board qualification,
+its build prerequisites and the limits of the evidence (#528).
+WebKitGTK defaults to development mode with its sandbox disabled. Before shipping,
+select `-DWEBFRONT_DISTRIBUTION=ON` and package the application's sandbox profile;
+[development and distribution](docs/WEBKITGTK.md#development-and-distribution)
+describes the target helpers and installed-application validation.
 
 ## Developing with an agent
 

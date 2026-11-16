@@ -76,6 +76,26 @@ asset freshness checks and, with an enabled engine, real-browser Jasmine and lif
 its generated provider from an empty directory. Configured tests need no public network.
 
 [Tiers](TEST_TIERS.md) defines the desktop and extended CI scope, including the GCC 13 Linux aarch64 job (#548) and its weekly CEF and WebKitGTK browser jobs (#524).
+The [Jetson Orin qualification](JETSON.md) records the separate on-board work (#528):
+the JetPack 7 upgrade identifies L4T R39.2.1, Ubuntu 24.04 and GCC 13.3 on an Orin
+Nano Super 8 GB. Native rendering, portals and kiosk behavior require board
+evidence beyond the hosted arm64 software-rendered jobs; NX, AGX and Wayland are
+not inferred from that CI coverage. Ubuntu 24.04's AppArmor user-namespace policy
+refuses WebKit's bubblewrap sandbox on that installation (`bwrap` cannot write the
+UID map). Development builds explicitly disable the WebKit sandbox by default,
+so native windows and Jasmine run without a system change. Distribution builds
+select `WEBFRONT_DISTRIBUTION=ON` (or `webfront_use_distribution(target)`) and
+require the sandbox; `webfront_generate_webkitgtk_profile` prepares the application's
+per-executable authorization for normal package installation. Neither the library
+nor its CMake helpers load policy on the development machine. See
+[WebKitGTK](WEBKITGTK.md#development-and-distribution). No Tegra rendering
+qualification is claimed.
+This does not erase the earlier JetPack 6 WebKitGTK qualification recorded in
+[draft PR #558](https://github.com/ambroise-leclerc/WebFront/pull/558): 28/28
+adapter/lifecycle cases and 7/7 Jasmine/fixture cases passed under Xvfb. That PR
+is not merged; its file-reader fix is carried by #596. The JetPack 7 pass uses a
+different OS, kernel, engine and security policy; the launch failure came from
+that policy, not from a WebFront regression.
 [Test execution and profiling](TEST_PERFORMANCE.md) documents fixture locks, complete-suite repetition, the intermittent
 failures of the last runs and why shared browser sessions were retired (#570); each wf command is a driver process
 on an OS-assigned loopback port. Manual transport measurements

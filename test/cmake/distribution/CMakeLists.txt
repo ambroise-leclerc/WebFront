@@ -1,0 +1,104 @@
+cmake_minimum_required(VERSION 3.31)
+project(WebFrontDistributionConsumer LANGUAGES NONE)
+include("${WEBFRONT_ROOT}/cmake/WebFrontDistribution.cmake")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/main.cpp" "
+#include <webfront/frontend/WebKitGTKPolicy.hpp>
+int main() {
+#if defined(__linux__)
+    using namespace webfront::frontend::detail::webkitgtk;
+    unsetenv(\"WEBFRONT_REQUIRE_WEBKIT_SANDBOX\");
+    setenv(\"WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS\", \"1\", 1);
+    try {
+#ifdef WEBFRONT_DISTRIBUTION
+        prepareSandboxLaunch(sandboxLauncherPath(), SandboxMode::distribution);
+#else
+        prepareSandboxLaunch(sandboxLauncherPath(), SandboxMode::development);
+#endif
+    }
+    catch (const std::runtime_error&) {
+#ifdef WEBFRONT_DISTRIBUTION
+        return 0;
+#else
+        return 1;
+#endif
+    }
+#ifdef WEBFRONT_DISTRIBUTION
+    return 2;
+#endif
+#endif
+    return 0;
+}
+")
+foreach(name app development)
+    add_executable(${name} "${CMAKE_CURRENT_BINARY_DIR}/main.cpp")
+    target_include_directories(${name} PRIVATE "${WEBFRONT_ROOT}/include")
+endforeach()
+set(installed "/opt/WebFront Example/bin/app")
+if(CASE STREQUAL "relative")
+    set(installed "bin/app")
+elseif(CASE STREQUAL "pattern")
+    set(installed "/usr/bin/*")
+elseif(CASE STREQUAL "traversal")
+    set(installed "/usr/bin/../app")
+elseif(CASE STREQUAL "missing-target")
+    webfront_use_distribution(absent)
+elseif(CASE STREQUAL "old-apparmor")
+    webfront_generate_webkitgtk_profile(APPARMOR_ABI 3.0 TARGET app EXECUTABLE /usr/bin/app OUTPUT profiles/invalid)
+elseif(CASE STREQUAL "library")
+    add_library(not_an_application INTERFACE)
+    webfront_generate_webkitgtk_profile(APPARMOR_ABI 4.0 TARGET not_an_application EXECUTABLE /usr/bin/app OUTPUT profiles/invalid)
+endif()
+webfront_use_distribution(app)
+webfront_generate_webkitgtk_profile(APPARMOR_ABI 4.0 TARGET development EXECUTABLE /usr/bin/development OUTPUT profiles/development)
+webfront_generate_webkitgtk_profile(APPARMOR_ABI 4.0 TARGET app EXECUTABLE "${installed}" OUTPUT profiles/webfront.app)
+get_target_property(definitions app COMPILE_DEFINITIONS)
+get_target_property(development_definitions development COMPILE_DEFINITIONS)
+if(NOT "WEBFRONT_DISTRIBUTION=1" IN_LIST definitions OR development_definitions)
+    message(FATAL_ERROR "The distribution policy must affect only the selected executable")
+endif()
+# Invalid requests fail before compiler discovery; only the positive consumer needs a toolchain.
+enable_language(CXX)
+foreach(name app development)
+    target_compile_features(${name} PRIVATE cxx_std_23)
+endforeach()
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ui.cpp" "
+#ifndef WEBFRONT_DISTRIBUTION
+#error Native UI library must use distribution policy
+#endif
+int native_policy() { return 0; }")
+add_library(native_ui STATIC "${CMAKE_CURRENT_BINARY_DIR}/ui.cpp")
+webfront_use_distribution(native_ui)
+add_executable(linked_app "${CMAKE_CURRENT_BINARY_DIR}/main.cpp")
+target_include_directories(linked_app PRIVATE "${WEBFRONT_ROOT}/include")
+target_compile_features(linked_app PRIVATE cxx_std_23)
+target_link_libraries(linked_app PRIVATE native_ui)
+# Stage the package's profile without installing or loading anything on the host.
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/profiles/webfront.app" DESTINATION etc/apparmor.d)
+enable_testing()
+add_test(NAME distribution-policy COMMAND app)
+add_test(NAME development-policy COMMAND development)
+
+add_test(NAME library-distribution-policy COMMAND linked_app)
+
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/mode.cpp" "
+#include <webfront/frontend/WebKitGTKPolicy.hpp>
+template <webfront::frontend::detail::webkitgtk::SandboxMode Mode>
+int selectedMode(webfront::frontend::BasicWebKitGTKFrontend<Mode>*) { return int(Mode); }
+extern \"C\" int LIBRARY_MODE();
+extern \"C\" int LIBRARY_MODE() {
+    return selectedMode(static_cast<webfront::frontend::WebKitGTKFrontend*>(nullptr));
+}")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/mixed.cpp" "
+extern \"C\" int development_mode();
+extern \"C\" int distribution_mode();
+int main() { return development_mode() == 0 && distribution_mode() == 1 ? 0 : 1; }")
+foreach(name development distribution)
+    add_library(${name}_mode STATIC "${CMAKE_CURRENT_BINARY_DIR}/mode.cpp")
+    target_include_directories(${name}_mode PRIVATE "${WEBFRONT_ROOT}/include")
+    target_compile_features(${name}_mode PRIVATE cxx_std_23)
+    target_compile_definitions(${name}_mode PRIVATE LIBRARY_MODE=${name}_mode)
+endforeach()
+webfront_use_distribution(distribution_mode)
+add_executable(mixed "${CMAKE_CURRENT_BINARY_DIR}/mixed.cpp")
+target_link_libraries(mixed PRIVATE development_mode distribution_mode)
+add_test(NAME mixed-policy-identities COMMAND mixed)
