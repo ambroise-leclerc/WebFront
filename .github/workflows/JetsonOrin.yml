@@ -2,7 +2,7 @@ name: Jetson Orin
 
 on:
   schedule:
-    - cron: '17 1 * * 2'
+    - cron: '17 1 * * 1'
   push:
     branches: [master]
   workflow_dispatch:

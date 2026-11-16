@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CONTROL = """name: Jetson Orin
 on:
   schedule:
-    - cron: '17 1 * * 2'
+    - cron: '17 1 * * 1'
   push:
     branches: [master]
   workflow_dispatch:
@@ -62,6 +62,9 @@ def check(workflows):
             match = re.search(r'^  jetson-validation:\n(?:(?:[ ]{4,}[^\n]*|[ ]*)\n)*', body, re.M)
             if not match or not match[0].startswith(VALIDATION_CONTROL):
                 raise ValueError('Manual Jetson validation must require maintainer dispatch')
+            remainder = match[0][len(VALIDATION_CONTROL):].splitlines()
+            if any(line.strip() and not line.startswith('      ') for line in remainder):
+                raise ValueError('Unexpected job-level YAML after manual Jetson steps')
             body = body[:match.start()] + body[match.end():]
         if name != 'JetsonOrin.yml' and re.search(r'self-hosted|jetson-orin', body, re.I):
             raise ValueError(f'{name}: hardware runners are confined to JetsonOrin.yml')
@@ -102,6 +105,12 @@ class HardwareWorkflows(unittest.TestCase):
             with self.subTest(label=label), self.assertRaises(ValueError):
                 check({'JetsonOrin.yml': CONTROL,
                        'fork.yml': f'on: [pull_request]\njobs:\n  fork:\n    runs-on: [{label}]\n'})
+
+    def test_rejects_duplicate_manual_job_keys(self):
+        for key in ['if: true', 'permissions: write-all', 'runs-on: self-hosted']:
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                check({'JetsonOrin.yml': CONTROL,
+                       'BuildAndTest.yml': 'jobs:\n' + VALIDATION_CONTROL + '    ' + key + '\n'})
 
 
 if __name__ == '__main__':
