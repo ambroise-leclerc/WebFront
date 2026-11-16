@@ -5,6 +5,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <functional>
+#include <future>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -430,6 +431,73 @@ const Scenario linuxInterface{"The Linux interface loop coalesces wake-ups witho
             check(wake.consume() == 0);
             wake.signal();
             check(wake.consume() == 1);
+        });
+    });
+}};
+
+namespace {
+std::atomic<int> pagesOpened{0};
+// Stops the loop too: were the page opened by a loop that cannot refuse, the scenario would end instead of waiting.
+void countingLauncher(const std::string&) {
+    ++pagesOpened;
+    BrowserWithUILoopFrontend::requestStop();
+}
+}  // namespace
+
+const Scenario linuxContextOwner{"The Linux interface loop refuses a default GLib context that another thread iterates", [] {
+    using namespace webfront::frontend;
+    const auto&        glib = detail::uiloop::GLib::get();
+    std::promise<void> owned;
+    std::promise<void> release;
+    auto               ownedReady = owned.get_future();
+    const auto         released   = release.get_future().share();
+    given("another thread that owns the default context", [&] {
+        // Joined on every path, including a failed require: a joinable thread would end the process.
+        std::jthread owner([&] {
+            const auto context = glib.contextDefault();
+            const bool taken   = glib.contextAcquire(context) != 0;
+            owned.set_value();
+            released.wait();
+            if (taken)
+                glib.contextRelease(context);
+        });
+        struct Free {
+            std::promise<void>& release;
+            ~Free() {
+                release.set_value();
+            }
+        } free{release};
+        require(ownedReady.wait_for(std::chrono::seconds{30}) == std::future_status::ready);
+        when("the loop is run", [&] {
+            UIExecutorHost host;
+            UILoopStop     stop;
+            // A stop already pending ends a loop that does start at its first check, before it iterates the context. Were the
+            // refusal lost, run() would return at once and the check below would fail, instead of the loop waiting for a
+            // context that the helper thread only gives up after run() returns.
+            stop.request();
+            then("it throws before it attaches, instead of letting that thread run its wake callback", [&] {
+                bool refused = false;
+                try {
+                    detail::uiloop::run(host, stop);
+                } catch (const std::runtime_error&) {
+                    refused = true;
+                }
+                check(refused);
+                check(!host.executor().onUIThread());
+            });
+        });
+        when("the frontend opens its page", [&] {
+            pagesOpened = 0;
+            then("the context is refused before the page is opened, so no tab is left without a server", [&] {
+                bool refused = false;
+                try {
+                    BrowserWithUILoopFrontend::loop("127.0.0.1", "9002", "index.html", countingLauncher);
+                } catch (const std::runtime_error&) {
+                    refused = true;
+                }
+                check(refused);
+                check(pagesOpened == 0);
+            });
         });
     });
 }};

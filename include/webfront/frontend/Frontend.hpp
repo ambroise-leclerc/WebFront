@@ -106,9 +106,11 @@ struct DefaultBrowserFrontend {
 /**
  * @brief The system browser with an interface-thread loop on the calling thread (ADR-020, #462).
  *
- * Like DefaultBrowserFrontend it launches the page in the system browser, then runs the platform's minimal loop (Windows
+ * Like DefaultBrowserFrontend it launches the page in the system browser, and runs the platform's minimal loop (Windows
  * message pump, AppKit run loop in the Accessory policy, GLib main loop) on the thread that called show()/open(), usually
- * the main thread. `uiExecutor()` is available while it runs, which the native dialogs need. Unlike the plain browser
+ * the main thread. The loop is prepared first (on Linux it takes ownership of the default GLib context, which it holds until
+ * it returns) and the page opens only then: a loop that cannot run throws without opening a tab. `uiExecutor()` is available
+ * while it runs, which the native dialogs need. Unlike the plain browser
  * frontend it does not wait for Enter: it returns when `requestStop()` is called, from any thread (a callback, a signal
  * handler's thread, a test). The server keeps running after it returns, until stop() or destruction. Without this frontend
  * the system browser has no interface thread and no executor.
@@ -159,9 +161,12 @@ struct BrowserWithUILoopFrontend {
     }
     /// The loop with another launcher: the unit tests start no browser.
     static void loop(std::string_view address, std::string_view port, std::string_view file, browser::Launcher launcher) {
-        // A launcher that fails throws before the loop: no executor is left attached.
-        launcher(detail::applicationUrl(address, port, file));
-        detail::uiloop::run(uiExecutorHostOf<BrowserWithUILoopFrontend>(), loopStop());
+        // The page opens from inside the loop, once it can run (the platform's loop acquired, nothing left to fail): a loop
+        // that refuses to run never opens a page that nobody serves. A launcher that fails throws before the executor is
+        // attached, so none is left attached.
+        detail::uiloop::run(uiExecutorHostOf<BrowserWithUILoopFrontend>(), loopStop(), [&] {
+            launcher(detail::applicationUrl(address, port, file));
+        });
     }
 
 private:
