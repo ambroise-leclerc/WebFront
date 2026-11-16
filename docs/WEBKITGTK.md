@@ -211,4 +211,9 @@ Development windows and Jasmine use development mode without installation.
 Before shipping, additionally test the installed distribution application with
 its sandbox active and without the upstream opt-out. Generated-profile syntax
 and staging tests do not replace that on-system qualification; the generated
-profile has not been loaded on the Jetson in this pass.
+profile was validated by installing and removing a temporary native application
+package on the Jetson: its bridge connected, its renderer had a separate mount
+and PID namespace, no effective capabilities, `NoNewPrivs=1` and seccomp active.
+See [the qualification record](JETSON.md#hybrid-policy-qualification-597). This
+software-rendered Xvfb check does not qualify accelerated rendering or every
+application package.
