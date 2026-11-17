@@ -1,0 +1,127 @@
+{
+  "format": 1,
+  "date": "2026-11-16",
+  "sourceCommit": "6ccb7e17e5c37ba4d75ba3502f6ae5b8491802a2",
+  "board": "NVIDIA Jetson Orin Nano Super 8 GB",
+  "l4t": "R39.2.1",
+  "kernel": "6.8.12-1021-tegra",
+  "os": "Ubuntu 24.04.5",
+  "compiler": "GCC 13.3.0",
+  "cmake": "4.4.4",
+  "webkitgtk": "2.52.6",
+  "gtk": "4.14.5",
+  "driver": "NVIDIA 595.78",
+  "session": "X11",
+  "build": {
+    "type": "Release",
+    "cef": false,
+    "webkitgtk": true,
+    "cuda": false,
+    "compilePool": 1,
+    "buildParallel": 2,
+    "ctestParallel": 2
+  },
+  "ctest": {
+    "name": "Linux-c++",
+    "tests": "732",
+    "failures": "0",
+    "disabled": "0",
+    "skipped": "1",
+    "hostname": "localhost.localdomain",
+    "time": "526",
+    "timestamp": "2026-11-16T23:18:32",
+    "passed": 731
+  },
+  "skipped": [
+    "Scenario: Host loop: CUDA computes the image of the CPU, within the rounding of the device"
+  ],
+  "webIntegration": {
+    "tests": 115,
+    "failures": 0
+  },
+  "graphicsX11": {
+    "format": 1,
+    "status": "passed",
+    "total": 3,
+    "failed": 0,
+    "failures": [],
+    "incomplete": ""
+  },
+  "graphicsNestedWayland": {
+    "format": 1,
+    "status": "passed",
+    "total": 3,
+    "failed": 0,
+    "failures": [],
+    "incomplete": ""
+  },
+  "portalX11": {
+    "cancel": "PASS",
+    "chooseFixtureFile": "PASS",
+    "transientFor": "x11:3c00004",
+    "modal": true,
+    "focusReturned": true
+  },
+  "lifeReact": {
+    "native": true,
+    "reactGeneration": 1,
+    "cppPanelGeneration": 1,
+    "fullscreen": true,
+    "windowPixels": [
+      2160,
+      3840
+    ]
+  },
+  "limits": [
+    "No fresh flash performed",
+    "No native GNOME Wayland session: GDM WaylandEnable=false",
+    "Nested Weston has no GTK portal-parent export",
+    "No physical NX/AGX test",
+    "No locked-down kiosk qualification"
+  ],
+  "evidenceSha256": {
+    "egl-audit.c": "91176a90cde6767366612752966327c61af8f26a6f15bb1f5eb574cd141784be",
+    "egl-contexts.log": "f582ebae44c11586602c9764bc64bbf9c1275eb1a5ba47ac92319b1860e06054",
+    "egl-wayland.log": "0b9b029e630ba86dc4d28f2e16de2456dc93d1d4c56fc11f05173bb41872b02a",
+    "egl-x11.log": "ac67deb94ef085daa6bd7bb0da343ffbd0840a1623ffc1cc14689a3272325b4b",
+    "graphics-wayland-egl.json": "f9d94619bac9f5827dcdc8ba6aad4761e6b033456b44f0851b784476952a8758",
+    "graphics-wayland-nested.json": "4cb601378b2985ac75eaedca7bd5311f2439f9734556a665e185d6647edc8433",
+    "graphics-wayland-nested.png": "dd8b341f1ddc20d6a77248e420529203d7db65cc07c17d97e7221f93eb3de837",
+    "graphics-x11-egl.json": "f9d94619bac9f5827dcdc8ba6aad4761e6b033456b44f0851b784476952a8758",
+    "graphics-x11.json": "4cb601378b2985ac75eaedca7bd5311f2439f9734556a665e185d6647edc8433",
+    "graphics-x11.png": "46fb821411f0cc2e222ea0c0cd7145c0ff732689201461bdeb6c5d49c6be0e6e",
+    "jasmine-real-x11.json": "ebc26191f282f72c01fdc02369ed675fa7d01775bfbfc7bb6235acfdb53b5153",
+    "life-react-fullscreen.png": "09fda4a9f492f37ea24cc2eab0fa07c1a2c448640623495ddcc4c8c28eb0b04c",
+    "lifecycle-x11-host-close.log": "211d464b9e7c43d628775cbaf6122c5d3c98db084ceb5e096b7406e0ee6da89c",
+    "lifecycle-x11-native-window.log": "211d464b9e7c43d628775cbaf6122c5d3c98db084ceb5e096b7406e0ee6da89c",
+    "lifecycle-x11-second-open.log": "211d464b9e7c43d628775cbaf6122c5d3c98db084ceb5e096b7406e0ee6da89c",
+    "lifecycle-x11-ui-executor.log": "211d464b9e7c43d628775cbaf6122c5d3c98db084ceb5e096b7406e0ee6da89c",
+    "portal-wayland-nested.log": "f37b409c8fdcf5d02df80c09beaf586930df4dd843aff75564d202029fe8b4c2",
+    "portal-x11-choose.log": "653bbb4bcc5b00239fe3d4a5fbd6e85447e10dd4e90aaed58d6ea7f1f42de36a",
+    "portal-x11.log": "0f9f6f8082c975b766141085c3365ae2e3346d3e1d52339733fcc5371fb3f73a",
+    "weston.log": "10a2db843a9db2ec0f879c1a027f985f12af03d8252ed7d65bb8ef8c905617b7"
+  },
+  "jasmineRealX11": {
+    "status": "passed",
+    "exitCode": 0,
+    "jasmine": "7.0.2",
+    "pattern": "",
+    "incomplete": "",
+    "total": 141,
+    "passed": 141,
+    "failed": 0,
+    "pending": 0,
+    "excluded": 0,
+    "durationMs": 17855,
+    "failures": [],
+    "pendingSpecs": [],
+    "suites": [],
+    "global": []
+  },
+  "lifecycleRealX11": {
+    "ui-executor": 0,
+    "native-window": 0,
+    "second-open": 0,
+    "host-close": 0
+  }
+}

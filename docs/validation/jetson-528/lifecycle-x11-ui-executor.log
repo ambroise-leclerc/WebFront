@@ -1,0 +1,1 @@
+WebFront: serving local files from documentRoot (development only). The intended development path is a TypeScript/TSX interface in ui/, built with `wf dev` in the terminal of app.bootstrap("developer"); an agent can run wf in JSON or MCP (docs/DEVELOPING_WITH_AGENTS.md).
