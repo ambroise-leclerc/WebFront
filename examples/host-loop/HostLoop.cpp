@@ -137,7 +137,7 @@ int runWithWindow(boing::Host& host, const Options& options) {
                         auto drawn = ui->jsFunction<std::uint32_t>("hostLoop.captureNext")(glass);
                         if (drawn.wait_for(10s) != std::future_status::ready)
                             throw std::runtime_error("No capture: the browser did not draw the next frame");
-                        drawn.get();
+                        (void)drawn.get();
                     }
                     boing::saveCapture(webfront::frontend::capturePng(), boing::captureFramePath(options.capture, i, options.captureFrames));
                 }

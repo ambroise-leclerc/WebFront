@@ -10,20 +10,22 @@ these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
-### Breaking
+## [1.0.0] - 2026-11-17
 
+WebFront 1.0 ships with developer environment 1.0.0. This release adds host-loop integration, developer tools and
+platform qualification; see the breaking changes below when upgrading.
+
+### Breaking
 - WebKitGTK defaults to development mode with its sandbox disabled; packaged applications must select `WEBFRONT_DISTRIBUTION=ON` or `webfront_use_distribution(target)` to require it, independently of Debug/Release (#596, `docs/WEBKITGTK.md`).
 - Reserve more command names for the terminal: an application command named `ls`, `cat`, `tree`, `mounts`, `cd`, `pwd`, `cp`, `mv`, `rm`, `mkdir`, `rmdir`, `touch`, `edit`, `find`, `grep`, `head`, `tail`, `less`, `stat`, `du` or `df` is now refused by `webfront::Commands::add` and must be renamed (#575, ADR-023).
 
 ### Added
-
 - Capture numbered PNG sequences with a fixed simulation clock using `WebFrontHostLoop --capture-frames`; `--capture-demo` hides statistics and switches materials continuously. Illustrate the bilingual README with the CUDA checkered ball followed by illuminated glass (#602, `docs/HOST_LOOP_EXAMPLE.md`).
 
 - Qualify real X11 Canvas/WebGL presentation on NVIDIA EGL, the GNOME file portal and fullscreen Life React on Orin Nano Super; retain captures, an EGL diagnostic and the limits of nested Wayland testing (#528, `docs/JETSON.md`).
 - Add an isolated, low-priority Jetson Orin hardware workflow with persistent caches, complete CEF-off tests, WebKitGTK integration, required CUDA regression and workflow security checks (#529, `docs/JETSON_RUNNER.md`).
 - Turn the `WebFrontHostLoop` example into a ray-traced Boing Ball computed by the host's own loop on the CPU or with an optional CUDA unit, shown full-window by an embedded page that receives at most one image at a time; a glass ball with coloured beams is the workload that separates the two engines. Measured on a Jetson Orin Nano (#530, `docs/HOST_LOOP_EXAMPLE.md`).
 - Generate a per-executable AppArmor profile for application packaging with `webfront_generate_webkitgtk_profile`; select the distribution policy per target with `webfront_use_distribution`, without adding a runtime (#596, `docs/WEBKITGTK.md`).
-- Document the Jetson Orin Nano Super qualification after the JetPack 7 upgrade and its L4T R39.2.1 toolchain; add a manual Canvas 2D/WebGL capture probe for the remaining real-display qualification (#528, `docs/JETSON.md`).
 - Look at the project from the terminal with `ls`, `cat`, `tree` and `mounts` (read-only), and at the installed packages with `wf list --tree`, `wf why <package>` and `wf info <package>`; a `wf` command typed without its prefix answers with the line to type. The `wf` prefix stays (#575, ADR-023, `docs/DEVELOPER_ENVIRONMENT.md`).
 - Add WebFront to an application that keeps its own loop: `app.start()` opens the system browser and returns at once, `app.requestClose()` ends an embedded window's `show()` from any thread, and `webfront::UIThread<App>` runs an application on a secondary thread where the frontend allows it (WebView2). New `WebFrontHostLoop` example (#567, `docs/HOST_INTEGRATION.md`, ADR-007).
 - Tell an agent at first contact how an application is developed (C++ with a TypeScript/TSX interface in `ui/`, `wf dev`) and that it can run `wf` itself in JSON or MCP: a README section before the tutorial, `webfront_write_agent_guide()`, and notices at configuration, in the terminal and at startup (#561, `docs/DEVELOPING_WITH_AGENTS.md`).
@@ -35,37 +37,29 @@ these entries stays in the GitHub releases and the Git history.
 - Launch the developer environment from its verified cache without rewriting it while its published files match the archive: a `wf` command of the tests starts in 1.6 s instead of 2.5 s (#570, `docs/DEVELOPER_ENVIRONMENT.md`).
 - Replace Catch2 with `test/unit/Bdd.hpp`, a single-header BDD framework: scenarios are `Scenario` objects whose `given`/`when`/`then` sections are lambdas, checked with `require`/`check`. The tests no longer download or compile Catch2; `tests` takes `--exact`, `--list`, `--junit` and the former filters, order and shard options (ADR-012, `docs/TEST_TIERS.md`).
 - Wait for asynchronous states in unit tests with `requireEventually`, `checkEventually`, `requireReady` and `checkReady` of `Bdd.hpp`, which report the delay and the time waited and replace nine local helpers; `WEBFRONT_TEST_TIMEOUT_FACTOR` lengthens the delays of a slow job (#582, `docs/TEST_TIERS.md`, ADR-012).
-- Keep automated browser windows visible (#544, #556, `docs/TEST_PERFORMANCE.md`).
 - Run each developer integration part and each wf command of the tests in a process of its own again: the shared windows of #544 and #556 made the driver cases about a third slower on Windows and failed more often. Remove the timing analysis tools and their CI steps, and repeat the desktop suite through one path, with `desktop_passes` on a manual dispatch (#570, `docs/TEST_PERFORMANCE.md`).
 - Close the test driver's window with `requestClose()` instead of asking the page: a spec that blocks the page now ends with the driver's timeout report instead of a forced exit (#570).
-- Retire browser tests that repeated others: `LifeEmbeddedBuild` and `LifeEmbeddedIntegration` (the journey compiles and runs the same application from its own generated header), `WfDriverCreateStarter` and `WfDriverTestPasses` (`JourneyCreate` and `JourneyTest`), and `AutomationCliWatchdog`, whose endpoint reuse and Unicode failure checks now follow `AutomationMcpWatchdog` (#570).
 - Keep the configure downloads of the tests (bootstrap environment, test registry, jasmine-core) once per machine, in `WEBFRONT_DOWNLOAD_CACHE`, and try a failed download three times: a new build tree links the verified archives instead of downloading them again (#570, `docs/DEVELOPER_ENVIRONMENT.md`).
 - Declare GCC 13 as the best-effort S2 minimum for the library and examples, document the GCC 14 exit clause and qualified Clang scope, and add GCC 13 ASan/UBSan fast tests (#525, ADR-022).
 
-- Skip the cases that configure a CMake project (label `configuration`, about 75 s of worker time) and the coverage capture on a pull request that does not change the build system, and drop the compiler-cache probe step; a push to `develop` and the full tier still run them (#545).
-- Open the developer page on the interface, over the whole window, once the project has a preview; the terminal moves to a floating, movable window behind a tab on the right edge that shows the session's state, and keeps its session when collapsed. Its shortcut is F9, or the manifest's new optional `developer.terminalShortcut`. Environment sources 0.9.1, not published yet (#539, `docs/DEVELOPER_ENVIRONMENT.md`).
+- Open the developer page on the interface, over the whole window, once the project has a preview; the terminal moves to a floating, movable window behind a tab on the right edge that shows the session's state, and keeps its session when collapsed. Its shortcut is F9, or the manifest's new optional `developer.terminalShortcut`. Introduced in environment 0.9.1 (#539, `docs/DEVELOPER_ENVIRONMENT.md`).
 - Make the default test build the quick one: the heavy unit tests compile four to a file, the MSVC code analysis and the reproducibility proofs are off unless `-DWEBFRONT_MSVC_ANALYZE=ON` or `-DWEBFRONT_TEST_REPRODUCIBILITY=ON` asks for them. The CI passes every option explicitly and checks what it checked before (#546).
-- Run the unit tests as a few processes instead of one per scenario with `-DWEBFRONT_TEST_UNIT_SHARDS=<n>`: each of the `n` CTest cases is a Catch2 shard that reports every scenario in `unit-results-<shard>.xml`. The default still registers one CTest case per scenario; the desktop CI jobs pass 4 and no longer run the fast tier twice on a pull request (#543).
 
 ### Fixed
-
+- Build the host-loop capture example with AppleClang when ignoring the frame number (#602, `docs/HOST_LOOP_EXAMPLE.md`).
 - Deduplicate the host-loop example's frame requests through rendering until each delivery starts, and expose its status messages to assistive technologies (#599, `docs/HOST_LOOP_EXAMPLE.md`).
 - Make the host-loop example reject `--capture` without a native window or with `--benchmark`, and return a failure when the capture cannot be saved or the window closes before it completes (#599, `docs/HOST_LOOP_EXAMPLE.md`).
 - Enforce the WebKitGTK distribution policy across translation units and inherited environments; bound launcher checks and restore the development opt-out before callbacks or system-browser fallback (#596, `docs/WEBKITGTK.md`).
-- Give `CheckConsumerJasmineReports.cmake` the policies of CMake 3.31, without which it compared the report status with a variable (#596).
 - On Windows, a slow HTTP client no longer blocks the publication of developer resources, and removing a log sink no longer returns while one of its callbacks is still running (#542, `docs/validation/ci-flakes-542.md`).
-- Serialize the developer session's phase logs and keep CI timing analysis running if a duration is malformed: report and omit that timing while retaining the other phases and test results (#542).
 - The Linux interface loop shuts down without leaving work behind, and the automation deadlines are decided consistently when a window is ready at the moment its startup expires. The ThreadSanitizer job no longer needs its GLib suppression (#542, `docs/validation/ci-flakes-542.md`).
-- Driver commands and their Jasmine runners are displayed in the native window, and asynchronous unit tests wait for observable states instead of fixed delays (#542).
-- Logging delivers to its sinks without allocating per line (#542).
 - `WebView2Lifecycle-native-early-close` no longer fails under load: the COM initialization that the WebView2 runtime keeps after a window closed during its startup is a documented limit, and the frontend's own apartment has a unit test (#564, #570, `docs/PROJECT_STATUS.md`).
 
 - Restore the terminal prompt with exit code 1 when `wf dev` starts without a project or a selectable entry; compilation errors still keep watching for edits. Environment 0.9.2 (#560).
 - Read all six developer integration reports in CTest after a part fails, and keep the successful parts' dependent tests runnable, also when the session's native deadline ends it (#556).
 - On Windows, `wf install`, `wf build` and `wf test` no longer fail with `rename: Access is denied` while another process, such as an antivirus scan, still reads the files just written: the developer store tries the rename again for up to 635 ms; `wf test` also empties the directory of an interrupted run (#542).
-- Run the commit attribution regression checks with older Git versions by dropping the unsupported `git log --no-graph` option (#525).
 
 - Build with `-DWEBFRONT_EMBED_CEF=ON` on Linux aarch64 instead of failing on `-m64`, and cross-compile CEF: WebFront pins CEF 156.0.28, whose package selects the archive and `PROJECT_ARCH` from the target (#523).
+
 
 ## [0.9.0] - 2026-11-10
 
@@ -237,7 +231,8 @@ Coroutines and the opt-in developer environment. One **breaking** change to the 
 
 - Fail decoding when a bridge integer is out of the requested C++ range, instead of invoking undefined behavior.
 
-[Unreleased]: https://github.com/ambroise-leclerc/WebFront/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/ambroise-leclerc/WebFront/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/ambroise-leclerc/WebFront/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/ambroise-leclerc/WebFront/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/ambroise-leclerc/WebFront/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/ambroise-leclerc/WebFront/compare/v0.6.0...v0.7.0
