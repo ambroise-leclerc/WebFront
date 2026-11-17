@@ -85,9 +85,15 @@ adding the workflow.
 [Tiers](TEST_TIERS.md) defines the desktop and extended CI scope, including the GCC 13 Linux aarch64 job (#548) and its weekly CEF and WebKitGTK browser jobs (#524).
 The [Jetson Orin qualification](JETSON.md) records the separate on-board work (#528):
 the JetPack 7 upgrade identifies L4T R39.2.1, Ubuntu 24.04 and GCC 13.3 on an Orin
-Nano Super 8 GB. Native rendering, portals and kiosk behavior require board
-evidence beyond the hosted arm64 software-rendered jobs; NX, AGX and Wayland are
-not inferred from that CI coverage. Ubuntu 24.04's AppArmor user-namespace policy
+Nano Super 8 GB. The [final desktop record](validation/jetson-528/README.md)
+qualifies X11 Canvas/WebGL presentation on native NVIDIA EGL contexts, the real
+GNOME file chooser and parent export, and fullscreen Life React with its C++
+panel updating after a click. No DMA-BUF opt-out was needed. A Wayland graphics
+client passed under Weston 13 nested on X11; its missing portal-parent export
+is retained as a negative result. Native GNOME Wayland is disabled in GDM and
+was not qualified. NX/AGX physical behavior, a locked-down kiosk and fresh-flash
+acceptance are not inferred from this existing-workstation qualification.
+Ubuntu 24.04's AppArmor user-namespace policy
 refuses WebKit's bubblewrap sandbox on that installation (`bwrap` cannot write the
 UID map). Development builds explicitly disable the WebKit sandbox by default,
 so native windows and Jasmine run without a system change. Distribution builds
@@ -95,8 +101,9 @@ select `WEBFRONT_DISTRIBUTION=ON` (or `webfront_use_distribution(target)`) and
 require the sandbox; `webfront_generate_webkitgtk_profile` prepares the application's
 per-executable authorization for normal package installation. Neither the library
 nor its CMake helpers load policy on the development machine. See
-[WebKitGTK](WEBKITGTK.md#development-and-distribution). No Tegra rendering
-qualification is claimed.
+[WebKitGTK](WEBKITGTK.md#development-and-distribution). JetPack 6 remains a
+historical S3 path; the on-board X11 S2 profile names the measured L4T stack
+rather than inferring a JetPack package set from an absent metapackage.
 This does not erase the earlier JetPack 6 WebKitGTK qualification recorded in
 [draft PR #558](https://github.com/ambroise-leclerc/WebFront/pull/558): 28/28
 adapter/lifecycle cases and 7/7 Jasmine/fixture cases passed under Xvfb. That PR

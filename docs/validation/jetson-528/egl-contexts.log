@@ -1,0 +1,4 @@
+wayland: WF528_CONTEXT pid=864057 process=jasmine_consumer vendor=NVIDIA Corporation renderer=NVIDIA Tegra Orin (nvgpu)/integrated version=OpenGL ES 3.2 NVIDIA 595.78
+wayland: WF528_CONTEXT pid=864081 process=WebKitWebProcess vendor=NVIDIA Corporation renderer=NVIDIA Tegra Orin (nvgpu)/integrated version=OpenGL ES 3.2 NVIDIA 595.78
+x11: WF528_CONTEXT pid=863628 process=jasmine_consumer vendor=NVIDIA Corporation renderer=NVIDIA Tegra Orin (nvgpu)/integrated version=OpenGL ES 3.2 NVIDIA 595.78
+x11: WF528_CONTEXT pid=863649 process=WebKitWebProcess vendor=NVIDIA Corporation renderer=NVIDIA Tegra Orin (nvgpu)/integrated version=OpenGL ES 3.2 NVIDIA 595.78

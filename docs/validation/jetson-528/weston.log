@@ -1,0 +1,56 @@
+Date: 2026-11-16 CET
+[22:28:00.722] weston 13.0.0
+               https://wayland.freedesktop.org
+               Bug reports to: https://gitlab.freedesktop.org/wayland/weston/issues/
+               Build: 13.0.0
+[22:28:00.722] Command line: /tmp/webfront-528-wayland-tools/root/usr/bin/weston --backend=x11 --renderer=gl --shell=kiosk-shell.so --socket=wayland-webfront-528-kiosk --width=1100 --height=900 --idle-time=0 --no-config --log=/tmp/webfront-528-weston-kiosk.log
+[22:28:00.722] OS: Linux, 6.8.12-1021-tegra, #1 SMP PREEMPT Thu Aug  6 21:56:04 PDT 2026, aarch64
+[22:28:00.722] Flight recorder: enabled
+[22:28:00.722] Starting with no config file.
+[22:28:00.722] Output repaint window is 7 ms maximum.
+[22:28:00.723] Loading module '/tmp/webfront-528-wayland-tools/root/usr/lib/aarch64-linux-gnu/libweston-13/x11-backend.so'
+[22:28:00.731] Loading module '/tmp/webfront-528-wayland-tools/root/usr/lib/aarch64-linux-gnu/libweston-13/gl-renderer.so'
+[22:28:00.802] Using rendering device: /dev/dri/renderD129
+[22:28:00.802] EGL version: 1.5
+[22:28:00.802] EGL vendor: NVIDIA
+[22:28:00.802] EGL client APIs: OpenGL_ES OpenGL
+[22:28:00.803] EGL features:
+               EGL Wayland extension: yes
+               context priority: yes
+               buffer age: yes
+               partial update: yes
+               swap buffers with damage: yes
+               configless context: yes
+               surfaceless context: yes
+               dmabuf support: modifiers
+[22:28:00.944] GL version: OpenGL ES 3.2 NVIDIA 595.78
+[22:28:00.944] GLSL version: OpenGL ES GLSL ES 3.20
+[22:28:00.944] GL vendor: NVIDIA Corporation
+[22:28:00.944] GL renderer: NVIDIA Tegra Orin (nvgpu)/integrated
+[22:28:00.945] GL ES 3.2 - renderer features:
+               read-back format: ARGB8888
+               glReadPixels supports y-flip: no
+               wl_shm 10 bpc formats: yes
+               wl_shm 16 bpc formats: yes
+               wl_shm half-float formats: no
+               internal R and RG formats: yes
+               OES_EGL_image_external: yes
+[22:28:00.946] Using GL renderer
+[22:28:00.969] Registered plugin API 'weston_windowed_output_api_v2' of size 16
+[22:28:00.969] Color manager: no-op
+[22:28:00.969] Output 'screen0' attempts EOTF mode: SDR
+[22:28:00.969] Output 'screen0' using color profile: stock sRGB color profile
+[22:28:00.970] Chosen EGL config details: id:  34 rgba: 8 8 8 0 buf: 24 dep:  0 stcl: 0 int: 0-8 type: win|pix|pbf vis_id: 0x2b
+[22:28:00.972] x11 output 1100x900, window id 69206022
+[22:28:00.972] Output 'screen0' enabled with head(s) screen0
+[22:28:00.972] Compositor capabilities:
+               arbitrary surface rotation: yes
+               screen capture uses y-flip: yes
+               cursor planes: no
+               arbitrary resolutions: no
+               view mask clipping: yes
+               explicit sync: yes
+               color operations: no
+               presentation clock: CLOCK_MONOTONIC_RAW, id 4
+               presentation clock resolution: 0.000000001 s
+[22:28:00.973] Loading module '/tmp/webfront-528-wayland-tools/root/usr/lib/aarch64-linux-gnu/weston/kiosk-shell.so'

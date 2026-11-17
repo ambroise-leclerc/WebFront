@@ -1,0 +1,35 @@
+Embedded window
+  [ok]   the executor is unavailable before show()
+  [ok]   app.nativeWindow() before show(): error notOpen
+  [ok]   an operation scheduled before show() is refused (UIExecutorUnavailable)
+  [ok]   a browser connected through the bridge
+  [ok]   the executor is available while the loop runs
+  [ok]   onUIThread() is false on a worker thread
+  [ok]   ui.isEmbeddedView() is true
+  [ok]   app.nativeWindow().get() on a worker thread: error wrongThread
+  [ok]   the operation runs on the thread that called show()
+  [ok]   onUIThread() is true inside the operation
+  [info] app.nativeWindow().get(): window kind=gtk portalParent='x11:3e00004'
+  [info] ui.nativeWindow():        window kind=gtk portalParent='x11:3e00004'
+  [ok]   the connection's window is the frontend's window
+  [ok]   the first operation completed with set_value
+  [ok]   three operations ran in scheduling order
+  [ok]   libgio-2.0.so.0 (GDBus, the portal's transport) loads at run time
+  [ok]   the operation runs inside the GLib default main context, owned by this thread
+  [ok]   the GLib operation completed
+  [info] XDG_SESSION_TYPE=x11 WAYLAND_DISPLAY= GDK_BACKEND=x11
+  [info] portalParent: 'x11:3e00004'
+  [ok]   the window exports a portal parent identifier (x11:<XID> or wayland:<handle>)
+  [ok]   the parented GtkFileDialog was opened from an operation of the executor
+  [look] the dialog opened over the application's window, stays on top of it and blocks it
+  [ok]   an operation scheduled while the dialog is open ran on the interface thread
+  [info] dialog result: a file was chosen
+  [ok]   the dialog completed on the interface thread
+  [ok]   the window was read after the dialog
+  [info] gtk_window_is_active after the dialog: true
+  [look] focus returned to the application's window
+  [ok]   show() returned after the scenario ended the loop
+  [ok]   the executor is unavailable after the loop ended
+  [ok]   an operation scheduled after closure is refused
+  [ok]   app.nativeWindow() after the loop: error closed
+RESULT: PASS
