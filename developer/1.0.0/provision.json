@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "version": "1.0.0",
+  "environment": "./environment.tgz",
+  "integrity": "sha512-jZTAAPzQmKYoSJ6URWkD3ksB8FvsVCUhAYw+E4P4yAV94eW9qp5wO3p2KKrWYjFEUqiyPU+H8pryi0E/Dvd2Sw==",
+  "starters": {
+    "app": {
+      "archive": "app-starter.tgz",
+      "integrity": "sha512-BarHDIS3zQVfEtPMxurH1vGhDR5kHc+xDZF+WpITodlVW1Dp8xY4/ToJQnaxXf7V/Tj8gP0eIPJGKoptb22LtQ=="
+    },
+    "life": {
+      "archive": "life-starter.tgz",
+      "integrity": "sha512-JK43TAPw3c1bvytSNIZ+PrnD69V6/AcLReCsGmV/AnS0xosofL7gDZ/sOY7EoSb80qrUNxmenLWyMj/UvjevKg=="
+    }
+  }
+}
