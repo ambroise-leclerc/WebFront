@@ -49,7 +49,7 @@ Conçu pour suivre le C++ standard sur les différentes plateformes, le cœur ut
 
 **L'[exemple Boing Ball fourni](docs/HOST_LOOP_EXAMPLE.md) fonctionne sur CPU ou CUDA.** Une balle à damier rebondit au-dessus d'un sol réfléchissant ; passez au verre teinté pour découvrir réflexion, réfraction et faisceaux de lumière colorée. Chaque pixel est calculé par l'hôte C++, tandis que la page affiche le tableau typé sur un canvas. La même boucle hôte fonctionne avec une fenêtre native ou le navigateur système.
 
-![Boing Ball raytracée avec CUDA dans une fenêtre native sur Jetson Orin Nano](docs/images/host-loop-boing.jpg)
+![Animation CUDA de la Boing Ball dans une fenêtre native sur Jetson Orin Nano : balle à damier, puis verre illuminé](docs/images/host-loop-boing.gif)
 
 ```bash
 cmake --build build --target WebFrontHostLoop --parallel 2
@@ -57,6 +57,8 @@ build/examples/WebFrontHostLoop --quality 0
 # Avec un moteur CUDA compilé et un GPU disponible :
 build/examples/WebFrontHostLoop --engine cuda --glass --stats
 ```
+
+Avec un générateur multi-configuration comme Visual Studio, remplacez `build/examples/` dans les commandes ci-dessus par `build/examples/Debug/`, ou `build/examples/Release/` après une construction avec `--config Release`. L’exécutable se nomme `WebFrontHostLoop.exe`.
 
 Ces commandes partent de la racine du dépôt, après configuration. CUDA est détecté automatiquement ; `-DWEBFRONT_HOST_LOOP_CUDA=OFF` construit l'exemple CPU complet sans toolkit. Ajoutez `--browser` pour choisir le navigateur système. Le [guide de l'exemple](docs/HOST_LOOP_EXAMPLE.md) décrit qualité, benchmark et configuration du compilateur CUDA séparé.
 
@@ -181,6 +183,8 @@ Aucune option n'est nécessaire. Les commandes suivantes partent de ce répertoi
 examples/WebFrontLifeConsole
 ```
 
+Avec Visual Studio, lancez `examples\Debug\WebFrontLifeConsole.exe`, ou `examples\Release\WebFrontLifeConsole.exe` après une construction avec `--config Release`.
+
 ### 2. Ajouter la fenêtre et les outils
 
 L'ajout essentiel de [LifeDeveloper.cpp](examples/life/LifeDeveloper.cpp) est :
@@ -199,6 +203,8 @@ Lancez l'application :
 ```bash
 examples/WebFrontLifeDeveloper
 ```
+
+Avec Visual Studio, lancez `examples\Debug\WebFrontLifeDeveloper.exe`, ou `examples\Release\WebFrontLifeDeveloper.exe` après une construction avec `--config Release`.
 
 L'exemple crée `life-project` dans le répertoire courant s'il manque et réutilise un projet existant sans écraser ses fichiers. `bootstrap("developer")` charge la version épinglée de l'environnement, vérifie son SHA-512 et la met en cache. Le terminal fournit les commandes `wf`, ainsi que `ls`, `cat`, `tree` et `mounts`, sans exposer de shell système.
 
@@ -319,6 +325,8 @@ cmake .. -DWEBFRONT_LIFE_ASSETS="$PWD/life-project/generated/LifeUI.hpp"
 cmake --build . --target WebFrontLifeEmbedded
 examples/WebFrontLifeEmbedded
 ```
+
+Avec Visual Studio, lancez `examples\Debug\WebFrontLifeEmbedded.exe`, ou `examples\Release\WebFrontLifeEmbedded.exe` après une construction avec `--config Release`.
 
 [LifeEmbedded.cpp](examples/life/LifeEmbedded.cpp) remplace le projet de développement par le provider généré :
 

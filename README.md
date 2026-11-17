@@ -48,7 +48,7 @@ Designed to follow standard C++ across platforms, the core uses standard facilit
 
 **The included [Boing Ball example](docs/HOST_LOOP_EXAMPLE.md) runs on CPU or CUDA.** A checkered ball bounces above a reflective floor; switch to tinted glass to reveal reflection, refraction and coloured light beams. Every pixel is computed by the C++ host, while the page displays the resulting typed array on a canvas. The same host loop works with a native window or the system browser.
 
-![Boing Ball ray-traced with CUDA in a native window on Jetson Orin Nano](docs/images/host-loop-boing.jpg)
+![CUDA Boing Ball animation in a native window on Jetson Orin Nano: checkered ball, then illuminated glass](docs/images/host-loop-boing.gif)
 
 ```bash
 cmake --build build --target WebFrontHostLoop --parallel 2
@@ -56,6 +56,8 @@ build/examples/WebFrontHostLoop --quality 0
 # On a CUDA-equipped build and device:
 build/examples/WebFrontHostLoop --engine cuda --glass --stats
 ```
+
+With a multi-configuration generator such as Visual Studio, replace `build/examples/` in the commands above with `build/examples/Debug/`, or `build/examples/Release/` after building with `--config Release`. The executable is named `WebFrontHostLoop.exe`.
 
 Run these commands from the repository root after configuration. CUDA detection is automatic; `-DWEBFRONT_HOST_LOOP_CUDA=OFF` builds the complete CPU example without the toolkit. Add `--browser` to select the system browser. The [example guide](docs/HOST_LOOP_EXAMPLE.md) covers quality, benchmarking and the separate CUDA compiler configuration.
 

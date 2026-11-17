@@ -78,6 +78,9 @@ inline constexpr std::string_view page = R"js(
     let device = "", cpuThreads = 0, wantCuda = false, stopping = false, sending = 0, settled = 0, requestedAt = 0;
     let framesPerSecond = 0, drawMs = 0, bridgeMs = 0;
     const shownAt = [];
+    const captureMode = Boolean(globalThis.hostLoopCapture);
+    let captureResolve = null;
+    if (captureMode) glass.checked = Boolean(globalThis.hostLoopCapture.glass);
     const showEngine = () => {
         cuda.classList.toggle("on", wantCuda);
         cuda.setAttribute("aria-pressed", String(wantCuda));
@@ -107,6 +110,15 @@ inline constexpr std::string_view page = R"js(
     };
 
     globalThis.hostLoop = {
+        async captureNext(makeGlass) {
+            await captureReady;
+            if (!captureMode || captureResolve) throw new Error("Capture is unavailable or already pending");
+            if (glass.checked !== makeGlass) {
+                glass.checked = makeGlass;
+                await send();
+            }
+            return new Promise(resolve => { captureResolve = resolve; next(); });
+        },
         onFrame(data, [sequence, width, height, rays, revision, packed], [usedEngine, isPaused, isGlass, usedQuality], [computeMs, copyMs, packMs]) {
             bridgeMs = Math.max(0, performance.now() - requestedAt - computeMs - copyMs - packMs);
             requestAnimationFrame(now => {
@@ -135,17 +147,22 @@ inline constexpr std::string_view page = R"js(
                     `compute ${fixed(computeMs)} ms  copy ${fixed(copyMs)} ms  pack ${fixed(packMs)} ms  ` +
                     `bridge ${fixed(bridgeMs)} ms  draw ${fixed(drawMs)} ms\n` +
                     `displayed ${framesPerSecond} images per second`;
-                if (!stopping) next();
+                if (captureMode) {
+                    const resolve = captureResolve;
+                    captureResolve = null;
+                    if (resolve) resolve(sequence);
+                } else if (!stopping) next();
             });
         }
     };
-    webFront.ready.then(() => call("host.info")).then(([name, threads]) => {
+    const captureReady = webFront.ready.then(() => call("host.info")).then(([name, threads]) => {
         device = name;
         cpuThreads = threads;
         cuda.disabled = !device;
         showEngine();
-        next();
-    }).catch(fail);
+        if (!captureMode) next();
+    });
+    captureReady.catch(fail);
 })();
 )js";
 

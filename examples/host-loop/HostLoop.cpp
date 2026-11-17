@@ -9,8 +9,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <exception>
+#include <future>
 #include <iostream>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <stop_token>
 #include <string>
@@ -35,6 +37,8 @@ using namespace std::chrono_literals;
 struct Options {
     boing::Settings settings;
     bool            browser{false}, stats{false}, benchmark{false};
+    unsigned        captureFrames{1};
+    bool            captureDemo{false};
     std::string     capture;  // a PNG file to write from the native window, after which the host stops
 };
 
@@ -74,16 +78,25 @@ int runWithBrowser(boing::Host& host, const Options& options) {
 // The native window: show() keeps the main thread until the window closes, whoever closes it.
 int runWithWindow(boing::Host& host, const Options& options) {
     using App = webfront::WebFrontWithFrontend<webfront::frontend::NativeWebViewFrontend>;
-    App app{webfront::WebFrontConfig{.window = {.title = "WebFront host loop", .width = 800, .height = 600}}};
+    // The server's connection handler refers to these; keep them alive until after app is destroyed.
+    std::mutex            uiMutex;
+    std::optional<App::UI> captureUI;
+    App app{webfront::WebFrontConfig{.window = {.title = "WebFront host loop", .width = options.captureDemo ? 640 : 800, .height = options.captureDemo ? 480 : 600}}};
     boing::install(app, host);
-    app.onUIStarted([](App::UI ui) {
-        ui.addScript(ownPage);
+    app.onUIStarted([&](App::UI ui) {
+        const std::scoped_lock lock{uiMutex};
+        captureUI = ui;
+        const std::string mode = options.captureFrames > 1
+            ? (options.settings.glass ? "globalThis.hostLoopCapture = {glass: true};" : "globalThis.hostLoopCapture = {glass: false};") : "";
+        const std::string style = options.captureDemo
+            ? "document.querySelector('#host-loop .stats').remove();" : "";
+        ui.addScript(mode + ownPage + style);
     });
     std::atomic<bool>  showReturned{false};
     std::exception_ptr loopFailure;
     std::jthread       loop([&](std::stop_token stopping) {
         try {
-            host.run(stopping, options.stats ? printStats : nullptr);
+            host.run(stopping, options.stats ? printStats : nullptr, options.captureFrames > 1 ? 1. / 25. : 0.);
         } catch (...) {
             loopFailure = std::current_exception();
         }
@@ -94,7 +107,7 @@ int runWithWindow(boing::Host& host, const Options& options) {
         }
     });
     // --capture: WebFront itself gives a PNG of what the window shows, to any thread but the window's. The host takes
-    // one after six seconds of animation, then ends its loop, which closes the window.
+    // one or a sequence after six seconds of animation, then ends its loop, which closes the window.
     std::exception_ptr captureFailure;
     bool               captureCompleted = false;  // read only after the capturer is joined
     std::jthread       capturer;
@@ -109,7 +122,25 @@ int runWithWindow(boing::Host& host, const Options& options) {
             if (stopping.stop_requested())
                 return;
             try {
-                boing::saveCapture(webfront::frontend::capturePng(), options.capture);
+                std::optional<App::UI> ui;
+                {
+                    const std::scoped_lock uiLock{uiMutex};
+                    ui = captureUI;
+                }
+                if (!ui)
+                    throw std::runtime_error("No capture: the browser did not connect");
+                for (unsigned i = 0; i < options.captureFrames; ++i) {
+                    if (stopping.stop_requested())
+                        return;
+                    if (options.captureFrames > 1) {
+                        const bool glass = options.captureDemo ? i >= options.captureFrames * 2 / 3 : options.settings.glass;
+                        auto drawn = ui->jsFunction<std::uint32_t>("hostLoop.captureNext")(glass);
+                        if (drawn.wait_for(10s) != std::future_status::ready)
+                            throw std::runtime_error("No capture: the browser did not draw the next frame");
+                        drawn.get();
+                    }
+                    boing::saveCapture(webfront::frontend::capturePng(), boing::captureFramePath(options.capture, i, options.captureFrames));
+                }
                 captureCompleted = true;
                 std::cout << "Captured the window in " << options.capture << '\n';
             } catch (...) {
@@ -163,6 +194,7 @@ int benchmark(boing::Host& host) {
 }
 
 bool parse(std::span<char* const> arguments, Options& options) {
+    bool captureFramesSpecified = false;
     for (std::size_t i = 0; i < arguments.size(); ++i) {
         const std::string_view argument = arguments[i];
         const std::string_view value    = i + 1 < arguments.size() ? arguments[i + 1] : "";
@@ -174,7 +206,16 @@ bool parse(std::span<char* const> arguments, Options& options) {
             options.settings.glass = true;
         else if (argument == "--capture" && !value.empty())
             options.capture = value, ++i;
-        else if (argument == "--browser")
+        else if (argument == "--capture-demo")
+            options.captureDemo = true;
+        else if (argument == "--capture-frames" && !value.empty()) {
+            const auto count = boing::captureFrameCount(value);
+            if (!count)
+                return false;
+            options.captureFrames  = *count;
+            captureFramesSpecified = true;
+            ++i;
+        } else if (argument == "--browser")
             options.browser = true;
         else if (argument == "--stats")
             options.stats = true;
@@ -183,21 +224,27 @@ bool parse(std::span<char* const> arguments, Options& options) {
         else
             return false;
     }
-    return true;
+    if (options.captureDemo && !captureFramesSpecified)
+        options.captureFrames = 300;
+    return (!(captureFramesSpecified || options.captureDemo) || !options.capture.empty())
+        && (!options.captureDemo || (options.captureFrames >= 3 && options.captureFrames % 3 == 0));
 }
 }  // namespace
 
 int main(int argc, char** argv) {
     Options options;
     if (!parse({argv + 1, static_cast<std::size_t>(argc - 1)}, options)) {
-        std::cerr << "Usage: WebFrontHostLoop [--engine cpu|cuda] [--quality 0-3] [--glass] [--browser] [--stats] [--capture <file.png>]\n"
-                     "       WebFrontHostLoop --benchmark\n"
-                     "  --engine     the renderer at start (default cpu); cuda is an error where it is unavailable\n"
-                     "  --quality    0: 320x240, 1: 640x480, 2: 640x480 with 4 rays per pixel, 3: 960x720 with 4 (default)\n"
-                     "  --browser    open the system browser even when the native window is built\n"
-                     "  --stats      print the timings of an image every second\n"
-                     "  --capture    write a PNG of the native window after six seconds, then stop\n"
-                     "  --benchmark  time both renderers without any interface, and exit\n";
+        std::cerr
+            << "Usage: WebFrontHostLoop [--engine cpu|cuda] [--quality 0-3] [--glass] [--browser] [--stats] [--capture <file.png>] [--capture-frames 1-600] [--capture-demo]\n"
+               "       WebFrontHostLoop --benchmark\n"
+               "  --engine     the renderer at start (default cpu); cuda is an error where it is unavailable\n"
+               "  --quality    0: 320x240, 1: 640x480, 2: 640x480 with 4 rays per pixel, 3: 960x720 with 4 (default)\n"
+               "  --browser    open the system browser even when the native window is built\n"
+               "  --stats      print the timings of an image every second\n"
+               "  --capture    write a PNG of the native window after six seconds, then stop\n"
+               "  --capture-frames  save numbered PNGs with a fixed 25 fps scene clock (default 1); requires --capture\n"
+               "  --capture-demo  hide statistics and switch to glass after two thirds (default 300 frames)\n"
+               "  --benchmark  time both renderers without any interface, and exit\n";
         return 2;
     }
     // WebFront's warnings on the console: a development build says there that its native window has no sandbox.
