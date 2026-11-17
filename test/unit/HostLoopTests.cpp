@@ -69,6 +69,31 @@ const Scenario hostLoopCapture{"Host loop: capture refuses unsupported modes and
         requireThrows<std::invalid_argument>([] { validateCapture(true, true, true, false); });
         requireThrows<std::invalid_argument>([] { validateCapture(true, true, false, true); });
     });
+    then("a frame clock advances only for rendered frames and survives a material change", [] {
+        Host host{{.quality = 0}};
+        require(!host.iterate(0.04, true));
+        require(host.sceneSeconds() == 0.);
+        host.request(1, [](const Frame&) {});
+        require(host.iterate(0.04, true));
+        require(host.sceneSeconds() == 0.04);
+        require(!host.iterate(20., true));
+        require(host.sceneSeconds() == 0.04);
+        host.set({.glass = true, .quality = 0});
+        host.request(1, [](const Frame& frame) { require(frame.scene.glass == 1); });
+        require(host.iterate(0.04, true));
+        require(host.sceneSeconds() == 0.08);
+    });
+    then("capture sequences accept only bounded positive frame counts", [] {
+        require(captureFrameCount("1") == 1);
+        require(captureFrameCount("600") == 600);
+        for (const auto text : {"", "0", "601", "-1", "+1", "2x", "999999999999999999999"})
+            require(!captureFrameCount(text));
+    });
+    then("single captures keep their path and sequences keep their directory", [] {
+        require(captureFramePath("frames/ball.png", 0, 1) == "frames/ball.png");
+        require(std::filesystem::path{captureFramePath("frames/ball.png", 0, 80)} == std::filesystem::path{"frames/ball-0000.png"});
+        require(std::filesystem::path{captureFramePath("frames/ball.png", 79, 80)} == std::filesystem::path{"frames/ball-0079.png"});
+    });
     then("an unavailable or timed out capture preserves its diagnostic", [] {
         requireThrows<std::runtime_error>([] {
             saveCapture(CaptureResult{std::unexpected("window did not answer")}, "unused.png");

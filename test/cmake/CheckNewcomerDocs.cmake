@@ -151,6 +151,26 @@ foreach(text agents ci frontends)
         list(APPEND failures "${text} browser build must include --target webtest developer_integration webfront-wf --parallel")
     endif()
 endforeach()
+# Both public languages must retain the runnable path and the same version pins.
+_read(readme_fr README.fr.md)
+_require("${readme}" "[Français](README.fr.md)" "French language switch")
+_require("${readme_fr}" "[English](README.md)" "English language switch")
+foreach(command "cmake --build build --target WebFrontHostLoop --parallel 2"
+        "build/examples/WebFrontHostLoop --quality 0"
+        "build/examples/WebFrontHostLoop --engine cuda --glass --stats"
+        "-DWEBFRONT_HOST_LOOP_CUDA=OFF" "docs/HOST_LOOP_EXAMPLE.md"
+        "wf create life" "wf init" "wf install react@19.3.1 react-dom@19.3.1"
+        "wf dev ui/main.tsx" "wf install jasmine-core@7.0.2"
+        "wf install typescript@5.9.3 @types/react@19.3.0 @types/react-dom@19.3.0"
+        "wf check" "wf test" "wf embed ui/main.tsx --output generated/LifeUI.hpp"
+        "target_link_libraries(MyApp PRIVATE WebFront::WebFront)"
+        "CMake **${cmake_minimum}+**" "cmake>=${cmake_minimum},<4"
+        "-DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_ENABLE_TESTING=ON"
+        "ctest --test-dir build --output-on-failure --parallel 4")
+    foreach(language readme readme_fr)
+        _require("${${language}}" "${command}" "${language} runnable path")
+    endforeach()
+endforeach()
 if(failures)
     list(JOIN failures "\n  " joined)
     message(FATAL_ERROR "Newcomer documentation drifted from the code:\n  ${joined}")

@@ -10,7 +10,7 @@ computed in C++, on the CPU or with CUDA; the page only draws a typed array of p
 JavaScript renderer: the page is a string in the executable and loads no local file or remote resource. WebFront
 serves it over loopback HTTP and carries calls over WebSocket.
 
-![The example in its native window on a Jetson Orin Nano: the glass ball and its beams, computed with CUDA](images/host-loop-boing.jpg)
+![The example captured in its native window on a Jetson Orin Nano: CUDA checkered ball, then glass and beams](images/host-loop-boing.gif)
 
 It is an example of integration, not a renderer: one sphere, one plane, one point light, a bounded number of bounces.
 Soft shadows and caustics are out of its scope, and the beams are neither reflected nor refracted by the ball.
@@ -36,6 +36,8 @@ build/examples/WebFrontHostLoop
 | `--glass` | Start with the glass ball and its beams. |
 | `--browser` | Open the system browser even when the native window is built. |
 | `--stats` | Print the timings of an image every second. |
+| `--capture-frames <1-600>` | With `--capture`, save numbered PNGs (`file-0000.png`, …) with a fixed 25 fps simulation clock. Each step waits for drawing and capture before advancing; rendering or PNG overhead never skips scene time. Default: one PNG at the exact `--capture` path. Failed frames return nonzero; earlier files remain. |
+| `--capture-demo` | With `--capture`, capture one continuous sequence, switch to glass after two thirds through the UI's settings handler, hide the statistics panel and use a 640 × 480 CSS-pixel window. Default: 300 frames (12 seconds at 25 fps); an explicit count must be a multiple of three. Combine with `--quality 0` for a 320 × 240 scene. |
 | `--capture <file.png>` | Write a PNG of what the native window shows after six seconds (`frontend::capturePng`), then stop the host. Requires a native frontend; incompatible with `--browser` and `--benchmark`. An unsuccessful capture or write, or closing before capture, returns a nonzero status. |
 | `--benchmark` | Time both renderers without any interface, and exit. |
 
@@ -59,6 +61,31 @@ Ubuntu 24.04) the native window opens with no change to the system: no AppArmor 
 > not a deployment: a packaged application selects the distribution mode, in which the sandbox is required; see
 > [development and distribution](WEBKITGTK.md#development-and-distribution). The example neither selects that mode nor
 > changes any system policy.
+
+### Reproduce the README animation
+
+The GIF is one continuous CUDA sequence captured on the Orin Nano: 200 checkered-ball frames followed by 100
+illuminated-glass frames. The simulation advances by exactly 40 ms per captured image, independently of rendering
+and PNG encoding time. Playback at 25 fps preserves the scene's normal speed: eight seconds, then four. The same
+position, bounce, spin and light clock continue across the material switch, as when using the interface's checkbox.
+The GIF is resized to 480 × 360. The statistics panel is hidden; the CUDA indicator and controls remain part of the captured application. This offline
+capture is an illustration, not a throughput measurement. From the repository root with a native-window CUDA build:
+
+```sh
+mkdir -p build/boing-capture
+build/examples/WebFrontHostLoop --engine cuda --quality 0 --capture build/boing-capture/frame.png --capture-demo
+```
+
+Assemble the PNGs with Python and Pillow (an image-authoring tool, not an application dependency):
+
+```sh
+python3 docs/images/render-boing.py build/boing-capture
+```
+
+The script keeps the captured content at 480 × 360, adding a title bar, window controls and border
+for a 482 × 394 GIF with transparent outer corners and no surrounding margin. This illustrative native-window framing is added during assembly because `capturePng`
+returns only the web view's content, without operating-system decorations. It does not change the simulation
+clock, frame count or continuous material transition.
 
 ## How it is put together
 

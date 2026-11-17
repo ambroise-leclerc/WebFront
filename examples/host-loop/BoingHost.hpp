@@ -174,7 +174,8 @@ public:
 
     /// One iteration, `elapsed` seconds after the previous one: the scene's clock advances unless paused, whether or
     /// not anyone is watching, and an image is computed only if a consumer waits for it. Returns whether one was.
-    bool iterate(double elapsed) {
+    /// With `frameClock`, elapsed is a fixed step applied only when an image is rendered (offline capture).
+    bool iterate(double elapsed, bool frameClock = false) {
         std::map<std::uint64_t, Deliver> consumers;
         struct ReleaseInFlight {
             Host& host;
@@ -191,7 +192,7 @@ public:
             for (const auto& [consumer, deliver] : consumers)
                 inFlight.insert(consumer);
         }
-        if (!frame.settings.paused)
+        if (!frame.settings.paused && (!frameClock || !consumers.empty()))
             seconds += elapsed;
         if (consumers.empty())
             return false;
@@ -217,7 +218,8 @@ public:
     /// Iterates until stop() or `stopping`, sleeping at most 10 ms while no consumer waits. `report`, if any, is called
     /// about once a second with the last image and what its consumer displayed. When it returns, pending and later
     /// requests are dropped: what they hold (a browser) may then be destroyed.
-    void run(std::stop_token external = {}, const std::function<void(const Frame&, const Displayed&)>& report = {}) {
+    /// A positive `frameStep` uses the offline frame clock instead of wall time.
+    void run(std::stop_token external = {}, const std::function<void(const Frame&, const Displayed&)>& report = {}, double frameStep = 0.) {
         using Clock = std::chrono::steady_clock;
         struct Ending {
             Host& host;
@@ -240,7 +242,7 @@ public:
                 displayed = lastDisplayed;
             }
             const auto now      = Clock::now();
-            const bool computed = iterate(std::chrono::duration<double>(now - last).count());
+            const bool computed = iterate(frameStep > 0. ? frameStep : std::chrono::duration<double>(now - last).count(), frameStep > 0.);
             last                = now;
             if (computed && report && now - reported >= std::chrono::seconds{1}) {
                 report(frame, displayed);
