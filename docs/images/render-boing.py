@@ -8,10 +8,9 @@ from PIL import Image, ImageDraw, ImageFont
 
 
 def window(content):
-    """Keep captured pixels intact inside a title bar, border and shadow."""
-    frame = Image.new("RGB", (506, 418), "#e9edf3")
+    """Keep captured pixels intact inside a title bar and border, with transparent outer corners."""
+    frame = Image.new("RGBA", (506, 418), (0, 0, 0, 0))
     draw = ImageDraw.Draw(frame)
-    draw.rounded_rectangle((15, 17, 497, 411), radius=10, fill="#c5cbd5")
     draw.rounded_rectangle((12, 12, 493, 405), radius=9, fill="#f1f2f4", outline="#aeb4bd")
     draw.line((13, 44, 492, 44), fill="#c1c6ce")
     draw.rounded_rectangle((24, 22, 37, 35), radius=3, fill="#27754f")
@@ -27,7 +26,7 @@ def window(content):
     draw.line((472, 25, 478, 31), fill="#454b54", width=1)
     draw.line((472, 31, 478, 25), fill="#454b54", width=1)
     frame.paste(content, (13, 45))
-    return frame
+    return frame.crop((12, 12, 494, 406))
 
 
 def main():
@@ -45,12 +44,19 @@ def main():
             content = image.convert("RGB").resize((480, 360), Image.Resampling.LANCZOS)
         frames.append(window(content))
     # Share one palette so the decoration and scene colours stay stable throughout.
-    samples = Image.new("RGB", (506 * 4, 418 * 3))
+    samples = Image.new("RGB", (482 * 4, 394 * 3))
     for i, frame in enumerate(frames[::25]):
-        samples.paste(frame, ((i % 4) * 506, (i // 4) * 418))
-    palette = samples.quantize(colors=256)
-    frames = [frame.quantize(palette=palette, dither=Image.Dither.NONE) for frame in frames]
-    frames[0].save(args.output, save_all=True, append_images=frames[1:], duration=40, loop=0, optimize=True)
+        samples.paste(frame.convert("RGB"), ((i % 4) * 482, (i // 4) * 394))
+    palette = samples.quantize(colors=255)
+    indexed = []
+    for frame in frames:
+        image = frame.convert("RGB").quantize(palette=palette, dither=Image.Dither.NONE)
+        # Reserve index 255 exclusively for transparency, including when a padded palette maps black to it.
+        image = image.point(list(range(255)) + [254])
+        image.paste(255, mask=frame.getchannel("A").point(lambda alpha: 255 if alpha == 0 else 0))
+        indexed.append(image)
+    indexed[0].save(args.output, save_all=True, append_images=indexed[1:], duration=40, loop=0,
+                    transparency=255, disposal=2, optimize=False)
     print(f"Wrote {args.output}: 300 frames, 25 fps, 8 seconds opaque + 4 seconds glass")
 
 

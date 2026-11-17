@@ -82,8 +82,8 @@ Assemble the PNGs with Python and Pillow (an image-authoring tool, not an applic
 python3 docs/images/render-boing.py build/boing-capture
 ```
 
-The script keeps the captured content at 480 × 360, adding a title bar, window controls, border and shadow
-for a 506 × 418 GIF. This illustrative native-window framing is added during assembly because `capturePng`
+The script keeps the captured content at 480 × 360, adding a title bar, window controls and border
+for a 482 × 394 GIF with transparent outer corners and no surrounding margin. This illustrative native-window framing is added during assembly because `capturePng`
 returns only the web view's content, without operating-system decorations. It does not change the simulation
 clock, frame count or continuous material transition.
 
