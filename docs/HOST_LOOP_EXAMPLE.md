@@ -78,22 +78,14 @@ build/examples/WebFrontHostLoop --engine cuda --quality 0 --capture build/boing-
 
 Assemble the PNGs with Python and Pillow (an image-authoring tool, not an application dependency):
 
-```python
-from pathlib import Path
-from PIL import Image
-
-paths = sorted(Path("build/boing-capture").glob("frame-*.png"))
-assert len(paths) == 300
-frames = [Image.open(path).convert("RGB").resize((480, 360), Image.Resampling.LANCZOS) for path in paths]
-# A shared palette keeps colours stable across the scene change.
-samples = Image.new("RGB", (480, 360))
-for i, frame in enumerate(frames[::25]):
-    samples.paste(frame.resize((120, 90)), ((i % 4) * 120, (i // 4) * 90))
-palette = samples.quantize(colors=256)
-frames = [frame.quantize(palette=palette, dither=Image.Dither.NONE) for frame in frames]
-frames[0].save("docs/images/host-loop-boing.gif", save_all=True, append_images=frames[1:],
-               duration=40, loop=0, optimize=True)
+```sh
+python3 docs/images/render-boing.py build/boing-capture
 ```
+
+The script keeps the captured content at 480 × 360, adding a title bar, window controls, border and shadow
+for a 506 × 418 GIF. This illustrative native-window framing is added during assembly because `capturePng`
+returns only the web view's content, without operating-system decorations. It does not change the simulation
+clock, frame count or continuous material transition.
 
 ## How it is put together
 
