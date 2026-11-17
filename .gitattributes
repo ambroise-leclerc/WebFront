@@ -69,3 +69,6 @@ js/developer/tools/*                           text eol=lf
 js/developer/scripts/*                      text eol=lf
 js/developer/webfront.project.json          text eol=lf
 js/developer/webfront-packages.lock.json    text eol=lf
+
+# The starters of the environment are hashed inputs and starter archives too.
+js/developer/starters/**                    text eol=lf

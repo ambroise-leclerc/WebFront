@@ -13,13 +13,23 @@ commands of the terminal operate on it:
 
 | Command | Purpose |
 | --- | --- |
-| `wf init`, `wf create <starter>` | write the manifest; copy the Life starter into a new directory |
+| `wf init`, `wf create <starter>` | write the manifest; copy a starter (`app` or `life`, not your project's name) into a new directory |
+| `wf help [command\|agents]` | list the commands, describe one, or print the sequence for an agent |
 | `wf install`, `wf restore` | resolve, download and lock packages; rebuild or verify the cache from the lock |
 | `wf dev`, `wf build`, `wf preview` | rebuild and reload the preview on every change; build once; preview once |
 | `wf check` | type-check with the locked TypeScript compiler |
 | `wf test` | run Jasmine specs in the application's window |
 | `wf run`, `wf exec` | run a manifest script or a package's executable entry |
+| `wf list [--tree]`, `wf why <package>`, `wf info <package>` | list the installed packages, show them under the dependencies that bring them, explain or describe one |
 | `wf embed` | generate the C++ provider of the application's resources |
+
+The terminal also has commands of its own, without prefix, that only read the project: `ls`, `cat`, `tree` and `mounts`
+(see [the terminal](#the-terminal-and-the-applications-commands)). Project commands keep the `wf` prefix, which leaves
+their names (`test`, `run`, `build`, `list`...) free for the commands of your application
+([ADR-023](adr/ADR-023-espace-de-noms-des-commandes-du-terminal.md)).
+
+**Agents.** A WebFront interface is TypeScript/TSX in `ui/`, developed with `wf dev`, and an agent runs every command of
+this page itself in JSON or MCP: see [developing with an agent](DEVELOPING_WITH_AGENTS.md).
 
 **Limits, stated directly.** The downloaded environment and the scripts you authorize run with the application's bridge
 authority and may read and write the selected project: there is **no sandbox**, and the manifest's permissions frame only the
@@ -35,9 +45,12 @@ installed or required (see [Type checking](#type-checking-wf-check)).
 The generated `DeveloperReleaseData.hpp` selects the default environment and its integrity. Published
 versions stay immutable. Environment **0.6.3** adds automation API v1 and the shared human/agent execution
 lease; version 0.6.2 predates that API. Environment **0.6.4** adds the project setup operations of the automation
-runner (`init`, `create`, `install`, `restore`, `embed`). Environment **0.6.6** adds the `call` operation, the terminal and `wf help` notice of automation and the starter's `AGENTS.md`. The release pin selects 0.6.6, published under the dedicated
+runner (`init`, `create`, `install`, `restore`, `embed`). Environment **0.6.6** adds the `call` operation, the terminal and `wf help` notice of automation and the starter's `AGENTS.md`. It was published under the dedicated
 `developer-v0.6.6` tag and verified after deployment. The test bootstrap (`cmake/WebFrontBootstrap.cmake`) stays on the
-published 0.6.3 and advances in a separate pull request. Publication and pin changes follow
+published 0.6.3 and advances in a separate pull request. Environment **0.9.1** adds the page layout (full-window
+interface and floating terminal, #539). Environment **0.9.2** adds the `app` starter, `wf help <command>` and
+`wf help agents`, errors that give the next steps (#561) and the prompt after a `wf dev` startup error (#560); it is
+published and the release pin selects it. Publication and pin changes follow
 [PUBLISHING](../js/developer/tools/PUBLISHING.md).
 
 ## Minimal C++ application
@@ -66,8 +79,8 @@ Each published version is immutable: 0.3.0 introduced the packed-bitset Life sta
 manifest, `wf restore`, `wf run`, `wf exec`, `wf check` and the complete terminal, and 0.6.0 `wf build`, `wf dev` and `wf test`.
 
 The default configuration is generated in `include/webfront/system/DeveloperReleaseData.hpp`; it contains
-an exact versioned environment URL and the trusted digest. The 0.9.0 release pin selects
-`https://dist.webfront.fr/developer/0.9.0/environment.tgz` (ADR-021). The deployed archive, CORS headers and public
+an exact versioned environment URL and the trusted digest. The 1.0.0 release pin selects
+`https://dist.webfront.fr/developer/1.0.0/environment.tgz` (ADR-021). The deployed archive, CORS headers and public
 smoke test were verified before the pin was merged. Earlier publication gates are recorded for
 [0.6.6](validation/developer-0.6.6-release.md), [0.6.4](validation/developer-0.6.4-release.md) and [0.6.3](validation/developer-0.6.3-release.md).
 Published 0.6.2 introduced installation of the archives of `@types` packages and the manifest directory;
@@ -84,7 +97,10 @@ See [publication instructions](../js/developer/tools/PUBLISHING.md) for deployme
 
 The bootstrap verifies SHA-512 before unpacking or executing the archive, validates its manifest
 and paths, then publishes it under the application's local origin. The cached **archive** is
-verified again before reuse, allowing subsequent launches without network access. Failure leaves
+verified again before reuse, allowing subsequent launches without network access. Such a launch
+asks the C++ for the SHA-256 of every published file (`webfront.developer.digests`, which the bootstrap
+shipped with the same library uses) and publishes the environment again only when one differs from the
+verified archive, or is missing or extra: the files served are always those of the archive. Failure leaves
 a readable status and Retry button. A different pinned hash requires a matching archive; the old
 environment is not silently substituted.
 
@@ -120,6 +136,11 @@ wf embed ui/main.tsx --output generated/LifeUI.hpp
 ```
 
 `wf test` needs `test.specs` declared in the manifest and `jasmine-core` installed; type checking is a separate step: `wf install typescript@5.9.3 @types/react@19.3.0 @types/react-dom@19.3.0` then `wf check` need a `tsconfig.json` (see the README for a complete one). The terminal does not read `#` comments, so type the commands only.
+
+`wf create` takes the name of a starter, not of your project, and an unknown name is answered with the starters of the
+environment. `life` is this example; `app` (environment 0.9.2) is a minimal TypeScript interface without dependency for a new
+application: `ui/main.ts` calls one C++ callback, `app.greet`, and each of its elements has an `id`. Every starter carries an
+`AGENTS.md` that states the model and how an agent runs `wf` (the text of `js/developer/starters/agent-guide.md`).
 
 The starter contains editable TSX/CSS and a recipe of exact versions; `wf init` does not copy it, so list the dependencies with `wf install` and declare `test.specs`, `entries` and `providers` in the manifest yourself.
 `wf create life another-directory` selects a different new destination; existing directories
@@ -180,7 +201,8 @@ A project has one manifest, which every `wf` command reads:
   "entries": {"main": "ui/main.tsx"},
   "providers": {"LifeUI": {"entry": "main", "output": "generated/LifeUI.hpp"}},
   "test": {"specs": []},
-  "permissions": {}
+  "permissions": {},
+  "developer": {"terminalShortcut": "F9"}
 }
 ```
 
@@ -188,7 +210,8 @@ Only `format`, `name` and `version` are required. Validation is strict: an unkno
 newer than the environment reads, a path leaving the project, a non-HTTPS registry or origin and an
 unknown permission are errors printed in the terminal, never silently ignored. `scripts` and `permissions` are
 used by `wf run` and `wf exec` (below); `test.specs` lists the spec files of `wf test`. Permissions only frame
-the operations of the `context` API of scripts; they are not a sandbox.
+the operations of the `context` API of scripts; they are not a sandbox. `developer.terminalShortcut` (environment 0.9.1;
+an earlier environment refuses the key) is the shortcut of the [terminal window](#the-page-interface-and-floating-terminal).
 
 - `wf init [name]` writes `webfront.project.json` at the project root (or in the application's manifest directory, below),
   the manifest every `wf` command reads; it never replaces an existing one. When a lock already exists (a project installed before
@@ -365,13 +388,112 @@ wf check
   terminated with `worker.terminate()` after the two-second grace period. The exit code is 130 (Ctrl+C) or 124 (time
   limit), and the terminal stays usable.
 
+## The page: interface and floating terminal
+
+The page of `bootstrap("developer")` shows one thing at a time by default (environment 0.9.1, #539; the layout belongs to the
+environment's `mount`, not to the embedded bootstrap page):
+
+- **No interface yet** (first launch, or a project that never ran `wf dev` or `wf preview`): the terminal alone, under the
+  status line. No tab and no empty preview are shown, also when the first build of `wf dev` fails: its diagnostic is in
+  the terminal.
+- **An interface exists**: the page opens on it, over the whole window, with the terminal collapsed. "Exists" means a
+  published preview, `.webfront/developer/preview/index.html`. `wf dev` and `wf preview` publish it; `wf create` and
+  `wf build` (which publishes under `build/`) do not. A publication replaces the directory in one step, so an interrupted
+  `wf dev` or a failed build leaves the last successful interface, which the next launch shows as it was built: run `wf dev`
+  to rebuild it.
+- **The tab** with the WebFront swallow, against the right edge of the window over the interface, opens the terminal in a
+  **floating window**; the tab again, the window's close button or **F9** (in the terminal or in the interface) collapses it. Collapsing only
+  hides the terminal: the session, its scrollback, the line being typed and a running command (`wf dev`, `wf test`) are
+  kept, and the keys go back to the interface. The first preview of a session leaves the terminal open over the interface,
+  since it is in use. A notice of automation opens it, so that the notice is seen.
+- **Moving and resizing**: drag the title bar, or focus it and use the arrow keys (Shift with an arrow key resizes); the
+  bottom-right corner resizes with the pointer. The window stays inside the browser window, shrinks with it and returns to
+  its place when there is room again; xterm.js is fitted to it. Its place and size are kept per project in
+  `.webfront/developer/terminal-window.json`.
+- **The tab shows the session's state**, so that a collapsed terminal still tells what it does: three bars when nothing
+  runs, a ring while a command runs or `wf dev` builds, a full dot when `wf dev` has built the interface and watches its
+  inputs, an amber diamond when the last build failed. The tab's name and tooltip say it in words.
+- **The shortcut** is F9 by default. The developer page takes it before the interface does: the page of a preview
+  announces its window before its scripts run (one inline script, absent from `wf build` and from an embedded
+  application), so the page's listener is the first of that window and no listener of the application sees the shortcut.
+  A frame that the application embeds is covered once the page has seen it, after any listener its own document installs
+  while loading; so is a preview published by an environment before 0.9.1, until `wf dev` or `wf preview` rebuilds it.
+  An application that uses
+  F9 itself names another one in its manifest, and receives F9 as it does in its embedded form:
+  `"developer": {"terminalShortcut": "Ctrl+Shift+F9"}`. A shortcut is a function key, F1 to F12, optionally after `Ctrl`,
+  `Alt`, `Shift` or `Meta`, joined by `+`; anything else is a manifest error. The page reads it when it opens: relaunch
+  the application after changing it. The tab's tooltip names the shortcut in use.
+- While the terminal is collapsed, `wf dev` keeps reloading the full-window interface, and a failed build still shows its
+  diagnostic over it.
+
+The tab is a button (`aria-expanded`, 44 px target) and the window a non-modal dialog. The interface stays in the preview
+frame, as before: the layout adds nothing to the application's documents except the shortcut's listener and the preview page's announcement, installed in the interface
+and in the same-origin frames it embeds (not in a frame of another origin, nor one inside a shadow tree: click the interface
+or the tab first). This is a layout, not a
+sandbox (see [limitations](#dependencies-storage-and-limitations)). A page that mounts the terminal itself (`runtime.mount`) with a preview frame gets
+the same layout; `workspace: false` keeps the page as it is.
+
 ## The terminal and the application's commands
 
 The terminal of the environment (developer distribution 0.5.0, #308) is the only WebFront terminal; it is served
 from the environment archive with xterm.js, never from a C++ header. It runs `wf` commands, the application's C++
-commands and its own: `help`, `clear` (screen and scrollback), `history` (`history -c` clears it) and
-`exit [code]`, which ends the session and closes the window; when the browser keeps a window that a script did not
-open, Enter starts a new session. No system shell is exposed.
+commands and its own: `help`, `clear` (screen and scrollback), `history` (`history -c` clears it),
+`exit [code]`, which ends the session and closes the window, and the file commands below; when the browser keeps a
+window that a script did not open, Enter starts a new session. No system shell is exposed.
+
+**Why `wf` stays.** A bare name belongs to the terminal or to your application; `wf` is the namespace of the project
+(manifest, lock, packages, build). Without it the verbs of `wf` would be names your application could not use, and
+every verb added later would take one more. A `wf` command typed without its prefix is not run: the error gives the
+line to type (`Unknown command: install. Did you mean: wf install react?`).
+
+**File commands** (environment 0.9.3) read the project directory and never write it. Paths are relative
+to the project and cannot leave it; there is no working directory, no glob and no pipe. Options combine (`-la`, `-aL 2`,
+`-L2`), and `--` ends them so that a name may start with a dash (`cat -- -notes.txt`).
+
+Names, file contents and what a package declares about itself are not trusted: every control character they contain (C0,
+DEL and the 8-bit C1 controls) is shown, `^[` for ESC or `\x9b` for an 8-bit CSI, and never sent to the terminal. This
+holds for `ls`, `cat`, `tree`, `wf list`, `wf why` and `wf info`.
+
+| Command | Purpose |
+| --- | --- |
+| `ls [-l] [-a] [path]` | the entries of a directory; `-a` adds the hidden ones; `-l` adds type, size in bytes, modification time and what `wf` knows of the entry: `[manifest]`, `[lock]`, `[entry main]`, `[spec]`, `[script icons]`, `[generated provider LifeUI]`, and under `.webfront/` the package cache, the publications and the history |
+| `cat <file> [file...]` | the text of UTF-8 files, at most 1 MiB each; a binary file is refused |
+| `tree [-a] [-L <depth>] [path]` | a directory as a tree, three levels deep by default and at most 2000 entries; `.webfront/` is listed with `-a` but opened only when the path names it; a file is refused with the `cat` line that prints it |
+| `mounts` | what the application answers to the browser, in the order it looks (resources embedded in the executable, the publications of `.webfront/developer/`, the application's own providers), and what the commands read: manifest, lock, cache, environment and registry. The sources of the project are never served |
+
+`ls -l` needs a library that has the `webfront.developer.entries` callback (added with these commands); with an older
+one it says so, and `ls`, `cat`, `tree` and `mounts` still work.
+
+The usual file commands that the terminal does not provide are reserved all the same: `cd`, `pwd`, `cp`, `mv`, `rm`,
+`mkdir`, `rmdir`, `touch`, `edit`, `find`, `grep`, `head`, `tail`, `less`, `stat`, `du`, `df`. Each answers with what to
+do instead (edit the files in your editor while `wf dev` rebuilds), and a later environment can provide one without
+taking a name from an application.
+
+**Dependencies.** `wf list` names the locked packages; `wf list --tree` shows them under the dependencies of the
+manifest, each with the range that asks for it (`peer` for a peer, `deduped` where a package already shown comes again);
+`wf why <package>` gives the chains of requirements from the manifest to a package, for each locked version;
+`wf info <package>` (a name or `name@version`) gives its license, integrity, files, dependencies, dependents and
+`wf exec` entries. They read the lock only: no network, nothing written.
+
+```text
+> wf list --tree
+react@19.3.1  (^19.3.1)
+react-dom@19.3.1  (^19.3.1)
+├── react@19.3.1  (peer ^19.3.1)
+└── scheduler@0.28.0  (^0.28.0)
+
+2 roots, 3 packages
+> wf why scheduler
+scheduler@0.28.0
+  react-dom@19.3.1 (root, ^19.3.1) > scheduler@0.28.0 (^0.28.0)
+```
+
+`wf help` lists the `wf` commands; `wf help <command>` gives the usage and purpose of one, and `wf help agents` (or
+`wf help --agents`) the model, the sequence for a new interface and the `webfront-agent` commands that run it in JSON or
+MCP (environment 0.9.2). The errors a newcomer meets first carry the next steps: a missing manifest names `wf init`, then
+`wf dev <entry.tsx>` and `wf create app`; a missing entry gives `ui/main.tsx` as an example; `wf create` without or with an
+unknown starter lists the starters. The line under the terminal that reports the bootstrap ends with `Agents: docs/DEVELOPING_WITH_AGENTS.md`;
+it comes from the library's embedded loader, not from the environment.
 
 - **Editing:** left/right, Home/End (Ctrl+A/Ctrl+E), Backspace/Delete, Ctrl+U/Ctrl+K, Ctrl+L, up/down through the
   history. A line wider than the terminal wraps over several rows and is redrawn in place; a line taller than the
@@ -383,7 +505,8 @@ open, Enter starts a new session. No system shell is exposed.
   pages on the same project keep each other's lines. A history file that cannot be read is never replaced.
 - **Typing ahead and paste:** keys typed or pasted while a command runs are applied after it, line by line; a last
   line without a line break waits on the prompt. Ctrl+C drops the keys still waiting.
-- **Completion (Tab):** command names, `wf` subcommands, the manifest's scripts after `wf run`, its entries and
+- **Completion (Tab):** command names, `wf` subcommands, the manifest's scripts after `wf run`, the installed packages after
+  `wf why` and `wf info`, its entries and
   entries/providers after `wf build`, `wf dev`, `wf preview` and `wf embed`, and project paths, also when the word is escaped (`my\ dir/`) or
   quoted (`"my dir/`); the completion is written the same way and closes the quote. Several candidates are completed
   to their common prefix, or listed.
@@ -431,8 +554,9 @@ of its browser with `webfront.commands.start`. In C++, the command is spawned li
 
 A second `webfront::Commands` on the same application throws `std::logic_error` and registers nothing. A copy of a
 `Context` may outlive its command (a detached task): its stop token stays valid and its writes are dropped once the
-browser is gone. The names `wf`, `clear`, `exit`,
-`help` and `history` are reserved. `context.write` has no flow control: a command
+browser is gone. The names the terminal handles itself are reserved (`webfront::commands::reservedNames`): `wf`,
+`clear`, `exit`, `help`, `history`, `ls`, `cat`, `tree`, `mounts` and the file commands listed above; `commands.add`
+throws `std::invalid_argument` for one of them. `context.write` has no flow control: a command
 writing large output with it, faster than the browser reads, grows the connection's write queue; use
 `context.print` for such output.
 
@@ -447,6 +571,9 @@ files; the developer HTTP provider serves only the environment and preview direc
 
 `wf dev [entry.tsx|name]` selects `entries.main` or the sole entry when omitted, builds, opens the preview
 and keeps running until Ctrl+C. It reuses one compiler Worker and esbuild context across rebuilds.
+At startup only a missing project or an omitted entry that cannot be selected ends the command with exit
+code 1 and restores the terminal prompt. Any other error (an unreadable or malformed manifest or lock, a
+compilation error, including a failed first build) keeps the watcher running so that editing the inputs can recover.
 Changing the selected entry or locked graph recreates the context. It uses the installed lock, without
 resolving packages or downloading dependencies; `wf install`/`wf restore` remain explicit actions.
 
@@ -549,8 +676,12 @@ webfront-wf --project <dir> [--environment <environment.tgz> --integrity <sha512
 - Without `--environment`, it uses the **bootstrap environment** provisioned at configure time. `cmake/WebFrontBootstrap.cmake`
   pins its URL and SHA-512 (distinct from `DeveloperReleaseData.hpp`, the environment applications start from, and changed
   by an explicit pull request). With `WEBFRONT_ENABLE_TESTING=ON`, configure downloads it to `<build>/bootstrap/` and verifies the
-  digest; a wrong digest or an unreachable URL stops the configure. On a machine without network access, pass
-  `-DWEBFRONT_BOOTSTRAP_DIR=<directory holding environment.tgz>`: the archive is verified the same way.
+  digest; a wrong digest, or a URL still unreachable after three attempts, stops the configure. The verified downloads are
+  kept once per machine in `WEBFRONT_DOWNLOAD_CACHE` (the `WEBFRONT_DOWNLOAD_CACHE` environment variable, else
+  `$CPM_SOURCE_CACHE/webfront-downloads`, else the user's cache directory for WebFront's own build; a consuming project keeps
+  them in its build tree unless it sets one): a new build tree links them instead of downloading them again. On a machine
+  without network access, pass `-DWEBFRONT_BOOTSTRAP_DIR=<directory holding environment.tgz>`: the archive is verified the
+  same way.
 - `--environment` and `--integrity` run an archive built elsewhere, such as the one built from the current sources (the
   environment under test of #315). `--registry-dir` serves a local npm registry from the driver's origin and imposes it. `--manifest-dir` keeps the manifest and
   the lock in that directory of the project (usage error 64 when it is absolute, has an empty or dot component or leaves the project).
@@ -560,7 +691,7 @@ webfront-wf --project <dir> [--environment <environment.tgz> --integrity <sha512
   `runNonInteractive`; it never extends the overall deadline. Suites use their per-case budgets instead.
 - Exit status: the command's own (`wf test`: 0, 1, 124, 130); **64** usage; **70** bootstrap failure (archive absent, wrong
   integrity, incompatible protocol or API, no non-interactive mode); **71** the driver's overall `--timeout` (default 600 s) or optional command deadline elapsed,
-  after asking the page to close; **72** the browser closed without a result. `--report` writes the JSON result
+  after closing the window natively (`requestClose()`, which works also when a spec blocks the page); **72** the browser closed without a result. `--report` writes the JSON result
   `{exitCode, output, report}` of the command, cut to fit a bridge string as described above.
 
 `webtest`, the Jasmine bridge suite (`test/web/suite/`, #311), is this driver with the C++ callbacks of its specs
@@ -596,7 +727,8 @@ above). Rows before 0.9 were reconstructed from the header of each tag; 0.4.0 pr
 <!-- compatibility-table:begin -->
 | Library | Environment | Minimum api |
 | --- | --- | --- |
-| unreleased | 0.9.0 | 1 |
+| unreleased | 1.0.0 | 1 |
+| 1.0.0 | 1.0.0 | 1 |
 | 0.9.0 | 0.9.0 | 1 |
 | 0.8.0 | 0.6.3 | 1 |
 | 0.7.0 | 0.6.3 | 1 |
@@ -649,14 +781,14 @@ wf run build build-developer-environment --refresh-bootstrap
 ```
 
 `js/developer/scripts/build.mjs` bundles the environment and compiler with the locked esbuild-wasm (run in the script's
-Worker), includes esbuild.wasm, xterm styles and licenses, and writes deterministic `environment.tgz`, `life-starter.tgz`,
+Worker), includes esbuild.wasm, xterm styles and licenses, and writes deterministic `environment.tgz`, `app-starter.tgz`, `life-starter.tgz`,
 `provision.json` and `DeveloperReleaseData.hpp`. The version and public base URL are in
 `js/developer/tools/distribution.json`. `--refresh-bootstrap` additionally refreshes the two checked-in JS bundles, their
 input checksums (`bundles.json`, over `js/developer/tools/bundle-inputs.json`) and the pinned header; the core headers that embed
 the bundles come from `cmake --build <dir> --target webfront-embedded-assets`. Without
 that flag, it writes only to the output directory. `site.mjs` stages a build into the GitHub Pages site and `pin.mjs`
 checks the pinned header against the published archive. The headers of the core's embedded assets are rendered by `js/core/EmbedAsset.cmake`, in pure CMake (see below). The archives have the package identifiers
-`@webfront/developer-environment` and `@webfront/life-starter`. They are distributed as static
+`@webfront/developer-environment`, `@webfront/app-starter` and `@webfront/life-starter`. They are distributed as static
 GitHub Pages downloads; no npm publication or scope ownership is required.
 
 The `SelfBuild*` CTest cases run the scripts on a copy of the sources, with the dependencies installed from the local
@@ -664,8 +796,8 @@ registry: the build, a repeat build (same bytes), the checked-in bootstrap bundl
 core headers rendered from them by CMake), the staging of the site (a second staging repeats the same bytes, a changed
 published file is refused) and the permissions of the manifest. `DeveloperSpecs` runs the pure JavaScript specs of
 `test/developer/` with `wf test` on that copy; the CEF-off CTest cases check the generated headers (`*AssetFresh`,
-`EmbeddedAssetGenerator`, and the Catch2 scenario on the embedded assets of the core), the checksums of the bundle inputs (`BundleInputsFresh`) and the names the
-terminal and `webfront::Commands` reserve (`CommandNamesAgree`) with CMake and Catch2 alone, and `NoNodeDependency` audits
+`EmbeddedAssetGenerator`, and the unit-test scenario on the embedded assets of the core), the checksums of the bundle inputs (`BundleInputsFresh`) and the names the
+terminal and `webfront::Commands` reserve (`CommandNamesAgree`) with CMake and the unit tests alone, and `NoNodeDependency` audits
 every file of the project. The maintainer procedure is in `js/developer/tools/PUBLISHING.md`.
 
 To try the local archive without an HTTPS server, after building the packages above (with `wf run build build-developer-environment`):
@@ -696,7 +828,7 @@ cmake -S . -B build-native -DCMAKE_BUILD_TYPE=Release \
   -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WKWEBVIEW=ON \
   -DWEBFRONT_WEBTEST_FRONTEND=WKWebView -DWEBFRONT_ENABLE_TESTING=ON
 cmake --build build-native --parallel
-ctest --test-dir build-native -R 'Developer|LifeEmbedded' --output-on-failure
+ctest --test-dir build-native -R 'Developer|Journey' --output-on-failure
 ```
 
 The CTest fixtures prepare the registry and the environment under test in every browser job (WKWebView, WebKitGTK, WebView2, CEF). The initial 0.2.0 Life version passed
@@ -705,8 +837,8 @@ WKWebView and all 14 Linux CEF/Xvfb cases with both GCC and Clang in
 The packed 0.3.0 version passes WKWebView and all 14 GCC CEF/Xvfb cases in
 [run 39490581423](https://github.com/ambroise-leclerc/WebFront/actions/runs/39490581423).
 For Linux, select CEF and Xvfb instead; the same developer tests use the selected test frontend.
-`DeveloperBrowserIntegration` (the application part: starter, build, `wf dev`, Life preview, embedding) and `DeveloperBrowserIntegration-scripts`, `-typescript`, `-jasmine` and `-terminal` exercise, in parallel and each from its own project, the real WASM compiler, local registry, `wf test` under the locked jasmine-core (pass, fail, pending, asynchronous failures, pattern, time limit, Ctrl+C, non-interactive report to C++), build without navigation, incremental dev reload/error/recovery/Ctrl+C, the Life preview, C++ generation/animation and repeatable header generation. Its CTest fixtures then build that
-**browser-generated** header and run `LifeEmbeddedIntegration` from an empty working directory
+`DeveloperBrowserIntegration` (the application part: starter, build, `wf dev`, Life preview, embedding) and `DeveloperBrowserIntegration-scripts`, `-typescript`, `-jasmine`, `-terminal` and `-workspace` (the page layout: first launch, launch on an existing interface, floating terminal and its session) exercise, in parallel and each from its own project, the real WASM compiler, local registry, `wf test` under the locked jasmine-core (pass, fail, pending, asynchronous failures, pattern, time limit, Ctrl+C, non-interactive report to C++), build without navigation, incremental dev reload/error/recovery/Ctrl+C, the Life preview, C++ generation/animation and repeatable header generation. The developer journey (`Journey*`) then
+builds the header that its own `wf embed` generated and runs `JourneyEmbeddedRun` from an empty working directory
 with no developer callbacks.
 Deadline and grace-period regressions advance a scoped clock instead of sleeping for seconds; Worker startup,
 bridge transfers and UI rendering still use the real browser. Dev polling is advanced explicitly after a committed
@@ -726,6 +858,5 @@ bootstrap freshness, package resolution, gzip generation, interruption and offli
 
 ## Repository test sessions
 
-The non-interactive test driver can run compatible commands in a shared browser session with fresh command frames and
-individual JSON reports. The production `wf` command API is unchanged. See [TEST_PERFORMANCE](TEST_PERFORMANCE.md) for
-`--suite`, isolated CTest filters, complete fixture repetition, quiet windows, profiling and concurrency constraints.
+The non-interactive test driver runs one command per process. See [TEST_PERFORMANCE](TEST_PERFORMANCE.md) for CTest
+filters, complete fixture repetition, visible windows and concurrency constraints.

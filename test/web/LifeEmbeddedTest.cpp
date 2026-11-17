@@ -61,7 +61,7 @@ int main() {
         using App = webfront::BasicWF<webfront::NetProvider,
                                       webfront::fs::DefaultFSWith<webfront::fs::LifeUI>,
                                       webfront::http::DefaultBuffersPolicy,
-                                      webfront::testdriver::QuietFrontend<WEBFRONT_TEST_FRONTEND>>;
+                                      webfront::testdriver::TestFrontend<WEBFRONT_TEST_FRONTEND>>;
         App               app;
         std::atomic<bool> passed{false};
         app.cppFunction("life.step", &webfront::demo::nextLife);
@@ -73,6 +73,10 @@ int main() {
             ui.addScript(uiScript);
         });
         app.show();
+        std::cerr << "Embedded Life frontend returned; beginning shutdown\n";
+        // Drain while the callbacks' captured state and the empty working directory are still alive.
+        app.shutdown();
+        std::cerr << "Embedded Life shutdown completed\n";
         std::filesystem::current_path(original);
         return passed.load() ? 0 : 1;
     } catch (const std::exception& error) {

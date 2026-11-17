@@ -61,7 +61,7 @@ public:
                + ",\"allow\":" + stringArray(options.allow) + ",\"callbacks\":" + stringArray(options.callbacks) + ",\"failure\":" + json::quote(failure) + ",\"audit\":" + auditJson() + "}";
     }
 
-    std::string start(const Object& request) {
+    std::string start(const Object& request, Clock::time_point now = Clock::now()) {
         std::scoped_lock lock{mutex};
         try {
             authorize(request);
@@ -89,7 +89,7 @@ public:
         if (runs.size() == 64)
             runs.pop_front();
         const auto id = "run-" + std::to_string(++counter);
-        runs.push_back({id, operation, objectJson(arguments.members()), "queued", "null", "", false, Clock::now() + options.timeout});
+        runs.push_back({id, operation, objectJson(arguments.members()), "queued", "null", "", false, now + options.timeout});
         active = id;
         audit("allowed", operation, id);
         return snapshot(runs.back());
@@ -193,6 +193,15 @@ public:
         run.state = "timeout";
         active.reset();
         closeLocked("Native operation deadline exceeded; session revoked");
+        return true;
+    }
+
+    // Readiness and startup expiry must be decided under the same lock: a poll arriving before this check wins.
+    bool expireStartup(Clock::time_point deadline, Clock::time_point now = Clock::now()) {
+        std::scoped_lock lock{mutex};
+        if (closed || ready || now < deadline)
+            return false;
+        closeLocked("Native automation startup deadline exceeded");
         return true;
     }
 

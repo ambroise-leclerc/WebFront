@@ -121,6 +121,11 @@ if(NOT content MATCHES "cmake -S [.] -B build-driver\n")
     message(FATAL_ERROR "The rehearsal does not configure build-driver again after setting the version")
 endif()
 
+# The requested version is compared with the sources and with the published pin: a published version is immutable.
+if(NOT content MATCHES "check-release-version[.]sh \"[$]VERSION\" \"[$]sources\" \"[$]pinned\"")
+    message(FATAL_ERROR "The workflow does not check the requested version against the sources and the published pin")
+endif()
+
 # The tag step can be rerun after a lost response: it accepts a tag that already points at the release commit.
 if(NOT content MATCHES "echo \"[$]tag already points at the release commit\"")
     message(FATAL_ERROR "The tag step is not rerunnable: it must accept an existing tag at the release commit")

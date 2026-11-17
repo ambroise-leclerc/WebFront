@@ -1,15 +1,16 @@
-CPMAddPackage("gh:catchorg/Catch2@3.15.2")
-target_compile_features(Catch2 PRIVATE cxx_std_23)
-target_compile_features(Catch2WithMain PRIVATE cxx_std_23)
-# Keep inline standard-library definitions consistent across the test executable.
-# Instrument the test runtime, but leave dependency sources out of project coverage.
-add_library(WebFront_test_sanitizers INTERFACE)
-enable_sanitizers(WebFront_test_sanitizers NO_COVERAGE)
-target_link_libraries(Catch2 PRIVATE WebFront_test_hardening WebFront_test_sanitizers)
-target_link_libraries(Catch2WithMain PRIVATE WebFront_test_hardening WebFront_test_sanitizers)
+# The scenarios use Bdd.hpp, a test framework in a single header; BddDiscoverTests registers them in CTest.
+include(BddDiscoverTests.cmake)
 
 find_package(Threads)
 include(CTest)
+
+# WEBFRONT_TEST_TIMEOUT_FACTOR (Bdd.hpp) lengthens the waits of a slow job. It is read here, when CMake configures, and
+# handed to every unit test as its environment, so that the waits and the CTest limits agree whatever the environment of
+# ctest is (TimeoutFactor.cmake gives the rule, which the TimeoutFactor case checks).
+include(TimeoutFactor.cmake)
+webfront_unit_timeouts("$ENV{WEBFRONT_TEST_TIMEOUT_FACTOR}" _unit_timeout _shard_timeout _unit_test_environment)
+add_test(NAME TimeoutFactor COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckTimeoutFactor.cmake)
+set_tests_properties(TimeoutFactor PROPERTIES TIMEOUT 30 LABELS fast)
 
 add_test(NAME TestSuiteRepetition COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
     -DWORK=${CMAKE_CURRENT_BINARY_DIR}/suite-repetition -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckTestSuiteRepetition.cmake)
@@ -23,14 +24,28 @@ if(WEBFRONT_TEST_DOXYGEN)
   set_tests_properties(DoxygenDocumentation PROPERTIES TIMEOUT 60)
 endif()
 
+# The framework's own test: the order of the sections, the failures, the filters and the exit codes.
+add_executable(bdd_self_test BddSelfTest.cpp)
+target_link_libraries(bdd_self_test PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options)
+target_compile_features(bdd_self_test PRIVATE cxx_std_23)
+add_test(NAME BddSelfTest COMMAND bdd_self_test)
+# CTest registers one case per scenario whatever brackets or semicolons its title holds.
+add_executable(bdd_discovery_probe Main.cpp BddDiscoveryProbe.cpp)
+target_link_libraries(bdd_discovery_probe PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options)
+target_compile_features(bdd_discovery_probe PRIVATE cxx_std_23)
+add_test(NAME BddDiscovery COMMAND ${CMAKE_COMMAND} -DPROBE=$<TARGET_FILE:bdd_discovery_probe>
+    -DSCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/BddDiscoverTests.cmake -DWORK=${CMAKE_CURRENT_BINARY_DIR}/bdd-discovery
+    -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckBddDiscovery.cmake)
+set_tests_properties(BddSelfTest BddDiscovery PROPERTIES TIMEOUT 30 LABELS fast)
+
 set(TESTS_LIST)
 list(APPEND TESTS_LIST WebKitGTKPolicyTests.cpp ContentPolicyTests.cpp HTTPServerTests.cpp HTTPEncodingTests.cpp GzipExecutorTests.cpp AcceptEncodingTests.cpp GzipTests.cpp ModuleHTTPServerTests.cpp HTTPRoutesTests.cpp HTTPRangeTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp MimeTypeTests.cpp)
 list(APPEND TESTS_LIST FormsTests.cpp ReactStoreTests.cpp DomDocumentTests.cpp DomBatchTests.cpp JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)
 list(APPEND TESTS_LIST FileSystemTests.cpp NativeFSTests.cpp DownloadsTests.cpp StorageTests.cpp NativeStorageTests.cpp)
 list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp SafePathTests.cpp UISubscribersTests.cpp)
 list(APPEND TESTS_LIST ReadBindingTests.cpp ViewAssociationTests.cpp BroadcastTests.cpp WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp)
-list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp AutomationTests.cpp AutomationChannelTests.cpp AutomationStdioTests.cpp AutomationDiscoveryTests.cpp JasmineConsumerTests.cpp HostTests.cpp LifeTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp DeferredCallTests.cpp)
-list(APPEND TESTS_LIST FrontendUrlTests.cpp ApplicationUrlTests.cpp FrontendContractTests.cpp UIExecutorTests.cpp NativeWindowTests.cpp CommandsTests.cpp EmbeddedCoreAssetsTests.cpp)
+list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp AutomationTests.cpp AutomationChannelTests.cpp AutomationStdioTests.cpp AutomationDiscoveryTests.cpp JasmineConsumerTests.cpp HostTests.cpp LifeTests.cpp HostLoopTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp DeferredCallTests.cpp)
+list(APPEND TESTS_LIST Main.cpp ScenarioIsolation.cpp FrontendUrlTests.cpp ApplicationUrlTests.cpp FrontendContractTests.cpp UIExecutorTests.cpp NativeWindowTests.cpp CommandsTests.cpp EmbeddedCoreAssetsTests.cpp)
 if(WEBFRONT_USE_MDDLOG)
   list(APPEND TESTS_LIST MddlogLoggerTests.cpp MddlogTransportTests.cpp)
 endif()
@@ -38,7 +53,9 @@ if(WEBFRONT_EMBED_WEBVIEW2)
   list(APPEND TESTS_LIST WebView2Tests.cpp)
 endif()
 add_executable(tests ${TESTS_LIST})
-target_link_libraries(tests PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options Catch2::Catch2WithMain WebFront)
+target_link_libraries(tests PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
+# The scene of the host-loop example: the CPU renderer everywhere, compared with the CUDA one where a toolkit was found.
+target_link_libraries(tests PRIVATE WebFront_boing)
 if(WIN32)
   target_link_libraries(tests PRIVATE ws2_32 bcrypt advapi32)
 endif()
@@ -55,10 +72,9 @@ add_dependencies(tests host_probe)
 target_compile_definitions(tests PRIVATE WEBFRONT_HOST_PROBE="$<TARGET_FILE:host_probe>")
 
 # The heavy units instantiate a full application, and compile four to a file in about half the time of four apart
-# (docs/BUILD_TIME_STUDY.md). The desktop CI jobs set the batch size; the default keeps one object per test file, which
-# keeps a rebuild after one edit small. The light units stay apart: grouping every unit does not compile, as their
+# (docs/BUILD_TIME_STUDY.md): that is the default. 0 keeps one object per test file, which the portability and
+# sanitizer jobs ask for. The light units stay apart: grouping every unit does not compile, as their
 # helpers share names.
-set(WEBFRONT_TEST_UNITY_BATCH 0 CACHE STRING "Compile the heavy unit tests this many to a file; 0 compiles each file alone")
 if(WEBFRONT_TEST_UNITY_BATCH GREATER 0)
   set(_heavy WebFrontTests ReadBindingTests ViewAssociationTests BroadcastTests CommandsTests ApplicationTaskTests DeferredCallTests StdnetShutdownTests FrontendContractTests JsFunctionSenderTests
       AutomationTests ReactStoreTests DeveloperTests CEFMacrosTests JasmineConsumerTests WfDriverTests)
@@ -78,13 +94,32 @@ target_include_directories(tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated"
 # more at -O3; WebFront_options is left out because its coverage flags would restore -O0.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   add_library(react_store_optimized OBJECT ReactStoreTests.cpp)
-  target_link_libraries(react_store_optimized PRIVATE WebFront_test_hardening WebFront_warnings Catch2::Catch2 WebFront)
+  target_link_libraries(react_store_optimized PRIVATE WebFront_test_hardening WebFront_warnings WebFront)
   target_compile_options(react_store_optimized PRIVATE -O3)
 endif()
 
-include(${Catch2_SOURCE_DIR}/extras/Catch.cmake)
 # Labels select the tiers (docs/TEST_TIERS.md): fast unit tests, browser integration, portability across toolchains.
-catch_discover_tests(tests PROPERTIES TIMEOUT 60 LABELS fast)
+# One CTest case per scenario starts one process per scenario: more than 500, which is most of the run time of the unit
+# tests (docs/TEST_PERFORMANCE.md). WEBFRONT_TEST_UNIT_SHARDS runs them as that many processes instead, each a
+# shard that writes the result of every scenario to a JUnit report. The default keeps one case per scenario, which
+# `ctest -R` filters by name.
+set(WEBFRONT_TEST_UNIT_SHARDS 0 CACHE STRING "Run the unit tests as this many CTest cases; 0 registers one case per scenario")
+if(NOT WEBFRONT_TEST_UNIT_SHARDS MATCHES "^[0-9]+$")
+  message(FATAL_ERROR "WEBFRONT_TEST_UNIT_SHARDS must be a non-negative integer, not '${WEBFRONT_TEST_UNIT_SHARDS}'")
+endif()
+if(WEBFRONT_TEST_UNIT_SHARDS GREATER 0)
+  math(EXPR _last_shard "${WEBFRONT_TEST_UNIT_SHARDS} - 1")
+  foreach(_shard RANGE ${_last_shard})
+    # The shards split the scenarios in their declaration order, which every process sees alike.
+    add_test(NAME UnitTests-${_shard} COMMAND tests --order decl --shard-count ${WEBFRONT_TEST_UNIT_SHARDS} --shard-index ${_shard}
+        --junit "${CMAKE_BINARY_DIR}/unit-results-${_shard}.xml")
+    # The scenarios of a shard share its time limit; the slowest of them takes a few seconds.
+    # A shard whose every scenario is skipped exits with 4, as a single scenario does (BddDiscoverTests.cmake).
+    set_tests_properties(UnitTests-${_shard} PROPERTIES TIMEOUT ${_shard_timeout} LABELS fast SKIP_RETURN_CODE 4 ${_unit_test_environment})
+  endforeach()
+else()
+  bdd_discover_tests(tests PROPERTIES TIMEOUT ${_unit_timeout} LABELS fast ${_unit_test_environment})
+endif()
 
 # The developer journey type-checks the declaration this tool writes from the hand-described settings (#383).
 add_executable(forms_declaration FormsDeclaration.cpp)
@@ -117,26 +152,12 @@ int main() { return 0; }
   set(_reflection_supported ${WEBFRONT_HAS_REFLECTION})
 endif()
 if(_reflection_supported)
-  # Catch2 is compiled again with the flags of the test: the C++23 Catch2 objects would mix the inline standard-library
-  # definitions of both standards in one executable (std::to_string(double) differs, P2587).
-  get_target_property(_catch2_sources Catch2 SOURCES)
-  get_target_property(_catch2_dir Catch2 SOURCE_DIR)
-  set(_catch2_absolute)
-  foreach(_source IN LISTS _catch2_sources)
-    cmake_path(ABSOLUTE_PATH _source BASE_DIRECTORY "${_catch2_dir}" NORMALIZE OUTPUT_VARIABLE _source)
-    list(APPEND _catch2_absolute "${_source}")
-  endforeach()
-  set(_catch2_sources ${_catch2_absolute})
-  add_library(Catch2_reflection STATIC ${_catch2_sources} ${Catch2_SOURCE_DIR}/src/catch2/internal/catch_main.cpp)
-  target_include_directories(Catch2_reflection PUBLIC ${Catch2_SOURCE_DIR}/src ${Catch2_BINARY_DIR}/generated-includes)
-  target_link_libraries(Catch2_reflection PRIVATE WebFront_test_hardening WebFront_test_sanitizers)
-  add_executable(forms_reflection_tests FormsReflectionTests.cpp)
-  target_link_libraries(forms_reflection_tests PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options Catch2_reflection WebFront)
-  foreach(_target IN ITEMS Catch2_reflection forms_reflection_tests)
-    set_target_properties(${_target} PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
-    target_compile_options(${_target} PRIVATE -freflection)
-  endforeach()
-  catch_discover_tests(forms_reflection_tests TEST_PREFIX "C++26." PROPERTIES TIMEOUT 60 LABELS fast)
+  # Bdd.hpp is a header: the whole executable, its framework included, is compiled as C++26.
+  add_executable(forms_reflection_tests Main.cpp FormsReflectionTests.cpp)
+  target_link_libraries(forms_reflection_tests PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
+  set_target_properties(forms_reflection_tests PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+  target_compile_options(forms_reflection_tests PRIVATE -freflection)
+  bdd_discover_tests(forms_reflection_tests TEST_PREFIX "C++26." PROPERTIES TIMEOUT 60 LABELS fast)
   # Misplaced annotations do not compile: each case must fail with the message of describe<T>().
   foreach(_case IN ITEMS "RANGE_ON_BOOL|Range applies to numeric members only" "RANGE_ON_STRING|Range applies to numeric members only"
                          "RANGE_ON_ENUM|Range applies to numeric members only" "REPEATED_LABEL|Label is repeated on a member"
@@ -217,7 +238,7 @@ if(WEBFRONT_ENABLE_COVERAGE)
   target_link_options(tests PUBLIC -fprofile-arcs -ftest-coverage)
 endif()
 
-# Replaces the global operator new to count allocations: kept out of Catch2 and TSan builds.
+# Replaces the global operator new to count allocations: kept out of the unit-test executable and TSan builds.
 # Clang's TSan C++ runtime defines the same operators, so this executable cannot link with it.
 # Ordinary and ASan/UBSan builds retain this regression; the rest of the suite still runs under TSan.
 if(NOT WEBFRONT_ENABLE_SANITIZER_THREAD)
@@ -249,6 +270,23 @@ add_test(NAME RepositoryLayoutRejectsVendoredSources
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckRepositoryLayoutNegative.cmake)
 add_test(NAME NewcomerDocsMatchExamples
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckNewcomerDocs.cmake)
+# What an agent reads first states the development model and how it runs wf itself (#561).
+add_test(NAME AgentGuidance
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/agent-guidance
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckAgentGuide.cmake)
+set_tests_properties(AgentGuidance PROPERTIES TIMEOUT 30 LABELS fast)
+add_test(NAME WebFrontDistribution
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/distribution
+        -DCONSUMER_CXX_COMPILER=${CMAKE_CXX_COMPILER} -DCONSUMER_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCONSUMER_CONFIG=$<CONFIG>
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckWebFrontDistribution.cmake)
+set_tests_properties(WebFrontDistribution PROPERTIES TIMEOUT 120)
+add_test(NAME BuildToolRequirements
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/build-tool-requirements
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckBuildToolRequirements.cmake)
+set_tests_properties(BuildToolRequirements PROPERTIES TIMEOUT 30 LABELS fast)
+add_test(NAME ChangelogFormat
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckChangelogFormat.cmake)
+set_tests_properties(ChangelogFormat PROPERTIES TIMEOUT 30 LABELS fast)
 add_test(NAME ModuleScanWarning
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/module-scan
         "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}" -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckModuleScan.cmake)
@@ -364,6 +402,17 @@ if(_consumer_native_enabled)
     set_tests_properties(AddSubdirectoryNativeConsumer PROPERTIES TIMEOUT 600)
 endif()
 
+# The cases that configure a CMake project test the build system, not the C++ of the library: a pull request runs them only
+# when the build system changes (docs/TEST_TIERS.md). None of them compiles library code, which is why
+# AddSubdirectoryNativeConsumer is not among them. `configuration` comes in addition to a tier label.
+foreach(_case IN ITEMS ModuleScanWarning TestOptionsConfiguration NativeAutodetectReconfiguration FrontendSelection
+        FrontendSelectionMultiConfig CEFTestingState CEFCopyDestinations WebView2UnsupportedToolchain WebView2LoaderArchitecture
+        WKWebViewConfiguration FrontendConsumerConfiguration TestSuiteRepetition)
+    if(TEST ${_case})
+        set_property(TEST ${_case} APPEND PROPERTY LABELS configuration)
+    endif()
+endforeach()
+
 # Manual timing evidence for gzip cache/cold-decode work; never a timing-based test.
 add_executable(gzip_cache_benchmark EXCLUDE_FROM_ALL GzipCacheBenchmark.cpp)
 target_link_libraries(gzip_cache_benchmark PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
@@ -386,11 +435,8 @@ endif()
 
 find_package(Python3 QUIET COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
-    add_test(NAME TestPerformanceProfile COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/tools/TestProfileTests.py")
     add_test(NAME FuzzerConcurrency COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/fuzz/TestRunFuzzers.py")
-    set_tests_properties(TestPerformanceProfile FuzzerConcurrency PROPERTIES TIMEOUT 15 LABELS fast)
-endif()
-if(Python3_Interpreter_FOUND)
-    add_test(NAME TestResourceMeasurement COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/tools/TestMeasurement.py")
-    set_tests_properties(TestResourceMeasurement PROPERTIES TIMEOUT 15 LABELS fast)
+    add_test(NAME TestFlakeReport COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/tools/TestFlakeReport.py")
+    add_test(NAME HardwareWorkflows COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/tools/TestHardwareWorkflows.py")
+    set_tests_properties(FuzzerConcurrency TestFlakeReport HardwareWorkflows PROPERTIES TIMEOUT 60 LABELS fast)
 endif()

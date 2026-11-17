@@ -95,6 +95,25 @@ describe('Developer automation', () => {
         expect(await execute(['help'],{})).toContain('wf test');
     });
 
+    it('gives an agent the model, the sequence and the way to run wf itself, from wf help and from the first errors', async () => {
+        const config = {starters: {life: {}, app: {}}};
+        expect(await execute(['help'],{config})).toContain('\nAgents: wf help agents');
+        for (const topic of ['agents','--agents']) {
+            const text = await execute(['help',topic],{config});
+            expect(text).toContain('C++ with a TypeScript/TSX interface in ui/, developed with wf dev');
+            expect(text).toContain('wf create app                 a starter (starters: app, life), not the name of your project');
+            expect(text).toMatch(/wf init[^]*wf dev ui\/main\.ts/);
+            expect(text).toContain('webfront-agent --attach DIRECTORY --operation preview --entry ui/main.ts');
+            expect(text).toContain('webfront-agent --attach DIRECTORY --mcp');
+            expect(text).toContain('docs/DEVELOPING_WITH_AGENTS.md');
+        }
+        expect(await execute(['help','create'],{config})).toMatch(/^wf create <starter> \[directory\]\n[^]*names a starter of this environment, not your project \(starters: app, life\)/);
+        expect(await execute(['help','dev'],{})).toMatch(/^wf dev \[entry\.tsx\|name\]\n/);
+        await rejects(execute(['help','nothing'],{}),/Unknown help topic: nothing/);
+        await rejects(execute(['help','dev','more'],{}),/Usage: wf help \[command\|agents\]/);
+        await rejects(execute(['create'],{config}),/Usage: wf create <starter> \[directory\] \(starters: app, life\)/);
+    });
+
     it('tells the person in the terminal and in wf help that automation is connected, without control characters', async () => {
         const shown=[];
         delete globalThis.webfrontAutomationNotice;
@@ -312,6 +331,27 @@ describe('Developer automation', () => {
             const result=await runNonInteractive(['build'],{bridge,onExit:() => {}});
             expect(result.exitCode).toBe(1);
             expect(result.diagnostics.map(item => item.file)).toEqual([path,path]);
+        } finally {
+            if(previousWorker===undefined) delete globalThis.Worker; else globalThis.Worker=previousWorker;
+        }
+    });
+
+    it('previews and embeds a project that has no dependency, so no lock (#561)', async () => {
+        setManifestDirectory();
+        const {bridge,storage}=memoryBridge(new Map([
+            ['webfront.project.json',new TextEncoder().encode(JSON.stringify({format:1,name:'app',version:'0.1.0',entries:{main:'ui/main.ts'}}))],
+            ['ui/main.ts',new TextEncoder().encode('export {};')]]));
+        expect(storage.has('webfront-packages.lock.json')).toBeFalse();
+        const previousWorker=globalThis.Worker;
+        globalThis.Worker=class {
+            postMessage() { queueMicrotask(() => this.onmessage({data:{type:'result',files:new Map([['app.js',new TextEncoder().encode('')]])}})); }
+            terminate() {}
+        };
+        try {
+            const embedded=await runNonInteractive(['embed','ui/main.ts','--output','generated/AppUI.hpp'],{bridge,onExit:() => {}});
+            expect(embedded.output).not.toMatch(/Cannot read project file/);
+            expect(embedded.exitCode).withContext(embedded.output).toBe(0);
+            expect(storage.has('generated/AppUI.hpp')).toBeTrue();
         } finally {
             if(previousWorker===undefined) delete globalThis.Worker; else globalThis.Worker=previousWorker;
         }

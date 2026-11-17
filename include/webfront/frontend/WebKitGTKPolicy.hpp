@@ -2,10 +2,26 @@
 
 #include "../ContentPolicy.hpp"
 
+#include <chrono>
 #include <exception>
+#include <filesystem>
+#include <fstream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+
+#if defined(__linux__)
+    #include <cerrno>
+    #include <cstdlib>
+
+    #include <fcntl.h>
+    #include <spawn.h>
+    #include <poll.h>
+    #include <signal.h>
+    #include <sys/wait.h>
+    #include <unistd.h>
+#endif
 
 namespace webfront::frontend::detail::webkitgtk {
 
@@ -78,4 +94,203 @@ struct FailureState {
     }
 };
 
+enum class SandboxMode { development, distribution };
+
+#if defined(__linux__)
+
+// Development is the default, independently of optimization level. A distribution binary requires the sandbox;
+// an inherited environment variable cannot weaken its build policy.
+inline bool sandboxRequiredByEnvironment() {
+    const auto* value = std::getenv("WEBFRONT_REQUIRE_WEBKIT_SANDBOX");
+    return value && *value && std::string_view(value) != "0";
+}
+
+// WebKit treats the value "0" as keeping the sandbox; other present values disable it.
+inline bool webKitSandboxDisabled() {
+    const auto* value = std::getenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS");
+    return value && std::string_view(value) != "0";
+}
+
+inline bool snapEnvironmentPresent() {
+    return std::getenv("SNAP") && std::getenv("SNAP_NAME") && std::getenv("SNAP_REVISION");
+}
+
+inline bool snapConfinementVerified() {
+    std::ifstream labelFile("/proc/self/attr/current");
+    std::string   label;
+    std::getline(labelFile, label);
+    const auto* name = std::getenv("SNAP_NAME");
+    return name && label.starts_with("snap." + std::string(name) + ".") && label.ends_with(" (enforce)");
+}
+
+inline bool sandboxLauncherApplies() {
+    std::error_code error;
+    return !webKitSandboxDisabled() && !snapEnvironmentPresent() && !std::filesystem::exists("/.flatpak-info", error);
+}
+
+inline std::filesystem::path sandboxLauncherPath() {
+    #ifdef WEBFRONT_WEBKITGTK_BWRAP_EXECUTABLE
+    return WEBFRONT_WEBKITGTK_BWRAP_EXECUTABLE;
+    #else
+    return "bwrap";  // Standalone headers use PATH; CMake consumers can pin WebKit's compiled launcher path.
+    #endif
+}
+
+/// Match WebKit's container capability probe. Every failure must preserve the distribution requirement.
+inline std::optional<std::string> sandboxLauncherFailure(const std::filesystem::path& launcher, std::chrono::milliseconds timeout = std::chrono::seconds(3)) {
+    int report[2];
+    if (pipe2(report, O_CLOEXEC) != 0)
+        return "cannot create bubblewrap diagnostic pipe";
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
+    posix_spawn_file_actions_adddup2(&actions, report[1], STDOUT_FILENO);
+    posix_spawn_file_actions_adddup2(&actions, report[1], STDERR_FILENO);
+    posix_spawnattr_t attributes;
+    posix_spawnattr_init(&attributes);
+    sigset_t defaults;
+    sigemptyset(&defaults);
+    sigaddset(&defaults, SIGCHLD);
+    posix_spawnattr_setsigdefault(&attributes, &defaults);
+    posix_spawnattr_setpgroup(&attributes, 0);
+    posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETPGROUP);
+    // The shell owns/reaps the probe child. The application's SIGCHLD handler cannot steal that child's status.
+    // Status travels over the pipe; waiting for the shell is only zombie cleanup, never the success criterion.
+    std::string path        = launcher.string();
+    const char* arguments[] = {"sh",
+                               "-c",
+                               "\"$@\"; result=$?; printf '\\nWEBFRONT_PROBE_STATUS=%s\\n' \"$result\"",
+                               "webfront-probe",
+                               path.c_str(),
+                               "--ro-bind",
+                               "/",
+                               "/",
+                               "--proc",
+                               "/proc",
+                               "--dev",
+                               "/dev",
+                               "--unshare-all",
+                               "true",
+                               nullptr};
+    pid_t       child       = 0;
+    const int   spawned     = posix_spawn(&child, "/bin/sh", &actions, &attributes, const_cast<char* const*>(arguments), ::environ);
+    posix_spawnattr_destroy(&attributes);
+    posix_spawn_file_actions_destroy(&actions);
+    close(report[1]);
+    if (spawned != 0) {
+        close(report[0]);
+        return "cannot spawn bubblewrap probe supervisor";
+    }
+    fcntl(report[0], F_SETFL, O_NONBLOCK);
+    std::string message;
+    bool        ended    = false;
+    const auto  deadline = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline) {
+        pollfd    descriptor{report[0], POLLIN, 0};
+        const int ready = poll(&descriptor, 1, 10);
+        if (ready < 0 && errno != EINTR)
+            break;
+        char       buffer[256];
+        const auto count = read(report[0], buffer, sizeof buffer);
+        if (count > 0) {
+            if (message.size() < 4096)
+                message.append(buffer, static_cast<std::size_t>(count));
+        } else if (count == 0) {
+            ended = true;
+            break;
+        } else if (errno != EINTR && errno != EAGAIN)
+            break;
+    }
+    close(report[0]);
+    if (!ended)
+        kill(-child, SIGKILL);
+    int status;
+    while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+    if (!ended)
+        return "bubblewrap probe timed out or its diagnostic channel failed";
+    constexpr std::string_view marker = "\nWEBFRONT_PROBE_STATUS=";
+    const auto                 result = message.rfind(marker);
+    if (result != std::string::npos && message.substr(result + marker.size()) == "0\n")
+        return std::nullopt;
+    if (result != std::string::npos)
+        message.resize(result);
+    while (!message.empty() && (message.back() == '\n' || message.back() == '\r'))
+        message.pop_back();
+    return message.empty() ? "bubblewrap probe failed without a diagnostic" : message;
+}
+
+inline bool webKitContainerFallbackPossible() {
+    std::error_code error;
+    return std::filesystem::exists("/run/.containerenv", error);
+}
+
+inline void requireSandboxEnvironment(SandboxMode mode, bool containerFallbackPossible = webKitContainerFallbackPossible()) {
+    const bool required = mode == SandboxMode::distribution || sandboxRequiredByEnvironment();
+    if (required && containerFallbackPossible)
+        throw std::runtime_error("WebKitGTK: distribution mode refuses containers with /run/.containerenv because WebKit may silently disable its sandbox "
+                                 "after the preflight probe");
+    if (required && snapEnvironmentPresent() && !snapConfinementVerified())
+        throw std::runtime_error(
+            "WebKitGTK: distribution mode rejects unverified Snap environment variables; launch outside Snap or use an enforced Snap profile");
+    if (required && webKitSandboxDisabled())
+        throw std::runtime_error("WebKitGTK: distribution mode requires the sandbox, but "
+                                 "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS disables it; unset it or set it to 0");
+}
+
+/// Prepare the development policy without mutating the environment. Distribution (or the legacy REQUIRE switch)
+/// rejects an inherited sandbox opt-out and reports a refused launcher before WebKit can abort the process.
+/// Returns a notice only when the development policy was selected.
+inline std::optional<std::string> prepareSandboxLaunch(const std::filesystem::path& launcher, SandboxMode mode) {
+    if (mode == SandboxMode::development && !sandboxRequiredByEnvironment()) {
+        return "development";
+    }
+    requireSandboxEnvironment(mode);
+    if (!sandboxLauncherApplies())
+        return std::nullopt;
+    if (const auto refusal = sandboxLauncherFailure(launcher))
+        throw std::runtime_error("WebKitGTK: the distribution sandbox cannot start (" + *refusal
+                                 + "); install the application's AppArmor profile or use a configured system browser; "
+                                   "see docs/WEBKITGTK.md, \"Distribution\"");
+    return std::nullopt;
+}
+
+// WebKit snapshots the switch when constructing its WebContext/process pool. Restore it before any user callback.
+class DevelopmentSandboxEnvironment {
+    std::optional<std::string> previous;
+    bool                       changed = false;
+
+public:
+    explicit DevelopmentSandboxEnvironment(SandboxMode mode) {
+        if (mode != SandboxMode::development || sandboxRequiredByEnvironment())
+            return;
+        if (const auto* value = std::getenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS"))
+            previous = value;
+        if (setenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", "1", 1) != 0)
+            throw std::runtime_error("WebKitGTK: cannot configure the development sandbox policy");
+        changed = true;
+    }
+    DevelopmentSandboxEnvironment(const DevelopmentSandboxEnvironment&) = delete;
+    ~DevelopmentSandboxEnvironment() {
+        if (!changed)
+            return;
+        if (previous)
+            setenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", previous->c_str(), 1);
+        else
+            unsetenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS");
+    }
+};
+
+#endif
+
 }  // namespace webfront::frontend::detail::webkitgtk
+
+namespace webfront::frontend {
+struct WebKitGTKHost {};
+template <detail::webkitgtk::SandboxMode Mode>
+struct BasicWebKitGTKFrontend;
+#if defined(WEBFRONT_DISTRIBUTION) && WEBFRONT_DISTRIBUTION
+using WebKitGTKFrontend = BasicWebKitGTKFrontend<detail::webkitgtk::SandboxMode::distribution>;
+#else
+using WebKitGTKFrontend = BasicWebKitGTKFrontend<detail::webkitgtk::SandboxMode::development>;
+#endif
+}  // namespace webfront::frontend

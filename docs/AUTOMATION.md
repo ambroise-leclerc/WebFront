@@ -11,12 +11,19 @@ bridge as MCP. Applications can explicitly integrate `automation::Binding` with 
 A session ID routes operations and prevents accidental cross-session requests; it is not an
 authentication secret. The opt-in native attachment channel uses a separate OS-generated capability.
 
+New to WebFront, or an agent about to write an application? Start with [developing with an agent](DEVELOPING_WITH_AGENTS.md):
+the model (C++ with a TypeScript/TSX interface in `ui/`), the development loop and the JSON and MCP form of each `wf` command.
+This page is the reference.
+
 For testing a consumer's own page through CTest, see [consumer testing](CONSUMER_TESTING.md).
 That independent API is available in this tree; MCP is unnecessary for CI to run Jasmine.
 
 ## Building and provisioning
 
-Enable an embedded frontend and the launcher. For example, on macOS:
+Enable an embedded frontend and the launcher. An application build needs only `-DWEBFRONT_BUILD_AUTOMATION=ON`: the native
+engine of the platform is detected. Each configuration prints one `WebFront for agents:` line that says whether the launcher
+is built, and `webfront_write_agent_guide()` writes the agent guide as `AGENTS.md` in a project that embeds WebFront
+(never replacing an existing file). A test build selects its engine explicitly; for example, on macOS:
 
 ```sh
 cmake -S . -B build-agent -DCMAKE_BUILD_TYPE=Release \
@@ -33,7 +40,7 @@ The implementation is native C++23; no Node.js, npm or Python is required to run
 Provision an environment containing automation API v1 (0.6.3 or later). The setup operations (`init`, `create`, `install`,
 `restore`, `embed`) need environment **0.6.4 or later**, which must be published (see the [0.6.4 publication gate](validation/developer-0.6.4-release.md)) before anything depending on this pin is merged: the launcher checks this at startup, and granting one of them to an
 older environment fails with a bootstrap error (status 70) naming the operation, instead of failing each run.
-`create` needs the starter archives (`<name>-starter.tgz`, such as `life-starter.tgz` of a distribution build) in the same
+`create` needs the starter archives (`<name>-starter.tgz`, such as `app-starter.tgz` and `life-starter.tgz` of a distribution build) in the same
 directory as the `--environment` archive: the launcher serves only files of that name from there, and the environment's
 manifest pins their SHA-512, so the directory is not trusted for content. Environment 0.6.2
 predates that API; passing an older environment produces a bootstrap error with status 70.
@@ -378,20 +385,19 @@ control need their own reviewed authorization/isolation design.
 
 ## Validation
 
-Catch2 covers native grants, cross-session rejection, path/option refusal, cancellation races,
+The unit tests cover native grants, cross-session rejection, path/option refusal, cancellation races,
 deadline revocation, MCP lifecycle/IDs and hostile JSON. Browser Jasmine specs cover shared
 dispatch arbitration and the runner. `AutomationMcpWindow` drives a real embedded window through
 stdio: structured errors, file correction, check/build/test, preview inspection/actions,
 cross-frame rejection, cancellation and POSIX SIGTERM cleanup of the shared owner
-(endpoint and temporary profile). This reuses the existing window. Separate `AutomationMcpWatchdog` and
-`AutomationCliWatchdog` cases block a real renderer inside a test-archive operation body,
-without loading/compiling Jasmine just to provoke that hang. They exercise the production signed
-callback/runner, native two-second deadline, five-second close grace, stdio EOF and endpoint removal;
-the CLI case checks endpoint reuse and Unicode failure reporting in the same restart after forced
-exit. The MCP case delays bootstrap by three
-seconds to verify that its shorter operation deadline starts only after startup. The cases retain
-separate private project/temporary directories and ephemeral ports; the frontend storage limits
-listed above still apply. Only the two spinning renderers share a lock.
+(endpoint and temporary profile). This reuses the existing window. A separate `AutomationMcpWatchdog` case
+blocks a real renderer inside a test-archive operation body,
+without loading/compiling Jasmine just to provoke that hang. It exercises the production signed
+callback/runner, native two-second deadline, five-second close grace, stdio EOF and endpoint removal
+through MCP; a CLI restart after the forced exit then checks endpoint reuse and Unicode failure reporting.
+It delays bootstrap by three seconds to verify that its shorter operation deadline starts only after startup. The
+cases retain separate private project/temporary directories and ephemeral ports; the frontend storage limits
+listed above still apply.
 That regression uses Python's standard library as a test client; Python is not a runtime
 dependency of the launcher. It is registered when a Python interpreter and embedded test engine
 are available; without xvfb-run on Linux only the optional Automation window tests are skipped with

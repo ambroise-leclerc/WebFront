@@ -68,7 +68,7 @@ jobs:
         run: |
           wf run build build-distribution
           wf run build build-distribution-repeat
-          for name in environment.tgz life-starter.tgz provision.json DeveloperReleaseData.hpp; do
+          for name in environment.tgz app-starter.tgz life-starter.tgz provision.json DeveloperReleaseData.hpp; do
             cmp "build-distribution/$name" "build-distribution-repeat/$name"
           done
           echo "environment.tgz sha512-$(openssl dgst -sha512 -binary build-distribution/environment.tgz | base64 -w0)"
@@ -97,6 +97,7 @@ jobs:
           if-no-files-found: error
           path: |
             build-distribution/environment.tgz
+            build-distribution/app-starter.tgz
             build-distribution/life-starter.tgz
             build-distribution/provision.json
             build-distribution/DeveloperReleaseData.hpp

@@ -1,7 +1,7 @@
 /// @brief Socket mock driving a WebLink from the test thread, with injectable write failures.
 #pragma once
 #include "InlineTaskScope.hpp"
-#include <catch2/catch_test_macros.hpp>
+#include "Bdd.hpp"
 #include <webfront/http/WebSocket.hpp>
 #include <webfront/networking/NetworkingMock.hpp>
 
@@ -20,6 +20,8 @@
 #include <system_error>
 #include <utility>
 #include <vector>
+
+using namespace webfront::bdd;
 
 namespace webfront::testing {
 
@@ -136,15 +138,15 @@ public:
     }
 
     static void receive(std::span<const std::byte> bytes) {
-        REQUIRE(readCompletion.complete);
-        REQUIRE(bytes.size() <= readBuffer.size());
+        require(readCompletion.complete);
+        require(bytes.size() <= readBuffer.size());
         std::copy(bytes.begin(), bytes.end(), static_cast<std::byte*>(readBuffer.data()));
         std::exchange(readCompletion, {}).complete({}, bytes.size());
     }
 
     /// An error ends the read; no error is a read of zero bytes, the end of the stream.
     static void fail(std::error_code error) {
-        REQUIRE(readCompletion.complete);
+        require(readCompletion.complete);
         std::exchange(readCompletion, {}).complete(error, 0);
     }
 
@@ -210,6 +212,12 @@ public:
         deferring = defer;
     }
 
+    /// A deferred send has registered cancellation and handed its completion to the test.
+    static bool hasDeferredWrites() {
+        std::lock_guard lock(mutex);
+        return !deferred.empty();
+    }
+
     /// Run queued completions on the calling thread, outside the write that queued them.
     static std::size_t completeDeferredWrites() {
         std::vector<std::function<void()>> pending;
@@ -268,7 +276,7 @@ public:
 
 /// Mask a browser-to-server frame: by default a binary message in one frame (FIN set, opcode 2).
 inline std::vector<std::byte> clientFrame(std::span<const std::byte> payload, std::byte finAndOpcode = std::byte{0x82}) {
-    REQUIRE(payload.size() < 126);
+    require(payload.size() < 126);
     constexpr std::array<std::byte, 4> mask{std::byte{0x12}, std::byte{0x34}, std::byte{0x56}, std::byte{0x78}};
     std::vector<std::byte>             frame{finAndOpcode, std::byte{static_cast<std::uint8_t>(0x80u | payload.size())}};
     frame.insert(frame.end(), mask.begin(), mask.end());

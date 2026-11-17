@@ -8,7 +8,7 @@ WebFront is a C++23 header-only library for serving a browser UI from a C++ appl
 - C++ calls browser functions with `ui.jsFunction(name)(arguments...)`, which is fire-and-forget and ignores the result, or with `ui.jsFunction<R>(name)(arguments...)`, which returns a `std::future<R>`. Only the untyped C++ form is fire-and-forget.
 - `webFront.ready` resolves after the WebSocket handshake acknowledgement and rejects if the initial connection fails or closes.
 
-WebFront also ships a standalone developer environment (`NativeApp::bootstrap("developer")`): a terminal whose `wf` commands (`init`, `create`, `install`, `restore`, `run`, `exec`, `check`, `test`, `build`, `dev`, `preview`, `embed`, `list`, `help`) manage a project manifest and lock, compile TS/TSX, type-check, run Jasmine specs and generate the application's embedded provider, with no JavaScript runtime or package manager on the developer's machine. It is not a sandbox. See `docs/DEVELOPER_ENVIRONMENT.md`.
+WebFront also ships a standalone developer environment (`NativeApp::bootstrap("developer")`): a terminal whose `wf` commands (`init`, `create`, `install`, `restore`, `run`, `exec`, `check`, `test`, `build`, `dev`, `preview`, `embed`, `list`, `why`, `info`, `help`) manage a project manifest and lock, compile TS/TSX, type-check, run Jasmine specs and generate the application's embedded provider, with no JavaScript runtime or package manager on the developer's machine. It is not a sandbox. See `docs/DEVELOPER_ENVIRONMENT.md`.
 
 The README introduces WebFront through the Game of Life walkthrough, demonstrating the developer bootstrap, reactive TypeScript UI and embedded distribution. The minimal `HelloWorld` example remains available under `examples/hello-world/`. Native modules and the bridge are covered by the Jasmine browser integration test. The optional `ui.document()` API provides per-connection DOM islands, batched writes, events (callbacks or awaitable `node.next(name)`) and grouped sender reads; see `docs/DOM.md`. The optional React store and `Island` adapter, including its support policy and coordinated unmount contract, is described in `docs/REACT.md`; `examples/life/react/` demonstrates it. Application coroutines use `webfront::Task` and `app.spawn(task)`/`ui.spawn(task)`; retain a `TaskHandle` to request individual cancellation. WebFront owns and drains these tasks. Spawn is callable from any thread while the application lives; a call rejected during shutdown returns a stopped handle. Destructors wait for outstanding operations; explicit shutdown reports a stalled join. Typed C++ sender calls support local cancellation; futures and JavaScript Promises do not expose cancellation.
 
@@ -21,16 +21,18 @@ The README introduces WebFront through the Game of Life walkthrough, demonstrati
 - `include/webfront/weblink/`: bridge message encoding and routing.
 - `include/webfront/system/`: layered virtual filesystems and the embedded web resources, a closed list guarded by the `MinimalCoreAssets` CTest case (normative list and 150 KiB decoded budget in ADR-016; changing it means amending the ADR and `test/cmake/CheckMinimalCoreAssets.cmake` together).
 - `include/webfront/frontend/`: system-browser, CEF, optional Windows WebView2 and macOS WKWebView frontend adapters.
-- `examples/`: only Hello World (`hello-world/`) and Game of Life (`life/`, with console, developer and embedded stages, plus the `life/react/` variant with a C++ panel inside React).
+- `examples/`: only Hello World (`hello-world/`), the host loop (`host-loop/`: an application that keeps its own loop, `app.start()` or a host thread beside a native window; it ray-traces a Boing Ball on the CPU or with an optional CUDA unit, see `docs/HOST_LOOP_EXAMPLE.md`) and Game of Life (`life/`, with console, developer and embedded stages, plus the `life/react/` variant with a C++ panel inside React).
 - `js/core/`: readable browser bridge, fallback and bootstrap loader compiled into `include/webfront/`, plus the embedding CMake modules; `js/developer/`: developer environment (its terminal and `wf`), the wf scripts that build it (`scripts/`), build and publication tools. The repository is itself a `wf` project (`js/developer/webfront.project.json` and its lock, selected with `--manifest-dir js/developer`): the environment builds itself, and its pure JavaScript specs (`test/developer/`) run with `wf test`. Production C++ remains header-only in `include/webfront/`.
+- `js/developer/starters/`: the sources of the `app` starter and `agent-guide.md`, the `AGENTS.md` that `wf create` puts beside a starter and that `webfront_write_agent_guide()` (`cmake/WebFrontAgentGuide.cmake`) writes in a consuming project.
 - `js/services/`: optional `@webfront/services` package, the browser side of the system services (ADR-020; a skeleton so far), built like `@webfront/react` by `wf run services-package`; outside the core's embedded resource list.
 - `js/react/`: optional `@webfront/react` package (`createStore`, `useStore`, `Island`), declarations and package-local license. `wf run react-package` assembles it; tests verify the exact archive installed by the registry. It is outside the core's embedded resource list.
 - `test/fixtures/`, `test/web/fixtures/`: retained regression fixtures, not public example applications.
-- `test/unit/`: Catch2 unit tests; `test/web/`: real-browser integration (`suite/` is the WebFront project of the Jasmine specs, run by `webtest` through `wf test`); `test/driver/`: `webfront-wf`, the non-interactive `wf` driver for tests; `test/fuzz/`, `test/fixtures/`; `test/cmake/`: CMake test scripts and sub-projects. The `RepositoryLayout` CTest case pins the tracked root.
+- `test/unit/`: C++ unit tests, written with `test/unit/Bdd.hpp` (a single-header BDD framework); `test/web/`: real-browser integration (`suite/` is the WebFront project of the Jasmine specs, run by `webtest` through `wf test`); `test/driver/`: `webfront-wf`, the non-interactive `wf` driver for tests; `test/fuzz/`, `test/fixtures/`; `test/cmake/`: CMake test scripts and sub-projects. The `RepositoryLayout` CTest case pins the tracked root.
 - `cmake/`: build modules (frontends, CEF, CPM, compiler options); `.github/`: workflows, `.github/CONTRIBUTING.md`.
 - `docs/`: current reference guides, architecture decisions and `docs/CHANGELOG.md`.
 - `docs/PROJECT_STATUS.md`: current supported paths, validation scope and known limitations; completed work belongs in the changelog and Git history.
 - `docs/adr/README.md`: architecture decision index, Git history, tradeoffs and implementation rules; read the relevant ADRs before changing their contracts.
+- `docs/DEVELOPING_WITH_AGENTS.md`: what an agent developing a consuming application reads first (the model, the loop, each `wf` command in JSON and MCP); the README section, `wf help agents`, the starters' `AGENTS.md` and the `AgentGuidance` CTest case keep to it.
 - `docs/DEVELOPER_ENVIRONMENT.md`: the reference of the developer environment (`wf` commands, manifest and lock, TypeScript and `wf check`, tests, limits, distribution); `docs/EMBEDDED_ASSETS.md`: the core's embedded resources and their regeneration.
 
 The historical `webfront/` prototype and the former top-level `webtest/` are gone: use `test/unit/` for current C++ tests and `test/web/` for browser tests. Do not revive legacy code without a specific issue and regression coverage.
@@ -53,7 +55,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure --parallel 4
 
-# Run one Catch2 scenario directly
+# Run one unit-test scenario directly (`tests --help` lists the filters)
 ./build/test/unit/tests "Scenario: JsFunction"
 
 # Linux real-browser integration test: configure downloads and verifies the pinned bootstrap environment and the packages
@@ -80,18 +82,20 @@ Important CMake options:
 The headers of the embedded assets are generated, and checked by CTest, in pure CMake (`js/core/EmbedAsset.cmake`; the
 `webfront-embedded-assets` target regenerates them). Normal C++ builds consume the versioned headers. Configuring with
 `WEBFRONT_ENABLE_TESTING=ON` downloads the pinned bootstrap environment and the packages of the test registry, each verified
-against its SHA-512; `-DWEBFRONT_BOOTSTRAP_DIR` and `-DWEBFRONT_REGISTRY_DIR` replace those downloads on a machine
-without network access.
+against its SHA-512, tried three times and kept once per machine (`WEBFRONT_DOWNLOAD_CACHE`, by default in CPM's cache or
+the user's cache directory), so a new build tree links them instead of downloading them again; `-DWEBFRONT_BOOTSTRAP_DIR`
+and `-DWEBFRONT_REGISTRY_DIR` replace those downloads on a machine without network access.
 
 - `WEBFRONT_EMBED_CEF=OFF` (default): CEF is unavailable; this is the normal unit-test build. `ON` downloads/links CEF and enables the automated browser test; it makes `CEFFrontend` available but does not select it: `webfront::WebFront` always uses the system browser.
 - `WEBFRONT_EMBED_WEBVIEW2=OFF` (default): Windows-only opt-in SDK and static loader for `WebView2Frontend`; requires the separately installed Evergreen runtime. Select it explicitly with `WebFrontWithFrontend<frontend::WebView2Frontend>`. With tests enabled, `WEBFRONT_WEBTEST_FRONTEND=WebView2` runs the shared Jasmine suite and lifecycle cases.
 - `WEBFRONT_EMBED_WKWEBVIEW=OFF` (default): macOS 13.3+ opt-in Cocoa/WebKit frontend, with no engine download. Select `WebFrontWithFrontend<frontend::WKWebViewFrontend>` on the main thread; `WEBFRONT_WEBTEST_FRONTEND=WKWebView` runs Jasmine and lifecycle coverage.
 
-- `WEBFRONT_ENABLE_TESTING=ON` (default `OFF`): build Catch2 and Jasmine test targets. CI and contributor commands must pass it explicitly. The test, fuzzing, coverage and sanitizer options (`WEBFRONT_ENABLE_SANITIZER_*`) carry the `WEBFRONT_` prefix so that a parent's own `ENABLE_TESTING` or `ENABLE_SANITIZER_ADDRESS` never builds or instruments WebFront's tests; the former unprefixed names no longer configure WebFront (`cmake/WebFrontTestOptions.cmake` documents the options).
+- `WEBFRONT_ENABLE_TESTING=ON` (default `OFF`): build the C++ unit-test and Jasmine test targets. CI and contributor commands must pass it explicitly. The test, fuzzing, coverage and sanitizer options (`WEBFRONT_ENABLE_SANITIZER_*`) carry the `WEBFRONT_` prefix so that a parent's own `ENABLE_TESTING` or `ENABLE_SANITIZER_ADDRESS` never builds or instruments WebFront's tests; the former unprefixed names no longer configure WebFront (`cmake/WebFrontTestOptions.cmake` documents the options).
 - `WEBFRONT_BUILD_EXAMPLES` (default `ON` only for the top-level project): build the examples. As a subproject (`add_subdirectory`), link `WebFront::WebFront`; no examples, tests or global compiler settings are added.
 - `WEBFRONT_ENABLE_COVERAGE=ON`: add GCC/Clang coverage instrumentation to the C++ tests.
+- The project has no CMake presets: the defaults are the quick local build (`WEBFRONT_TEST_UNITY_BATCH=4`, `WEBFRONT_MSVC_ANALYZE=OFF`, `WEBFRONT_TEST_REPRODUCIBILITY=OFF`) and every CI job passes these options explicitly (`docs/TEST_TIERS.md`).
 
-If the environment provides a read-only default ccache directory, set `CCACHE_DIR` to a writable temporary directory for local builds. Do not encode machine-specific cache paths in project files. In CI, `ENABLE_CACHE=OFF` disables automatic cache discovery while `CMAKE_CXX_COMPILER_LAUNCHER=sccache` explicitly enables sccache; a PATH/version probe runs on all three platforms. The combined Linux job uses Debug with GCC coverage on every PR; Windows and macOS use Release. The WebKitGTK sandbox opt-out is confined to the Linux test step and trusted fixtures.
+If the environment provides a read-only default ccache directory, set `CCACHE_DIR` to a writable temporary directory for local builds. Do not encode machine-specific cache paths in project files. In CI, `ENABLE_CACHE=OFF` disables automatic cache discovery while `CMAKE_CXX_COMPILER_LAUNCHER=sccache` explicitly enables sccache; a PATH/version probe runs on all three platforms. The combined Linux job uses Debug with GCC coverage on every PR; Windows and macOS use Release. WebKitGTK defaults to development mode, with its sandbox disabled only while constructing the native view context; the environment is restored afterward. Distribution builds require the sandbox (`WEBFRONT_DISTRIBUTION=ON` or explicitly selected native UI targets). See `docs/WEBKITGTK.md`.
 
 ## Architecture and invariants
 
@@ -99,7 +103,7 @@ If the environment provides a read-only default ccache directory, set `CCACHE_DI
 
 The HTTP server connections and the WebSocket read/write loops are coroutines (`networking::Task`) awaiting the senders a network provider returns (`Receive`, `Send`, `Accept`; `networking::TCPStdnet` forwards them to stdnet). A stop request cancels them from any thread and they unwind on the io_context thread, so I/O objects are never closed from another thread. The server owns a `counting_scope` for HTTP, WebSocket and application tasks. `shutdown()` stops and joins owned work; call it outside server callbacks, after external run callers have returned. Whoever owns the objects the tasks use must run `Server::drain()` before destroying them (`~BasicWF` does): it closes, stops and joins the scope while pumping the context. Low-level WebSocket/WebLink users pass an external `TaskScope&` and drain it before releasing dependencies.
 
-`webfront::WebFront` is default-constructible (`WebFrontConfig`: loopback address, port `9002`, no document root) and `show(page = "index.html")` opens a page. Without a document root no local file access happens; `WebFrontConfig::documentRoot` serves local files for development only, after the embedded `WebFront.js` (which a root can never override) and before the embedded fallback page.
+`webfront::WebFront` is default-constructible (`WebFrontConfig`: loopback address, port `9002`, no document root) and `show(page = "index.html")` opens a page. `show()` keeps its calling thread; an application with its own loop uses `start()` (system browser, returns at once), `requestClose()` (ends `show()` from any thread) or `webfront::UIThread` (secondary thread, refused at compile time for main-thread frontends), as `docs/HOST_INTEGRATION.md` describes. Without a document root no local file access happens; `WebFrontConfig::documentRoot` serves local files for development only, after the embedded `WebFront.js` (which a root can never override) and before the embedded fallback page.
 
 Filesystems implement `open(std::filesystem::path) -> std::optional<fs::File>` and are composed with `fs::Multi<>`; the first provider returning a file wins. `NativeDebugFS` is development-only and must not be presented as a production sandbox.
 
@@ -112,9 +116,9 @@ Exception: a purely C++ change that reuses an existing encoding, introduces no n
 ## Coding and testing conventions
 
 - Use C++23, four-space indentation, the `.clang-format` of the directory (`include/webfront/`, `test/`, `examples/`), and the naming rules in `.github/CONTRIBUTING.md`.
-- Keep production implementation header-only under `include/`; `examples/` contains the two public examples; browser resources live in `js/`.
+- Keep production implementation header-only under `include/`; `examples/` contains the three public examples; browser resources live in `js/`.
 - Prefer standard-library facilities and explicit ownership. Keep public headers ODR-safe (`inline`/templates as appropriate).
-- Catch2 tests use `SCENARIO`/`GIVEN`/`WHEN`/`THEN` and deterministic mocks.
+- Unit tests are named `const Scenario` objects whose `given`/`when`/`then` sections are lambdas, checked with `require`/`check` (`test/unit/Bdd.hpp`), and use deterministic mocks.
 - Jasmine specs are the project `test/web/suite/`, built by esbuild-wasm and run by `wf test` under the locked `jasmine-core` (installed from the local registry by `WebSuiteInstall`); `webtest` is the `webfront-wf` driver plus the C++ callbacks of the specs. The specs tell C++ they are done (`specsFinished`), the process status is that of `wf test` (or 1 when C++ did not observe every call), and the CTest case has a timeout. The registry the suite installs from is built by `wf run test-registry` (the `TestRegistry` case), from the packages that configure downloaded.
 - Every bug fix needs a failing regression test at the lowest useful level. Bridge changes also need the browser integration test.
 - Tests must not require user input, a fixed pre-existing browser session, or public network access after dependencies are configured.

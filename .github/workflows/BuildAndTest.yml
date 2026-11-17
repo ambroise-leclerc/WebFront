@@ -9,16 +9,36 @@ on:
     - cron: '23 4 * * 1'
   workflow_dispatch:
     inputs:
-      repeat_desktop_tests:
-        description: 'Also run the desktop matrix, repeating the complete CTest suite three times'
+      jetson_orin:
+        description: 'Validate a trusted branch on the Jetson hardware runner (maintainer only)'
         type: boolean
         default: false
+      gcc13_arm64:
+        description: 'Also run GCC 13 ARM64 and its ASan/UBSan fast tests'
+        type: boolean
+        default: false
+      cef_arm64:
+        description: 'Also run the CEF linuxarm64 browser integration (GCC 13)'
+        type: boolean
+        default: false
+      webkitgtk_arm64:
+        description: 'Also run the WebKitGTK aarch64 browser integration (GCC 13)'
+        type: boolean
+        default: false
+      repeat_desktop_tests:
+        description: 'Also run the desktop matrix, repeating the complete CTest suite desktop_passes times'
+        type: boolean
+        default: false
+      desktop_passes:
+        description: 'Passes of the complete desktop suite when repeat_desktop_tests is set (20 qualifies a reliability fix)'
+        type: number
+        default: 3
 
 permissions:
   contents: read
 
 concurrency:
-  group: build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.jetson_orin && 'jetson' || 'hosted' }}
   # Never cancel a push to a release branch: its coverage upload must complete.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -31,6 +51,36 @@ env:
 
 # Third-party actions are pinned to commit SHAs; GitHub-owned actions/* use version tags.
 jobs:
+  # Pre-merge entry point: the standalone workflow cannot be dispatched until it is on the default branch.
+  jetson-validation:
+    if: >-
+      github.repository == 'ambroise-leclerc/WebFront' && !cancelled() && github.event_name == 'workflow_dispatch' &&
+      github.actor == 'ambroise-leclerc' && github.ref_type == 'branch' && inputs.jetson_orin
+    runs-on: [self-hosted, linux, arm64, jetson-orin]
+    timeout-minutes: 180
+    concurrency:
+      group: jetson-orin
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Build and test at low priority
+        run: nice -n 15 ionice -c 3 bash .github/scripts/jetson-orin.sh
+      - name: Retain diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jetson-orin-${{ github.run_id }}
+          path: |
+            build-jetson-*/Testing/Temporary/LastTest.log
+            build-jetson-*/*results.xml
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Remove job build directories
+        if: always()
+        run: rm -rf -- build-jetson-core build-jetson-webkitgtk
+
   # The Linux toolchain image is tagged with the hash of its Dockerfile and built only when that tag is missing from ghcr.io,
   # so a change of the Dockerfile is validated by the very run that carries it. A pull request from a fork cannot push it
   # (read-only token): its Linux job then fails at the pull, which a maintainer re-run on a branch of this repository fixes.
@@ -69,7 +119,7 @@ jobs:
     # Only Linux waits for its image. Native desktops below start immediately and reuse these steps.
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.repeat_desktop_tests) }}
     # No `name:` expression: a skipped matrix job would display it unevaluated.
-    timeout-minutes: 25
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && (inputs.desktop_passes > 3 && 300 || 90) || 25 }}
     strategy:
       fail-fast: false
       matrix:
@@ -104,6 +154,20 @@ jobs:
           fi
           echo "Reproducibility builds: $reproducibility"
           echo "WEBFRONT_REPRODUCIBILITY=$reproducibility" >> "$GITHUB_ENV"
+      # The cases that configure a CMake project (label `configuration`, about 75 s of worker time on Windows) test the build
+      # system: a pull request into develop runs them only when it changes the build system or this workflow. A push to
+      # develop and the full tier always run them.
+      - name: Decide whether the configuration checks run
+        shell: bash
+        run: |
+          configuration=true
+          if [ "$FULL_TIER" != true ] && [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            if ! git diff --name-only HEAD^1 HEAD | grep -qE '^(cmake/|CMakeLists\.txt|js/core/[^/]*\.cmake|test/cmake/|test/unit/CMakeLists\.txt|\.github/actions/|\.github/workflows/BuildAndTest\.yml)'; then
+              configuration=false
+            fi
+          fi
+          echo "Configuration checks: $configuration"
+          echo "WEBFRONT_CONFIGURATION=$configuration" >> "$GITHUB_ENV"
       # No step of a build or of its tests needs a JavaScript runtime or package manager: the runner has none from here on.
       - uses: ./.github/actions/remove-node
       - uses: ./.github/actions/setup-cmake
@@ -141,6 +205,8 @@ jobs:
           sccache --version
       # ENABLE_CACHE controls automatic ccache discovery; the explicit sccache launcher stays enabled.
       # The heavy unit tests are compiled four to a file (docs/BUILD_TIME_STUDY.md); the portability and sanitizer jobs keep one object per test file.
+      # No job relies on a default of the test options: the defaults are those of a quick local build (docs/TEST_TIERS.md).
+      # The unit tests run as four shards instead of one process per scenario (docs/TEST_TIERS.md).
       - name: Configure
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
@@ -148,11 +214,12 @@ jobs:
           -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
           -DWEBFRONT_TEST_UNITY_BATCH=4
+          -DWEBFRONT_TEST_UNIT_SHARDS=4
           -DWEBFRONT_TEST_REPRODUCIBILITY=${{ env.WEBFRONT_REPRODUCIBILITY }}
-          ${{ env.FULL_TIER == 'true' && '' || '-DWEBFRONT_MSVC_ANALYZE=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF' }}
+          ${{ env.FULL_TIER == 'true' && '-DWEBFRONT_MSVC_ANALYZE=ON -DWEBFRONT_BUILD_EXAMPLES=ON' || '-DWEBFRONT_MSVC_ANALYZE=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF' }}
           ${{ matrix.options }}
       - name: Build
-        run: python3 test/tools/MeasureCommand.py --output build/build-resources.json -- cmake --build build --config ${{ matrix.build_type }} --parallel 4
+        run: cmake --build build --config ${{ matrix.build_type }} --parallel 4 ${{ runner.os == 'Windows' && '-- -k 0' || '' }}
       - name: Ensure WebView2 Evergreen runtime
         if: runner.os == 'Windows'
         shell: pwsh
@@ -183,74 +250,31 @@ jobs:
       # The fast tier (docs/TEST_TIERS.md): unit tests only, so a plain regression is reported before the browser suite starts.
       - name: Fast tests
         shell: bash
-        run: ctest --test-dir build -C ${{ matrix.build_type }} -L fast --parallel 4 --output-on-failure --no-tests=error
-      - name: Capture CTest dependency graph
-        shell: bash
-        run: ctest --test-dir build --show-only=json-v1 > build/ctest-graph.json
+        run: >-
+          ctest --test-dir build -C ${{ matrix.build_type }} -L fast ${{ env.WEBFRONT_CONFIGURATION != 'true' && '-LE configuration' || '' }}
+          --parallel 4 --output-on-failure --no-tests=error --output-junit "$PWD/build/fast-results.xml"
       - name: Test C++ and native browser integration
+        id: desktop_suite
+        # The fast tier has just run: a single pass does not run it again; the three passes of the complete tier do.
         # Only Linux trusted fixtures need the sandbox opt-out on hosted runners.
         env: ${{ matrix.test_env }}
         run: >-
-          python3 test/tools/MeasureCommand.py --output build/suite-resources.json --
           cmake -DBUILD_DIR=build -DCONFIG=${{ matrix.build_type }}
-          -DREPEAT=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && '3' || '1' }}
-          -DLABEL_EXCLUDE=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && 'none' || 'portability' }}
+          -DREPEAT=${{ (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests) && inputs.desktop_passes || ((github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master')) && '3' || '1') }}
+          '-DLABEL_EXCLUDE=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && 'none' || (env.WEBFRONT_CONFIGURATION == 'true' && '^(portability|fast)$' || '^(portability|fast|configuration)$') }}'
           -P test/cmake/RunTestSuite.cmake
-      - name: Repeat WebKitGTK pointer tests with suite display sharing enabled
-        if: runner.os == 'Linux'
-        env: ${{ matrix.test_env }}
-        # These tests must still get private displays when invoked from the shared-display suite runner.
-        run: >-
-          xvfb-run -a env WEBFRONT_TEST_SHARED_DISPLAY=1
-          ctest --test-dir build --output-on-failure --no-tests=error
-          -R '^WebKitGTKAdapter-(choose-file|cancel-choose|close-with-dialog)$' --repeat until-fail:5
-      - name: Analyze CTest timings
-        if: always()
-        shell: bash
-        run: python3 test/tools/ProfileTests.py build/ctest-graph.json build/test-results-*.xml --workers 4 --log build/Testing/Temporary/LastTest.log --ninja-log build/.ninja_log --output build/test-profile.txt
-      - name: Probe compiler cache on the embedded builds
-        # Diagnostic (#388): do the Life embedded translation units hit the compiler cache once the suite has warmed it?
-        if: ${{ !cancelled() }}
-        continue-on-error: true
-        shell: bash
-        run: |
-          {
-            echo "Before the probe (whole run):"
-            sccache --show-stats | grep -E '^(Compile requests|Cache hits|Cache misses) '
-            for target in life_embedded life_journey; do
-              sccache --zero-stats > /dev/null
-              start=$(date +%s)
-              cmake --build build --config ${{ matrix.build_type }} --target "$target" --clean-first > "build/probe-$target.log" 2>&1 || tail -n 20 "build/probe-$target.log"
-              echo "$target clean rebuild: $(( $(date +%s) - start )) s"
-              sccache --show-stats | grep -E '^(Compile requests|Cache hits|Cache misses) '
-            done
-            # The consumer project of AddSubdirectoryConsumer: its single translation unit against the warm cache.
-            sccache --zero-stats > /dev/null
-            start=$(date +%s)
-            cmake --build build/test/unit/consumer-build --config ${{ matrix.build_type }} --clean-first > build/probe-consumer.log 2>&1 || tail -n 20 build/probe-consumer.log
-            echo "consumer clean rebuild: $(( $(date +%s) - start )) s"
-            sccache --show-stats | grep -E '^(Compile requests|Cache hits|Cache misses) '
-          } 2>&1 | tee build/embedded-cache-probe.txt
+      # Nothing consumes the capture of a pull request, which only lists it in its log: it runs on a push to develop or master
+      # and in the full tier. The pull request still builds and runs the instrumented tests.
       - name: Collect coverage
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && (github.event_name == 'push' || env.FULL_TIER == 'true')
         shell: bash
         working-directory: build
-        env:
-          BENCHMARK_COVERAGE: ${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests }}
         run: |
           set -euo pipefail
           # lcov 2 on Ubuntu 26.04 rejects the benign line/function hit inconsistencies GCC emits for templates.
-          if [[ "$BENCHMARK_COVERAGE" == true ]]; then
-            /usr/bin/time -v -o coverage-pp-capture.txt lcov --rc lcov_json_module=JSON::PP --ignore-errors inconsistent,inconsistent --gcov-tool gcov-16 --capture --directory . --output-file coverage-pp.info
-          fi
-          perl -MJSON::XS -e 'print "Fast JSON backend JSON::XS $JSON::XS::VERSION\n"'
-          /usr/bin/time -v -o coverage-capture.txt lcov --verbose --rc lcov_json_module=JSON::XS --ignore-errors inconsistent,inconsistent --gcov-tool gcov-16 --capture --directory . --output-file coverage.info 2>&1 | tee coverage-capture.log
-          grep -F 'Using JSON module JSON::XS' coverage-capture.log
-          if [[ "$BENCHMARK_COVERAGE" == true ]]; then
-            python3 ../test/tools/CompareCoverage.py coverage-pp.info coverage.info
-          fi
-          /usr/bin/time -v -o coverage-filter.txt lcov --ignore-errors inconsistent,inconsistent --remove coverage.info '/usr/*' '*/examples/*' --output-file coverage.info
-          /usr/bin/time -v -o coverage-list.txt lcov --list coverage.info
+          lcov --rc lcov_json_module=JSON::XS --ignore-errors inconsistent,inconsistent --gcov-tool gcov-16 --capture --directory . --output-file coverage.info
+          lcov --ignore-errors inconsistent,inconsistent --remove coverage.info '/usr/*' '*/examples/*' --output-file coverage.info
+          lcov --list coverage.info
       - name: Collect macOS browser crash diagnostics
         if: failure() && runner.os == 'macOS'
         timeout-minutes: 1
@@ -277,13 +301,9 @@ jobs:
           name: test-log-${{ runner.os }}
           path: |
             build/test-results-*.xml
-            build/ctest-graph.json
-            build/embedded-cache-probe.txt
+            build/fast-results.xml
+            build/unit-results-*.xml
             build/test/unit/consumer-build/.ninja_log
-            build/test-profile*
-            build/*-resources.json
-            build/coverage-*.txt
-            build/coverage-capture.log
             build/Testing/Temporary/LastTest*.log
             build/diagnostics/
           if-no-files-found: ignore
@@ -292,7 +312,8 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.repeat_desktop_tests
     permissions:
       contents: read
-    timeout-minutes: 25
+    # The explicit qualification includes a cold analysis build and desktop_passes complete graphs.
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && (inputs.desktop_passes > 3 && 300 || 90) || 25 }}
     strategy:
       fail-fast: false
       matrix:
@@ -352,13 +373,204 @@ jobs:
           sudo apt-get install -y clang-23 lld-23
           echo "CC=clang-23" >> "$GITHUB_ENV"
           echo "CXX=clang++-23" >> "$GITHUB_ENV"
+      - name: Report the selected compiler
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then cl 2>&1 || true; else "${CXX:-c++}" --version; fi
       # No compiler cache: a new user compiles everything.
       - name: Configure
         shell: bash
-        run: cmake -S . -B build -G "${{ matrix.generator }}" -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_ENABLE_TESTING=ON -DENABLE_CACHE=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+        run: cmake -S . -B build -G "${{ matrix.generator }}" -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_ENABLE_TESTING=ON -DENABLE_CACHE=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DWEBFRONT_TEST_UNITY_BATCH=0 -DWEBFRONT_MSVC_ANALYZE=ON -DWEBFRONT_TEST_REPRODUCIBILITY=ON
       - name: Portability tests
         shell: bash
         run: ctest --test-dir build -C Release -L portability --output-on-failure --no-tests=error
+
+  # GCC 13 on Linux aarch64 (#548): the default compiler of Ubuntu 24.04, JetPack 7.2 and Yocto Scarthgap, on the architecture of
+  # the Jetson boards. It builds the library, the examples and every test with the hosted ubuntu-24.04-arm image, then runs the fast
+  # tier. Warnings are not errors here: libstdc++ 13 reports false -Wnull-dereference positives (#526), so -Werror stays with the
+  # reference compiler (#525). A browser frontend needs a display and CEF has no aarch64 job yet, so both are off.
+  gcc13-arm64:
+    if: github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && (inputs.repeat_desktop_tests || inputs.gcc13_arm64))
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    env:
+      CC: gcc-13
+      CXX: g++-13
+      ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/remove-node
+      - uses: ./.github/actions/setup-cmake
+        with:
+          version: '4.4.4'
+      - uses: actions/cache@v4
+        with:
+          path: .cache/CPM
+          key: cpm-extended-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
+          restore-keys: cpm-extended-${{ runner.os }}-${{ runner.arch }}-
+      - name: Install GCC 13
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-13 ninja-build
+      # An image change must not move the compiler silently: fail unless this really is GCC 13 on aarch64.
+      - name: Verify the compiler
+        run: |
+          g++-13 --version
+          test "$(uname -m)" = aarch64
+          case "$(g++-13 -dumpfullversion)" in 13.*) ;; *) echo "::error::Expected GCC 13, got $(g++-13 -dumpfullversion)"; exit 1 ;; esac
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=OFF -DWEBFRONT_ENABLE_TESTING=ON
+          -DWARNINGS_AS_ERRORS=OFF -DENABLE_CACHE=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+      - name: Build
+        run: cmake --build build --parallel 4
+      - name: Fast tests
+        run: ctest --test-dir build -L fast --output-on-failure --no-tests=error --parallel 4
+      # Exercise coroutine lifetimes with the oldest supported compiler as well (#525).
+      - name: Configure GCC 13 ASan and UBSan
+        env:
+          WEBFRONT_TEST_TIMEOUT_FACTOR: '2'
+        run: >-
+          cmake -S . -B build-sanitizers -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=OFF -DWEBFRONT_ENABLE_TESTING=ON
+          -DWEBFRONT_BUILD_EXAMPLES=OFF -DWARNINGS_AS_ERRORS=OFF -DENABLE_CACHE=OFF
+          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+          -DWEBFRONT_ENABLE_SANITIZER_ADDRESS=ON -DWEBFRONT_ENABLE_SANITIZER_UNDEFINED_BEHAVIOR=ON
+      - name: Build GCC 13 sanitizer tests
+        run: cmake --build build-sanitizers --parallel 2
+      - name: GCC 13 sanitizer fast tests
+        run: ctest --test-dir build-sanitizers -L fast --output-on-failure --no-tests=error --parallel 4
+      - name: Retain GCC 13 test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log-gcc13-arm64
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build-sanitizers/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+
+  # CEF on Linux aarch64 (#524): the pinned CEF picks its linuxarm64 archive from the target, so the browser integration suite runs
+  # natively on the hosted arm runner with GCC 13 and Xvfb, once a week (on demand with cef_arm64), not on every pull request.
+  # A Jetson Orin Nano qualification passed the same cases as x86-64; this job guards against drift.
+  cef-arm64:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.cef_arm64)
+    timeout-minutes: 60
+    runs-on: ubuntu-24.04-arm
+    env:
+      CC: gcc-13
+      CXX: g++-13
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v4
+        with:
+          path: .cache/CPM
+          key: cpm-extended-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
+          restore-keys: cpm-extended-${{ runner.os }}-${{ runner.arch }}-
+      - uses: actions/cache@v4
+        with:
+          path: |
+            build-cef/bootstrap
+            build-cef/registry-archives
+          key: inputs-web-integration-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/WebFrontBootstrap.cmake', 'test/web/registry-packages.json') }}
+      - uses: ./.github/actions/remove-node
+      - uses: ./.github/actions/setup-cmake
+        with:
+          version: '4.4.4'
+      - name: Install GCC 13 and Xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-13 ninja-build xvfb
+      - name: Verify the compiler
+        run: |
+          test "$(uname -m)" = aarch64
+          case "$(g++-13 -dumpfullversion)" in 13.*) ;; *) echo "::error::Expected GCC 13, got $(g++-13 -dumpfullversion)"; exit 1 ;; esac
+      - name: Configure CEF integration build
+        run: >-
+          cmake -S . -B build-cef -G Ninja -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DWEBFRONT_BUILD_EXAMPLES=OFF
+          -DWEBFRONT_ENABLE_TESTING=ON -DWARNINGS_AS_ERRORS=OFF -DENABLE_CACHE=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+      # The suite must not pass against an x86-64 archive by accident.
+      - name: Verify the CEF architecture
+        run: |
+          lib="$(find build-cef/_deps/cef_binaries-src -name libcef.so -print -quit)"
+          test -n "$lib"
+          file "$lib" | grep -q aarch64 || { echo "::error::CEF is not linuxarm64: $(file "$lib")"; exit 1; }
+      - name: Build browser test
+        run: cmake --build build-cef --target webtest developer_integration webfront-wf --parallel 4
+      - name: Run Jasmine bridge test
+        run: >-
+          ctest --test-dir build-cef -L web-integration --output-on-failure --no-tests=error --parallel 2
+          --output-junit "${{ github.workspace }}/build-cef/test-results.xml"
+      - name: Retain test timings and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log-cef-arm64
+          path: |
+            build-cef/test-results.xml
+            build-cef/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+
+  # WebKitGTK 6.0 on Linux aarch64 (#524): the system WebKitGTK of Ubuntu 24.04 with GCC 13 and Xvfb, running the same
+  # web-integration suite as the CEF job through the WebKitGTK frontend. Weekly and on demand with webkitgtk_arm64, not on
+  # pull requests, like the CEF job; the sandbox opt-out is confined to this test step and its trusted fixtures.
+  webkitgtk-arm64:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.webkitgtk_arm64)
+    timeout-minutes: 60
+    runs-on: ubuntu-24.04-arm
+    env:
+      CC: gcc-13
+      CXX: g++-13
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v4
+        with:
+          path: .cache/CPM
+          key: cpm-extended-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
+          restore-keys: cpm-extended-${{ runner.os }}-${{ runner.arch }}-
+      - uses: actions/cache@v4
+        with:
+          path: |
+            build-webkitgtk/bootstrap
+            build-webkitgtk/registry-archives
+          key: inputs-webkitgtk-arm64-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/WebFrontBootstrap.cmake', 'test/web/registry-packages.json') }}
+      - uses: ./.github/actions/remove-node
+      - uses: ./.github/actions/setup-cmake
+        with:
+          version: '4.4.4'
+      - name: Install GCC 13, WebKitGTK and Xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-13 ninja-build xvfb libwebkitgtk-6.0-dev
+      - name: Verify the compiler
+        run: |
+          test "$(uname -m)" = aarch64
+          case "$(g++-13 -dumpfullversion)" in 13.*) ;; *) echo "::error::Expected GCC 13, got $(g++-13 -dumpfullversion)"; exit 1 ;; esac
+          pkg-config --modversion webkitgtk-6.0
+      - name: Configure WebKitGTK integration build
+        run: >-
+          cmake -S . -B build-webkitgtk -G Ninja -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=ON
+          -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK -DWEBFRONT_BUILD_EXAMPLES=OFF -DWEBFRONT_ENABLE_TESTING=ON
+          -DWARNINGS_AS_ERRORS=OFF -DENABLE_CACHE=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+      - name: Build browser test
+        run: cmake --build build-webkitgtk --target webtest developer_integration webfront-wf --parallel 4
+      - name: Run Jasmine bridge test
+        env:
+          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'
+        run: >-
+          ctest --test-dir build-webkitgtk -L web-integration --output-on-failure --no-tests=error --parallel 2
+          --output-junit "${{ github.workspace }}/build-webkitgtk/test-results.xml"
+      - name: Retain test timings and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log-webkitgtk-arm64
+          path: |
+            build-webkitgtk/test-results.xml
+            build-webkitgtk/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
 
   sanitizers:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'master')
@@ -409,6 +621,7 @@ jobs:
           cmake -S . -B build-sanitizers -DCMAKE_BUILD_TYPE=RelWithDebInfo
           -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF -DWEBFRONT_ENABLE_TESTING=ON -DENABLE_CACHE=OFF
           -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+          -DWEBFRONT_TEST_UNITY_BATCH=0 -DWEBFRONT_TEST_REPRODUCIBILITY=ON
           ${{ matrix.sanitizer == 'thread' && '-DCMAKE_CXX_FLAGS=-stdlib=libc++ -DWEBFRONT_ENABLE_SANITIZER_THREAD=ON' || '-DWEBFRONT_ENABLE_SANITIZER_ADDRESS=ON -DWEBFRONT_ENABLE_SANITIZER_UNDEFINED_BEHAVIOR=ON -DWEBFRONT_ENABLE_FUZZING=ON -DWEBFRONT_GZIP_DIFFERENTIAL=ON' }}
       - name: Build
         run: cmake --build build-sanitizers --parallel 2
@@ -491,7 +704,7 @@ jobs:
 
       # The registry packages and the pinned bootstrap environment are downloaded and verified here; wf then builds the rest.
       - name: Configure CEF integration build
-        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DWEBFRONT_BUILD_EXAMPLES=OFF -DWEBFRONT_ENABLE_TESTING=ON -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DWEBFRONT_BUILD_EXAMPLES=OFF -DWEBFRONT_ENABLE_TESTING=ON -DWEBFRONT_TEST_REPRODUCIBILITY=ON -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
 
       - name: Build browser test
         run: cmake --build ${{github.workspace}}/build-cef --target webtest developer_integration webfront-wf --parallel 2

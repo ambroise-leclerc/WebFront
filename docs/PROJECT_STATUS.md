@@ -3,6 +3,16 @@
 Release history belongs in the [changelog](CHANGELOG.md)
 and Git; architecture decisions and their evidence are indexed in [the ADRs](adr/README.md).
 
+## Compiler support
+
+GCC 13 is the minimum for the library and examples, with best-effort S2 support: the
+weekly and `master` PR ARM64 job builds everything without `-Werror`, runs the fast tier,
+and repeats that tier under ASan/UBSan. Browser frontends are disabled in this job.
+GCC 16 remains the reference compiler. Clang 23 is qualified in the extended jobs;
+no older upstream Clang minimum is qualified. AppleClang and MSVC follow the native CI images.
+Optional C++26 reflection and mddlog retain their separate compiler requirements.
+The [support ADR](adr/ADR-022-profils-et-niveaux-de-support.md) defines the GCC 14 exit clause.
+
 ## Supported paths
 
 WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer environment.
@@ -13,17 +23,24 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   engine when its dependencies are available (outside test/fuzzing builds).
   `webfront_use_native_window(target)` provides target setup and a definition for selecting
   the native adapter with a browser fallback; see the [consumer example](../README.md#use-webfront-in-your-project)
-  and [frontends](FRONTENDS.md).
+  and [frontends](FRONTENDS.md). An application that keeps its own loop uses `app.start()` with the
+  system browser, `app.requestClose()` from another thread, or `webfront::UIThread` where the frontend
+  accepts a secondary thread (WebView2); a host loop cannot share the main thread with an embedded
+  window. See [host integration](HOST_INTEGRATION.md).
 - **Developer environment.** `NativeApp::bootstrap("developer")` loads the verified, pinned
   environment selected by `DeveloperReleaseData.hpp`. Its terminal provides `wf init`, `create`,
-  `install`, `restore`, `run`, `exec`, `check`, `test`, `build`, `dev`, `preview`, `embed`, `list` and `help`. The manifest and lock describe
+  `install`, `restore`, `run`, `exec`, `check`, `test`, `build`, `dev`, `preview`, `embed`, `list`, `why`, `info` and `help`, beside the terminal's own read-only `ls`, `cat`, `tree` and `mounts` (ADR-023). The manifest and lock describe
   dependencies, entries, providers, scripts and permissions. TypeScript/TSX compilation uses
   esbuild-wasm; type checking uses the project's locked TypeScript. Application commands use
-  `webfront::Commands`. See the [developer reference](DEVELOPER_ENVIRONMENT.md).
+  `webfront::Commands`. From environment 0.9.1, a project that has a preview opens
+  on its interface over the whole window, with the terminal in a floating window behind a tab on the window's edge. See the
+  [developer reference](DEVELOPER_ENVIRONMENT.md).
 - **Distribution.** `wf embed` generates the application's compressed C++ provider.
   `NativeAppWithAssets<Provider>` runs without project files, developer callbacks or tool cache.
   Native-engine deployment remains application work. The [README walkthrough](../README.md)
-  covers the console, developer and embedded Game of Life stages; Hello World is the other public example.
+  covers the console, developer and embedded Game of Life stages; Hello World and the host loop
+  (`examples/host-loop/`, a Boing Ball ray-traced by the host on the CPU or with optional CUDA; see
+  [the host-loop example](HOST_LOOP_EXAMPLE.md) for its measurements and limits) are the other public examples.
 - **Developer automation (opt-in).** `webfront-agent` provides local stdio MCP and a JSON CLI
   for an explicitly launched developer window. Native grants select check/build/test/preview,
   bounded inspection and semantic actions. [Automation](AUTOMATION.md) documents provisioning,
@@ -32,7 +49,7 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   native attachment. This does not discover arbitrary processes or isolate untrusted project code.
   An application opts in to being driven with `automation::enableAutomation` (its own window and callbacks), shared sessions are
   listed by `webfront-agent --list`, and `--print-mcp-config` generates the client configuration. The owner may allow-list application callbacks that an agent reaches through the `call` operation, and the terminal, `wf help` and
-  the starter's `AGENTS.md` announce automation (environment 0.6.6). Environment 0.6.6 is published and pinned.
+  the starter's `AGENTS.md` announce automation (environment 0.6.6). Environment 0.6.6 is published; the release pin selects 0.9.2. First-contact guidance for agents (README section, `docs/DEVELOPING_WITH_AGENTS.md`, `webfront_write_agent_guide()`, configuration and startup notices) comes with the library; the `app` starter, `wf help agents` and the errors that give the next steps come with environment 0.9.2 (#561).
 - **Maintaining WebFront.** The repository is itself a `wf` project, selected with
   `--manifest-dir js/developer`. Build and publish its environment using
   [PUBLISHING](../js/developer/tools/PUBLISHING.md). Regenerate the core's versioned headers
@@ -54,16 +71,58 @@ specs run programs the test's owner authorizes (`PROGRAMS`), with private tempor
 Linux only (the runner's unit tests also run on Windows and macOS).
 
 The CEF-off build and complete CTest commands are in [AGENTS.md](../AGENTS.md).
-The suite includes deterministic Catch2 regressions, CMake consumer/configuration checks,
+The suite includes deterministic C++ unit-test regressions, CMake consumer/configuration checks,
 asset freshness checks and, with an enabled engine, real-browser Jasmine and lifecycle tests.
 `Journey*` builds a UI with the rebuilt environment and local registry, then compiles and runs
 its generated provider from an empty directory. Configured tests need no public network.
 
-[Tiers](TEST_TIERS.md) defines the desktop and extended CI scope.
-[Test execution and profiling](TEST_PERFORMANCE.md) documents session isolation, fixture locks,
-resource limits and complete-suite repetition. Sessions retain individual CTest assertions;
-independent driver processes use OS-assigned loopback ports. Manual transport measurements
+The [Jetson hardware runner](JETSON_RUNNER.md) adds trusted weekly and maintainer-dispatched
+CEF-off, CUDA and WebKitGTK validation on the board (#529). It is S2 evidence and never
+blocks a PR or merge when the workstation is unavailable. Three consecutive green weekly
+runs and observed workstation usability remain acceptance criteria, not a claim made by
+adding the workflow.
+
+[Tiers](TEST_TIERS.md) defines the desktop and extended CI scope, including the GCC 13 Linux aarch64 job (#548) and its weekly CEF and WebKitGTK browser jobs (#524).
+The [Jetson Orin qualification](JETSON.md) records the separate on-board work (#528):
+the JetPack 7 upgrade identifies L4T R39.2.1, Ubuntu 24.04 and GCC 13.3 on an Orin
+Nano Super 8 GB. The [final desktop record](validation/jetson-528/README.md)
+qualifies X11 Canvas/WebGL presentation on native NVIDIA EGL contexts, the real
+GNOME file chooser and parent export, and fullscreen Life React with its C++
+panel updating after a click. No DMA-BUF opt-out was needed. A Wayland graphics
+client passed under Weston 13 nested on X11; its missing portal-parent export
+is retained as a negative result. Native GNOME Wayland is disabled in GDM and
+was not qualified. NX/AGX physical behavior, a locked-down kiosk and fresh-flash
+acceptance are not inferred from this existing-workstation qualification.
+Ubuntu 24.04's AppArmor user-namespace policy
+refuses WebKit's bubblewrap sandbox on that installation (`bwrap` cannot write the
+UID map). Development builds explicitly disable the WebKit sandbox by default,
+so native windows and Jasmine run without a system change. Distribution builds
+select `WEBFRONT_DISTRIBUTION=ON` (or `webfront_use_distribution(target)`) and
+require the sandbox; `webfront_generate_webkitgtk_profile` prepares the application's
+per-executable authorization for normal package installation. Neither the library
+nor its CMake helpers load policy on the development machine. See
+[WebKitGTK](WEBKITGTK.md#development-and-distribution). JetPack 6 remains a
+historical S3 path; the on-board X11 S2 profile names the measured L4T stack
+rather than inferring a JetPack package set from an absent metapackage.
+This does not erase the earlier JetPack 6 WebKitGTK qualification recorded in
+[draft PR #558](https://github.com/ambroise-leclerc/WebFront/pull/558): 28/28
+adapter/lifecycle cases and 7/7 Jasmine/fixture cases passed under Xvfb. That PR
+is not merged; its file-reader fix is carried by #596. The JetPack 7 pass uses a
+different OS, kernel, engine and security policy; the launch failure came from
+that policy, not from a WebFront regression.
+[Test execution and profiling](TEST_PERFORMANCE.md) documents fixture locks, complete-suite repetition, the intermittent
+failures of the last runs and why shared browser sessions were retired (#570); each wf command is a driver process
+on an OS-assigned loopback port. Manual transport measurements
 remain separate from the short native transport contract tests.
+
+The [#542 investigation](validation/ci-flakes-542.md) reproduces and fixes Windows developer publication held open by
+an HTTP reader and concurrent fallback logger delivery. Its qualification passes 20 selected browser graphs on each
+native engine and 1,000 repetitions of each Linux closure case. The historical Linux internal stall was not reproduced;
+the report distinguishes that evidence from proven causes. The Windows early-close COM failure
+([#564](https://github.com/ambroise-leclerc/WebFront/issues/564)) is reproduced and attributed to the runtime
+([measurements](TEST_PERFORMANCE.md#the-webview2-early-close-failure-564)); its limit is listed below.
+The [diagnostic workflow](TEST_PERFORMANCE.md#investigating-intermittent-failures) preserves failed attempts and HTTP
+transcripts without automatic retries.
 
 [Local-model qualification](validation/automation-models-2026-10-29.md) records five installed
 models driving the real MCP window through an external LM Studio measurement adapter. It distinguishes
@@ -107,12 +166,17 @@ are retained for investigation; diagnostics alone do not establish a correction.
   refused there. A `shared` root lifts the POSIX ownership checks. No service uses the storage yet
   (ADR-020). See [ADR-002](adr/ADR-002-systemes-de-fichiers-composables.md).
 - A synchronous infinite loop in a spec blocks the page hosting `wf test`; the native test
-  driver's watchdog terminates stalled runs with failure. Windows file reads beyond 260
+  driver closes its window natively when its time limit elapses and reports the timeout. Windows file reads beyond 260
   characters remain unsupported (#349).
-- Native windows require their platform event loop and the main thread. Hidden WKWebView tests
+- Native windows require their platform event loop; WKWebView, WebKitGTK and CEF also require the main thread, while
+  WebView2 runs on any thread that is not already MTA (`webfront::UIThread`). Hidden WKWebView tests
   require macOS 14+ and a WindowServer session. Automated CEF coverage is Linux/Xvfb;
   Windows/macOS CEF deployment is not qualified. WebView2 needs its installed Evergreen runtime;
   fixed-version runtime packaging, application installers and accessibility remain application work.
+- `WebView2Frontend::open()` releases the STA it initialized. When a window is closed while the runtime is still
+  starting and the same thread then opens another one, the WebView2 runtime (observed with 157.0.4341.46) can keep one
+  COM initialization of its own: the thread then remains in its STA after `open()` returns (#564). A window that ran to
+  its end leaves none.
 - The low-level DOM batch command and optional embedded interpreter are implemented; see
   [the wire contract](adr/ADR-003-protocole-binaire-et-bornes.md#commande-dom-dombatch-code-5-version-1).
   The per-connection document/node API, events (callbacks or `co_await node.next(name)`) and grouped

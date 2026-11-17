@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
 /// @brief C++ callbacks that answer a JavaScript call later: their result, failures, stop, disconnection and shutdown (#459).
 #include "InjectableNetworking.hpp"
-#include <catch2/catch_test_macros.hpp>
+#include "Bdd.hpp"
 #include <webfront/WebFront.hpp>
 #include <webfront/networking/TCPNetworkingStdnet.hpp>
 #include <webfront/system/DefaultFS.hpp>
@@ -12,6 +12,8 @@
 #include <span>
 #include <string>
 #include <vector>
+
+using namespace webfront::bdd;
 
 using namespace webfront;
 using Socket = testing::InjectableSocket;
@@ -134,84 +136,84 @@ struct DeferredBrowser {
 
 }  // namespace
 
-SCENARIO("A callback that returns a task answers when the task completes", "[deferred]") {
+const Scenario callbackReturns{"A callback that returns a task answers when the task completes", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.app.cppFunction("echoLater", &echoLater);
     browser.connect();
 
-    WHEN("the browser calls it") {
+    when("the browser calls it", [&] {
         browser.call("echoLater", 5, "x");
-        THEN("nothing is answered while the task is suspended") {
-            REQUIRE(deferredGates.open.size() == 1);
-            REQUIRE_FALSE(Socket::wrote("answered:x"));
-        }
-        AND_WHEN("the task completes") {
+        then("nothing is answered while the task is suspended", [&] {
+            require(deferredGates.open.size() == 1);
+            require(!Socket::wrote("answered:x"));
+        });
+        andWhen("the task completes", [&] {
             deferredGates.release(0);
-            THEN("its value is sent as the result of the call") {
-                REQUIRE(Socket::wrote("answered:x"));
-            }
-        }
-    }
-    WHEN("the call asks for no answer") {
+            then("its value is sent as the result of the call", [&] {
+                require(Socket::wrote("answered:x"));
+            });
+        });
+    });
+    when("the call asks for no answer", [&] {
         browser.call("echoLater", 0, "x");
         deferredGates.release(0);
-        THEN("nothing is sent") {
-            REQUIRE_FALSE(Socket::wrote("answered:x"));
-        }
-    }
-}
+        then("nothing is sent", [&] {
+            require(!Socket::wrote("answered:x"));
+        });
+    });
+}};
 
-SCENARIO("A deferred callback that fails rejects the call with its code", "[deferred]") {
+const Scenario deferredCallback{"A deferred callback that fails rejects the call with its code", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.app.cppFunction("failLater", &failLater);
     browser.connect();
     browser.call("failLater", 9, "x");
     deferredGates.release(0);
-    THEN("the code and the message are sent") {
-        REQUIRE(Socket::wrote("quota:exceeded"));
-        REQUIRE(Socket::wrote("the disk is full"));
-    }
-}
+    then("the code and the message are sent", [&] {
+        require(Socket::wrote("quota:exceeded"));
+        require(Socket::wrote("the disk is full"));
+    });
+}};
 
-SCENARIO("A deferred callback that throws before returning its task rejects the call at once", "[deferred]") {
+const Scenario deferredCallbackThrows{"A deferred callback that throws before returning its task rejects the call at once", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.app.cppFunction<ResultTask<std::string>, std::string>("throwsNow", [](const std::string&) -> ResultTask<std::string> {
         throw BridgeError("early", "refused before it started");
     });
     browser.connect();
     browser.call("throwsNow", 4, "x");
-    THEN("the rejection is sent without waiting") {
-        REQUIRE(Socket::wrote("early"));
-        REQUIRE(Socket::wrote("refused before it started"));
-    }
-}
+    then("the rejection is sent without waiting", [&] {
+        require(Socket::wrote("early"));
+        require(Socket::wrote("refused before it started"));
+    });
+}};
 
-SCENARIO("A deferred callback whose operation is stopped rejects the call as cancelled", "[deferred]") {
+const Scenario deferredCallbackWhose{"A deferred callback whose operation is stopped rejects the call as cancelled", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.app.cppFunction("echoLater", &echoLater);
     browser.connect();
     browser.call("echoLater", 3, "x");
     deferredGates.stopOne(0);
-    THEN("the cancellation code is sent") {
-        REQUIRE(Socket::wrote(std::string(bridge_code::cancelled)));
-    }
-}
+    then("the cancellation code is sent", [&] {
+        require(Socket::wrote(std::string(bridge_code::cancelled)));
+    });
+}};
 
-SCENARIO("A callback may be a task without result", "[deferred]") {
+const Scenario callbackMay{"A callback may be a task without result", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.app.cppFunction("voidLater", &voidLater);
     browser.connect();
     Socket::discardWrites();
     const auto before = Socket::discardedBytes();
     browser.call("voidLater", 2);
-    REQUIRE(Socket::discardedBytes() == before);
+    require(Socket::discardedBytes() == before);
     deferredGates.release(0);
-    THEN("a return without value is sent") {
-        REQUIRE(Socket::discardedBytes() > before);
-    }
-}
+    then("a return without value is sent", [&] {
+        require(Socket::discardedBytes() > before);
+    });
+}};
 
-SCENARIO("A callback taking the caller can answer later", "[deferred]") {
+const Scenario callbackTaking{"A callback taking the caller can answer later", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.app.cppFunction<ResultTask<std::string>, DeferredApp::UI, std::string>("withCaller", [](DeferredApp::UI, const std::string& value) -> ResultTask<std::string> {
         return echoLater(value);
@@ -219,32 +221,32 @@ SCENARIO("A callback taking the caller can answer later", "[deferred]") {
     browser.connect();
     browser.call("withCaller", 6, "who");
     deferredGates.release(0);
-    THEN("the browser receives the value") {
-        REQUIRE(Socket::wrote("answered:who"));
-    }
-}
+    then("the browser receives the value", [&] {
+        require(Socket::wrote("answered:who"));
+    });
+}};
 
-SCENARIO("Several deferred calls of one connection are answered independently", "[deferred]") {
+const Scenario severalDeferred{"Several deferred calls of one connection are answered independently", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.app.cppFunction("echoLater", &echoLater);
     browser.connect();
     browser.call("echoLater", 1, "first");
     browser.call("echoLater", 2, "second");
     browser.call("echoLater", 3, "third");
-    REQUIRE(deferredGates.open.size() == 3);
+    require(deferredGates.open.size() == 3);
     deferredGates.release(2);
     deferredGates.release(0);
-    THEN("each is answered when it completes, whatever the order") {
-        REQUIRE(Socket::wrote("answered:third"));
-        REQUIRE(Socket::wrote("answered:first"));
-        REQUIRE_FALSE(Socket::wrote("answered:second"));
+    then("each is answered when it completes, whatever the order", [&] {
+        require(Socket::wrote("answered:third"));
+        require(Socket::wrote("answered:first"));
+        require(!Socket::wrote("answered:second"));
         deferredGates.release(1);
-        REQUIRE(Socket::wrote("answered:second"));
-        REQUIRE(Socket::writtenAt("answered:third") < Socket::writtenAt("answered:first"));
-    }
-}
+        require(Socket::wrote("answered:second"));
+        require(Socket::writtenAt("answered:third") < Socket::writtenAt("answered:first"));
+    });
+}};
 
-SCENARIO("A call that reuses the identifier of a running call is dropped without any answer", "[deferred]") {
+const Scenario callReuses{"A call that reuses the identifier of a running call is dropped without any answer", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.app.cppFunction("echoLater", &echoLater);
     browser.app.cppFunction<std::string>("plain", [] { return std::string("plain-result"); });
@@ -253,27 +255,27 @@ SCENARIO("A call that reuses the identifier of a running call is dropped without
     browser.call("echoLater", 7, "again");
     browser.call("plain", 7);
     browser.call("noSuchFunction", 7);
-    THEN("no callback runs and nothing is sent for the duplicates, whatever the function") {
-        REQUIRE(deferredGates.open.size() == 1);
-        REQUIRE_FALSE(Socket::wrote("plain-result"));
-        REQUIRE_FALSE(Socket::wrote("already in use"));
-        REQUIRE_FALSE(Socket::wrote("was not found"));
-    }
-    THEN("the first call still completes with its own answer") {
+    then("no callback runs and nothing is sent for the duplicates, whatever the function", [&] {
+        require(deferredGates.open.size() == 1);
+        require(!Socket::wrote("plain-result"));
+        require(!Socket::wrote("already in use"));
+        require(!Socket::wrote("was not found"));
+    });
+    then("the first call still completes with its own answer", [&] {
         deferredGates.release(0);
-        REQUIRE(Socket::wrote("answered:first"));
-        REQUIRE_FALSE(Socket::wrote("answered:again"));
-    }
-    AND_WHEN("it was answered") {
+        require(Socket::wrote("answered:first"));
+        require(!Socket::wrote("answered:again"));
+    });
+    andWhen("it was answered", [&] {
         deferredGates.release(0);
         browser.call("echoLater", 7, "later");
-        THEN("the identifier is free again") {
-            REQUIRE(deferredGates.open.size() == 2);
-        }
-    }
-}
+        then("the identifier is free again", [&] {
+            require(deferredGates.open.size() == 2);
+        });
+    });
+}};
 
-SCENARIO("The disconnection of the browser stops its deferred calls and drops their answers", "[deferred]") {
+const Scenario disconnectionBrowser{"The disconnection of the browser stops its deferred calls and drops their answers", {"deferred"}, [] {
     DeferredBrowser browser;
     std::weak_ptr<int> observed;
     browser.app.cppFunction<ResultTask<std::string>>("watched", [&observed]() -> ResultTask<std::string> {
@@ -281,19 +283,19 @@ SCENARIO("The disconnection of the browser stops its deferred calls and drops th
     });
     browser.connect();
     browser.call("watched", 8);
-    REQUIRE_FALSE(observed.expired());
+    require(!observed.expired());
 
-    WHEN("the connection closes while the call is pending") {
+    when("the connection closes while the call is pending", [&] {
         Socket::fail(std::make_error_code(std::errc::connection_reset));
-        THEN("the work is stopped and destroyed, and no answer is sent") {
-            REQUIRE(observed.expired());
-            REQUIRE_FALSE(Socket::wrote("late"));
-            REQUIRE_FALSE(Socket::wrote(std::string(bridge_code::cancelled)));
-        }
-    }
-}
+        then("the work is stopped and destroyed, and no answer is sent", [&] {
+            require(observed.expired());
+            require(!Socket::wrote("late"));
+            require(!Socket::wrote(std::string(bridge_code::cancelled)));
+        });
+    });
+}};
 
-SCENARIO("Shutting the application down joins its pending deferred calls", "[deferred]") {
+const Scenario shuttingApplication{"Shutting the application down joins its pending deferred calls", {"deferred"}, [] {
     DeferredBrowser browser;
     std::weak_ptr<int> observed;
     browser.app.cppFunction<ResultTask<std::string>>("watched", [&observed]() -> ResultTask<std::string> {
@@ -301,47 +303,47 @@ SCENARIO("Shutting the application down joins its pending deferred calls", "[def
     });
     browser.connect();
     browser.call("watched", 8);
-    REQUIRE_FALSE(observed.expired());
+    require(!observed.expired());
     browser.app.shutdown();
-    THEN("the pending work is gone when shutdown returns") {
-        REQUIRE(observed.expired());
-        REQUIRE_FALSE(Socket::wrote("late"));
-    }
-}
+    then("the pending work is gone when shutdown returns", [&] {
+        require(observed.expired());
+        require(!Socket::wrote("late"));
+    });
+}};
 
-SCENARIO("The identifiers of in-flight calls are claimed once and released on finish", "[deferred]") {
+const Scenario identifiersFlight{"The identifiers of in-flight calls are claimed once and released on finish", {"deferred"}, [] {
     detail::DeferredCalls calls;
     const auto            key = calls.reserve(5);
-    REQUIRE(key != 0);
-    REQUIRE(calls.reserve(5) == 0);
-    REQUIRE(calls.reserve(0) != 0);  // zero asks for no answer: never in flight
-    REQUIRE(calls.reserve(0) != 0);
-    WHEN("the call finishes, as a task the server refused does at once") {
+    require(key != 0);
+    require(calls.reserve(5) == 0);
+    require(calls.reserve(0) != 0);  // zero asks for no answer: never in flight
+    require(calls.reserve(0) != 0);
+    when("the call finishes, as a task the server refused does at once", [&] {
         calls.finish(5, key);
-        THEN("the identifier can be claimed again") {
-            REQUIRE(calls.reserve(5) != 0);
-        }
-    }
-    WHEN("the connection closes") {
+        then("the identifier can be claimed again", [&] {
+            require(calls.reserve(5) != 0);
+        });
+    });
+    when("the connection closes", [&] {
         calls.close();
-        THEN("nothing can be claimed any more") {
-            REQUIRE(calls.reserve(6) == 0);
-        }
-    }
-}
+        then("nothing can be claimed any more", [&] {
+            require(calls.reserve(6) == 0);
+        });
+    });
+}};
 
-SCENARIO("The decoded arguments of a deferred callback live until it completes", "[deferred]") {
+const Scenario decodedArguments{"The decoded arguments of a deferred callback live until it completes", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.app.cppFunction("byReference", &byReferenceLater);
     browser.connect();
     browser.call("byReference", 3, std::string(60, 'r'));  // beyond the small string buffer: a dangling reference would read freed memory
     deferredGates.release(0);
-    THEN("the coroutine still reads its argument") {
-        REQUIRE(Socket::wrote("reference:" + std::string(60, 'r')));
-    }
-}
+    then("the coroutine still reads its argument", [&] {
+        require(Socket::wrote("reference:" + std::string(60, 'r')));
+    });
+}};
 
-SCENARIO("A call refused as a duplicate does not run the callback", "[deferred]") {
+const Scenario callRefused{"A call refused as a duplicate does not run the callback", {"deferred"}, [] {
     DeferredBrowser browser;
     sideEffects = 0;
     browser.app.cppFunction<ResultTask<std::string>, std::string>("counting", [](const std::string& value) -> ResultTask<std::string> {
@@ -351,13 +353,13 @@ SCENARIO("A call refused as a duplicate does not run the callback", "[deferred]"
     browser.connect();
     browser.call("counting", 7, "first");
     browser.call("counting", 7, "again");
-    THEN("the callback ran once and the duplicate was refused") {
-        REQUIRE(sideEffects == 1);
-        REQUIRE_FALSE(Socket::wrote("already in use"));
-    }
-}
+    then("the callback ran once and the duplicate was refused", [&] {
+        require(sideEffects == 1);
+        require(!Socket::wrote("already in use"));
+    });
+}};
 
-SCENARIO("The calling UI of a deferred callback lives until it completes", "[deferred]") {
+const Scenario callingUI{"The calling UI of a deferred callback lives until it completes", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.app.cppFunction<ResultTask<std::string>, const DeferredApp::UI&, std::string>("uiReference", &uiReferenceLater);
     browser.app.cppFunction<ResultTask<std::string>, DeferredApp::UI&, std::string>("uiMutable", &uiMutableLater);
@@ -366,19 +368,19 @@ SCENARIO("The calling UI of a deferred callback lives until it completes", "[def
     browser.call("uiMutable", 2, std::string(60, 'm'));
     deferredGates.release(0);
     deferredGates.release(1);
-    THEN("the coroutines still read the UI they were given") {
-        REQUIRE(Socket::wrote(":" + std::string(60, 'u')));
-        REQUIRE(Socket::wrote(":" + std::string(60, 'm')));
-        REQUIRE(Socket::wrote("mutable"));
-    }
-}
+    then("the coroutines still read the UI they were given", [&] {
+        require(Socket::wrote(":" + std::string(60, 'u')));
+        require(Socket::wrote(":" + std::string(60, 'm')));
+        require(Socket::wrote("mutable"));
+    });
+}};
 
-SCENARIO("A call to an unknown function is rejected with the not-found code of the bridge", "[deferred]") {
+const Scenario callUnknown{"A call to an unknown function is rejected with the not-found code of the bridge", {"deferred"}, [] {
     DeferredBrowser browser;
     browser.connect();
     browser.call("noSuchFunction", 4);
-    THEN("the code reserved to the bridge reaches the browser") {
-        REQUIRE(Socket::wrote(std::string(bridge_code::notFound)));
-        REQUIRE(Socket::wrote("was not found"));
-    }
-}
+    then("the code reserved to the bridge reaches the browser", [&] {
+        require(Socket::wrote(std::string(bridge_code::notFound)));
+        require(Socket::wrote("was not found"));
+    });
+}};

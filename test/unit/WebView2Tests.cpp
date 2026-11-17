@@ -1,8 +1,11 @@
 #include "WebView2ControllerMock.hpp"
 #include "WebView2PolicyMocks.hpp"
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_string.hpp>
+#include "Bdd.hpp"
 #include <webfront/frontend/WebView2.hpp>
+
+#include <thread>
+
+using namespace webfront::bdd;
 
 namespace {
 struct ViewRegistrationBrowser {
@@ -20,7 +23,7 @@ struct ViewRegistrationBrowser {
 };
 }
 
-SCENARIO("WebView2 waits for view association registration before navigation") {
+const Scenario webView2Waits{"WebView2 waits for view association registration before navigation", [] {
     using namespace webfront::frontend::detail::webview2;
     Apartment apartment;
     auto session = std::make_shared<Session>(std::chrono::milliseconds{25});
@@ -28,80 +31,80 @@ SCENARIO("WebView2 waits for view association registration before navigation") {
     session->viewLaunch = {std::string(64, 'a'), "http://127.0.0.1:9002"};
     ViewRegistrationBrowser browser;
     session->installViewAssociationThenNavigate(&browser);
-    REQUIRE(browser.completion);
-    REQUIRE(browser.navigations == 0);
-    REQUIRE(session->startupTimer != 0);
-    WHEN("registration completes successfully") {
-        REQUIRE(browser.completion->Invoke(S_OK, L"script") == S_OK);
-        REQUIRE(browser.navigations == 1);
-        REQUIRE(session->startupTimer == 0);
-        REQUIRE_FALSE(session->failure);
-    }
-    WHEN("registration fails") {
-        REQUIRE(browser.completion->Invoke(E_FAIL, nullptr) == S_OK);
-        REQUIRE(browser.navigations == 0);
-        REQUIRE(session->failure);
-        REQUIRE(session->startupTimer == 0);
-    }
-    WHEN("registration never completes") {
-        REQUIRE_THROWS_WITH(session->run(), Catch::Matchers::ContainsSubstring("25 milliseconds"));
-        REQUIRE(browser.navigations == 0);
-    }
-    WHEN("the window closes before registration completes") {
+    require(browser.completion);
+    require(browser.navigations == 0);
+    require(session->startupTimer != 0);
+    when("registration completes successfully", [&] {
+        require(browser.completion->Invoke(S_OK, L"script") == S_OK);
+        require(browser.navigations == 1);
+        require(session->startupTimer == 0);
+        require(!session->failure);
+    });
+    when("registration fails", [&] {
+        require(browser.completion->Invoke(E_FAIL, nullptr) == S_OK);
+        require(browser.navigations == 0);
+        require(session->failure);
+        require(session->startupTimer == 0);
+    });
+    when("registration never completes", [&] {
+        requireThrows([&] { session->run(); }, contains("25 milliseconds"));
+        require(browser.navigations == 0);
+    });
+    when("the window closes before registration completes", [&] {
         session->close();
-        REQUIRE(browser.completion->Invoke(S_OK, L"script") == S_OK);
-        REQUIRE(browser.navigations == 0);
-    }
-    WHEN("navigation fails after successful registration") {
+        require(browser.completion->Invoke(S_OK, L"script") == S_OK);
+        require(browser.navigations == 0);
+    });
+    when("navigation fails after successful registration", [&] {
         browser.navigationResult = E_FAIL;
-        REQUIRE(browser.completion->Invoke(S_OK, L"script") == S_OK);
-        REQUIRE(session->failure);
-    }
-}
+        require(browser.completion->Invoke(S_OK, L"script") == S_OK);
+        require(session->failure);
+    });
+}};
 
-SCENARIO("WebView2 installs the window close script even without a view association secret") {
+const Scenario webView2Installs{"WebView2 installs the window close script even without a view association secret", [] {
     using namespace webfront::frontend::detail::webview2;
     Apartment apartment;
     auto session = std::make_shared<Session>();
     session->createWindow();
     ViewRegistrationBrowser browser;
     session->installViewAssociationThenNavigate(&browser);
-    REQUIRE(browser.completion);
-    REQUIRE(browser.navigations == 0);
-    REQUIRE(browser.completion->Invoke(S_OK, L"script") == S_OK);
-    REQUIRE(browser.navigations == 1);
-    REQUIRE(session->startupTimer == 0);
-    THEN("the script asks the host to close instead of relying on Chromium's window.close() filter") {
+    require(browser.completion);
+    require(browser.navigations == 0);
+    require(browser.completion->Invoke(S_OK, L"script") == S_OK);
+    require(browser.navigations == 1);
+    require(session->startupTimer == 0);
+    then("the script asks the host to close instead of relying on Chromium's window.close() filter", [&] {
         const auto script = Session::windowCloseScript();
-        REQUIRE_THAT(script, Catch::Matchers::ContainsSubstring("webfront:close-window"));
-        REQUIRE_THAT(script, Catch::Matchers::ContainsSubstring("window.top!==window"));
-        REQUIRE(Session::windowCloseMessage() == L"webfront:close-window");
-    }
-}
+        require(script, contains("webfront:close-window"));
+        require(script, contains("window.top!==window"));
+        require(Session::windowCloseMessage() == L"webfront:close-window");
+    });
+}};
 
-SCENARIO("WebView2 encodes application paths") {
+const Scenario webView2Encodes{"WebView2 encodes application paths", [] {
     using webfront::frontend::detail::webview2::applicationUrl;
-    GIVEN("a UTF-8 filename containing percent-escaped URL delimiters") {
-        THEN("all frontends share URI-reference encoding") {
-            REQUIRE(applicationUrl("9002", "folder/a b%23c%3Fd%25\xc3\xa9.html") == L"http://127.0.0.1:9002/folder/a%20b%23c%3Fd%25%C3%A9.html");
-            REQUIRE(applicationUrl("127.0.0.2", "9002", "index.html?x=1#result") == L"http://127.0.0.2:9002/index.html?x=1#result");
-        }
-    }
-}
+    given("a UTF-8 filename containing percent-escaped URL delimiters", [&] {
+        then("all frontends share URI-reference encoding", [&] {
+            require(applicationUrl("9002", "folder/a b%23c%3Fd%25\xc3\xa9.html") == L"http://127.0.0.1:9002/folder/a%20b%23c%3Fd%25%C3%A9.html");
+            require(applicationUrl("127.0.0.2", "9002", "index.html?x=1#result") == L"http://127.0.0.2:9002/index.html?x=1#result");
+        });
+    });
+}};
 
-SCENARIO("WebView2 runtime startup has a configurable deadline") {
+const Scenario webView2Runtime{"WebView2 runtime startup has a configurable deadline", [] {
     using namespace webfront::frontend::detail::webview2;
     using namespace std::chrono_literals;
-    REQUIRE_NOTHROW(Session{3min});
-    REQUIRE_THROWS_AS(Session{0ms}, std::invalid_argument);
-    REQUIRE_THROWS_AS(Session{-1ms}, std::invalid_argument);
+    requireNothrow([&] { Session{3min}; });
+    requireThrows<std::invalid_argument>([&] { Session{0ms}; });
+    requireThrows<std::invalid_argument>([&] { Session{-1ms}; });
     Apartment apartment;
     auto      session = std::make_shared<Session>(25ms);
     session->createWindow();
-    REQUIRE_THROWS_WITH(session->run(), Catch::Matchers::ContainsSubstring("25 milliseconds"));
-}
+    requireThrows([&] { session->run(); }, contains("25 milliseconds"));
+}};
 
-SCENARIO("WebView2 controller closure is idempotent and preserves errors") {
+const Scenario webView2Controller{"WebView2 controller closure is idempotent and preserves errors", [] {
     using webfront::frontend::detail::webview2::Session;
     auto session            = std::make_shared<Session>();
     auto controller         = Microsoft::WRL::Make<webfront::test::WebView2ControllerMock>();
@@ -112,65 +115,64 @@ SCENARIO("WebView2 controller closure is idempotent and preserves errors") {
     controller->closeResult = E_FAIL;
     session->close();
     session->close();
-    REQUIRE(controller->closeCalls == 1);
-    REQUIRE_FALSE(session->controller);
-    REQUIRE(session->failure);
-    REQUIRE_THROWS_WITH(std::rethrow_exception(session->failure), Catch::Matchers::ContainsSubstring("closing controller"));
-}
+    require(controller->closeCalls == 1);
+    require(!session->controller);
+    require(session->failure);
+    requireThrows([&] { std::rethrow_exception(session->failure); }, contains("closing controller"));
+}};
 
-SCENARIO("WebView2 tolerates a temporarily unresponsive renderer") {
+const Scenario webView2Tolerates{"WebView2 tolerates a temporarily unresponsive renderer", [] {
     using webfront::frontend::detail::webview2::Session;
-    THEN("unresponsive and recoverable auxiliary processes are not fatal") {
-        REQUIRE_NOTHROW(Session::checkProcessFailure(COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE));
-        REQUIRE_NOTHROW(Session::checkProcessFailure(COREWEBVIEW2_PROCESS_FAILED_KIND_GPU_PROCESS_EXITED));
-    }
-    THEN("browser and main renderer exits remain fatal") {
-        REQUIRE_THROWS_AS(Session::checkProcessFailure(COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED), std::runtime_error);
-        REQUIRE_THROWS_AS(Session::checkProcessFailure(COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED), std::runtime_error);
-    }
-}
+    then("unresponsive and recoverable auxiliary processes are not fatal", [&] {
+        requireNothrow([&] { Session::checkProcessFailure(COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE); });
+        requireNothrow([&] { Session::checkProcessFailure(COREWEBVIEW2_PROCESS_FAILED_KIND_GPU_PROCESS_EXITED); });
+    });
+    then("browser and main renderer exits remain fatal", [&] {
+        requireThrows<std::runtime_error>([&] { Session::checkProcessFailure(COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED); });
+        requireThrows<std::runtime_error>([&] { Session::checkProcessFailure(COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED); });
+    });
+}};
 
-SCENARIO("WebView2 errors display the Windows HRESULT in hexadecimal") {
+const Scenario webView2Errors{"WebView2 errors display the Windows HRESULT in hexadecimal", [] {
     using webfront::frontend::detail::webview2::check;
-    THEN("the original HRESULT can be compared directly with Windows diagnostics") {
-        REQUIRE_THROWS_WITH(check(HRESULT_FROM_WIN32(ERROR_BAD_COMPRESSION_BUFFER), "creating environment"),
-                            Catch::Matchers::ContainsSubstring("HRESULT 0x8007025D"));
-        REQUIRE_NOTHROW(check(S_OK, "creating environment"));
-    }
-}
+    then("the original HRESULT can be compared directly with Windows diagnostics", [&] {
+        requireThrows([&] { check(HRESULT_FROM_WIN32(ERROR_BAD_COMPRESSION_BUFFER), "creating environment"); }, contains("HRESULT 0x8007025D"));
+        requireNothrow([&] { check(S_OK, "creating environment"); });
+    });
+}};
 
-SCENARIO("WebView2 forwards native focus and movement messages") {
+const Scenario webView2Forwards{"WebView2 forwards native focus and movement messages", [] {
     using namespace webfront::frontend::detail::webview2;
     Apartment apartment;
     auto      session = std::make_shared<Session>();
     session->createWindow();
     auto controller     = Microsoft::WRL::Make<webfront::test::WebView2ControllerMock>();
     session->controller = controller;
-    WHEN("the native window receives focus") {
+    when("the native window receives focus", [&] {
         SendMessageW(session->window, WM_SETFOCUS, 0, 0);
-        THEN("focus is restored programmatically to the WebView") {
-            REQUIRE(controller->focusCalls == 1);
-            REQUIRE(controller->focusReason == COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
-        }
-    }
-    WHEN("the parent window moves") {
+        then("focus is restored programmatically to the WebView", [&] {
+            require(controller->focusCalls == 1);
+            require(controller->focusReason == COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+        });
+    });
+    when("the parent window moves", [&] {
         SendMessageW(session->window, WM_MOVE, 0, 0);
-        THEN("the WebView is notified independently of resizing") {
-            REQUIRE(controller->positionCalls == 1);
-        }
-    }
-    WHEN("Windows suggests new bounds after a DPI change") {
+        then("the WebView is notified independently of resizing", [&] {
+            require(controller->positionCalls == 1);
+        });
+    });
+    when("Windows suggests new bounds after a DPI change", [&] {
         RECT suggested{100, 100, 1000, 800};
         SendMessageW(session->window, WM_DPICHANGED, MAKELONG(144, 144), reinterpret_cast<LPARAM>(&suggested));
         RECT actual{};
-        REQUIRE(GetWindowRect(session->window, &actual));
-        THEN("the native window adopts the suggested size") {
-            REQUIRE(actual.right - actual.left == 900);
-            REQUIRE(actual.bottom - actual.top == 700);
-            REQUIRE_FALSE(session->failure);
-        }
-    }
-    WHEN("controller shutdown sends reentrant window messages") {
+        require(GetWindowRect(session->window, &actual));
+        then("the native window adopts the suggested size", [&] {
+            require(actual.right - actual.left == 900);
+            require(actual.bottom - actual.top == 700);
+            require(!session->failure);
+        });
+    });
+    when("controller shutdown sends reentrant window messages", [&] {
         controller->duringClose = [&] {
             controller->focusResult    = HRESULT_FROM_WIN32(ERROR_INVALID_STATE);
             controller->positionResult = HRESULT_FROM_WIN32(ERROR_INVALID_STATE);
@@ -178,89 +180,117 @@ SCENARIO("WebView2 forwards native focus and movement messages") {
             SendMessageW(session->window, WM_MOVE, 0, 0);
         };
         session->close();
-        THEN("closed controllers are not called and closure remains successful") {
-            REQUIRE(controller->focusCalls == 0);
-            REQUIRE(controller->positionCalls == 0);
-            REQUIRE_FALSE(session->failure);
-        }
-    }
-    THEN("the window has a background while the runtime starts") {
-        REQUIRE(GetClassLongPtrW(session->window, GCLP_HBRBACKGROUND) != 0);
-    }
-}
+        then("closed controllers are not called and closure remains successful", [&] {
+            require(controller->focusCalls == 0);
+            require(controller->positionCalls == 0);
+            require(!session->failure);
+        });
+    });
+    then("the window has a background while the runtime starts", [&] {
+        require(GetClassLongPtrW(session->window, GCLP_HBRBACKGROUND) != 0);
+    });
+}};
 
-SCENARIO("WebView2 only forwards user-initiated popups") {
+const Scenario webView2Only{"WebView2 only forwards user-initiated popups", [] {
     using webfront::frontend::detail::webview2::Session;
     auto session           = std::make_shared<Session>();
     session->contentPolicy = webfront::detail::BoundContentPolicy{"http://127.0.0.1:9002", {.popups = webfront::PopupPolicy::systemBrowser}};
     auto args              = Microsoft::WRL::Make<webfront::test::WebView2PopupMock>();
     for (const BOOL initiated : {FALSE, TRUE}) {
-        WHEN((initiated ? "the user requests a popup" : "a script requests a popup without user initiation")) {
+        when((initiated ? "the user requests a popup" : "a script requests a popup without user initiation"), [&] {
             static bool launched = false;
             launched             = false;
             args->userInitiated  = initiated;
             session->newWindowRequested(args.Get(), [](const std::string&) {
                 launched = true;
             });
-            THEN("only the user-initiated popup reaches the external launcher") {
-                REQUIRE(launched == (initiated != FALSE));
-                REQUIRE(args->handled);
-                REQUIRE_FALSE(session->failure);
-            }
-        }
+            then("only the user-initiated popup reaches the external launcher", [&] {
+                require(launched == (initiated != FALSE));
+                require(args->handled);
+                require(!session->failure);
+            });
+        });
     }
-}
+}};
 
-SCENARIO("WebView2 popup launcher failures leave the application running") {
+const Scenario webView2Popup{"WebView2 popup launcher failures leave the application running", [] {
     using webfront::frontend::detail::webview2::Session;
     auto session           = std::make_shared<Session>();
     session->contentPolicy = webfront::detail::BoundContentPolicy{"http://127.0.0.1:9002", {.popups = webfront::PopupPolicy::systemBrowser}};
     auto args              = Microsoft::WRL::Make<webfront::test::WebView2PopupMock>();
-    WHEN("the external launcher throws a standard exception") {
+    when("the external launcher throws a standard exception", [&] {
         session->newWindowRequested(args.Get(), [](const std::string&) {
             throw std::runtime_error("No URL association");
         });
-        REQUIRE(args->handled);
-        REQUIRE_FALSE(session->failure);
-        REQUIRE_FALSE(session->closed);
-    }
-    WHEN("the external launcher throws a non-standard exception") {
+        require(args->handled);
+        require(!session->failure);
+        require(!session->closed);
+    });
+    when("the external launcher throws a non-standard exception", [&] {
         session->newWindowRequested(args.Get(), [](const std::string&) {
             throw 42;
         });
-        REQUIRE(args->handled);
-        REQUIRE_FALSE(session->failure);
-        REQUIRE_FALSE(session->closed);
-    }
-    WHEN("marking the popup handled fails") {
+        require(args->handled);
+        require(!session->failure);
+        require(!session->closed);
+    });
+    when("marking the popup handled fails", [&] {
         args->handledResult = E_FAIL;
         session->newWindowRequested(args.Get());
-        REQUIRE(session->failure);
-    }
-    WHEN("reading the popup URI fails") {
+        require(session->failure);
+    });
+    when("reading the popup URI fails", [&] {
         args->uriResult = E_FAIL;
         session->newWindowRequested(args.Get());
-        REQUIRE(session->failure);
-    }
-    WHEN("reading popup user initiation fails") {
+        require(session->failure);
+    });
+    when("reading popup user initiation fails", [&] {
         args->userInitiatedResult = E_FAIL;
         session->newWindowRequested(args.Get());
-        REQUIRE(session->failure);
-    }
-}
+        require(session->failure);
+    });
+}};
 
-SCENARIO("WebView2 content controls map to engine settings") {
+const Scenario webView2Content{"WebView2 content controls map to engine settings", [] {
     auto settings = Microsoft::WRL::Make<webfront::test::WebView2SettingsMock>();
     using webfront::frontend::detail::webview2::configureContentSettings;
     configureContentSettings(settings.Get(), {});
-    REQUIRE(settings->devTools);
-    REQUIRE(settings->contextMenus);
+    require(settings->devTools);
+    require(settings->contextMenus);
     configureContentSettings(settings.Get(), {.devToolsEnabled = false});
-    REQUIRE_FALSE(settings->devTools);
-    REQUIRE(settings->contextMenus);
+    require(!settings->devTools);
+    require(settings->contextMenus);
     configureContentSettings(settings.Get(), {.contextMenusEnabled = false});
-    REQUIRE(settings->devTools);
-    REQUIRE_FALSE(settings->contextMenus);
+    require(settings->devTools);
+    require(!settings->contextMenus);
     settings->settingsResult = E_FAIL;
-    REQUIRE_THROWS_AS(configureContentSettings(settings.Get(), {}), std::runtime_error);
-}
+    requireThrows<std::runtime_error>([&] { configureContentSettings(settings.Get(), {}); });
+}};
+
+const Scenario apartmentWebView2{"The apartment of a WebView2 window leaves the thread as it found it", [] {
+    using namespace webfront::frontend::detail::webview2;
+    // A thread of its own: no other scenario and no engine has initialized COM there (#564).
+    struct State {
+        HRESULT          result{};
+        APTTYPE          apartment{};
+        APTTYPEQUALIFIER qualifier{};
+        bool             operator==(const State&) const = default;
+        static State     read() {
+            State state;
+            state.result = CoGetApartmentType(&state.apartment, &state.qualifier);
+            return state;
+        }
+    };
+    State before, during, after;
+    std::thread([&] {
+        before = State::read();
+        {
+            Apartment apartment;
+            during = State::read();
+        }
+        after = State::read();
+    }).join();
+    require(during.result == S_OK);
+    require((during.apartment == APTTYPE_STA || during.apartment == APTTYPE_MAINSTA));
+    require(after == before);
+}};

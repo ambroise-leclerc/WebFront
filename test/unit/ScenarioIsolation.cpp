@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+/// @brief Gives every scenario the process-wide state a process of its own would have, so that the scenarios pass in any
+/// order within one process (WEBFRONT_TEST_UNIT_SHARDS, #543).
+#include "Bdd.hpp"
+#include <webfront/tooling/Logger.hpp>
+
+#include <array>
+
+namespace {
+
+/// The enabled severities are global: a scenario that raises them makes the next one log, and a connected browser is
+/// sent what is logged at the debug level.
+constexpr std::array severities{webfront::log::Error, webfront::log::Warn, webfront::log::Info, webfront::log::Debug};
+std::array<bool, 4>  initial{};
+
+void rememberSeverities() {
+    for (std::size_t index = 0; index != severities.size(); ++index)
+        initial[index] = webfront::log::is(severities[index]);
+}
+
+void restoreSeverities() {
+    for (std::size_t index = 0; index != severities.size(); ++index)
+        webfront::log::set(severities[index], initial[index]);
+}
+
+const webfront::bdd::Listener scenarioIsolation{rememberSeverities, restoreSeverities};
+
+}  // namespace

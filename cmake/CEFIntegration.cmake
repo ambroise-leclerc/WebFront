@@ -30,7 +30,7 @@ message(STATUS "WebFront: Embedded CEF window support enabled")
 set(CEF_USE_SANDBOX OFF CACHE BOOL "Disable CEF sandbox" FORCE)
 set(CEF_WRAPPER_BUILD_SKIP OFF CACHE BOOL "Enable CEF wrapper build" FORCE)
 
-# Inherited SDK flags; CEF 154 does not honor all of them. CPM below controls CTest registration.
+# Inherited SDK flags; CEF 156 does not honor all of them. CPM below controls CTest registration.
 set(CEF_SKIP_TESTS ON CACHE BOOL "Skip CEF tests" FORCE)
 set(CEF_BUILD_TESTS OFF CACHE BOOL "Disable CEF test building" FORCE)
 set(BUILD_CEF_TESTS OFF CACHE BOOL "Disable CEF test building" FORCE)
@@ -50,7 +50,7 @@ set(WITH_TESTS OFF CACHE BOOL "Disable all tests" FORCE)
 # This scopes the normal binding, not arbitrary cache writes inside a dependency. Recheck CEF's
 # BUILD_TESTING handling on SDK upgrades; CACHE FORCE could still modify the caller's cache.
 CPMAddPackage(
-    URI "gh:ambroise-leclerc/CEF@154.0.34"
+    URI "gh:ambroise-leclerc/CEF@156.0.28"
     OPTIONS "BUILD_TESTING OFF"
 )
 
@@ -60,7 +60,7 @@ if(MSVC)
     target_compile_definitions(WebFront INTERFACE _ITERATOR_DEBUG_LEVEL=0 _HAS_ITERATOR_DEBUGGING=0)
 endif()
 
-# CEF 154 creates its demo targets unconditionally. Keep them out of the default build;
+# CEF 156 creates its demo targets unconditionally. Keep them out of the default build;
 # BUILD_TESTING=OFF above prevents CEF's own CTest registration on the first configure.
 foreach(_webfront_cef_test_target cef_sanity_test cef_resources_test cef_window_test)
     if(TARGET ${_webfront_cef_test_target})

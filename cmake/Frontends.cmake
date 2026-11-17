@@ -203,7 +203,7 @@ webfront_register_frontend(WebKitGTK
     TEST_SETUP webfront_add_webkitgtk_tests)
 webfront_register_frontend(CEF
     OPTION WEBFRONT_EMBED_CEF POLICY lenient
-    DESCRIPTION "Download and link CEF so CEFFrontend is available (Windows, Linux and macOS only). Other platforms fail at configure time"
+    DESCRIPTION "Download and link CEF so CEFFrontend is available (Windows, Linux x86_64 and aarch64, and macOS only). Other platforms fail at configure time"
     PLATFORMS Windows Linux Darwin SUPPORT CEFIntegration SETUP setup_cef_for_target
     TEST_PLATFORMS Linux TEST_NAME WebFrontBrowserIntegration TEST_TIMEOUT 60 XVFB_LINUX)
 
@@ -436,7 +436,11 @@ function(webfront_add_browser_tests target frontend assets_directory lifecycle_t
             set(lifecycle_command "${XVFB_RUN_EXECUTABLE}" -a ${lifecycle_command})
         endif()
         set(lifecycle_modes no-bridge early-close rejected-ready navigation-failure path-encoding content-policy navigation-allow-list view-association stage-report)
-        list(APPEND lifecycle_modes ui-executor native-window second-open)
+        list(APPEND lifecycle_modes ui-executor native-window second-open host-close)
+        # CEF neither supports nor checks a secondary thread: nothing to observe there (docs/HOST_INTEGRATION.md).
+        if(NOT frontend STREQUAL "CEF")
+            list(APPEND lifecycle_modes host-thread)
+        endif()
         foreach(mode ${lifecycle_modes})
             set(lifecycle_name "${frontend}Lifecycle-${mode}")
             add_test(NAME ${lifecycle_name} COMMAND ${lifecycle_command} ${mode})

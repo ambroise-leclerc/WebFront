@@ -1,4 +1,4 @@
-# Only two examples: the minimal application and the successive Game of Life stages.
+# Three examples: the minimal application, the successive Game of Life stages and a host application that keeps its loop.
 include(Frontends)
 
 # The Life examples use NativeOrBrowserFrontend: the native window when its engine is built and a session exists,
@@ -22,6 +22,18 @@ endif()
 add_executable(HelloWorld hello-world/HelloWorld.cpp)
 target_link_libraries(HelloWorld PRIVATE WebFront WebFront_warnings WebFront_options)
 webfront_setup_frontends_for_target(HelloWorld)
+
+# An existing application keeps its own loop (docs/HOST_INTEGRATION.md): a ray-traced Boing Ball, computed on the CPU
+# or, when a CUDA toolkit was found, on the GPU (cmake/BoingCuda.cmake). See docs/HOST_LOOP_EXAMPLE.md.
+add_executable(WebFrontHostLoop host-loop/HostLoop.cpp)
+target_link_libraries(WebFrontHostLoop PRIVATE WebFront WebFront_boing WebFront_warnings WebFront_options)
+webfront_setup_frontends_for_target(WebFrontHostLoop)
+if(WEBFRONT_ENABLE_TESTING)
+    add_test(NAME HostLoopCaptureModes COMMAND ${CMAKE_COMMAND}
+        -DAPP=$<TARGET_FILE:WebFrontHostLoop>
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckHostLoopCaptureModes.cmake)
+    set_tests_properties(HostLoopCaptureModes PROPERTIES TIMEOUT 15 LABELS fast)
+endif()
 
 # The simulation can be explored before adding a UI or enabling a native engine.
 add_executable(WebFrontLifeConsole life/LifeConsole.cpp)

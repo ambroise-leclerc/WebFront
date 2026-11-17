@@ -1,0 +1,43 @@
+name: Jetson Orin
+
+on:
+  schedule:
+    - cron: '17 1 * * 1'
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jetson-orin
+  cancel-in-progress: false
+
+jobs:
+  jetson-orin:
+    if: >-
+      github.repository == 'ambroise-leclerc/WebFront' && !cancelled() &&
+      (github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
+      (github.event_name == 'workflow_dispatch' && github.actor == 'ambroise-leclerc' && github.ref_type == 'branch'))
+    runs-on: [self-hosted, linux, arm64, jetson-orin]
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Build and test at low priority
+        run: nice -n 15 ionice -c 3 bash .github/scripts/jetson-orin.sh
+      - name: Retain diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jetson-orin-${{ github.run_id }}
+          path: |
+            build-jetson-*/Testing/Temporary/LastTest.log
+            build-jetson-*/*results.xml
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Remove job build directories
+        if: always()
+        run: rm -rf -- build-jetson-core build-jetson-webkitgtk

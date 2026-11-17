@@ -1,5 +1,5 @@
 #include "Mocks.hpp"
-#include <catch2/catch_test_macros.hpp>
+#include "Bdd.hpp"
 #include <webfront/http/HTTPServer.hpp>
 #include <webfront/networking/NetworkingMock.hpp>
 
@@ -11,6 +11,8 @@
 #include <string>
 #include <string_view>
 #include <utility>
+
+using namespace webfront::bdd;
 
 using namespace webfront;
 using namespace webfront::http;
@@ -47,57 +49,57 @@ std::string decodedModule() {
 }
 }  // namespace
 
-SCENARIO("RequestHandler serves JavaScript modules") {
+const Scenario requestHandlerServes{"RequestHandler serves JavaScript modules", [] {
     std::string input{"GET /modules/main.mjs HTTP/1.1\r\nHost: localhost\r\nAccept-encoding: gzip, br, deflate\r\n\r\n"};
     Request     request;
-    REQUIRE_NOTHROW(request.parseSomeData(input.cbegin(), input.cend()));
+    requireNothrow([&] { request.parseSomeData(input.cbegin(), input.cend()); });
 
     RequestHandler<Net, MockFileSystem<ModuleFile>> handler{"."};
     auto                                            response = handler.handleRequest(request);
 
-    REQUIRE(response.statusCode == Response::ok);
-    REQUIRE(response.getHeaderValue("Content-Encoding") == "br");
-    REQUIRE(response.getHeaderValue("Content-Type") == "application/javascript");
-    REQUIRE(response.getHeaderValue("Content-Length") == "0");
-}
+    require(response.statusCode == Response::ok);
+    require(response.getHeaderValue("Content-Encoding") == "br");
+    require(response.getHeaderValue("Content-Type") == "application/javascript");
+    require(response.getHeaderValue("Content-Length") == "0");
+}};
 
 // WebKit does not advertise Brotli over loopback HTTP.
 
-SCENARIO("Embedded gzip assets are served to gzip-only HTTP clients") {
+const Scenario embeddedGzip{"Embedded gzip assets are served to gzip-only HTTP clients", [] {
     RequestHandler<Net, GzipModuleFS> handler{"."};
-    WHEN("the client requests the module without Brotli support") {
+    when("the client requests the module without Brotli support", [&] {
         const std::string input = "GET /modules/answer.mjs HTTP/1.1\r\nHost: localhost\r\nAccept-Encoding: gzip, deflate\r\n\r\n";
         Request           request;
         request.parseSomeData(input.begin(), input.end());
         auto response = handler.handleRequest(request);
-        THEN("the stored gzip bytes are returned") {
-            REQUIRE(response.statusCode == Response::ok);
-            REQUIRE(response.getHeaderValue("Content-Encoding") == "gzip");
-            REQUIRE(response.getHeaderValue("Vary") == "Accept-Encoding");
-            REQUIRE(response.getHeaderValue("Content-Length") == std::to_string(response.content.size()));
-            REQUIRE(response.content.size() == GzipModuleData::dataSize);
-            REQUIRE(response.getHeaderValue("Content-Type") == "application/javascript");
-        }
-    }
-}
+        then("the stored gzip bytes are returned", [&] {
+            require(response.statusCode == Response::ok);
+            require(response.getHeaderValue("Content-Encoding") == "gzip");
+            require(response.getHeaderValue("Vary") == "Accept-Encoding");
+            require(response.getHeaderValue("Content-Length") == std::to_string(response.content.size()));
+            require(response.content.size() == GzipModuleData::dataSize);
+            require(response.getHeaderValue("Content-Type") == "application/javascript");
+        });
+    });
+}};
 
-SCENARIO("Embedded gzip assets are served to identity-only HTTP clients") {
+const Scenario embeddedGzipAssets{"Embedded gzip assets are served to identity-only HTTP clients", [] {
     RequestHandler<Net, GzipModuleFS> handler{"."};
     const auto                        expected = decodedModule();
     for (const auto accept : {"", "Accept-Encoding: identity\r\n", "Accept-Encoding: gzip;q=0, identity;q=1\r\n"}) {
-        WHEN("the client requests identity with " << accept) {
+        when("the client requests identity with ", accept, [&] {
             const auto input = std::string("GET /modules/answer.mjs HTTP/1.1\r\nHost: localhost\r\n") + accept + "\r\n";
             Request    request;
             request.parseSomeData(input.begin(), input.end());
             auto response = handler.handleRequest(request);
-            THEN("the server returns the decoded bytes with their decoded length") {
-                REQUIRE(response.statusCode == Response::ok);
-                REQUIRE_FALSE(response.getHeaderValue("Content-Encoding"));
-                REQUIRE(response.getHeaderValue("Content-Length") == std::to_string(expected.size()));
-                REQUIRE(response.content == expected);
-                REQUIRE(response.getHeaderValue("Content-Type") == "application/javascript");
-                REQUIRE(response.getHeaderValue("Vary") == "Accept-Encoding");
-            }
-        }
+            then("the server returns the decoded bytes with their decoded length", [&] {
+                require(response.statusCode == Response::ok);
+                require(!response.getHeaderValue("Content-Encoding"));
+                require(response.getHeaderValue("Content-Length") == std::to_string(expected.size()));
+                require(response.content == expected);
+                require(response.getHeaderValue("Content-Type") == "application/javascript");
+                require(response.getHeaderValue("Vary") == "Accept-Encoding");
+            });
+        });
     }
-}
+}};

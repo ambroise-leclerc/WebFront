@@ -28,10 +28,17 @@ async function downloadStarter(starter, {signal, fetchImpl}) {
     return unpackStarter(bytes);
 }
 
+/** The starters this environment pins, sorted: the only values `wf create` accepts. */
+export const starterNames = config => Object.keys(config?.starters ?? {}).sort();
+
+// The argument of wf create is easily taken for the name of the project to create.
+const unknownStarter = (name, config) => `Unknown pinned starter: ${name}. wf create takes the name of a starter, not of your project` +
+    (starterNames(config).length ? `; available: ${starterNames(config).join(', ')}` : '');
+
 export async function createStarter(bridge, config, [name, destination = 'ui'], {signal, fetchImpl = fetch} = {}) {
     safePackagePath(destination);
-    const starter = config.starters?.[name];
-    if (!starter) throw new Error(`Unknown pinned starter: ${name}`);
+    const starter = Object.hasOwn(config.starters ?? {}, name) ? config.starters[name] : undefined;
+    if (!starter) throw new Error(unknownStarter(name, config));
     const files = await downloadStarter(starter, {signal, fetchImpl});
     const recipe = recipeOf(files);
     signal?.throwIfAborted();
@@ -39,5 +46,8 @@ export async function createStarter(bridge, config, [name, destination = 'ui'], 
     await publish(bridge, destination, files, {signal, replace: false});
     const install = Object.entries(recipe.dependencies).map(([pkg, version]) => `${pkg}@${version}`).join(' ');
     const output = recipe.output ?? `generated/${recipe.provider ?? 'AppUI'}.hpp`;
-    return `Created ${destination}.\nwf init\nwf install ${install}\nwf preview ${destination}/${recipe.entry}\nwf embed ${destination}/${recipe.entry} --output ${output}`;
+    const entry = `${destination}/${recipe.entry}`;
+    // The next commands, in order; a starter without dependency has nothing to install.
+    return [`Created ${destination}.`, 'wf init', ...(install ? [`wf install ${install}`] : []), `wf dev ${entry}`,
+        `wf preview ${entry}`, `wf embed ${entry} --output ${output}`].join('\n');
 }

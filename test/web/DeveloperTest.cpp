@@ -1,14 +1,20 @@
 #include "../../examples/life/Life.hpp"
+#include "../driver/RequestLog.hpp"
 #include "../unit/TemporaryDirectory.hpp"
 #include <webfront/Commands.hpp>
+#include <webfront/utils/Json.hpp>
 #include <webfront/WebFront.hpp>
 
 #include <atomic>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <utility>
 
@@ -57,7 +63,7 @@ std::string readIntegrity(const std::filesystem::path& config) {
 }
 
 template <typename App>
-void registerCallbacks(App& app, const std::filesystem::path& project, std::atomic<bool>& passed) {
+void registerCallbacks(App& app, const std::filesystem::path& project, std::atomic<bool>& passed, std::function<void()> reported = {}) {
     app.cppFunction("life.step", &webfront::demo::nextLife);
     app.cppFunction("test.header", [project](std::string name) {
         if (name != "LifeUI")
@@ -83,9 +89,11 @@ void registerCallbacks(App& app, const std::filesystem::path& project, std::atom
     app.cppFunction("test.progress", [](std::string message) {
         std::cout << "Developer integration: " << message << std::endl;
     });
-    app.cppFunction("test.report", [&passed](bool success, std::string message) {
+    app.cppFunction("test.report", [&passed, reported = std::move(reported)](bool success, std::string message) {
         std::cout << message << std::endl;
         passed.store(success);
+        if (reported)
+            reported();
     });
 }
 
@@ -204,7 +212,7 @@ void registerCommands(webfront::Commands<App>& commands, const std::shared_ptr<C
 }
 
 // What a run does: the public smoke test, one part of the test (each part starts from its own project and runs alongside
-// the others), or everything in one session when nothing is given.
+// the others), or everything in one project when nothing is given.
 struct Mode {
     bool        publicDistribution = false;
     std::string part               = "all";
@@ -222,7 +230,8 @@ Mode parseMode(std::string_view argument) {
         mode.part               = "app";
     } else if (argument.starts_with("--part=")) {
         mode.part = std::string(argument.substr(7));
-        if (mode.part != "app" && mode.part != "scripts" && mode.part != "typescript" && mode.part != "jasmine" && mode.part != "terminal")
+        if (mode.part != "app" && mode.part != "scripts" && mode.part != "typescript" && mode.part != "jasmine" && mode.part != "terminal" &&
+            mode.part != "workspace")
             throw std::invalid_argument("Unknown part of the developer test: " + mode.part);
     } else {
         throw std::invalid_argument("Unknown smoke-test mode");
@@ -245,65 +254,116 @@ void copyHeaders(const std::filesystem::path& project, const std::filesystem::pa
 
 constexpr auto runScript =
     "import('/fixtures/run.mjs').catch(async e => { await webFront.cppFunction('test.report')(false, String(e.stack || e)); window.close(); });";
+
+// A part is a process of its own: its project, its origin, its bridge, its commands and its visible window.
+class Part {
+    using App = webfront::BasicDeveloperApp<WEBFRONT_TEST_FRONTEND, FixturesFS>;
+
+public:
+    Part(const std::filesystem::path& fixtures, Mode selected)
+        : app(project.path(), configFor(selected)), mode(std::move(selected)), states(std::make_shared<CommandStates>()), commands(app) {
+        std::filesystem::copy(fixtures, project.path() / "fixtures", std::filesystem::copy_options::recursive);
+        registerCallbacks(app, project.path(), passed, [this] {
+            std::scoped_lock lock{reportMutex};
+            if (reported)
+                throw std::runtime_error("A developer part reported twice");
+            reported = true;
+        });
+        registerCommands(commands, states);
+        app.cppFunction("test.command", [owned = states](std::string tag) {
+            return owned->get(tag);
+        });
+        app.cppFunction("test.release", [owned = states](std::string tag) {
+            owned->release(tag);
+        });
+        app.cppFunction("test.part", [part = mode.part] {
+            return part;
+        });
+        app.cppFunction("test.browsers", [this] {
+            return static_cast<double>(app.connectedBrowsers());
+        });
+        bootstrapApp(app, mode, readIntegrity(project.path() / "fixtures/provision.json"));
+        subscription = app.subscribeUIStarted([injected = false](App::UI ui) mutable {
+            if (!std::exchange(injected, true))
+                ui.addScript(runScript);
+        });
+    }
+
+    ~Part() {
+        states->releaseAll();
+        app.stop();
+        // Drain while the commands, callback state and project are still alive.
+        try {
+            app.shutdown();
+        } catch (const std::exception& error) {
+            std::cerr << error.what() << '\n';
+        }
+    }
+
+    void show() {
+        app.show();
+    }
+
+    bool finish(const std::filesystem::path& output) {
+        states->releaseAll();
+        app.stop();
+        app.shutdown();
+        const std::scoped_lock lock{reportMutex};
+        if (!reported) {
+            std::cerr << "Developer part " << mode.part << " closed without reporting a result\n";
+            return false;
+        }
+        if (!passed.load())
+            return false;
+        if (mode.runs("terminal") && !mode.publicDistribution && states->get("final") != "cancelled") {
+            std::cerr << "The command running at shutdown was not drained: " << states->get("final") << '\n';
+            return false;
+        }
+        if (mode.runs("app")) {
+            try {
+                copyHeaders(project.path(), output);
+            } catch (const std::exception& error) {
+                std::cerr << error.what() << '\n';
+                return false;
+            }
+        }
+        return true;
+    }
+
+private:
+    webfront::test::TemporaryDirectory project;
+    App                                app;
+    Mode                               mode;
+    static webfront::WebFrontConfig    configFor(const Mode& selected) {
+        webfront::WebFrontConfig config;
+        // A part has no port of its own to keep: the parts run at the same time, each on the port the system gives it.
+        if (selected.part != "all")
+            config.port = "0";
+        return config;
+    }
+
+    std::atomic<bool>              passed{false};
+    bool                           reported = false;
+    std::mutex                     reportMutex;
+    std::shared_ptr<CommandStates> states;
+    webfront::Commands<App>        commands;
+    webfront::UISubscription       subscription;
+};
 }  // namespace
 
 int main(int argc, char** argv) {
     try {
         // CEF child processes must dispatch before interpreting application arguments or creating files.
         webfront::detail::ensureFrontendInitialized<WEBFRONT_TEST_FRONTEND>();
+        // CTest shows the output of a failed case only: it then names every request and the status it was answered,
+        // which is what tells a resource the page could not load from one the server refused (#542).
+        [[maybe_unused]] const auto requestLog = webfront::testdriver::logRequests();
         if (argc != 3 && argc != 4)
             throw std::invalid_argument("Expected fixture directory, header output directory and optional --public or --part=<name>");
         const Mode mode = parseMode(argc == 4 ? std::string_view(argv[3]) : std::string_view{});
-        webfront::test::TemporaryDirectory project;
-        std::filesystem::copy(argv[1], project.path() / "fixtures", std::filesystem::copy_options::recursive);
-        const auto integrity = readIntegrity(project.path() / "fixtures/provision.json");
-        using App            = webfront::BasicDeveloperApp<WEBFRONT_TEST_FRONTEND, FixturesFS>;
-        // A part has no port of its own to keep: the parts run at the same time, each on the port the system gives it.
-        webfront::WebFrontConfig config;
-        if (mode.part != "all")
-            config.port = "0";
-        App               app{project.path(), config};
-        std::atomic<bool> passed{false};
-        registerCallbacks(app, project.path(), passed);
-        auto               states = std::make_shared<CommandStates>();
-        webfront::Commands commands{app};
-        registerCommands(commands, states);
-        app.cppFunction("test.command", [states](std::string tag) {
-            return states->get(tag);
-        });
-        app.cppFunction("test.release", [states](std::string tag) {
-            states->release(tag);
-        });
-        app.cppFunction("test.part", [part = mode.part] {
-            return part;
-        });
-        app.cppFunction("test.browsers", [&app] {
-            return static_cast<double>(app.connectedBrowsers());
-        });
-        bootstrapApp(app, mode, integrity);
-        auto subscription = app.subscribeUIStarted([injected = false](App::UI ui) mutable {
-            if (!std::exchange(injected, true))
-                ui.addScript(runScript);
-        });
-        try {
-            app.show();
-        } catch (...) {
-            states->releaseAll();
-            throw;
-        }
-        // The test ends while the "final" command runs: shutdown drains it.
-        states->releaseAll();
-        app.shutdown();
-        if (!passed.load())
-            return 1;
-        // The command running at shutdown belongs to the terminal part; the generated header, to the application part.
-        if (mode.runs("terminal") && !mode.publicDistribution && states->get("final") != "cancelled") {
-            std::cerr << "The command running at shutdown was not drained: " << states->get("final") << '\n';
-            return 1;
-        }
-        if (mode.runs("app"))
-            copyHeaders(project.path(), argv[2]);
-        return 0;
+        Part       part(argv[1], mode);
+        part.show();
+        return part.finish(argv[2]) ? 0 : 1;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

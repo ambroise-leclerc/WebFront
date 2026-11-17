@@ -19,6 +19,9 @@ endif()
 # As in the root CMakeLists.txt, after project(), which reads CMAKE_TOOLCHAIN_FILE (test-options/Toolchain.cmake).
 include("${ROOT}/cmake/WebFrontTestOptions.cmake")
 webfront_declare_test_options(${TOP_LEVEL})
+foreach(name TEST_UNITY_BATCH MSVC_ANALYZE TEST_REPRODUCIBILITY)
+    message(STATUS "${name}=${WEBFRONT_${name}}")
+endforeach()
 foreach(name TESTING FUZZING COVERAGE SANITIZER_ADDRESS SANITIZER_LEAK SANITIZER_UNDEFINED_BEHAVIOR
         SANITIZER_THREAD SANITIZER_MEMORY)
     if(DEFINED CACHE{ENABLE_${name}})

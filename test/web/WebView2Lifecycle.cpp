@@ -21,7 +21,7 @@ namespace {
 using TestFS = webfront::fs::Multi<webfront::fs::IndexFS, webfront::fs::NativeDebugFS>;
 struct LifecycleOptions {
     static webfront::frontend::WebView2Options get() {
-        return {.startupTimeout = std::chrono::seconds{90}, .visible = webfront::testdriver::diagnosticWindows()};
+        return {.startupTimeout = std::chrono::seconds{90}, .visible = webfront::testdriver::visibleWindows};
     }
 };
 using App = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, webfront::frontend::WebView2FrontendWithOptions<LifecycleOptions>>;
@@ -78,6 +78,11 @@ void require(bool condition, const char* message) {
         throw std::runtime_error(message);
 }
 
+void require(bool condition, const std::string& message) {
+    if (!condition)
+        throw std::runtime_error(message);
+}
+
 void failWithMessage(webfront::frontend::detail::webview2::Session& session, const char* message) noexcept {
     try {
         throw std::runtime_error(message);
@@ -113,8 +118,10 @@ int startupCompletion(bool failed) {
     using namespace webfront::frontend::detail::webview2;
     Apartment apartment;
     auto      session = std::make_shared<Session>();
-    session->createWindow(webfront::testdriver::diagnosticWindows());
-    require(static_cast<bool>(IsWindowVisible(session->window)) == webfront::testdriver::diagnosticWindows(), "Window visibility option was ignored");
+    // Cover the explicit hidden-window option on this startup-failure probe; ordinary rendered sessions stay visible.
+    const bool visible = !failed;
+    session->createWindow(visible);
+    require(static_cast<bool>(IsWindowVisible(session->window)) == visible, "Window visibility option was ignored");
     session->start(L"unused-profile", DeferredEnvironment::create);
     require(DeferredEnvironment::completion.Get() != nullptr, "Creation request was not started");
     const auto timer = session->startupTimer;
@@ -169,8 +176,8 @@ int lateNavigationFailure() {
     session->url                                                                       = L"http://127.0.0.1:9002/policy-controls.html";
     // Reach the engine's network-failure path rather than the navigation-policy rejection path.
     session->contentPolicy = webfront::detail::BoundContentPolicy{"http://127.0.0.1:9002", {.navigationAllowedOrigins = {"http://127.0.0.1:0"}}};
-    session->createWindow(webfront::testdriver::diagnosticWindows());
-    require(static_cast<bool>(IsWindowVisible(session->window)) == webfront::testdriver::diagnosticWindows(), "Window visibility option was ignored");
+    session->createWindow(webfront::testdriver::visibleWindows);
+    require(static_cast<bool>(IsWindowVisible(session->window)) == webfront::testdriver::visibleWindows, "Window visibility option was ignored");
     Actions actions;
     actions.onFailure = [&] {
         session->fail();
@@ -233,7 +240,7 @@ int fileServices(std::string_view mode) {
     auto                                                                       session = std::make_shared<Session>();
     session->url           = mode == "download" ? L"http://127.0.0.1:9002/file-services.html?download" : L"http://127.0.0.1:9002/file-services.html?choose";
     session->contentPolicy = webfront::detail::BoundContentPolicy{"http://127.0.0.1:9002", {}};
-    session->createWindow(webfront::testdriver::diagnosticWindows());
+    session->createWindow(webfront::testdriver::visibleWindows);
     Actions actions;
     actions.onFailure = [&] {
         session->fail();
@@ -374,7 +381,7 @@ int scriptDialogs() {
             return dialog.message == "name?" ? webfront::frontend::ScriptDialogAnswer{true, "typed"} : webfront::frontend::ScriptDialogAnswer{};
         return webfront::frontend::ScriptDialogAnswer{true, {}};
     };
-    session->createWindow(webfront::testdriver::diagnosticWindows());
+    session->createWindow(webfront::testdriver::visibleWindows);
     Actions actions;
     actions.onFailure = [&] {
         session->fail();
@@ -409,7 +416,7 @@ int rejectMta() {
         return 1;
     bool rejected = false;
     try {
-        webfront::testdriver::QuietFrontend<webfront::frontend::WebView2Frontend>::open("9002", "index.html");
+        webfront::testdriver::TestFrontend<webfront::frontend::WebView2Frontend>::open("9002", "index.html");
     } catch (const std::exception& error) {
         rejected = std::string_view(error.what()).find("STA") != std::string_view::npos;
     }
@@ -447,8 +454,8 @@ int runtimeReadyBeforePageLoad() {
     Apartment                                                 apartment;
     auto                                                      session = std::make_shared<Session>();
     session->url                                                      = L"http://127.0.0.1:9002/slow-page.html";
-    session->createWindow(webfront::testdriver::diagnosticWindows());
-    require(static_cast<bool>(IsWindowVisible(session->window)) == webfront::testdriver::diagnosticWindows(), "Window visibility option was ignored");
+    session->createWindow(webfront::testdriver::visibleWindows);
+    require(static_cast<bool>(IsWindowVisible(session->window)) == webfront::testdriver::visibleWindows, "Window visibility option was ignored");
     const auto oldTimer = session->startupTimer;
     Actions    actions;
     bool       observed      = false;
@@ -490,7 +497,7 @@ int runtimeReadyBeforePageLoad() {
 
 int expectOpenFailure(std::string_view port, std::string_view diagnostic) {
     try {
-        webfront::testdriver::QuietFrontend<webfront::frontend::WebView2Frontend>::open(port, "index.html");
+        webfront::testdriver::TestFrontend<webfront::frontend::WebView2Frontend>::open(port, "index.html");
     } catch (const std::exception& error) {
         return std::string_view(error.what()).find(diagnostic) != std::string_view::npos ? 0 : 1;
     }
@@ -555,7 +562,10 @@ int showTwice(std::string_view page, bool earlyClose = false) {
         if (earlyClose)
             require(closer.closeSent, "Native close was not sent during window creation");
         require(!connected, "Unexpected bridge connection");
-        require(comReleased(), "STA COM initialization was not released");
+        // Closing while the runtime starts can leave the runtime's own COM initialization on the thread (#564): the frontend
+        // answers for its apartment (unit test of Apartment) and, here, for a session that ran to its end.
+        if (!earlyClose)
+            require(comReleased(), "STA COM initialization was not released");
     }
     return 0;
 }

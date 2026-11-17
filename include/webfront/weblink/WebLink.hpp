@@ -395,21 +395,25 @@ private:
     }
 
     void attachTransport() {
-        auto handle = log::addTransport([this](const log::TransportRecord& record) {
-            // A browser that stops reading must not grow the write queue without bound: diagnostics
-            // are dropped and counted, never logged (that would feed this transport again).
-            const msg::TextCommand command(msg::TxtOpcode::debugLog, record.text);
-            if (!ws->tryWrite(command.header(), command.payload(), maxPendingLogFrames)) {
-                droppedLogs.fetch_add(1, std::memory_order_relaxed);
-                log::reportTransportOverflow();
-            }
+        auto handle = log::addTransport([this, guard = handlers](const log::TransportRecord& record) {
+            guard->run([&] {
+                // A browser that stops reading must not grow the write queue without bound: diagnostics
+                // are dropped and counted, never logged (that would feed this transport again).
+                const msg::TextCommand command(msg::TxtOpcode::debugLog, record.text);
+                if (!ws->tryWrite(command.header(), command.payload(), maxPendingLogFrames)) {
+                    droppedLogs.fetch_add(1, std::memory_order_relaxed);
+                    log::reportTransportOverflow();
+                }
+            });
         });
         std::optional<log::TransportHandle> replaced{handle};
         {
             std::lock_guard lock(transportMutex);
-            if (!transportRetired) replaced = std::exchange(transport, std::move(handle));
+            if (!transportRetired)
+                replaced = std::exchange(transport, std::move(handle));
         }
-        if (replaced) log::removeTransport(*replaced);
+        if (replaced)
+            log::removeTransport(*replaced);
     }
 
     /// Detach at most once; no transport attaches afterwards. A failure is reported, retiring

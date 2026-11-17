@@ -10,7 +10,9 @@ export {packageRoot} from './paths.mjs';
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 
-export const noManifest = 'No webfront.project.json: run wf init';
+// The whole sequence, not only its first step: the reader may never have seen a WebFront project (wf help agents).
+export const noManifest = 'No webfront.project.json: run wf init, then wf dev <entry.tsx> (the interface is TypeScript/TSX in ui/; ' +
+    'wf create app writes a first one; wf help agents gives the sequence)';
 export const desynchronized = 'The lock does not match the dependencies of webfront.project.json; run wf install --update to resolve them again';
 
 async function readOptional(bridge, path) {
@@ -93,7 +95,7 @@ export function resolveEntry(manifest, argument, command) {
     if (Object.hasOwn(entries, 'main')) return entries.main;
     const names = Object.keys(entries);
     if (names.length === 1) return entries[names[0]];
-    throw new Error(`Usage: ${command} (declare entries.main in ${manifestPath} to omit the entry)`);
+    throw new Error(`Usage: ${command}, for example ui/main.tsx (declare entries.main in ${manifestPath} to omit the entry; wf create app writes a first ui/main.ts)`);
 }
 
 // wf embed <provider>: the class is the provider's name. wf embed <entry> --output <Provider.hpp>: the class is the file name.

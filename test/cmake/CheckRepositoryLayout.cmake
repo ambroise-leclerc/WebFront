@@ -13,7 +13,7 @@ endif()
 
 set(expected
     .gitattributes .github .gitignore
-    AGENTS.md CMakeLists.txt LICENSE README.md
+    AGENTS.md CMakeLists.txt LICENSE README.md README.fr.md
     cmake docs examples include js test)
 
 set(actual "")
@@ -52,10 +52,12 @@ if(NOT from_git)
         endif()
     endforeach()
 endif()
-# Include the license during local validation before it has been added to Git.
-if(EXISTS "${ROOT}/LICENSE")
-    list(APPEND actual LICENSE)
-endif()
+# Include public documents during local validation before they have been added to Git.
+foreach(document LICENSE README.fr.md)
+    if(EXISTS "${ROOT}/${document}")
+        list(APPEND actual "${document}")
+    endif()
+endforeach()
 # .gitattributes and .gitignore are export-ignored, so archives legitimately lack them.
 set(archive_optional .gitattributes .gitignore)
 list(REMOVE_ITEM actual "" ${archive_optional})

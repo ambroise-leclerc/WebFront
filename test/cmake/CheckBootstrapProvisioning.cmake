@@ -1,4 +1,5 @@
-# Bootstrap provisioning at configure time: SRI conversion, verified download, local directory, integrity failures.
+# Bootstrap provisioning at configure time: SRI conversion, verified download, machine download cache, retries, local
+# directory, integrity failures.
 # Usage: cmake -DROOT=<source> -DWORK=<scratch directory> -P CheckBootstrapProvisioning.cmake
 include("${ROOT}/cmake/WebFrontBootstrap.cmake")
 
@@ -35,21 +36,28 @@ file(WRITE "${WORK}/local/environment.tgz" "${content}")
 file(WRITE "${WORK}/tampered.tgz" "tampered\n")
 file(WRITE "${WORK}/run.cmake" [[
 include("${ROOT}/cmake/WebFrontBootstrap.cmake")
+if(NOT DESTINATION)
+    set(DESTINATION "${WORK}/cache")
+endif()
 if(LOCAL)
-    webfront_provision_bootstrap(archive URL "${URL}" INTEGRITY "${INTEGRITY}" DESTINATION "${WORK}/cache" LOCAL_DIR "${LOCAL}")
+    webfront_provision_bootstrap(archive URL "${URL}" INTEGRITY "${INTEGRITY}" DESTINATION "${DESTINATION}" LOCAL_DIR "${LOCAL}")
 else()
-    webfront_provision_bootstrap(archive URL "${URL}" INTEGRITY "${INTEGRITY}" DESTINATION "${WORK}/cache")
+    webfront_provision_bootstrap(archive URL "${URL}" INTEGRITY "${INTEGRITY}" DESTINATION "${DESTINATION}")
 endif()
 message(STATUS "provisioned ${archive}")
 ]])
 
 function(provision name result_var output_var)
-    cmake_parse_arguments(ARG "" "URL;INTEGRITY;LOCAL" "" ${ARGN})
+    cmake_parse_arguments(ARG "" "URL;INTEGRITY;LOCAL;DESTINATION;CACHE" "" ${ARGN})
+    # No retry delay, and the machine cache only where a case names one.
     execute_process(COMMAND "${CMAKE_COMMAND}" -DROOT=${ROOT} -DWORK=${WORK} -DURL=${ARG_URL} -DINTEGRITY=${ARG_INTEGRITY}
-            -DLOCAL=${ARG_LOCAL} -P "${WORK}/run.cmake"
+            -DLOCAL=${ARG_LOCAL} -DDESTINATION=${ARG_DESTINATION} -DWEBFRONT_DOWNLOAD_CACHE=${ARG_CACHE}
+            -DWEBFRONT_DOWNLOAD_RETRY_DELAY=0 -P "${WORK}/run.cmake"
         RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err)
     set(${result_var} "${result}" PARENT_SCOPE)
-    set(${output_var} "${out}${err}" PARENT_SCOPE)
+    # CMake wraps a long message wherever its paths make it long: the checks read it on one line.
+    string(REGEX REPLACE "[ \t\r\n]+" " " text "${out}${err}")
+    set(${output_var} "${text}" PARENT_SCOPE)
 endfunction()
 
 # A file URL: a Windows drive letter needs a third slash.
@@ -83,11 +91,25 @@ if(EXISTS "${WORK}/cache/environment.tgz")
     message(FATAL_ERROR "A downloaded archive that fails its integrity check must be removed")
 endif()
 
-# A download failure names the offline alternative.
+# A download failure is tried again, then names the offline alternative.
 provision(missing result text URL "${scheme}${WORK}/absent/environment.tgz" INTEGRITY "${sri}")
-if(result EQUAL 0 OR NOT text MATCHES "WEBFRONT_BOOTSTRAP_DIR")
-    message(FATAL_ERROR "A failed download must point to WEBFRONT_BOOTSTRAP_DIR: ${result} ${text}")
+if(result EQUAL 0 OR NOT text MATCHES "WEBFRONT_BOOTSTRAP_DIR" OR NOT text MATCHES "3 attempts" OR NOT text MATCHES "trying again")
+    message(FATAL_ERROR "A failed download must be tried again, then point to WEBFRONT_BOOTSTRAP_DIR: ${result} ${text}")
 endif()
+
+# The machine download cache: a download fills it, and another build tree then gets the archive from it alone.
+file(WRITE "${WORK}/source/environment.tgz" "${content}")
+set(machine "${WORK}/machine")
+string(SUBSTRING "${hex}" 0 32 key)
+provision(cacheFill result text URL "${url}" INTEGRITY "${sri}" DESTINATION "${WORK}/tree-a" CACHE "${machine}")
+expect_equal("${result}" 0 "A download must fill the machine cache: ${text}")
+file(REMOVE "${WORK}/source/environment.tgz")
+provision(cacheHit result text URL "${url}" INTEGRITY "${sri}" DESTINATION "${WORK}/tree-b" CACHE "${machine}")
+expect_equal("${result}" 0 "A new build tree must be provisioned from the machine cache without the source: ${text}")
+foreach(file "${machine}/${key}/environment.tgz" "${WORK}/tree-a/environment.tgz" "${WORK}/tree-b/environment.tgz")
+    file(SHA512 "${file}" digest)
+    expect_equal("${digest}" "${hex}" "The cached and provisioned archives must be the verified one (${file})")
+endforeach()
 
 # A local provisioning directory replaces the download and is verified too.
 provision(local result text URL "https://offline.invalid/environment.tgz" INTEGRITY "${sri}" LOCAL "${WORK}/local")
@@ -101,6 +123,60 @@ file(REMOVE "${WORK}/local/environment.tgz")
 provision(localMissing result text URL "https://offline.invalid/environment.tgz" INTEGRITY "${sri}" LOCAL "${WORK}/local")
 if(result EQUAL 0 OR NOT text MATCHES "is missing")
     message(FATAL_ERROR "An absent local archive must fail the configure: ${result} ${text}")
+endif()
+
+# A cache that exists but refuses files (a shared, read-only one): a download falls back to the build tree with a warning
+# instead of stopping the configure. Only POSIX permissions can make it so, and a process
+# that writes through them (root) cannot test it.
+if(NOT CMAKE_HOST_WIN32)
+    file(WRITE "${WORK}/source/environment.tgz" "${content}")
+    set(readonly "${WORK}/readonly")
+    file(REMOVE_RECURSE "${readonly}")
+    file(MAKE_DIRECTORY "${readonly}/${key}")
+    file(CHMOD "${readonly}" "${readonly}/${key}" DIRECTORY_PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
+        WORLD_READ WORLD_EXECUTE)
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E touch "${readonly}/${key}/probe" RESULT_VARIABLE writable OUTPUT_QUIET ERROR_QUIET)
+    if(writable EQUAL 0)
+        file(REMOVE "${readonly}/${key}/probe")
+        message(STATUS "This process writes into read-only directories: the read-only cache cases are skipped")
+    else()
+        provision(readonlyEmpty result text URL "${url}" INTEGRITY "${sri}" DESTINATION "${WORK}/tree-e" CACHE "${readonly}")
+        expect_equal("${result}" 0 "A read-only cache must not stop the configure: ${text}")
+        if(NOT text MATCHES "cannot be written")
+            message(FATAL_ERROR "A read-only cache must be reported: ${text}")
+        endif()
+    endif()
+    file(CHMOD "${readonly}" "${readonly}/${key}" DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+endif()
+
+# The test registry keeps the verified archives already in the build tree: its offline directory need not stay mounted.
+file(MAKE_DIRECTORY "${WORK}/offline")
+file(WRITE "${WORK}/offline/environment.tgz" "${content}")
+file(WRITE "${WORK}/packages.json" "{\"packages\": [{\"name\": \"environment\", \"url\": \"https://offline.invalid/environment.tgz\", \"integrity\": \"${sri}\"}]}")
+file(WRITE "${WORK}/registry.cmake" [[
+list(APPEND CMAKE_MODULE_PATH "${ROOT}/cmake")
+include("${ROOT}/cmake/WebFrontRegistry.cmake")
+webfront_provision_registry(directory "${WORK}/packages.json" "${WORK}/registry-tree")
+message(STATUS "provisioned ${directory}")
+]])
+foreach(round mounted unmounted)
+    execute_process(COMMAND "${CMAKE_COMMAND}" -DROOT=${ROOT} -DWORK=${WORK} -DWEBFRONT_REGISTRY_DIR=${WORK}/offline
+            -DWEBFRONT_DOWNLOAD_CACHE= -P "${WORK}/registry.cmake"
+        RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err)
+    expect_equal("${result}" 0 "The ${round} offline registry directory must provision the build tree: ${out}${err}")
+    file(REMOVE_RECURSE "${WORK}/offline")
+endforeach()
+
+# An environment variable set to nothing counts as unset: an empty CPM_SOURCE_CACHE gives a consuming project no cache,
+# not one at the root.
+file(WRITE "${WORK}/default-cache.cmake" [[
+include("${ROOT}/cmake/WebFrontBootstrap.cmake")
+message(STATUS "cache=[${WEBFRONT_DOWNLOAD_CACHE}]")
+]])
+execute_process(COMMAND "${CMAKE_COMMAND}" -E env --unset=WEBFRONT_DOWNLOAD_CACHE CPM_SOURCE_CACHE= "${CMAKE_COMMAND}" -DROOT=${ROOT}
+        -P "${WORK}/default-cache.cmake" WORKING_DIRECTORY "${WORK}" OUTPUT_VARIABLE out ERROR_VARIABLE out)
+if(NOT out MATCHES "cache=\\[\\]")
+    message(FATAL_ERROR "An empty CPM_SOURCE_CACHE must not choose a cache: ${out}")
 endif()
 
 # A malformed integrity is refused before anything is downloaded.

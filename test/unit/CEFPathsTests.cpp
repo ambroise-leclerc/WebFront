@@ -1,29 +1,31 @@
-#include <catch2/catch_test_macros.hpp>
+#include "Bdd.hpp"
 #include <webfront/frontend/CEFPaths.hpp>
 
 #include <filesystem>
 
-SCENARIO("macOS CEF paths match the deployed framework layout") {
-    GIVEN("executables in different CMake target directories") {
+using namespace webfront::bdd;
+
+const Scenario macOSCEF{"macOS CEF paths match the deployed framework layout", [] {
+    given("executables in different CMake target directories", [&] {
         const std::filesystem::path buildRoot{"build-cef"};
         const auto                  deployedFramework = buildRoot / "Frameworks" / "Chromium Embedded Framework.framework";
 
-        WHEN("each target resolves its framework path") {
-            THEN("both locate the framework deployed in the parent directory") {
-                REQUIRE(webfront::cef::detail::macOSFrameworkPath(buildRoot / "examples" / "HelloWorld") == deployedFramework);
-                REQUIRE(webfront::cef::detail::macOSFrameworkPath(buildRoot / "webtest" / "webtest") == deployedFramework);
-            }
-        }
-    }
+        when("each target resolves its framework path", [&] {
+            then("both locate the framework deployed in the parent directory", [&] {
+                require(webfront::cef::detail::macOSFrameworkPath(buildRoot / "examples" / "HelloWorld") == deployedFramework);
+                require(webfront::cef::detail::macOSFrameworkPath(buildRoot / "webtest" / "webtest") == deployedFramework);
+            });
+        });
+    });
 
-    GIVEN("an application bundle with an arbitrary executable name") {
+    given("an application bundle with an arbitrary executable name", [&] {
         const std::filesystem::path contents = std::filesystem::path{"CustomApp.app"} / "Contents";
 
-        WHEN("the executable resolves its framework path") {
-            THEN("it uses Contents/Frameworks, matching the CEF library loader") {
-                REQUIRE(webfront::cef::detail::macOSFrameworkPath(contents / "MacOS" / "CustomApp")
+        when("the executable resolves its framework path", [&] {
+            then("it uses Contents/Frameworks, matching the CEF library loader", [&] {
+                require(webfront::cef::detail::macOSFrameworkPath(contents / "MacOS" / "CustomApp")
                         == contents / "Frameworks" / "Chromium Embedded Framework.framework");
-            }
-        }
-    }
-}
+            });
+        });
+    });
+}};

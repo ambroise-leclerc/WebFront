@@ -3,6 +3,9 @@
 `WEBFRONT_USE_MDDLOG` defaults to `OFF`. In that configuration WebFront remains
 header-only and builds with CMake 3.31, its usual compilers and generators. It neither
 searches for mddlog nor selects CMake's experimental `import std` gate.
+Its synchronous fallback registry also supports concurrent logging and registration: callbacks run outside the
+registry lock on the calling threads and may overlap. Removal waits for in-flight delivery when called outside a logging callback. A browser transport
+uses the link's lifetime guard as well, so a callback selected before detachment cannot access a destroyed link.
 
 With `ON`, WebFront owns `include/webfront/tooling/MddlogLogger.hpp`, the shared declarations
 in `include/webfront/tooling/LoggerApi.hpp`, and `cmake/mddlog/Logger.cpp`. `tooling/Logger.hpp`

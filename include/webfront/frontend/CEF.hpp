@@ -1019,6 +1019,12 @@ inline void openWindow(std::string url, webfront::detail::BoundContentPolicy con
 
 }  // namespace detail
 
+/// Closes the browser published as the native window (a CefBrowser*), on CEF's UI thread: the window follows, without
+/// asking the page (a host's request is not a navigation).
+inline void closeBrowser(void* browser) {
+    static_cast<CefBrowser*>(browser)->GetHost()->CloseBrowser(true);
+}
+
 inline void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy = {},
                  const WindowOptions& window = {}, const ViewLaunch& launch = {}) {
     detail::openWindow(frontend::detail::applicationUrl(address, port, file),

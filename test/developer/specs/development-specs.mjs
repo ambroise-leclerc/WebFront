@@ -1,6 +1,7 @@
 // Specs of wf dev's host side, which supplement the real-WASM browser regression in test/web/developer-specs.mjs.
 import {bundleContext} from '../../../js/developer/environment/bundler.mjs';
-import {observedRead, inputsChanged, compilerSession, waitForPoll, buildEntries, diagnosticsText, dev} from '../../../js/developer/environment/development.mjs';
+import {observedRead, inputsChanged, compilerSession, waitForPoll, buildEntries, diagnosticsText, dev, previewPage, previewHook} from '../../../js/developer/environment/development.mjs';
+import {applicationPage} from '../../../js/developer/environment/embed.mjs';
 import {memoryBridge} from '../memory-bridge.mjs';
 import {rejects, throws, esbuild} from '../support.mjs';
 
@@ -11,6 +12,47 @@ describe('wf dev', () => {
     const encode = text => new TextEncoder().encode(text);
 
     const lock = {format: 1, roots: {}, packages: {}};
+    for (const [label, manifest, message] of [
+        ['without a project', null, /No webfront.project.json: run wf init/],
+        ['without an entry', {format: 1, name: 'empty', version: '0.1.0'}, /Usage: wf dev <entry.tsx>/],
+    ]) it(`rejects ${label} without waiting for Ctrl+C or starting a compiler`, async () => {
+        const {bridge} = memoryBridge(new Map(manifest ? [['webfront.project.json', encode(JSON.stringify(manifest))]] : []));
+        const controller = new AbortController();
+        // Bound the regression: the broken command stays in its polling loop until this aborts it.
+        const timer = setTimeout(() => controller.abort(), 1000);
+        const states = [], output = [];
+        const frame = new EventTarget();
+        frame.addEventListener('webfront-dev-status', event => states.push(event.detail.state));
+        const worker = spyOn(globalThis, 'Worker').and.throwError('The compiler must not start');
+        try {
+            await rejects(dev([], {bridge, signal: controller.signal, preview: frame, write: text => output.push(text)}), message);
+            expect(controller.signal.aborted).toBe(false);
+            expect(worker).not.toHaveBeenCalled();
+            expect(states.at(-1)).toBe('stopped');
+            expect(output).toEqual([]);
+        } finally { clearTimeout(timer); controller.abort(); }
+    });
+
+    it('keeps watching when the manifest is malformed at startup', async () => {
+        const {bridge} = memoryBridge(new Map([['webfront.project.json', encode('{not json')]]));
+        const controller = new AbortController();
+        const states = [], output = [];
+        const frame = new EventTarget();
+        frame.addEventListener('webfront-dev-status', event => {
+            states.push(event.detail.state);
+            if (event.detail.state === 'failed') controller.abort();
+        });
+        const worker = spyOn(globalThis, 'Worker').and.throwError('The compiler must not start');
+        const timer = setTimeout(() => controller.abort(), 5000);
+        try {
+            await dev([], {bridge, signal: controller.signal, preview: frame, write: text => output.push(text)}).then(
+                () => fail('dev must not resolve'), () => {});
+            expect(states).toContain('failed');
+            expect(output.join('')).not.toBe('');
+            expect(worker).not.toHaveBeenCalled();
+        } finally { clearTimeout(timer); controller.abort(); }
+    });
+
     it('one esbuild context reads changed imports, reports syntax errors and recovers', async () => {
         const files = new Map([['main.ts', encode("import {value} from './value'; console.log(value)")], ['value.ts', encode('export const value = 1')]]);
         const context = await bundleContext(await esbuild(), {entry: 'main.ts', lock, readProject: async path => {
@@ -88,6 +130,17 @@ describe('wf dev', () => {
             callback({data: {type: 'error', error: 'syntax', diagnostics: [{text: 'bad', location: {file: 'project:two.ts', line: 4, column: 2}}]}});
             await rejects(second, error => diagnosticsText(error).startsWith('two.ts:4:3: bad'));
         } finally { session.close(); }
+    });
+
+    it('only the page of a preview announces its window, before the application\'s scripts', () => {
+        const decode = bytes => new TextDecoder().decode(bytes);
+        const files = new Map([['app.js', encode('')], ['app.css', encode('')]]);
+        const page = decode(previewPage(files));
+        expect(page.indexOf(previewHook)).toBeGreaterThan(0);
+        expect(page.indexOf(previewHook)).toBeLessThan(page.indexOf('<script src="/WebFront.js">'));
+        expect(page.indexOf(previewHook)).toBeLessThan(page.indexOf('<link rel="stylesheet"'));
+        expect(page.replace(previewHook, '')).toBe(decode(applicationPage(files)));
+        expect(decode(applicationPage(files))).not.toContain('webfront-preview-window');
     });
 
     it('build selects one explicit entry or every declared entry', () => {

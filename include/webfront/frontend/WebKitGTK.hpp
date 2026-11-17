@@ -4,6 +4,7 @@
 #include "../tooling/Logger.hpp"
 #include "Action.hpp"
 #include "Capture.hpp"
+#include "CloseRequest.hpp"
 #include "DefaultBrowser.hpp"
 #include "Downloads.hpp"
 #include "NativeWindow.hpp"
@@ -22,6 +23,7 @@
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -36,10 +38,6 @@
     #include <dlfcn.h>
     #include <sys/syscall.h>
     #include <unistd.h>
-
-namespace webfront::frontend {
-struct WebKitGTKFrontend;  // names the executor's host (UIExecutor.hpp)
-}
 
 namespace webfront::frontend::detail::webkitgtk {
 
@@ -139,6 +137,7 @@ public:
     const char* (*dialogDefault)(Object)                        = symbol<decltype(dialogDefault)>("webkit_script_dialog_prompt_get_default_text");
     void (*dialogPromptText)(Object, const char*)               = symbol<decltype(dialogPromptText)>("webkit_script_dialog_prompt_set_text");
     // User scripts: WebKitUserContentInjectedFrames TOP_FRAME = 1 and WebKitUserScriptInjectionTime START = 0.
+    Object (*contextNew)() = symbol<decltype(contextNew)>("webkit_web_context_new");
     Object (*contentManager)(Object)                            = symbol<decltype(contentManager)>("webkit_web_view_get_user_content_manager");
     Object (*scriptNew)(const char*, int, int, const char* const*, const char* const*) = symbol<decltype(scriptNew)>("webkit_user_script_new");
     void (*scriptAdd)(Object, Object)                           = symbol<decltype(scriptAdd)>("webkit_user_content_manager_add_script");
@@ -164,8 +163,19 @@ inline void requireMainThread() {
         throw std::runtime_error("WebKitGTK: construct the application and call show()/open() on the process main thread");
 }
 
-inline void initialize() {
+inline void initialize(SandboxMode mode = SandboxMode::development) {
     requireMainThread();
+    requireSandboxEnvironment(mode);
+    static std::optional<SandboxMode> prepared;
+    if (prepared && *prepared != mode)
+        throw std::runtime_error("WebKitGTK: cannot mix development and distribution frontends in one process");
+    if (!prepared) {
+        if (prepareSandboxLaunch(sandboxLauncherPath(), mode))
+            log::warn("WebKitGTK development mode: sandbox disabled for native views; select WEBFRONT_DISTRIBUTION for packaged applications");
+        else
+            log::info("WebKitGTK distribution mode: sandbox required");
+        prepared = mode;
+    }
     if (!api().init())
         throw std::runtime_error("WebKitGTK: cannot open a display; set DISPLAY or WAYLAND_DISPLAY for a working desktop, or run under xvfb-run -a");
 }
@@ -423,12 +433,18 @@ struct Session : FailureState {
         viewHandlers.push_back(a.connect(view, signal, reinterpret_cast<Api::Callback>(callback), this, nullptr, flags));
     }
 
-    void create() {
+    void create(SandboxMode mode = SandboxMode::development) {
         const auto data  = profileDirectory("XDG_DATA_HOME", ".local/share");
         const auto cache = profileDirectory("XDG_CACHE_HOME", ".cache");
         network          = a.networkNew(data.c_str(), cache.c_str());
-        view             = a.refSink(a.objectNew(a.viewType(), "network-session", network, nullptr));
-        window           = a.windowNew();
+        Api::Object context;
+        {
+            DevelopmentSandboxEnvironment environment(mode);
+            context = a.contextNew();
+        }
+        view = a.refSink(a.objectNew(a.viewType(), "web-context", context, "network-session", network, nullptr));
+        a.unref(context);
+        window = a.windowNew();
         a.windowTitle(window, windowOptions.title.c_str());
         a.windowSize(window, windowOptions.width, windowOptions.height);
         a.windowChild(window, view);
@@ -725,7 +741,7 @@ struct Session : FailureState {
     // generation of the publication that asked, so the host drops an answer that is not about the current window.
     static void onWaylandExported(Api::Object, const char* handle, void* data) {
         if (handle)
-            nativeWindowHostOf<WebKitGTKFrontend>().setPortalParent(std::string("wayland:") + handle, reinterpret_cast<std::uintptr_t>(data));
+            nativeWindowHostOf<WebKitGTKHost>().setPortalParent(std::string("wayland:") + handle, reinterpret_cast<std::uintptr_t>(data));
     }
     // gdk_wayland_toplevel_export_handle fails until the toplevel has its xdg role: retry every 100 ms for 5 s, then give up
     // (the identifier stays empty and a dialog is simply not parented).
@@ -733,7 +749,7 @@ struct Session : FailureState {
     // realized yet or the toplevel cannot be exported yet.
     bool tryPortalParent() {
         if (auto x11 = x11PortalParent(); !x11.empty()) {
-            nativeWindowHostOf<WebKitGTKFrontend>().setPortalParent(std::move(x11), portalGeneration);
+            nativeWindowHostOf<WebKitGTKHost>().setPortalParent(std::move(x11), portalGeneration);
             return true;
         }
         const auto target = surface();
@@ -750,7 +766,7 @@ struct Session : FailureState {
     }
     void startPortalExport() {
         // open() published this session's window just before run(): that is the generation current now.
-        portalGeneration = nativeWindowHostOf<WebKitGTKFrontend>().generation();
+        portalGeneration = nativeWindowHostOf<WebKitGTKHost>().generation();
         if (tryPortalParent())
             return;
         // GTK realizes the surface and the compositor gives the toplevel its role after present(): retry for 5 s.
@@ -778,18 +794,18 @@ struct OpenOptions {
     ViewLaunch                    launch{};
 };
 
-inline void open(std::string_view address, std::string_view port, std::string_view file, const OpenOptions& options = {}) {
-    initialize();
+inline void open(std::string_view address, std::string_view port, std::string_view file, const OpenOptions& options = {}, SandboxMode mode = SandboxMode::development) {
+    initialize(mode);
     // One window per process: a second open() on the main thread is refused before it creates a window.
-    if (uiExecutorHostOf<WebKitGTKFrontend>().executor().available())
+    if (uiExecutorHostOf<WebKitGTKHost>().executor().available())
         throw std::logic_error("WebKitGTKFrontend: open() is already running; a process opens one window at a time");
     Session session(webfront::detail::BoundContentPolicy{webfront::detail::applicationOrigin(address, port), options.contentPolicy}, options.window);
     session.launch = options.launch;
-    session.create();
+    session.create(mode);
     if (options.configure)
         options.configure(session);
     // g_idle_add_full is thread-safe and wakes the main context the loop of run() iterates.
-    auto& host = uiExecutorHostOf<WebKitGTKFrontend>();
+    auto& host = uiExecutorHostOf<WebKitGTKHost>();
     host.attach([&host] {
         constexpr int defaultIdle = 200;  // G_PRIORITY_DEFAULT_IDLE
         api().idleAddFull(
@@ -802,7 +818,7 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
             nullptr);
     });
     // GTK realizes the window at present(): run() then sets the X11 identifier, and the Wayland one arrives later.
-    auto& windowHost = nativeWindowHostOf<WebKitGTKFrontend>();
+    auto& windowHost = nativeWindowHostOf<WebKitGTKHost>();
     windowHost.publish({.kind = NativeWindowKind::gtk, .pointer = session.window, .portalParent = {}});
     struct Closing {
         UIExecutorHost&   host;
@@ -821,21 +837,35 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
 namespace webfront::frontend {
 
 /** @brief Optional Linux WebKitGTK 6.0 window. Construct and open on the process main thread. */
-struct WebKitGTKFrontend {
+template <detail::webkitgtk::SandboxMode Mode>
+struct BasicWebKitGTKFrontend {
+    static constexpr detail::webkitgtk::SandboxMode sandboxMode = Mode;
     /// The main thread while open() runs the GLib loop (see UIExecutor.hpp).
     [[nodiscard]] static UIExecutor uiExecutor() {
-        return uiExecutorHostOf<WebKitGTKFrontend>().executor();
+        return uiExecutorHostOf<WebKitGTKHost>().executor();
     }
 
     /// The GtkWindow, readable on the main thread while open() runs (see NativeWindow.hpp).
     [[nodiscard]] static NativeWindow nativeWindow() {
-        return nativeWindowHostOf<WebKitGTKFrontend>().window();
+        return nativeWindowHostOf<WebKitGTKHost>().window();
     }
 
     static constexpr Action action{Action::closeServerAfterOpen};
+    static constexpr bool   requiresMainThread = true;  // GTK is initialized and run on the process main thread
+
+    /// Asks the window to close, from any thread; false when no window is open (see CloseRequest.hpp).
+    static bool requestClose([[maybe_unused]] std::optional<UISession> session = std::nullopt) noexcept {
+#if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
+        return detail::requestWindowClose(uiExecutor(), nativeWindow(), [](const NativeWindowHandle& window) {
+            detail::webkitgtk::api().windowClose(window.pointer);  // emits close-request, as the window's button does
+        }, session);
+#else
+        return false;
+#endif
+    }
     static void             initialize() {
 #if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
-        detail::webkitgtk::initialize();
+        detail::webkitgtk::initialize(Mode);
 #else
         throw std::runtime_error("WebKitGTKFrontend is unavailable. Configure on Linux with -DWEBFRONT_EMBED_WEBKITGTK=ON");
 #endif
@@ -848,7 +878,7 @@ struct WebKitGTKFrontend {
     }
     static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy, const WindowOptions& window) {
 #if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
-        detail::webkitgtk::open(address, port, page, {.contentPolicy = policy, .window = window});
+        detail::webkitgtk::open(address, port, page, {.contentPolicy = policy, .window = window}, Mode);
 #else
         (void)window;
         (void)address;
@@ -861,7 +891,7 @@ struct WebKitGTKFrontend {
     static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy, const WindowOptions& window,
                      const ViewLaunch& launch) {
 #if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
-        detail::webkitgtk::open(address, port, page, {.contentPolicy = policy, .window = window, .launch = launch});
+        detail::webkitgtk::open(address, port, page, {.contentPolicy = policy, .window = window, .launch = launch}, Mode);
 #else
         (void)launch;
         open(address, port, page, policy, window);

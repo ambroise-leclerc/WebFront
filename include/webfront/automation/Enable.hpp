@@ -28,8 +28,41 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <type_traits>
 
 namespace webfront::automation {
+/// `from + after`, saturated: a very large duration (`seconds::max()` to disable a delay) must not overflow the clock's tick
+/// count, which is undefined behavior and would yield a deadline already past. Nothing is computed that can overflow: the room
+/// left before `time_point::max()` is measured in whole seconds (never more than twice the clock's range, whatever the origin,
+/// negative included), `after` is compared to it without being incremented, and the sum is made in two steps when `after`
+/// alone exceeds the clock's tick range while the deadline stays representable. A zero or negative duration returns `from`.
+template <typename Duration>
+[[nodiscard]] constexpr std::chrono::steady_clock::time_point deadlineAfter(std::chrono::steady_clock::time_point from, Duration after) noexcept {
+    using Clock = std::chrono::steady_clock;
+    using std::chrono::duration_cast;
+    using std::chrono::seconds;
+    if (after <= Duration::zero())
+        return from;
+    const auto capacity = duration_cast<seconds>(Clock::time_point::max().time_since_epoch());
+    const auto room     = capacity - duration_cast<seconds>(from.time_since_epoch());
+    const auto whole    = duration_cast<seconds>(after);
+    // One second of margin for the truncations; `room - 1` cannot overflow, `room` being at least 1.
+    if (whole >= room - seconds{1})
+        return Clock::time_point::max();
+    if (whole < capacity)
+        return from + after;  // `after` converts to ticks: it is below the clock's range
+    // `after` exceeds the range of the ticks but the deadline does not: `from` is negative, so a first step of the largest
+    // whole number of `Duration` the clock can hold stays representable, then the rest.
+    const auto step = duration_cast<Duration>(Clock::duration::max());
+    return from + duration_cast<Clock::duration>(step) + (after - step);
+}
+
+/// The end of the startup window, saturated (see `deadlineAfter`).
+[[nodiscard]] constexpr std::chrono::steady_clock::time_point startupDeadline(std::chrono::steady_clock::time_point launched,
+                                                                              std::chrono::seconds startup) noexcept {
+    return deadlineAfter(launched, startup);
+}
+
 struct AutomationOptions {
     /// Granted operations (`check`, `build`, `test`, `preview`, `inspect`, `interact`, and the setup grants). None
     /// leaves only session discovery.
@@ -45,10 +78,12 @@ struct AutomationOptions {
     /// Per-operation native deadline.
     std::chrono::seconds timeout{120};
     /// How long the window may take to claim the session, counted from the activation: a renderer blocked before its first
-    /// poll has no operation for `timeout` to expire. Past it the session is revoked like a deadline.
+    /// poll has no operation for `timeout` to expire. Past it the session is revoked like a deadline. Must be positive;
+    /// `seconds::max()` disables the delay.
     std::chrono::seconds startupTimeout{120};
     /// After a deadline revokes the session, how long the window may take to close on its own. `window.close()` cannot run
     /// in a renderer stuck in a loop, so past this grace the endpoint and record are removed and `onUnresponsive` is called.
+    /// Must not be negative; `milliseconds::max()` waits for the window without limit.
     std::chrono::milliseconds closeGrace{5000};
     /// What to do with a window that did not close. By default the process ends with status 72 (as `webfront-agent`
     /// does): `show()` cannot be interrupted from another thread. Set it to close the application another way.
@@ -57,10 +92,15 @@ struct AutomationOptions {
     bool announce = true;
 };
 
-template <typename App>
+// Clock is a time source returning steady_clock::time_point; tests advance it without sleeping through deadlines.
+template <typename App, typename Clock = std::chrono::steady_clock>
 class Automation {
+    // Session keeps its deadlines in steady_clock::time_point: an injected clock must return that type.
+    static_assert(std::is_same_v<decltype(Clock::now()), std::chrono::steady_clock::time_point>,
+                  "Automation's Clock must return std::chrono::steady_clock::time_point");
+
 public:
-    /// @throws std::invalid_argument for an unknown grant, an empty `listen` path, or a `listen` directory inside the project
+    /// @throws std::invalid_argument for an unknown grant, a non-positive `startupTimeout`, a negative `closeGrace`, an empty `listen` path, or a `listen` directory inside the project
     /// @throws std::runtime_error (including std::filesystem::filesystem_error) when the endpoint or the discovery directory cannot be
     ///         created or is refused (an existing one that other users can read). Nothing stays registered in the application.
     Automation(App& app, AutomationOptions options)
@@ -72,7 +112,7 @@ public:
           endpointDirectory(channel.directory()),
           grace(options.closeGrace),
           unresponsive(std::move(options.onUnresponsive)),
-          launched(std::chrono::steady_clock::now()),
+          launched(Clock::now()),
           startup(options.startupTimeout),
           // Last of the fallible steps: the binding registers callbacks in the application and cannot take them back, so
           // everything that can refuse the activation (grants, endpoint, record) has been validated before it.
@@ -81,10 +121,11 @@ public:
         // A renderer in a loop never runs that request: after the grace the window is declared unresponsive.
         supervisor = std::jthread([this](std::stop_token stop) {
             while (!stop.stop_requested()) {
-                const bool starting = !session->wasReady() && !session->isClosed();
-                if (session->expire() || (starting && std::chrono::steady_clock::now() - launched > startup))
+                if (session->expire(Clock::now()) || session->expireStartup(startupDeadline(launched, startup), Clock::now()))
                     session->close("Native automation deadline exceeded");
                 if (session->isClosed()) {
+                    // The grace starts when the window is asked to close, so a closeBrowser() that blocks does not extend it.
+                    const auto deadline = deadlineAfter(Clock::now(), grace);
                     binding.closeBrowser();
                     // Whatever revoked the session (a deadline, a signal, an attached client's --shutdown, the page's own failure
                     // report, a lost WebSocket), the window was only asked to close: a stuck renderer ignores it, and a lost
@@ -92,8 +133,7 @@ public:
                     // native window is gone, so the grace always runs.
                     if (Object(session->describe()).string("failure") == "Developer window disconnected")
                         revoke();  // the connection is gone: no endpoint nor running record may remain meanwhile
-                    const auto deadline = std::chrono::steady_clock::now() + grace;
-                    while (!stop.stop_requested() && std::chrono::steady_clock::now() < deadline)
+                    while (!stop.stop_requested() && Clock::now() < deadline)
                         std::this_thread::sleep_for(std::chrono::milliseconds{20});
                     if (!stop.stop_requested()) {
                         revoke();
@@ -166,6 +206,10 @@ private:
     static std::shared_ptr<Session> make(App& app, const AutomationOptions& options) {
         if (options.listen.empty())
             throw std::invalid_argument("Automation needs a new private `listen` directory for its endpoint");
+        if (options.startupTimeout <= std::chrono::seconds::zero())
+            throw std::invalid_argument("Automation startupTimeout must be positive");
+        if (options.closeGrace < std::chrono::milliseconds::zero())
+            throw std::invalid_argument("Automation closeGrace must not be negative");
         return std::make_shared<Session>(SessionOptions{.project = app.projectDirectory(), .allow = options.grants, .timeout = options.timeout, .callbacks = options.callbacks});
     }
     static discovery::Entry record(const Session& session, const std::filesystem::path& endpoint) {

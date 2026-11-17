@@ -1,23 +1,26 @@
 import {Terminal} from '@xterm/xterm';
 import {FitAddon} from '@xterm/addon-fit';
-import {LineEditor, tokenize, wordAtEnd, unicodeProvider, clearScreen, historyLimit} from './terminal.mjs';
+import {LineEditor, tokenize, wordAtEnd, unicodeProvider, clearScreen, historyLimit, inline} from './terminal.mjs';
 import {manifestPath, setManifestDirectory} from './manifest.mjs';
 import {discoverCommands, runCommand, reservedNames} from './commands.mjs';
 export {discoverCommands, reservedNames};
 import {validateLock} from './packages.mjs';
 import {call, readProject, publish, writeChunks} from './io.mjs';
 import {isUnsafe} from './paths.mjs';
-import {createStarter} from './starter.mjs';
+import {createStarter, starterNames} from './starter.mjs';
 import {install, initProject} from './installer.mjs';
 import {restore, describeRegistry} from './restore.mjs';
 import {loadProject, syncNotice, resolveEntry, embedTarget, lockPath, packageRoot, noManifest} from './project.mjs';
 import {parseRunOptions, scriptCommand, execTarget, scriptHost, runWorker, runResult, runDeadline, secondsLeft} from './scripts.mjs';
-import {build, dev, showPreview} from './development.mjs';
+import {build, dev, showPreview, previewPage} from './development.mjs';
 import {parseTestOptions, specFiles, jasmineCore, runnerFiles, runInFrame, reportResult, fitResult, stoppedRun, abortable, testDirectory} from './testing.mjs';
 import {generateProvider, applicationPage} from './embed.mjs';
 import {typescriptPackage, parseCheckOptions, checkHost} from './typecheck.mjs';
 import {pinnedStarters} from './bootstrap.mjs';
+import {createWorkspace, isManaged} from './workspace.mjs';
 import {connectAutomation as connectAgent, clipText, automationHelp, onAutomationNotice} from './automation.mjs';
+import {ls, cat, tree, mounts, fileCommandHelp, withheld, withheldReason} from './files.mjs';
+import {dependencyTree, why as whyInstalled, info as packageInfo} from './dependencies.mjs';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -91,7 +94,8 @@ function dependencyNotices(lock, packages) {
 }
 
 export async function compile(bridge, entry, signal) {
-    const lock = await readLock(bridge);
+    // Without dependency there is no lock: wf init writes the manifest only, and wf dev and wf build already accept that.
+    const lock = await readLock(bridge, true);
     const packages = await readPackages(bridge, lock, signal);
     const files = await buildInWorker(bridge, {type: 'build', entry, lock, packages}, signal);
     files.set('index.html', applicationPage(files));
@@ -99,7 +103,7 @@ export async function compile(bridge, entry, signal) {
 }
 
 async function create([starter, directory, ...extra], {bridge, config, signal}) {
-    if (!starter || extra.length) throw new Error('Usage: wf create <starter> [directory]');
+    if (!starter || extra.length) throw new Error(`Usage: wf create <starter> [directory]${availableStarters(config)}`);
     return createStarter(bridge, config, [starter, directory ?? 'ui'], {signal});
 }
 
@@ -125,6 +129,7 @@ async function preview(args, {bridge, signal, preview: frame}) {
     const project = await loadProject(bridge);
     const entry = resolveEntry(project.manifest, args[0], 'wf preview <entry.tsx>');
     const result = await compile(bridge, entry, signal);
+    result.files.set('index.html', previewPage(result.files));
     await publish(bridge, '.webfront/developer/preview', result.files, {signal});
     showPreview(frame);
     return syncNotice(project) + 'Preview ready.';
@@ -206,6 +211,9 @@ async function check(args, {bridge, signal, write = () => {}, createWorker = che
     return syncNotice(project) + runResult('Type check', outcome, host.publications);
 }
 
+// Milliseconds before each new attempt to empty the directory of a finished run; the last attempt is not followed by a wait.
+const cleanupRetryDelays = [20, 40, 80, 160, 320, undefined];
+
 // wf test [--timeout <seconds>] [pattern]: the specs of "test.specs" under the Jasmine of the lock, in a frame of this page.
 // context.onReport receives the structured report, also when the run fails. --timeout, never later than the deadline
 // of the wf script that runs this command, covers the whole command: no step waits for the bridge past it, and Ctrl+C
@@ -253,23 +261,100 @@ async function test(args, {bridge, signal, write = () => {}, createFrame, onRepo
     } finally {
         clearTimeout(timer);
         signal?.removeEventListener('abort', interrupt);
-        // The files of the run are not needed any more: an empty directory replaces them, for at most two seconds.
-        let cleanupTimer;
+        // The files of the run are not needed any more: an empty directory replaces them, for at most two seconds. The
+        // server may still be sending a file to a frame removed in the middle of its run, and Windows refuses to replace
+        // a directory with an open file: the publication is tried again once the server has had time to close it.
+        let cleanupTimer, retryTimer, expired = false;
+        const empty = async () => {
+            for (const delay of cleanupRetryDelays) {
+                try { return await publish(bridge, directory, new Map()); } catch { /* tried again below */ }
+                if (expired || delay === undefined) return;
+                await new Promise(resolve => { retryTimer = setTimeout(resolve, delay); });
+            }
+        };
         try {
-            await Promise.race([publish(bridge, directory, new Map()).catch(() => {}),
-                new Promise(resolve => { cleanupTimer = setTimeout(resolve, 2000); })]);
-        } finally { clearTimeout(cleanupTimer); }
+            await Promise.race([empty(), new Promise(resolve => { cleanupTimer = setTimeout(resolve, 2000); })]);
+        } finally {
+            expired = true;
+            clearTimeout(cleanupTimer);
+            clearTimeout(retryTimer);
+        }
     }
 }
 
-async function list(_args, {bridge}) {
+// wf list [--tree]: the locked packages, or their graph under the roots of the manifest.
+async function list(args, {bridge}) {
+    if (args.length > 1 || (args.length && args[0] !== '--tree')) throw new Error(`Usage: ${usage.list}`);
     const project = await loadProject(bridge);
-    const names = Object.keys(project.lock?.packages ?? {}).sort().join('\n');
+    if (args.length) return syncNotice(project) + dependencyTree(project.lock);
+    const names = Object.keys(project.lock?.packages ?? {}).sort().map(inline).join('\n');
     return syncNotice(project) + (names || 'No installed packages.');
 }
 
-const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf run [--timeout <seconds>] <script> [args...]\nwf exec [--timeout <seconds>] <package>[:<entry>] [args...]\nwf check [--timeout <seconds>]\nwf test [--timeout <seconds>] [pattern]\nwf list\nwf build [entry.tsx|name]\nwf dev [entry.tsx|name]\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a command. No system shell is exposed.' + automationHelp();
-const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, check, test, build, dev, preview, embed, list, help};
+// wf why <package> and wf info <package>: read from the lock, like wf list.
+const lockQuery = (name, answer) => async (args, {bridge}) => {
+    if (args.length !== 1 || args[0].startsWith('-')) throw new Error(`Usage: ${usage[name]}`);
+    const project = await loadProject(bridge);
+    return syncNotice(project) + answer(project.lock, args[0]);
+};
+const why = lockQuery('why', whyInstalled);
+const info = lockQuery('info', packageInfo);
+
+const availableStarters = config => starterNames(config).length ? ` (starters: ${starterNames(config).join(', ')})` : '';
+const usage = {
+    init: 'wf init [name]', create: 'wf create <starter> [directory]', install: 'wf install [--update] [<package>[@range] ...]',
+    restore: 'wf restore [--offline]', run: 'wf run [--timeout <seconds>] <script> [args...]',
+    exec: 'wf exec [--timeout <seconds>] <package>[:<entry>] [args...]', check: 'wf check [--timeout <seconds>]',
+    test: 'wf test [--timeout <seconds>] [pattern]', list: 'wf list [--tree]', why: 'wf why <package>', info: 'wf info <package>', build: 'wf build [entry.tsx|name]', dev: 'wf dev [entry.tsx|name]',
+    preview: 'wf preview [entry.tsx|name]', embed: 'wf embed <provider> | <entry.tsx> --output <Provider.hpp>',
+    help: 'wf help [command|agents]'};
+// What a command does, in one or two lines, for wf help <command>.
+const purposes = {
+    init: 'Writes webfront.project.json, the manifest every other command reads; it never replaces one.',
+    create: config => 'Writes the sources of a starter into a new directory (ui by default); it never replaces one.\n' +
+        `<starter> names a starter of this environment, not your project${availableStarters(config)}.\nThen: wf init, wf dev ui/<entry>.`,
+    install: 'Resolves npm packages, verifies them and records exact versions in the lock; installation scripts are not run.',
+    restore: 'Rebuilds the package cache from the lock; --offline only verifies it.',
+    run: 'Runs a script of the manifest ("scripts") or a module of the project.',
+    exec: 'Runs the command-line entry of an installed package.',
+    check: 'Type-checks the entries with the locked typescript (wf install typescript) and tsconfig.json.',
+    test: 'Runs the Jasmine specs of "test": {"specs": [...]} under the locked jasmine-core (wf install jasmine-core).',
+    list: 'Lists the installed packages; --tree shows them under the dependencies of the manifest that bring them.',
+    why: 'Shows which dependencies of the manifest bring a package, as chains of requirements.',
+    info: 'Describes an installed package: license, integrity, files, dependencies and dependents.',
+    build: 'Compiles the entries once into .webfront/developer/build/.',
+    dev: 'Compiles a TypeScript/TSX entry (ui/main.tsx), shows the interface in the window and rebuilds on every save. Ctrl+C stops it.',
+    preview: 'Compiles an entry once and shows the interface in the window.',
+    embed: 'Compiles an entry and packages it as a C++ header for the distributed application.',
+    help: 'Lists the commands, describes one, or with agents gives the sequence for an agent.'};
+// The first thing an agent must learn: the model, the sequence, and that it can run the commands itself (docs/DEVELOPING_WITH_AGENTS.md).
+const agentsHelp = config => `A WebFront application is C++ with a TypeScript/TSX interface in ui/, developed with wf dev.
+New interface, in order:
+  wf create app                 a starter${availableStarters(config)}, not the name of your project
+  wf init                       the manifest webfront.project.json
+  wf install <package>          only for the npm packages the interface imports
+  wf dev ui/main.ts             rebuilds on every save; wf preview builds once
+  wf check, wf test, wf embed <entry> --output generated/AppUI.hpp
+An agent runs these itself and reads JSON results, with webfront-agent (WebFront configured with
+-DWEBFRONT_BUILD_AUTOMATION=ON) once the application has called webfront::automation::enableAutomation:
+  webfront-agent --list                                                      the shared sessions
+  webfront-agent --attach DIRECTORY --operation create --starter app
+  webfront-agent --attach DIRECTORY --operation preview --entry ui/main.ts   after each edit, in place of wf dev
+  webfront-agent --attach DIRECTORY --mcp                                    the same operations as MCP on stdio
+  webfront-agent --agent-help                                                rules and contract
+Guide: docs/DEVELOPING_WITH_AGENTS.md`;
+function help([topic, ...extra] = [], {config} = {}) {
+    if (extra.length) throw new Error(`Usage: ${usage.help}`);
+    if (topic === 'agents' || topic === '--agents') return agentsHelp(config);
+    if (topic !== undefined) {
+        if (!Object.hasOwn(usage, topic)) throw new Error(`Unknown help topic: ${topic}. Usage: ${usage.help}`);
+        const purpose = purposes[topic];
+        return `${usage[topic]}\n${typeof purpose === 'function' ? purpose(config) : purpose}`;
+    }
+    return Object.values(usage).join('\n') + '\nAgents: wf help agents (the sequence, and how to run wf in JSON or MCP).' +
+        '\nCtrl+C interrupts a command. No system shell is exposed.' + automationHelp();
+}
+const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, check, test, build, dev, preview, embed, list, why, info, help};
 
 let executionToken = null, executionCount = 0, automationActive = false, cppActive = 0;
 export async function exclusive(context, action, {settlesOnAbort = false} = {}) {
@@ -431,12 +516,20 @@ const builtins = {
     help: (_args, {cppCommands = new Map()}) => {
         const width = Math.max(7, ...[...cppCommands.keys()].map(name => name.length));
         const line = (name, text) => `${name.padEnd(width)}  ${text}`;
-        return [line('wf', 'Project commands: wf help lists them'), line('clear', 'Clear the screen and its scrollback'),
+        return [line('wf', 'Project commands (manifest, packages, build): wf help lists them'),
+            ...Object.entries(fileCommandHelp).map(([name, text]) => line(name, text)),
+            line('clear', 'Clear the screen and its scrollback'),
             line('history', 'List the commands typed in this project; history -c clears them'),
             line('exit', 'End the session [with an exit code]'), line('help', 'List the commands'),
             ...[...cppCommands].map(([name, text]) => line(name, text)),
-            'Ctrl+C interrupts a command. No system shell is exposed.'].join('\n');
+            'Paths are relative to the project. Ctrl+C interrupts a command. No system shell is exposed.'].join('\n');
     },
+    ls: (args, {bridge, editor}) => ls(args, {bridge, width: editor?.columns?.() ?? 80, manifest: () => cachedManifest(bridge)}),
+    cat: (args, {bridge, signal}) => cat(args, {bridge, signal}),
+    tree: (args, {bridge, signal}) => tree(args, {bridge, signal}),
+    mounts: (args, {bridge, config}) => mounts(args, {bridge, config}),
+    // The file commands kept for the terminal without being provided: each says what to use instead.
+    ...Object.fromEntries(withheld.map(name => [name, () => { throw new Error(withheldReason(name)); }])),
     clear: () => clearScreen,
     history: async (args, {editor, bridge}) => {
         if (args.length === 1 && args[0] === '-c') {
@@ -479,6 +572,8 @@ export async function runLine(line, context) {
         try { return await runCommand(context.bridge, command, args, {signal: context.signal, write}); }
         finally {--cppActive;}
     }
+    // The project commands keep their prefix, so that their names stay free for the application's (ADR-023).
+    if (Object.hasOwn(commands, command)) throw new Error(`Unknown command: ${command}. Did you mean: wf ${[command, ...args].join(' ')}?`);
     throw new Error(`Unknown command: ${command}. Type help to list the commands.`);
 }
 
@@ -515,6 +610,12 @@ async function manifestNames(bridge, command) {
     catch { return []; }
 }
 
+// The names of the locked packages, for wf why and wf info.
+async function lockedNames(bridge) {
+    try { return Object.values((await readLock(bridge, true)).packages).map(node => node.name); }
+    catch { return []; }
+}
+
 /**
  * Completes the word at the end of a line, escaped or quoted: command names first, then wf subcommands, the manifest's
  * scripts after wf run, its entries and providers after wf preview and wf embed, and project paths. Resolves with
@@ -528,9 +629,11 @@ export async function complete(line, {bridge, cppCommands = new Map()}) {
     let before;
     try { before = tokenize(line.slice(0, typed.start)); }
     catch { return matching([]); }
-    if (!before.length) return matching(['wf', ...Object.keys(builtins), ...cppCommands.keys()]);
+    if (!before.length) return matching(['wf', ...Object.keys(builtins).filter(name => !withheld.includes(name)), ...cppCommands.keys()]);
     if (before[0] === 'wf' && before.length === 1) return matching(Object.keys(commands));
     if (before[0] === 'wf' && before.length === 2 && before[1] === 'run') return matching(await manifestNames(bridge, 'run'));
+    if (before[0] === 'wf' && before.length === 2 && (before[1] === 'why' || before[1] === 'info')) return matching(await lockedNames(bridge));
+    if (before[0] === 'wf' && before.length === 2 && before[1] === 'list') return matching(['--tree']);
     if (before[0] === 'wf' && before.length === 2) return matching((await Promise.all([manifestNames(bridge, before[1]), projectPaths(bridge, word)])).flat());
     return matching(await projectPaths(bridge, word));
 }
@@ -539,8 +642,11 @@ export async function complete(line, {bridge, cppCommands = new Map()}) {
  * Mounts the terminal in `element`. Each page has its own session: its history comes from the project, its C++
  * commands run in this browser's session. `onExit(code)` ends the session after exit (by default, closes the window).
  * `fitToElement: false` keeps the terminal's size as set by terminal.resize() instead of following the element's.
+ * With a `preview` frame, the first terminal mounted lays the page out (workspace.mjs): the terminal alone while the
+ * project has no interface, then the interface over the whole window and the terminal in a floating window that an icon
+ * opens and collapses. `workspace: false` leaves the page as it is.
  */
-export async function mount({bridge, config, terminal: element, preview, onExit, fitToElement = true}) {
+export async function mount({bridge, config, terminal: element, preview, onExit, fitToElement = true, workspace: layout = true}) {
     setManifestDirectory(config?.manifestDirectory);
     const link = document.createElement('link');
     link.rel = 'stylesheet';
@@ -555,6 +661,7 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
     terminal.unicode.activeVersion = unicodeProvider.version;
     const fit = new FitAddon();
     terminal.loadAddon(fit);
+    const workspace = layout && preview && !isManaged(preview) ? await createWorkspace({bridge, element, frame: preview}) : null;
     terminal.open(element);
     fit.fit();
     const write = text => terminal.write(text);
@@ -571,18 +678,29 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
     const context = {bridge, config, preview, cppCommands, onExit};
     const editor = new LineEditor({write, columns: () => terminal.cols, rows: () => terminal.rows, prompt: '> ', history,
         remember: line => rememberLine(bridge, line),
-        run: (line, signal) => runLine(line, {...context, editor, signal, write: text => editor.write(text)}),
+        run: async (line, signal) => {
+            workspace?.command(true);  // the tab shows that a command runs, also while the terminal is collapsed
+            try { return await runLine(line, {...context, editor, signal, write: text => editor.write(text)}); }
+            finally { workspace?.command(false); }
+        },
         complete: line => complete(line, context)});
     terminal.onResize(() => editor.resized());
-    if (fitToElement) new ResizeObserver(() => fit.fit()).observe(element);
+    // An element without a size is not laid out: fitting to it would shrink the terminal and reflow its lines.
+    const fitTerminal = () => { if (element.clientWidth && element.clientHeight) fit.fit(); };
+    if (fitToElement) new ResizeObserver(fitTerminal).observe(element);
     terminal.onData(data => editor.handle(data));
     // Automation must be visible to the person using the terminal: say so once it is connected, grants and attach path included.
     onAutomationNotice(text => {
         write(`\r\x1b[K\x1b[33m${text}\x1b[0m\r\n`);
         if (!editor.busy) editor.showPrompt();
+        workspace?.open({focus: false});  // a collapsed terminal would hide the notice
     });
     editor.showPrompt();
     for (const data of early) editor.handle(data);
-    terminal.focus();
-    return {terminal, editor};
+    if (workspace) {
+        // The interface the project already has fills the window; the keys go to it while the terminal is collapsed.
+        if (workspace.interfaceExists) showPreview(preview);
+        workspace.attach({focus: () => terminal.focus(), fit: fitToElement ? fitTerminal : undefined});
+    } else terminal.focus();
+    return {terminal, editor, workspace};
 }

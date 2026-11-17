@@ -2,8 +2,7 @@
 #include "InjectableNetworking.hpp"
 #include "Mocks.hpp"
 #include "TemporaryDirectory.hpp"
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
+#include "Bdd.hpp"
 #include <webfront/http/BlockingWorker.hpp>
 #include <webfront/http/HTTPServer.hpp>
 
@@ -15,6 +14,8 @@
 #include <string_view>
 #include <future>
 #include <thread>
+
+using namespace webfront::bdd;
 #ifndef _WIN32
     #include <sys/resource.h>
 #endif
@@ -43,15 +44,6 @@ struct ProviderFiles {
 using Files  = MockFileSystem<ProviderFiles>;
 using Router = Server<RouteNet, Files>;
 
-template <typename Condition>
-bool waitFor(Condition condition, std::chrono::milliseconds limit = 10s) {
-    for (auto waited = 0ms; waited < limit; waited += 1ms) {
-        if (condition()) return true;
-        std::this_thread::sleep_for(1ms);
-    }
-    return false;
-}
-
 void send(std::string_view request) {
     std::vector<std::byte> bytes;
     for (const char c : request) bytes.push_back(static_cast<std::byte>(c));
@@ -72,7 +64,11 @@ struct Fixture {
     /// Sends the request and waits for the end of the connection; returns what the server wrote.
     std::string answer(std::string_view request) {
         send(request);
-        REQUIRE(waitFor([] { return InjectableSocket::shutdownCount() > 0; }));
+        requireEventually(
+            [] {
+                return InjectableSocket::shutdownCount() > 0;
+            },
+            10s);
         return InjectableSocket::writtenText();
     }
 };
@@ -95,58 +91,58 @@ bool contains(const std::string& haystack, std::string_view needle) { return hay
 
 } // namespace
 
-SCENARIO("Route prefixes are validated when registered") {
+const Scenario routePrefixes{"Route prefixes are validated when registered", [] {
     RouteTable table;
     const auto handler = [](const RouteRequest&) { return RouteReply{}; };
-    GIVEN("prefixes that cannot be routes") {
+    given("prefixes that cannot be routes", [&] {
         for (const auto* prefix : {"", "/", "/files", "files/", "/a//b/", "/a/../b/", "/a/./b/", "/a b/", "/a?b/", "/a#/", "/a%2e/"}) {
-            THEN("'" << prefix << "' is refused") { REQUIRE_THROWS_AS(table.add(prefix, handler), std::invalid_argument); }
+            then("'", prefix, "' is refused", [&] { requireThrows<std::invalid_argument>([&] { (void)table.add(prefix, handler); }); });
         }
-        THEN("a route without handler is refused") { REQUIRE_THROWS_AS(table.add("/webfront/services/files/", nullptr), std::invalid_argument); }
-    }
-    GIVEN("a registered prefix") {
+        then("a route without handler is refused", [&] { requireThrows<std::invalid_argument>([&] { (void)table.add("/webfront/services/files/", nullptr); }); });
+    });
+    given("a registered prefix", [&] {
         auto registration = table.add("/webfront/services/files/", handler);
-        THEN("the same prefix, a longer one and a shorter one collide") {
-            REQUIRE_THROWS_AS(table.add("/webfront/services/files/", handler), std::invalid_argument);
-            REQUIRE_THROWS_AS(table.add("/webfront/services/files/deep/", handler), std::invalid_argument);
-            REQUIRE_THROWS_AS(table.add("/webfront/services/", handler), std::invalid_argument);
-        }
-        THEN("a sibling prefix, even sharing the name's start, is accepted") {
-            REQUIRE_NOTHROW(table.add("/webfront/services/files2/", handler));
-            REQUIRE_NOTHROW(table.add("/webfront/services/dialogs/", handler));
-        }
-        THEN("lookup matches paths under the prefix only") {
-            REQUIRE(table.find("/webfront/services/files/token"));
-            REQUIRE_FALSE(table.find("/webfront/services/files"));
-            REQUIRE_FALSE(table.find("/webfront/services/filesX/token"));
-            REQUIRE_FALSE(table.find("/WebFront.js"));
-        }
-        THEN("unregistering frees the prefix and the lookup") {
+        then("the same prefix, a longer one and a shorter one collide", [&] {
+            requireThrows<std::invalid_argument>([&] { (void)table.add("/webfront/services/files/", handler); });
+            requireThrows<std::invalid_argument>([&] { (void)table.add("/webfront/services/files/deep/", handler); });
+            requireThrows<std::invalid_argument>([&] { (void)table.add("/webfront/services/", handler); });
+        });
+        then("a sibling prefix, even sharing the name's start, is accepted", [&] {
+            requireNothrow([&] { (void)table.add("/webfront/services/files2/", handler); });
+            requireNothrow([&] { (void)table.add("/webfront/services/dialogs/", handler); });
+        });
+        then("lookup matches paths under the prefix only", [&] {
+            require(table.find("/webfront/services/files/token"));
+            require(!table.find("/webfront/services/files"));
+            require(!table.find("/webfront/services/filesX/token"));
+            require(!table.find("/WebFront.js"));
+        });
+        then("unregistering frees the prefix and the lookup", [&] {
             registration.reset();
-            REQUIRE_FALSE(table.find("/webfront/services/files/token"));
-            REQUIRE_NOTHROW(table.add("/webfront/services/files/", handler));
-        }
-        THEN("a moved registration keeps the route until it is destroyed") {
+            require(!table.find("/webfront/services/files/token"));
+            requireNothrow([&] { (void)table.add("/webfront/services/files/", handler); });
+        });
+        then("a moved registration keeps the route until it is destroyed", [&] {
             auto moved = std::move(registration);
-            REQUIRE(table.find("/webfront/services/files/x"));
+            require(table.find("/webfront/services/files/x"));
             moved = {};
-            REQUIRE_FALSE(table.find("/webfront/services/files/x"));
-        }
-    }
-    GIVEN("a registration outliving its table") {
+            require(!table.find("/webfront/services/files/x"));
+        });
+    });
+    given("a registration outliving its table", [&] {
         RouteTable::Registration registration;
         {
             RouteTable shortLived;
             registration = shortLived.add("/webfront/services/files/", handler);
         }
-        THEN("destroying it is harmless") { REQUIRE_NOTHROW(registration.reset()); }
-    }
-}
+        then("destroying it is harmless", [&] { requireNothrow([&] { registration.reset(); }); });
+    });
+}};
 
-SCENARIO("A route streams its reply in bounded chunks") {
+const Scenario routeStreams{"A route streams its reply in bounded chunks", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
-    GIVEN("a body several chunks long") {
+    given("a body several chunks long", [&] {
         std::string body;
         for (std::size_t index = 0; index < 3 * DefaultBuffersPolicy::emissionBufferSize + 5; ++index) body.push_back(static_cast<char>('a' + index % 26));
         std::size_t largestChunk = 0;
@@ -161,28 +157,28 @@ SCENARIO("A route streams its reply in bounded chunks") {
             };
             return reply;
         });
-        WHEN("the browser requests it with a percent-encoded name and a query") {
+        when("the browser requests it with a percent-encoded name and a query", [&] {
             const auto response = fixture.answer(get("/webfront/services/files/a%20b.txt?token=1"));
-            THEN("the headers describe the reply and the whole body follows") {
-                REQUIRE(response.starts_with("HTTP/1.1 200 OK\r\n"));
-                REQUIRE(contains(response, "Content-Type: text/plain\r\n"));
-                REQUIRE(contains(response, "Cache-Control: no-store\r\n"));
-                REQUIRE(contains(response, "Content-Length: " + std::to_string(body.size()) + "\r\n"));
-                REQUIRE(contains(response, "Connection: close\r\n"));
-                REQUIRE(response.ends_with("\r\n\r\n" + body));
-            }
-            THEN("the handler saw the decoded path and the raw query") {
-                REQUIRE(target == "/webfront/services/files/a b.txt");
-                REQUIRE(query == "token=1");
-            }
-            THEN("the body was never asked for more than the emission buffer at once") {
-                REQUIRE(largestChunk == DefaultBuffersPolicy::emissionBufferSize);
-            }
-        }
-    }
-}
+            then("the headers describe the reply and the whole body follows", [&] {
+                require(response.starts_with("HTTP/1.1 200 OK\r\n"));
+                require(contains(response, "Content-Type: text/plain\r\n"));
+                require(contains(response, "Cache-Control: no-store\r\n"));
+                require(contains(response, "Content-Length: " + std::to_string(body.size()) + "\r\n"));
+                require(contains(response, "Connection: close\r\n"));
+                require(response.ends_with("\r\n\r\n" + body));
+            });
+            then("the handler saw the decoded path and the raw query", [&] {
+                require(target == "/webfront/services/files/a b.txt");
+                require(query == "token=1");
+            });
+            then("the body was never asked for more than the emission buffer at once", [&] {
+                require(largestChunk == DefaultBuffersPolicy::emissionBufferSize);
+            });
+        });
+    });
+}};
 
-SCENARIO("A route answers HEAD without reading its body") {
+const Scenario routeAnswers{"A route answers HEAD without reading its body", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     std::atomic<int> reads{0};
@@ -192,15 +188,15 @@ SCENARIO("A route answers HEAD without reading its body") {
         return reply;
     });
     const auto response = fixture.answer(get("/webfront/services/files/x", "HEAD"));
-    THEN("the headers announce the length and no body follows") {
-        REQUIRE(response.starts_with("HTTP/1.1 200 OK\r\n"));
-        REQUIRE(contains(response, "Content-Length: 10\r\n"));
-        REQUIRE(response.ends_with("\r\n\r\n"));
-        REQUIRE(reads == 0);
-    }
-}
+    then("the headers announce the length and no body follows", [&] {
+        require(response.starts_with("HTTP/1.1 200 OK\r\n"));
+        require(contains(response, "Content-Length: 10\r\n"));
+        require(response.ends_with("\r\n\r\n"));
+        require(reads == 0);
+    });
+}};
 
-SCENARIO("A route precedes the file providers and refuses other methods") {
+const Scenario routePrecedes{"A route precedes the file providers and refuses other methods", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     std::atomic<int> calls{0};
@@ -208,90 +204,90 @@ SCENARIO("A route precedes the file providers and refuses other methods") {
         ++calls;
         return text("from the route");
     });
-    GIVEN("a provider that also has a file under the prefix") {
+    given("a provider that also has a file under the prefix", [&] {
         const auto response = fixture.answer(get("/webfront/services/files/provided.txt"));
-        THEN("the route answers") { REQUIRE(response.ends_with("from the route")); }
-    }
-    GIVEN("a POST") {
+        then("the route answers", [&] { require(response.ends_with("from the route")); });
+    });
+    given("a POST", [&] {
         const auto response = fixture.answer(get("/webfront/services/files/x", "POST"));
-        THEN("it is refused with the methods the route serves, without calling the handler") {
-            REQUIRE(response.starts_with("HTTP/1.1 405 Method Not Allowed\r\n"));
-            REQUIRE(contains(response, "Allow: GET, HEAD\r\n"));
-            REQUIRE(calls == 0);
-        }
-    }
-}
+        then("it is refused with the methods the route serves, without calling the handler", [&] {
+            require(response.starts_with("HTTP/1.1 405 Method Not Allowed\r\n"));
+            require(contains(response, "Allow: GET, HEAD\r\n"));
+            require(calls == 0);
+        });
+    });
+}};
 
-SCENARIO("A path outside every route, or after unregistering, goes to the providers") {
+const Scenario pathOutside{"A path outside every route, or after unregistering, goes to the providers", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     auto    route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) { return text("x"); });
-    GIVEN("a registration that was reset") {
+    given("a registration that was reset", [&] {
         route.reset();
         const auto response = fixture.answer(get("/webfront/services/files/x"));
-        THEN("the request is a 404") { REQUIRE(response.starts_with("HTTP/1.1 404 Not Found\r\n")); }
-    }
-}
+        then("the request is a 404", [&] { require(response.starts_with("HTTP/1.1 404 Not Found\r\n")); });
+    });
+}};
 
-SCENARIO("A failing handler answers 500 without leaking its error") {
+const Scenario failingHandler{"A failing handler answers 500 without leaking its error", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
-    GIVEN("a handler that throws") {
+    given("a handler that throws", [&] {
         auto route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) -> RouteReply { throw std::runtime_error("secret detail"); });
         const auto response = fixture.answer(get("/webfront/services/files/x"));
-        THEN("the browser gets a bare 500") {
-            REQUIRE(response.starts_with("HTTP/1.1 500 Internal Server Error\r\n"));
-            REQUIRE_FALSE(contains(response, "secret detail"));
-        }
-    }
-    GIVEN("a handler whose header would split the response") {
+        then("the browser gets a bare 500", [&] {
+            require(response.starts_with("HTTP/1.1 500 Internal Server Error\r\n"));
+            require(!contains(response, "secret detail"));
+        });
+    });
+    given("a handler whose header would split the response", [&] {
         auto route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) {
             auto reply = text("x");
             reply.headers.emplace_back("X-Name", "a\r\nSet-Cookie: injected=1");
             return reply;
         });
         const auto response = fixture.answer(get("/webfront/services/files/x"));
-        THEN("it is refused") {
-            REQUIRE(response.starts_with("HTTP/1.1 500 Internal Server Error\r\n"));
-            REQUIRE_FALSE(contains(response, "injected"));
-        }
-    }
-    GIVEN("a handler setting a header the server owns") {
+        then("it is refused", [&] {
+            require(response.starts_with("HTTP/1.1 500 Internal Server Error\r\n"));
+            require(!contains(response, "injected"));
+        });
+    });
+    given("a handler setting a header the server owns", [&] {
         auto route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) {
             auto reply = text("x");
             reply.headers.emplace_back("content-length", "1");
             return reply;
         });
         const auto response = fixture.answer(get("/webfront/services/files/x"));
-        THEN("it is refused") { REQUIRE(response.starts_with("HTTP/1.1 500 Internal Server Error\r\n")); }
-    }
-}
+        then("it is refused", [&] { require(response.starts_with("HTTP/1.1 500 Internal Server Error\r\n")); });
+    });
+}};
 
-SCENARIO("A body that breaks its promise closes the connection") {
+const Scenario bodyBreaks{"A body that breaks its promise closes the connection", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
-    GIVEN("a body shorter than its Content-Length") {
+    given("a body shorter than its Content-Length", [&] {
         auto route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) {
             auto reply          = text("abc");
             reply.contentLength = 10;
             return reply;
         });
         const auto response = fixture.answer(get("/webfront/services/files/x"));
-        THEN("the client receives a truncated body, which it detects") {
-            REQUIRE(contains(response, "Content-Length: 10\r\n"));
-            REQUIRE(response.ends_with("\r\n\r\nabc"));
-        }
-    }
-    GIVEN("a body longer than its Content-Length") {
+        then("the client receives a truncated body, which it detects", [&] {
+            require(contains(response, "Content-Length: 10\r\n"));
+            require(response.ends_with("\r\n\r\nabc"));
+        });
+    });
+    given("a body longer than its Content-Length", [&] {
         auto route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) {
             auto reply          = text("abcdef");
             reply.contentLength = 3;
             return reply;
         });
         const auto response = fixture.answer(get("/webfront/services/files/x"));
-        THEN("nothing past the announced length is sent") { REQUIRE(response.ends_with("\r\n\r\n")); }
-    }
-    GIVEN("a body that throws after a first chunk") {
+        then("nothing past the announced length is sent", [&] { require(response.ends_with("\r\n\r\n")); });
+    });
+    given("a body that throws after a first chunk", [&] {
         auto route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) {
             RouteReply reply;
             reply.contentLength = 100;
@@ -303,11 +299,11 @@ SCENARIO("A body that breaks its promise closes the connection") {
             return reply;
         });
         const auto response = fixture.answer(get("/webfront/services/files/x"));
-        THEN("the connection ends after what was read") { REQUIRE(response.ends_with("\r\n\r\nx")); }
-    }
-}
+        then("the connection ends after what was read", [&] { require(response.ends_with("\r\n\r\nx")); });
+    });
+}};
 
-SCENARIO("A slow handler does not block the server context") {
+const Scenario slowHandler{"A slow handler does not block the server context", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     std::atomic<bool> entered{false}, release{false};
@@ -317,16 +313,24 @@ SCENARIO("A slow handler does not block the server context") {
         return text("late");
     });
     send(get("/webfront/services/files/x"));
-    REQUIRE(waitFor([&] { return entered.load(); }));
-    THEN("the thread which sent the request has already returned, and the reply comes when the handler ends") {
-        REQUIRE(InjectableSocket::shutdownCount() == 0);
+    requireEventually(
+        [&] {
+            return entered.load();
+        },
+        10s);
+    then("the thread which sent the request has already returned, and the reply comes when the handler ends", [&] {
+        require(InjectableSocket::shutdownCount() == 0);
         release = true;
-        REQUIRE(waitFor([] { return InjectableSocket::shutdownCount() > 0; }));
-        REQUIRE(InjectableSocket::writtenText().ends_with("late"));
-    }
-}
+        requireEventually(
+            [] {
+                return InjectableSocket::shutdownCount() > 0;
+            },
+            10s);
+        require(InjectableSocket::writtenText().ends_with("late"));
+    });
+}};
 
-SCENARIO("Draining waits for a handler still running on the worker instead of reporting a stalled scope") {
+const Scenario drainingWaits{"Draining waits for a handler still running on the worker instead of reporting a stalled scope", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     std::atomic<bool> entered{false}, release{false};
@@ -336,16 +340,20 @@ SCENARIO("Draining waits for a handler still running on the worker instead of re
         return text("late");
     });
     send(get("/webfront/services/files/x"));
-    REQUIRE(waitFor([&] { return entered.load(); }));
-    WHEN("the server is stopped and drained while the handler has not returned") {
+    requireEventually(
+        [&] {
+            return entered.load();
+        },
+        10s);
+    when("the server is stopped and drained while the handler has not returned", [&] {
         server.stop();
         std::jthread finishing([&] {
             std::this_thread::sleep_for(100ms);
             release = true;
         });
-        THEN("the drain waits for the handler and returns without an error") { REQUIRE_NOTHROW(server.drain()); }
-    }
-}
+        then("the drain waits for the handler and returns without an error", [&] { requireNothrow([&] { server.drain(); }); });
+    });
+}};
 
 namespace {
 // Peak resident set of the process in bytes, or 0 where it cannot be read.
@@ -362,20 +370,24 @@ std::uint64_t peakResidentBytes() {
     #endif
 #endif
 }
+struct StreamingPolicy : DefaultBuffersPolicy {
+    // Keep the 128 MiB memory proof without 16384 worker round trips on instrumented ARM64 builds.
+    static constexpr std::size_t emissionBufferSize = 64 * 1024;
+};
 }  // namespace
 
-SCENARIO("A large body is streamed without being held") {
-    Fixture fixture;
-    Router  server("127.0.0.1", "0");
-    constexpr std::uint64_t size = 128ull * 1024 * 1024;
-    std::size_t             largestChunk = 0;
-    auto route = server.addRoute("/webfront/services/files/", [&](const RouteRequest&) {
+const Scenario largeBody{"A large body is streamed without being held", [] {
+    Fixture                                  fixture;
+    Server<RouteNet, Files, StreamingPolicy> server("127.0.0.1", "0");
+    static constexpr std::uint64_t           size         = 128ull * 1024 * 1024;
+    std::size_t                              largestChunk = 0;
+    auto                                     route        = server.addRoute("/webfront/services/files/", [&](const RouteRequest&) {
         RouteReply reply;
         reply.contentLength = size;
         reply.body          = [&largestChunk, produced = std::uint64_t{0}](std::span<char> out) mutable {
             largestChunk     = std::max(largestChunk, out.size());
             const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(out.size(), size - produced));
-            produced += count;
+            produced        += count;
             return count;
         };
         return reply;
@@ -383,20 +395,25 @@ SCENARIO("A large body is streamed without being held") {
     InjectableSocket::discardWrites();
     const auto before = peakResidentBytes();
     send(get("/webfront/services/files/big"));
-    // 16384 chunks, each crossing to the worker thread: slow under Debug, coverage and sanitizers. The limit stays below
+    // Each chunk crosses to the worker thread. The limit stays below
     // the 60 s CTest timeout of the scenarios, so that a stall is reported by the test rather than by a kill.
-    REQUIRE(waitFor([] { return InjectableSocket::shutdownCount() > 0; }, 45s));
-    THEN("the peak memory of the process did not grow with the size sent") {
+    requireEventually(
+        [] {
+            return InjectableSocket::shutdownCount() > 0;
+        },
+        45s);
+    then("the peak memory of the process did not grow with the size sent", [&] {
         // Holding the body would add its 128 MiB to the peak; ctest runs each scenario in its own process.
-        if (const auto after = peakResidentBytes()) REQUIRE(after - before < 48ull * 1024 * 1024);
-    }
-    THEN("every byte was sent through a buffer of the emission size") {
-        REQUIRE(InjectableSocket::discardedBytes() > size);
-        REQUIRE(largestChunk == DefaultBuffersPolicy::emissionBufferSize);
-    }
-}
+        if (const auto after = peakResidentBytes())
+            require(after - before < 48ull * 1024 * 1024);
+    });
+    then("every byte was sent through a buffer of the emission size", [&] {
+        require(InjectableSocket::discardedBytes() > size);
+        require(largestChunk == StreamingPolicy::emissionBufferSize);
+    });
+}};
 
-SCENARIO("A connection which fails while a reply is streamed stops the reading") {
+const Scenario connectionWhich{"A connection which fails while a reply is streamed stops the reading", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     std::atomic<int> reads{0};
@@ -409,16 +426,20 @@ SCENARIO("A connection which fails while a reply is streamed stops the reading")
         return reply;
     });
     send(get("/webfront/services/files/endless"));
-    REQUIRE(waitFor([] { return InjectableSocket::shutdownCount() > 0; }));
-    THEN("the body is not read again") {
+    requireEventually(
+        [] {
+            return InjectableSocket::shutdownCount() > 0;
+        },
+        10s);
+    then("the body is not read again", [&] {
         const auto seen = reads.load();
         std::this_thread::sleep_for(20ms);
-        REQUIRE(reads == seen);
-        REQUIRE(seen <= 3);
-    }
-}
+        require(reads == seen);
+        require(seen <= 3);
+    });
+}};
 
-SCENARIO("Stopping the server ends a reply being streamed") {
+const Scenario stoppingServer{"Stopping the server ends a reply being streamed", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     auto route = server.addRoute("/webfront/services/files/", [&](const RouteRequest&) {
@@ -428,12 +449,16 @@ SCENARIO("Stopping the server ends a reply being streamed") {
     });
     InjectableSocket::deferWrites();
     send(get("/webfront/services/files/endless"));
-    REQUIRE(waitFor([] { return InjectableSocket::hasWrittenData(); }));
-    WHEN("the server is stopped and drained while a send is pending") {
+    requireEventually(
+        [] {
+            return InjectableSocket::hasDeferredWrites();
+        },
+        10s);
+    when("the server is stopped and drained while a send is pending", [&] {
         server.stop();
-        THEN("the drain returns") { REQUIRE_NOTHROW(server.drain()); }
-    }
-}
+        then("the drain returns", [&] { requireNothrow([&] { server.drain(); }); });
+    });
+}};
 
 namespace {
 
@@ -463,9 +488,9 @@ struct ProvidedFS {
 
 } // namespace
 
-SCENARIO("Files of a provider are announced by size and streamed") {
+const Scenario filesProvider{"Files of a provider are announced by size and streamed", [] {
     for (const bool native : {false, true}) {
-        GIVEN(std::string(native ? "a native file" : "an embedded file") << " of several chunks") {
+        given(std::string(native ? "a native file" : "an embedded file"), " of several chunks", [&] {
             webfront::test::TemporaryDirectory directory;
             ProvidedFile::content = pattern(3 * DefaultBuffersPolicy::emissionBufferSize + 11);
             ProvidedFile::native.clear();
@@ -475,16 +500,16 @@ SCENARIO("Files of a provider are announced by size and streamed") {
             }
             Fixture                     fixture;
             Server<RouteNet, ProvidedFS> server("127.0.0.1", "0");
-            WHEN("it is requested") {
+            when("it is requested", [&] {
                 const auto response = fixture.answer(get("/file.bin"));
-                THEN("the length is announced and the whole content follows") {
-                    REQUIRE(response.starts_with("HTTP/1.1 200 OK\r\n"));
-                    REQUIRE(contains(response, "Content-Length: " + std::to_string(ProvidedFile::content.size()) + "\r\n"));
-                    REQUIRE(response.ends_with("\r\n\r\n" + ProvidedFile::content));
-                }
-            }
-        }
-        GIVEN(std::string(native ? "a native file" : "an embedded file") << " requested with HEAD") {
+                then("the length is announced and the whole content follows", [&] {
+                    require(response.starts_with("HTTP/1.1 200 OK\r\n"));
+                    require(contains(response, "Content-Length: " + std::to_string(ProvidedFile::content.size()) + "\r\n"));
+                    require(response.ends_with("\r\n\r\n" + ProvidedFile::content));
+                });
+            });
+        });
+        given(std::string(native ? "a native file" : "an embedded file"), " requested with HEAD", [&] {
             webfront::test::TemporaryDirectory directory;
             ProvidedFile::content = pattern(20000);
             ProvidedFile::native.clear();
@@ -495,81 +520,81 @@ SCENARIO("Files of a provider are announced by size and streamed") {
             Fixture                     fixture;
             Server<RouteNet, ProvidedFS> server("127.0.0.1", "0");
             const auto response = fixture.answer(get("/file.bin", "HEAD"));
-            THEN("the length is announced and no body follows") {
-                REQUIRE(contains(response, "Content-Length: 20000\r\n"));
-                REQUIRE(response.ends_with("\r\n\r\n"));
-            }
-        }
+            then("the length is announced and no body follows", [&] {
+                require(contains(response, "Content-Length: 20000\r\n"));
+                require(response.ends_with("\r\n\r\n"));
+            });
+        });
     }
-    GIVEN("an empty file") {
+    given("an empty file", [&] {
         ProvidedFile::content = "";
         ProvidedFile::native.clear();
         Fixture                     fixture;
         Server<RouteNet, ProvidedFS> server("127.0.0.1", "0");
         const auto response = fixture.answer(get("/file.bin"));
-        THEN("it is a 200 with a zero length") {
-            REQUIRE(response.starts_with("HTTP/1.1 200 OK\r\n"));
-            REQUIRE(contains(response, "Content-Length: 0\r\n"));
-        }
-    }
-}
+        then("it is a 200 with a zero length", [&] {
+            require(response.starts_with("HTTP/1.1 200 OK\r\n"));
+            require(contains(response, "Content-Length: 0\r\n"));
+        });
+    });
+}};
 
-SCENARIO("A native file known by its size reports it") {
+const Scenario nativeFileKnown{"A native file known by its size reports it", [] {
     webfront::test::TemporaryDirectory directory;
     const auto                         path = directory.path() / "known.bin";
     std::ofstream(path, std::ios::binary) << pattern(1234);
-    THEN("knownSize is the size on disk, whatever was read") {
+    then("knownSize is the size on disk, whatever was read", [&] {
         fs::File file{std::ifstream(path, std::ios::binary)};
-        REQUIRE(file.knownSize() == 1234);
+        require(file.knownSize() == 1234);
         std::array<char, 100> buffer{};
-        REQUIRE(file.read(buffer) == 100);
-        REQUIRE(file.knownSize() == 1234);
-    }
-}
+        require(file.read(buffer) == 100);
+        require(file.knownSize() == 1234);
+    });
+}};
 
-SCENARIO("Failed HEAD requests carry no body") {
+const Scenario failedHEAD{"Failed HEAD requests carry no body", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
-    GIVEN("a handler which throws") {
+    given("a handler which throws", [&] {
         auto route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) -> RouteReply { throw std::runtime_error("no"); });
         const auto response = fixture.answer(get("/webfront/services/files/x", "HEAD"));
-        THEN("the 500 has its headers only") {
-            REQUIRE(response.starts_with("HTTP/1.1 500 Internal Server Error\r\n"));
-            REQUIRE(response.ends_with("\r\n\r\n"));
-        }
-    }
-    GIVEN("a handler with an invalid header") {
+        then("the 500 has its headers only", [&] {
+            require(response.starts_with("HTTP/1.1 500 Internal Server Error\r\n"));
+            require(response.ends_with("\r\n\r\n"));
+        });
+    });
+    given("a handler with an invalid header", [&] {
         auto route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) {
             auto reply = text("x");
             reply.headers.emplace_back("Bad Name", "v");
             return reply;
         });
         const auto response = fixture.answer(get("/webfront/services/files/x", "HEAD"));
-        THEN("the 500 has its headers only") { REQUIRE(response.ends_with("\r\n\r\n")); }
-    }
-    GIVEN("a file which does not exist") {
+        then("the 500 has its headers only", [&] { require(response.ends_with("\r\n\r\n")); });
+    });
+    given("a file which does not exist", [&] {
         const auto response = fixture.answer(get("/nothing.txt", "HEAD"));
-        THEN("the 404 has its headers only") {
-            REQUIRE(response.starts_with("HTTP/1.1 404 Not Found\r\n"));
-            REQUIRE(response.ends_with("\r\n\r\n"));
-        }
-    }
-}
+        then("the 404 has its headers only", [&] {
+            require(response.starts_with("HTTP/1.1 404 Not Found\r\n"));
+            require(response.ends_with("\r\n\r\n"));
+        });
+    });
+}};
 
-SCENARIO("A file wrapped after a prefix yields the remaining bytes and their count") {
+const Scenario fileWrapped{"A file wrapped after a prefix yields the remaining bytes and their count", [] {
     webfront::test::TemporaryDirectory directory;
     const auto                         path = directory.path() / "prefixed.bin";
     std::ofstream(path, std::ios::binary) << "prefix:payload";
     std::ifstream stream(path, std::ios::binary);
     stream.seekg(7);
     fs::File file{std::move(stream)};
-    THEN("only the payload is counted and read") {
-        REQUIRE(file.knownSize() == 7);
+    then("only the payload is counted and read", [&] {
+        require(file.knownSize() == 7);
         std::array<char, 32> buffer{};
         const auto           count = file.read(buffer);
-        REQUIRE(std::string(buffer.data(), count) == "payload");
-    }
-}
+        require(std::string(buffer.data(), count) == "payload");
+    });
+}};
 
 namespace {
 struct Completes {
@@ -581,7 +606,7 @@ struct Completes {
 };
 }  // namespace
 
-SCENARIO("A blocked job does not delay the others of a worker with several threads") {
+const Scenario blockedJob{"A blocked job does not delay the others of a worker with several threads", [] {
     BlockingWorker     worker{2};
     std::promise<void> release, blockedDone, quickDone;
     auto               shared = release.get_future().share();
@@ -600,21 +625,25 @@ SCENARIO("A blocked job does not delay the others of a worker with several threa
         ~Release() { now(); }
     } releaseGuard{release};
     networking::ex::start(slow);
-    const bool started = waitFor([&] { return blocked.load(); });
+    const bool started = waitUntil(
+        [&] {
+            return blocked.load();
+        },
+        10s);
     if (started) networking::ex::start(fast);
-    const bool quickDoneInTime = started && quickEnded.wait_for(5s) == std::future_status::ready;
+    const bool quickDoneInTime  = started && waitReady(quickEnded, 5s);
     const bool slowStillBlocked = blockedEnded.wait_for(10ms) == std::future_status::timeout;
     releaseGuard.now();
     if (started) blockedEnded.wait();
     if (started) quickEnded.wait();  // `fast` and `worker` outlive any use of each other, even when an assertion fails
-    THEN("the quick job completes while the slow one still runs") {
-        REQUIRE(started);
-        REQUIRE(quickDoneInTime);
-        REQUIRE(slowStillBlocked);
-    }
-}
+    then("the quick job completes while the slow one still runs", [&] {
+        require(started);
+        require(quickDoneInTime);
+        require(slowStillBlocked);
+    });
+}};
 
-SCENARIO("A single-thread worker keeps the jobs in order") {
+const Scenario singleThread{"A single-thread worker keeps the jobs in order", [] {
     BlockingWorker     worker;
     std::promise<void> firstDone, secondDone;
     std::string        order;
@@ -624,18 +653,18 @@ SCENARIO("A single-thread worker keeps the jobs in order") {
     networking::ex::start(second);
     firstDone.get_future().wait();
     secondDone.get_future().wait();
-    REQUIRE(order == "ab");
-}
+    require(order == "ab");
+}};
 
-SCENARIO("A handler or a body throwing something else than a std::exception is contained") {
+const Scenario handlerBody{"A handler or a body throwing something else than a std::exception is contained", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
-    GIVEN("a handler which throws an int") {
+    given("a handler which throws an int", [&] {
         auto route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) -> RouteReply { throw 42; });
         const auto response = fixture.answer(get("/webfront/services/files/x"));
-        THEN("the browser gets a 500") { REQUIRE(response.starts_with("HTTP/1.1 500 Internal Server Error\r\n")); }
-    }
-    GIVEN("a body which throws an int after the headers") {
+        then("the browser gets a 500", [&] { require(response.starts_with("HTTP/1.1 500 Internal Server Error\r\n")); });
+    });
+    given("a body which throws an int after the headers", [&] {
         auto route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) {
             RouteReply reply;
             reply.contentLength = 10;
@@ -643,11 +672,11 @@ SCENARIO("A handler or a body throwing something else than a std::exception is c
             return reply;
         });
         const auto response = fixture.answer(get("/webfront/services/files/x"));
-        THEN("the connection ends after the headers") { REQUIRE(response.ends_with("\r\n\r\n")); }
-    }
-}
+        then("the connection ends after the headers", [&] { require(response.ends_with("\r\n\r\n")); });
+    });
+}};
 
-SCENARIO("Route matching sees the path as a URL path") {
+const Scenario routeMatching{"Route matching sees the path as a URL path", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     std::string seen;
@@ -659,28 +688,30 @@ SCENARIO("Route matching sees the path as a URL path") {
         seen = std::string(request.path);
         return text("plus");
     });
-    GIVEN("a prefix with a literal plus") {
+    given("a prefix with a literal plus", [&] {
         const auto response = fixture.answer(get("/a+b/x+y"));
-        THEN("the plus stays a plus in the matching and in the path") {
-            REQUIRE(response.ends_with("plus"));
-            REQUIRE(seen == "/a+b/x+y");
-        }
-    }
-    GIVEN("a percent-encoded plus") {
+        then("the plus stays a plus in the matching and in the path", [&] {
+            require(response.ends_with("plus"));
+            require(seen == "/a+b/x+y");
+        });
+    });
+    given("a percent-encoded plus", [&] {
         const auto response = fixture.answer(get("/a%2Bb/x"));
-        THEN("it matches the same route") { REQUIRE(response.ends_with("plus")); }
-    }
-    GIVEN("empty and dot segments before the prefix") {
-        const auto target = GENERATE(as<std::string>{}, "/webfront//services/files/x", "/webfront/./services/files/x", "//webfront/services//files/./x");
-        const auto response = fixture.answer(get(target));
-        THEN("the route answers, not a file provider, with the normalized path") {
-            REQUIRE(response.ends_with("ok"));
-            REQUIRE(seen == "/webfront/services/files/x");
-        }
-    }
-}
+        then("it matches the same route", [&] { require(response.ends_with("plus")); });
+    });
+    given("empty and dot segments before the prefix", [&] {
+        for (std::string target : {"/webfront//services/files/x", "/webfront/./services/files/x", "//webfront/services//files/./x"})
+            when(target, [&] {
+                const auto response = fixture.answer(get(target));
+                then("the route answers, not a file provider, with the normalized path", [&] {
+                    require(response.ends_with("ok"));
+                    require(seen == "/webfront/services/files/x");
+                });
+            });
+    });
+}};
 
-SCENARIO("A handler may answer 405 with a body of its own") {
+const Scenario handlerMay{"A handler may answer 405 with a body of its own", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     auto    route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) {
@@ -689,13 +720,13 @@ SCENARIO("A handler may answer 405 with a body of its own") {
         return reply;
     });
     const auto response = fixture.answer(get("/webfront/services/files/x"));
-    THEN("its body is streamed after its headers") {
-        REQUIRE(response.starts_with("HTTP/1.1 405 Method Not Allowed\r\n"));
-        REQUIRE(response.ends_with("\r\n\r\nnot this path"));
-    }
-}
+    then("its body is streamed after its headers", [&] {
+        require(response.starts_with("HTTP/1.1 405 Method Not Allowed\r\n"));
+        require(response.ends_with("\r\n\r\nnot this path"));
+    });
+}};
 
-SCENARIO("Header names are ASCII tokens whatever the locale") {
+const Scenario headerNames{"Header names are ASCII tokens whatever the locale", [] {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
     auto    route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) {
@@ -704,5 +735,5 @@ SCENARIO("Header names are ASCII tokens whatever the locale") {
         return reply;
     });
     const auto response = fixture.answer(get("/webfront/services/files/x"));
-    THEN("a non-ASCII name is refused") { REQUIRE(response.starts_with("HTTP/1.1 500 Internal Server Error\r\n")); }
-}
+    then("a non-ASCII name is refused", [&] { require(response.starts_with("HTTP/1.1 500 Internal Server Error\r\n")); });
+}};

@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <utility>
 
 namespace webfront::developer {
@@ -59,6 +60,27 @@ inline std::pair<std::string, std::filesystem::path> createStaging(const std::fi
     }
 }
 
+// Windows refuses to rename a file, or a directory that holds one, while another process has it open without sharing its
+// deletion: an antivirus or an indexer reading what was just written. The refusal ends with that read, so the rename is
+// tried again for a bounded time (635 ms) before it is reported. Elsewhere an open file never prevents a rename.
+inline void renameSettled(const std::filesystem::path& from, const std::filesystem::path& to) {
+#ifdef _WIN32
+    constexpr int accessDenied = 5, sharingViolation = 32;
+    for (std::chrono::milliseconds delay{5};; delay *= 2) {
+        std::error_code error;
+        std::filesystem::rename(from, to, error);
+        if (!error)
+            return;
+        const bool transient = error.category() == std::system_category() && (error.value() == accessDenied || error.value() == sharingViolation);
+        if (!transient || delay > std::chrono::milliseconds{320})
+            throw std::filesystem::filesystem_error("rename", from, to, error);
+        std::this_thread::sleep_for(delay);
+    }
+#else
+    std::filesystem::rename(from, to);
+#endif
+}
+
 // Moves the staged files over the target, restoring the previous content if that fails.
 inline void replaceTarget(const std::filesystem::path& target, bool replace, const std::filesystem::path& source, const std::filesystem::path& backup) {
     std::filesystem::create_directories(target.parent_path());
@@ -68,9 +90,9 @@ inline void replaceTarget(const std::filesystem::path& target, bool replace, con
     if (exists && !replace)
         throw std::runtime_error("Starter destination already exists");
     if (exists)
-        std::filesystem::rename(target, backup);
+        renameSettled(target, backup);
     try {
-        std::filesystem::rename(source, target);
+        renameSettled(source, target);
     } catch (...) {
         if (exists)
             std::filesystem::rename(backup, target);

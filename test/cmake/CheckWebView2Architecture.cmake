@@ -1,4 +1,5 @@
 # Exercise the production SDK selection without downloading or linking the SDK.
+cmake_minimum_required(VERSION 3.31)
 set(WIN32 ON)
 set(MSVC ON)
 function(CPMAddPackage)

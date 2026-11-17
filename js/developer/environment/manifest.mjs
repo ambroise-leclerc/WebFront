@@ -33,7 +33,7 @@ const exactVersion = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const rangeShape = /^[0-9A-Za-z.+\-^~<>=*| ]{1,128}$/;
 const label = /^[A-Za-z0-9][A-Za-z0-9:_.-]{0,63}$/;
 const identifier = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const keys = ['format', 'name', 'version', 'dependencies', 'registry', 'scripts', 'entries', 'providers', 'test', 'permissions'];
+const keys = ['format', 'name', 'version', 'dependencies', 'registry', 'scripts', 'entries', 'providers', 'test', 'permissions', 'developer'];
 const permissionKeys = ['files', 'publish', 'fetch'];
 
 const fail = message => { throw new Error(`${manifestPath}: ${message}`); };
@@ -136,6 +136,35 @@ function checkPermissions(value) {
     return permissions;
 }
 
+const shortcutModifiers = {Ctrl: 'ctrlKey', Alt: 'altKey', Shift: 'shiftKey', Meta: 'metaKey'};
+
+/** The shortcut of the terminal window when the manifest names none. */
+export const defaultTerminalShortcut = 'F9';
+
+/**
+ * A shortcut written as "F9" or "Ctrl+Shift+F10": a function key, F1 to F12, after any of Ctrl, Alt, Shift and Meta, each
+ * at most once. Gives the key and the modifiers as a keyboard event has them; null when the text is not a shortcut.
+ */
+export function parseShortcut(text) {
+    if (typeof text !== 'string') return null;
+    const parts = text.split('+'), key = parts.pop();
+    if (!/^F(?:[1-9]|1[0-2])$/.test(key) || new Set(parts).size !== parts.length) return null;
+    const shortcut = {key, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false};
+    for (const part of parts) {
+        if (!Object.hasOwn(shortcutModifiers, part)) return null;
+        shortcut[shortcutModifiers[part]] = true;
+    }
+    return shortcut;
+}
+
+function checkDeveloper(value) {
+    const developer = requireObject(value, 'developer');
+    onlyKeys(developer, ['terminalShortcut'], 'developer');
+    if (developer.terminalShortcut !== undefined && !parseShortcut(developer.terminalShortcut))
+        fail('developer.terminalShortcut must be a function key, F1 to F12, optionally after Ctrl, Alt, Shift or Meta (for instance "Ctrl+Shift+F9")');
+    return developer;
+}
+
 function checkIdentity(manifest) {
     if (typeof manifest.name !== 'string' || !npmName.test(manifest.name)) fail('name must be a lower-case npm package name');
     if (typeof manifest.version !== 'string' || !exactVersion.test(manifest.version)) fail('version must be a semantic version');
@@ -164,6 +193,7 @@ export function validateManifest(manifest) {
         ...(manifest.scripts === undefined ? {} : {scripts: checkScripts(manifest.scripts)}),
         ...(manifest.test === undefined ? {} : {test: checkTest(manifest.test)}),
         ...(manifest.permissions === undefined ? {} : {permissions: checkPermissions(manifest.permissions)}),
+        ...(manifest.developer === undefined ? {} : {developer: checkDeveloper(manifest.developer)}),
     };
 }
 

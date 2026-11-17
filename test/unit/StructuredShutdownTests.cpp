@@ -1,5 +1,5 @@
 #include "InlineTaskScope.hpp"
-#include <catch2/catch_test_macros.hpp>
+#include "Bdd.hpp"
 #include <webfront/http/HTTPServer.hpp>
 #include <webfront/networking/NetworkingMock.hpp>
 #include <webfront/system/DefaultFS.hpp>
@@ -14,6 +14,8 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+using namespace webfront::bdd;
 
 namespace {
 namespace ex = webfront::networking::ex;
@@ -136,28 +138,28 @@ struct ShutdownNet : webfront::networking::NetworkingMock {
 };
 }  // namespace
 
-SCENARIO("Server drain joins its pending connection without draining unrelated work") {
+const Scenario serverDrain{"Server drain joins its pending connection without draining unrelated work", [] {
     std::shared_ptr<ShutdownTrace> trace;
-    GIVEN("a server with an accepted socket and a pending read") {
+    given("a server with an accepted socket and a pending read", [&] {
         {
             webfront::http::Server<ShutdownNet, webfront::fs::DefaultFS> server("127.0.0.1", "0");
             trace = ShutdownContext::current->trace;
-            REQUIRE(trace->liveSockets == 1);
-            WHEN("shutdown cancellation is queued on the context") {
+            require(trace->liveSockets == 1);
+            when("shutdown cancellation is queued on the context", [&] {
                 server.drain();
-                THEN("the connection is destroyed before drain returns") {
-                    CHECK(trace->liveSockets == 0);
-                }
-                AND_THEN("join does not require unrelated context work to finish") {
-                    CHECK(trace->foreignCompletions == 0);
-                }
-            }
+                then("the connection is destroyed before drain returns", [&] {
+                    check(trace->liveSockets == 0);
+                });
+                andThen("join does not require unrelated context work to finish", [&] {
+                    check(trace->foreignCompletions == 0);
+                });
+            });
         }
-        THEN("no connection outlives the server") {
-            CHECK(trace->liveSockets == 0);
-        }
-    }
-}
+        then("no connection outlives the server", [&] {
+            check(trace->liveSockets == 0);
+        });
+    });
+}};
 
 namespace {
 webfront::networking::Task failingTask(int failure) {
@@ -168,29 +170,29 @@ webfront::networking::Task failingTask(int failure) {
     co_return;
 }
 }  // namespace
-SCENARIO("Tracked task errors are logged and do not prevent joining") {
+const Scenario trackedTask{"Tracked task errors are logged and do not prevent joining", [] {
     namespace log = webfront::log;
     std::vector<std::string> lines;
     log::setLogLevel(log::Error);
     auto handle = log::addSinks([&](std::string_view text) {
         lines.emplace_back(text);
     });
-    GIVEN("tasks that fail with standard and nonstandard exceptions") {
+    given("tasks that fail with standard and nonstandard exceptions", [&] {
         webfront::testing::InlineTaskScope scope;
-        WHEN("they are spawned into a scope") {
+        when("they are spawned into a scope", [&] {
             webfront::networking::Spawn(scope, ex::inline_scheduler{}, failingTask(0));
             webfront::networking::Spawn(scope, ex::inline_scheduler{}, failingTask(1));
             webfront::networking::Spawn(scope, ex::inline_scheduler{}, failingTask(2));
             log::removeSinks(handle);
-            THEN("both errors are logged and the scope can be drained") {
-                CHECK(lines.size() == 2);
-                CHECK(std::ranges::any_of(lines, [](const auto& line) {
+            then("both errors are logged and the scope can be drained", [&] {
+                check(lines.size() == 2);
+                check(std::ranges::any_of(lines, [](const auto& line) {
                     return line.ends_with("Network task failed: tracked failure");
                 }));
-                CHECK(std::ranges::any_of(lines, [](const auto& line) {
+                check(std::ranges::any_of(lines, [](const auto& line) {
                     return line.ends_with("Network task failed");
                 }));
-            }
-        }
-    }
-}
+            });
+        });
+    });
+}};

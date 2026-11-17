@@ -22,6 +22,14 @@ _read(life examples/life/LifeDeveloper.cpp)
 _read(embedded examples/life/LifeEmbedded.cpp)
 _read(examples examples/CMakeLists.txt)
 _read(root CMakeLists.txt)
+string(REGEX MATCH "cmake_minimum_required *\\(VERSION ([0-9.]+)\\)" minimum_declaration "${root}")
+if(NOT minimum_declaration)
+    message(FATAL_ERROR "Cannot read the root CMake minimum")
+endif()
+set(cmake_minimum "${CMAKE_MATCH_1}")
+_require("${readme}" "CMake **${cmake_minimum}+**" "documented CMake minimum")
+_require("${readme}" "cmake>=${cmake_minimum},<4" "LTS installation minimum")
+_require("${readme}" "## Build tools on LTS distributions" "CMake diagnostic destination")
 _read(test_options cmake/WebFrontTestOptions.cmake)
 _read(ci .github/workflows/BuildAndTest.yml)
 _read(frontends docs/FRONTENDS.md)
@@ -72,8 +80,8 @@ foreach(target HelloWorld WebFrontLifeConsole WebFrontLifeDeveloper WebFrontLife
 endforeach()
 string(REGEX MATCHALL "add_executable\\(" targets "${examples}")
 list(LENGTH targets target_count)
-if(NOT target_count EQUAL 5)
-    list(APPEND failures "Only Hello World, the three Life stages and the React adapter variant should be built")
+if(NOT target_count EQUAL 6)
+    list(APPEND failures "Only Hello World, the host loop, the three Life stages and the React adapter variant should be built")
 endif()
 foreach(command "wf create life" "wf init" "wf install react@19.3.1 react-dom@19.3.1" "wf dev ui/main.tsx" "wf check" "wf test" "wf embed ui/main.tsx --output generated/LifeUI.hpp")
     _require("${readme}" "${command}" "developer-terminal walkthrough")
@@ -142,6 +150,26 @@ foreach(text agents ci frontends)
     if(NOT browser_build)
         list(APPEND failures "${text} browser build must include --target webtest developer_integration webfront-wf --parallel")
     endif()
+endforeach()
+# Both public languages must retain the runnable path and the same version pins.
+_read(readme_fr README.fr.md)
+_require("${readme}" "[Français](README.fr.md)" "French language switch")
+_require("${readme_fr}" "[English](README.md)" "English language switch")
+foreach(command "cmake --build build --target WebFrontHostLoop --parallel 2"
+        "build/examples/WebFrontHostLoop --quality 0"
+        "build/examples/WebFrontHostLoop --engine cuda --glass --stats"
+        "-DWEBFRONT_HOST_LOOP_CUDA=OFF" "docs/HOST_LOOP_EXAMPLE.md"
+        "wf create life" "wf init" "wf install react@19.3.1 react-dom@19.3.1"
+        "wf dev ui/main.tsx" "wf install jasmine-core@7.0.2"
+        "wf install typescript@5.9.3 @types/react@19.3.0 @types/react-dom@19.3.0"
+        "wf check" "wf test" "wf embed ui/main.tsx --output generated/LifeUI.hpp"
+        "target_link_libraries(MyApp PRIVATE WebFront::WebFront)"
+        "CMake **${cmake_minimum}+**" "cmake>=${cmake_minimum},<4"
+        "-DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_ENABLE_TESTING=ON"
+        "ctest --test-dir build --output-on-failure --parallel 4")
+    foreach(language readme readme_fr)
+        _require("${${language}}" "${command}" "${language} runnable path")
+    endforeach()
 endforeach()
 if(failures)
     list(JOIN failures "\n  " joined)

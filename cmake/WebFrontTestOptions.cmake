@@ -1,5 +1,9 @@
 # WebFront options are independent of an embedding project's generic ENABLE_* variables.
 function(webfront_declare_test_options is_top_level)
+    # Keep the quick-build defaults here so the lightweight configuration fixture tests the actual declarations.
+    set(WEBFRONT_TEST_UNITY_BATCH 4 CACHE STRING "Compile the heavy unit tests this many to a file; 0 compiles each file alone")
+    option(WEBFRONT_MSVC_ANALYZE "Run the MSVC code analysis while compiling" OFF)
+    option(WEBFRONT_TEST_REPRODUCIBILITY "Build the self-built environment again, to prove it reproducible and equal to the checked-in bundles" OFF)
     option(WEBFRONT_ENABLE_TESTING "Build WebFront's tests" OFF)
     option(WEBFRONT_ENABLE_FUZZING "Build WebFront's fuzzers" OFF)
     option(WEBFRONT_ENABLE_COVERAGE "Instrument WebFront's tests for GCC/Clang coverage" OFF)

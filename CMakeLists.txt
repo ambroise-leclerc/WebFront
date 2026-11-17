@@ -1,5 +1,10 @@
 ﻿# The embedding project's CMP0155 setting (module scanning by default), read before this file's own
 # cmake_minimum_required resets the policies; empty when unknown or set.
+if(CMAKE_VERSION VERSION_LESS "3.31")
+    message(FATAL_ERROR
+        "WebFront requires CMake 3.31 or newer (found ${CMAKE_VERSION}). "
+        "See README.md#build-tools-on-lts-distributions for installation instructions.")
+endif()
 cmake_policy(GET CMP0155 WEBFRONT_PARENT_CMP0155)
 cmake_minimum_required (VERSION 3.31)
 
@@ -13,6 +18,7 @@ endif()
 option(BUILD_SHARED_LIBS "Enable compilation of shared libraries" OFF)
 option(WEBFRONT_BUILD_AUTOMATION "Build the optional local developer CLI/MCP launcher" OFF)
 option(WEBFRONT_BUILD_EXAMPLES "Build the example applications" ${WEBFRONT_IS_TOP_LEVEL})
+option(WEBFRONT_DISTRIBUTION "Require WebKitGTK sandboxing for distribution (development disables it by default)" OFF)
 option(WEBFRONT_GZIP_DIFFERENTIAL "Build test-only gzip/zlib differential checks" OFF)
 option(WEBFRONT_USE_MDDLOG "Use the compiled mddlog diagnostic adapter" OFF)
 # The experimental gate must be selected before project() probes the compiler.
@@ -49,6 +55,17 @@ find_package(Threads REQUIRED)
 
 add_library(WebFront INTERFACE)
 add_library(WebFront::WebFront ALIAS WebFront)
+if(WEBFRONT_DISTRIBUTION)
+    target_compile_definitions(WebFront INTERFACE WEBFRONT_DISTRIBUTION=1)
+endif()
+include(cmake/WebFrontDistribution.cmake)
+if(WEBFRONT_EMBED_WEBKITGTK AND WEBFRONT_IS_TOP_LEVEL)
+    if(WEBFRONT_DISTRIBUTION)
+        message(NOTICE "WebFront WebKitGTK: DISTRIBUTION mode, sandbox required. Package the application profile; see docs/WEBKITGTK.md.")
+    else()
+        message(NOTICE "WebFront WebKitGTK default: DEVELOPMENT (per-target distribution may override), sandbox disabled for native views. Select -DWEBFRONT_DISTRIBUTION=ON for distribution; see docs/WEBKITGTK.md.")
+    endif()
+endif()
 target_link_libraries(WebFront INTERFACE Threads::Threads)
 # dlopen/dlsym: the frontends' run-time loaded toolkits and the system browser's UI loop (needs -ldl before glibc 2.34)
 target_link_libraries(WebFront INTERFACE ${CMAKE_DL_LIBS})
@@ -149,6 +166,9 @@ if(WEBFRONT_BUILD_AUTOMATION OR (WEBFRONT_ENABLE_TESTING AND
 endif()
 # Public helper for a parent project: checks the launcher target and optionally installs it.
 include(WebFrontAgent)
+# What an agent configuring a project must learn at once: the development model, and how it runs wf itself.
+include(WebFrontAgentGuide)
+webfront_announce_agent_support()
 
 if(WEBFRONT_ENABLE_TESTING OR WEBFRONT_ENABLE_FUZZING)
   include(TestHardening)
@@ -156,6 +176,12 @@ endif()
 
 if(WEBFRONT_ENABLE_FUZZING)
   add_subdirectory(test/fuzz)
+endif()
+
+# The host-loop example and its tests share one optional CUDA unit; the language is enabled here, above both.
+if(WEBFRONT_ENABLE_TESTING OR WEBFRONT_BUILD_EXAMPLES)
+  include(BoingCuda)
+  webfront_enable_host_loop_cuda()
 endif()
 
 if(WEBFRONT_ENABLE_TESTING)

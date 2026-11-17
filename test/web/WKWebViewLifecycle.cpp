@@ -20,7 +20,7 @@ void checkWKWebViewHeader();
 
 namespace {
 using namespace webfront::frontend::detail::wkwebview;
-using Frontend = webfront::testdriver::QuietFrontend<webfront::frontend::WKWebViewFrontend>;
+using Frontend = webfront::testdriver::TestFrontend<webfront::frontend::WKWebViewFrontend>;
 using App      = webfront::WebFrontWithFrontend<Frontend>;
 
 void require(bool condition, const char* message) {
@@ -80,13 +80,10 @@ void nativeClose(bool quit) {
     const auto previousMenu     = send(app, "mainMenu");
     const auto previousDelegate = send(app, "delegate");
     {
-        Session session("http://127.0.0.1:0/", {.visible = webfront::testdriver::diagnosticWindows()});
+        Session session("http://127.0.0.1:0/", {.visible = webfront::testdriver::visibleWindows});
         session.create();
-        require(static_cast<bool>(send<BOOL>(session.window, "isVisible")) == webfront::testdriver::diagnosticWindows(),
+        require(static_cast<bool>(send<BOOL>(session.window, "isVisible")) == webfront::testdriver::visibleWindows,
                 "Window visibility option was ignored");
-        if (!webfront::testdriver::diagnosticWindows())
-            require(send<long>(send(send(session.view, "configuration"), "preferences"), "inactiveSchedulingPolicy") == 2L,
-                    "Hidden web content would suspend before asynchronous work finishes");
         // Exercise the real native entry points before any WebKit/bridge callback.
         if (quit)
             send<void>(app, "terminate:", static_cast<id>(nullptr));
@@ -133,7 +130,7 @@ struct Listener {
 void startupTimeout() {
     // No accept/response: navigation stalls without relying on public networking.
     Listener                             listener;
-    webfront::frontend::WKWebViewOptions options{.startupTimeout = std::chrono::milliseconds(200), .visible = webfront::testdriver::diagnosticWindows()};
+    webfront::frontend::WKWebViewOptions options{.startupTimeout = std::chrono::milliseconds(200), .visible = webfront::testdriver::visibleWindows};
     expectFailure(
         [&] {
             Frontend::open("127.0.0.1", listener.port, "index.html", options);
@@ -207,14 +204,11 @@ void settings() {
         Session session("http://127.0.0.1:9002/",
                         {
                             .contentPolicy = {.devToolsEnabled = enabled, .contextMenusEnabled = enabled},
-                            .visible       = webfront::testdriver::diagnosticWindows()
+                            .visible       = webfront::testdriver::visibleWindows
         });
         session.create();
-        require(static_cast<bool>(send<BOOL>(session.window, "isVisible")) == webfront::testdriver::diagnosticWindows(),
+        require(static_cast<bool>(send<BOOL>(session.window, "isVisible")) == webfront::testdriver::visibleWindows,
                 "Window visibility option was ignored");
-        if (!webfront::testdriver::diagnosticWindows())
-            require(send<long>(send(send(session.view, "configuration"), "preferences"), "inactiveSchedulingPolicy") == 2L,
-                    "Hidden web content would suspend before asynchronous work finishes");
         require(static_cast<bool>(send<BOOL>(session.view, "isInspectable")) == enabled, "Inspector policy was ignored");
         require(!send<BOOL>(send(send(session.view, "configuration"), "websiteDataStore"), "isPersistent"), "Website data was persistent");
         Object menu(send(type("NSMenu"), "new"));
@@ -225,9 +219,27 @@ void settings() {
         require(utf8(send(send(send(session.app, "mainMenu"), "itemAtIndex:", 1L), "title")) == "Edit", "Edit menu has no visible title");
     }
 }
+void hiddenScheduling() {
+    Object  pool(send(type("NSAutoreleasePool"), "new"));
+    Object configuration(send(type("WKWebViewConfiguration"), "new"));
+    const auto preferences = send(configuration.get(), "preferences");
+    Session session("http://127.0.0.1:0/", {.visible = false});
+    // Check the runtime capability: a test binary built on macOS 14 can also run on macOS 13.3.
+    if (!send<BOOL>(preferences, "respondsToSelector:", sel_registerName("setInactiveSchedulingPolicy:"))) {
+        expectFailure([&] { session.create(); }, "hidden sessions require macOS 14 or later");
+        return;
+    }
+    session.create();
+    require(!send<BOOL>(session.window, "isVisible"), "An explicitly hidden window was shown");
+    require(send<long>(send(send(session.view, "configuration"), "preferences"), "inactiveSchedulingPolicy") == 2L,
+            "Hidden web content would suspend before asynchronous work finishes");
+    session.close();
+    session.run();
+}
+
 void missingResponse() {
     Object  pool(send(type("NSAutoreleasePool"), "new"));
-    Session session("http://127.0.0.1:0/", {.visible = webfront::testdriver::diagnosticWindows()});
+    Session session("http://127.0.0.1:0/", {.visible = webfront::testdriver::visibleWindows});
     session.create();
     send<void>(session.delegate, "webView:didFinishNavigation:", session.view, static_cast<id>(nullptr));
     require(session.closed && !session.loaded, "An internal error document was treated as a successful HTTP load");
@@ -240,7 +252,7 @@ void missingResponse() {
 
 void committedNavigation() {
     Object  pool(send(type("NSAutoreleasePool"), "new"));
-    Session session("http://127.0.0.1:9002/", {.visible = webfront::testdriver::diagnosticWindows()});
+    Session session("http://127.0.0.1:9002/", {.visible = webfront::testdriver::visibleWindows});
     session.create();
     bool notified               = false;
     session.navigationCancelled = [&] {
@@ -286,7 +298,7 @@ struct ScenarioFrontend : Frontend {
     static void open(std::string_view port, std::string_view page) {
         initialize();
         Object                               pool(send(type("NSAutoreleasePool"), "new"));
-        webfront::frontend::WKWebViewOptions options{.visible = webfront::testdriver::diagnosticWindows()};
+        webfront::frontend::WKWebViewOptions options{.visible = webfront::testdriver::visibleWindows};
         if (configure)
             configure(options);
         Session session(webfront::frontend::detail::applicationUrl("127.0.0.1", port, page), options);
@@ -596,6 +608,7 @@ int main(int argc, char** argv) {
             {      "startup-timeout",       startupTimeout},
             {      "redirect-policy",       redirectPolicy},
             {             "settings",             settings},
+            {    "hidden-scheduling",     hiddenScheduling},
             {"navigation-diagnostic", navigationDiagnostic},
             {     "missing-response",      missingResponse},
             { "committed-navigation",  committedNavigation},

@@ -437,9 +437,11 @@ foreach(case webkitgtk-display webkitgtk-linux cef-linux cef-macos cef-windows c
             continue()
         endif()
         if(case STREQUAL "extension" OR case STREQUAL "webview2-windows")
-            set(expected_count 14)
+            set(expected_count 16)
+        elseif(case STREQUAL "cef-linux")
+            set(expected_count 14)  # no host-thread case: CEF has no secondary-thread path to observe
         else()
-            set(expected_count 13)
+            set(expected_count 15)
         endif()
         if(NOT count EQUAL expected_count)
             list(APPEND failures "${case}: expected ${expected_count} tests, got ${count}")

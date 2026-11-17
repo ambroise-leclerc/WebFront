@@ -42,6 +42,20 @@ describe('The developer distribution', () => {
         }
     });
 
+    it('a starter without dependency lists no installation, and an unknown name is answered with the starters', async () => {
+        const bytes = starter({'package/main.ts': encode('export {};'),
+            'package/webfront.project.json': encode(recipe({name: 'app-starter', dependencies: {}, entries: {main: 'main.ts'}}))});
+        const bridge = {cppFunction: () => async () => 'transaction'};
+        const config = {starters: {life: {url: '/life-starter.tgz', integrity: await integrity(bytes)}, app: {url: '/app-starter.tgz', integrity: await integrity(bytes)}}};
+        const help = await createStarter(bridge, config, ['app', 'ui'], {fetchImpl: async () => new Response(bytes)});
+        expect(help).toBe('Created ui.\nwf init\nwf dev ui/main.ts\nwf preview ui/main.ts\nwf embed ui/main.ts --output generated/AppUI.hpp');
+        // The argument is easily taken for the name of the project (#561): the answer says what it is and what exists.
+        await rejects(createStarter(bridge, config, ['my-ui', 'ui'], {fetchImpl: async () => new Response(bytes)}),
+            /Unknown pinned starter: my-ui\. wf create takes the name of a starter, not of your project; available: app, life/);
+        await rejects(createStarter(bridge, config, ['constructor', 'ui'], {fetchImpl: async () => new Response(bytes)}), /Unknown pinned starter: constructor/);
+        await rejects(createStarter(bridge, {}, ['app', 'ui']), /Unknown pinned starter: app\. wf create takes the name of a starter, not of your project$/);
+    });
+
     it('starter replacement refusal aborts the publication rather than overwriting files', async () => {
         const bytes = starter();
         const calls = [];

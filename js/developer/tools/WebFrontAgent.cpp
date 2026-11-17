@@ -10,6 +10,10 @@
 #include <webfront/automation/Stdio.hpp>
 #include <webfront/DeveloperApp.hpp>
 
+#ifdef WEBFRONT_TEST_REQUEST_LOG
+    #include "../../../test/driver/RequestLog.hpp"
+#endif
+
 #include <webfront/automation/Platform.hpp>
 
 #include <algorithm>
@@ -789,6 +793,9 @@ int main(int argc, char** argv) {
         // Dispatch CEF renderer processes before parsing flags or creating a
         // profile.
         webfront::detail::ensureFrontendInitialized<Selected>();
+#ifdef WEBFRONT_TEST_REQUEST_LOG
+        [[maybe_unused]] const auto requestLog = webfront::testdriver::logRequests();
+#endif
         const auto options = parse(argc, argv);
         Interrupt interrupt;
         Profile    profile;

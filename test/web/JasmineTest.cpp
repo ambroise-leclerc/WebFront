@@ -8,6 +8,7 @@
 #include <webfront/WebFront.hpp>
 
 #include "../driver/WfDriver.hpp"
+#include "../../examples/host-loop/HostLoopUI.hpp"
 #include "../../examples/life/react/LifeReact.hpp"
 #include "RejectedWebSocketServer.hpp"
 #include "../unit/FormsSettings.hpp"
@@ -67,6 +68,8 @@ struct TestState {
     atomic<bool> senderResultsObserved{false};
     atomic<bool> senderCancellationObserved{false};
     atomic<bool> specsFinished{false};
+    atomic<bool> hostLoopEnded{false};
+    atomic<bool> hostLoopStoppedByPage{false};
     atomic<bool> subscriberNotified{false};
 };
 
@@ -104,6 +107,7 @@ public:
     using Pages = TestPages;
 
     ~BrowserIntegrationTest() {
+        joinHostLoop();
         joinBitsetFutureChecks();
         error_code ignored;
         if (!mediaFile.empty()) filesystem::remove(mediaFile, ignored);
@@ -119,6 +123,7 @@ public:
         registerBitsetCallbacks();
         registerListCallbacks();
         lifeReactSubscription = demo::installLifeReact(app);
+        registerHostLoop(app);
         registerMediaRoute(app);
         registerReadRoute(app);
         streamRoute           = app.addRoute("/webfront/services/test-stream/", [](const http::RouteRequest& request) {
@@ -142,6 +147,7 @@ public:
 
     /// The status of `wf test` (the specs), unless the specs passed and C++ did not observe every call they make.
     int finish(int status) {
+        joinHostLoop();
         joinBitsetFutureChecks();
         if (status != 0) {
             log::error("wf test did not pass (status {})", status);
@@ -202,6 +208,28 @@ private:
     future<string> cppResult;
     jthread bitsetFutureThread;
     static constexpr chrono::seconds cppResultWaitTimeout{10};
+
+    // The host of examples/host-loop, with its loop on a thread of this program as the example runs it beside a native
+    // window. The page of the example is added on request of its specs, which also stop the loop from its button.
+    boing::Host hostLoop{{boing::Engine::cpu, false, false, 0}, 2};
+    jthread     hostLoopThread;
+
+    void registerHostLoop(TestWF& app) {
+        boing::install(app, hostLoop);
+        app.cppFunction("hostLoopTest.mount", [](TestWF::UI ui) { ui.addScript(boing::page); });
+        app.cppFunction("hostLoopTest.ended", [this] { return state.hostLoopEnded.load(); });
+        hostLoopThread = jthread([this] {
+            hostLoop.run();
+            state.hostLoopEnded = true;
+        });
+    }
+
+    /// No call of the loop into WebFront may still run when the application shuts down.
+    void joinHostLoop() {
+        hostLoop.stop();
+        if (hostLoopThread.joinable())
+            hostLoopThread.join();
+    }
 
     void joinBitsetFutureChecks() {
         if (bitsetFutureThread.joinable())
@@ -376,41 +404,33 @@ private:
         webFront->cppFunction("heterogeneousList", [](const vector<string>&) {});
     }
 
+    /// "<code>|<message>" of the BridgeError that the browser function `name` raises, called with `argument` if any, or
+    /// "resolved". Literals, not strings: no temporary may live in a co_await expression (GCC coroutine ICE).
+    static ResultTask<string> rejectionOf(TestWF::UI ui, const char* name, const char* argument = nullptr) {
+        try {
+            if (argument)
+                co_await ui.jsFunctionSender<string>(name)(argument);
+            else
+                co_await ui.jsFunctionSender<string>(name)();
+        } catch (const BridgeError& error) {
+            co_return error.code() + "|" + error.what();
+        }
+        co_return "resolved";
+    }
+
     /// C++ -> JavaScript: the code of a rejection of the browser reaches C++, and an application cannot forge a reserved one.
     Task checkErrorCodes(TestWF::UI ui) {
         bool passed = false;
         try {
-            string application, reserved, missing, plain, longCode;
-            size_t longSize = 0;
-            try {
-                co_await ui.jsFunctionSender<string>("webfrontTests.rejectWithCode")("quota:exceeded");
-            } catch (const BridgeError& error) {
-                application = error.code() + "|" + error.what();
-            }
-            try {
-                co_await ui.jsFunctionSender<string>("webfrontTests.rejectWithCode")("webfront.cancelled");
-            } catch (const BridgeError& error) {
-                reserved = error.code();
-            }
-            try {
-                co_await ui.jsFunctionSender<string>("webfrontTests.noSuchFunction")();
-            } catch (const BridgeError& error) {
-                missing = error.code();
-            }
-            try {
-                co_await ui.jsFunctionSender<string>("webfrontTests.rejectLong")();
-            } catch (const BridgeError& error) {
-                longCode = error.code();
-                longSize = string_view(error.what()).size();
-            }
-            try {
-                co_await ui.jsFunctionSender<string>("webfrontTests.senderThrows")();
-            } catch (const BridgeError& error) {
-                plain = error.code();
-            }
-            passed = application == "quota:exceeded|failure quota:exceeded" && reserved == bridge_code::generic && missing == bridge_code::notFound
-                     && plain == bridge_code::generic
-                     && longCode == "long" && longSize == 65534;  // the 80000-byte message is cut before the character that straddles 65535
+            const auto codeIs = [](const string& rejection, string_view code) { return rejection.starts_with(string(code) + "|"); };
+            const auto application = co_await rejectionOf(ui, "webfrontTests.rejectWithCode", "quota:exceeded");
+            const auto reserved    = co_await rejectionOf(ui, "webfrontTests.rejectWithCode", "webfront.cancelled");
+            const auto missing     = co_await rejectionOf(ui, "webfrontTests.noSuchFunction");
+            const auto longOne     = co_await rejectionOf(ui, "webfrontTests.rejectLong");
+            const auto plain       = co_await rejectionOf(ui, "webfrontTests.senderThrows");
+            // The 80000-byte message is cut to 65534 bytes, before the character that straddles 65535.
+            passed = application == "quota:exceeded|failure quota:exceeded" && codeIs(reserved, bridge_code::generic) && codeIs(missing, bridge_code::notFound)
+                     && codeIs(plain, bridge_code::generic) && codeIs(longOne, "long") && longOne.size() == string_view("long|").size() + 65534;
         } catch (const exception& error) {
             log::error("Error code checks failed: {}", error.what());
         }
@@ -740,10 +760,10 @@ private:
             connectedUI = ui;
             browserReady();
         });
-        webFront->cppFunction<void, string>("recordFromJs", [this](const string& token) {
-            recordFromJs(token);
+        webFront->cppFunction("recordFromJs", [this](const string& token) {
+            state.jsToCppObserved = token == jsToCppToken;
         });
-        webFront->cppFunction<void, string>("recordExtendedFrameFromJs", [this](const string& value) {
+        webFront->cppFunction("recordExtendedFrameFromJs", [this](const string& value) {
             state.jsExtendedFrameObserved = value == string(126, 'x');
         });
         webFront->cppFunction("specsFinished", [this] {
@@ -758,31 +778,14 @@ private:
             return value;
         });
         webFront->cppFunction<size_t, string>("lengthInCpp", [](const string& value) { return value.size(); });
-        webFront->cppFunction<void,
-                             vector<uint8_t>,
-                             vector<int8_t>,
-                             vector<uint16_t>,
-                             vector<int16_t>,
-                             vector<uint32_t>,
-                             vector<int32_t>,
-                             vector<uint64_t>,
-                             vector<int64_t>,
-                             vector<float>,
-                             vector<double>>(
-            "recordArraysFromJs",
-            [this](const vector<uint8_t>&  u8,
-                   const vector<int8_t>&   i8,
-                   const vector<uint16_t>& u16,
-                   const vector<int16_t>&  i16,
-                   const vector<uint32_t>& u32,
-                   const vector<int32_t>&  i32,
-                   const vector<uint64_t>& u64,
-                   const vector<int64_t>&  i64,
-                   const vector<float>&    floats,
-                   const vector<double>&   doubles) {
-                recordArraysFromJs(u8, i8, u16, i16, u32, i32, u64, i64, floats, doubles);
-            });
-        webFront->cppFunction<void, tuple<int, string>>("recordTupleFromJs", [this](const tuple<int, string>& value) {
+        // Ten typed arrays as ten top-level parameters, the signature deduced from the lambda.
+        webFront->cppFunction("recordArraysFromJs",
+                              [this](const vector<uint8_t>& u8, const vector<int8_t>& i8, const vector<uint16_t>& u16, const vector<int16_t>& i16,
+                                     const vector<uint32_t>& u32, const vector<int32_t>& i32, const vector<uint64_t>& u64, const vector<int64_t>& i64,
+                                     const vector<float>& floats, const vector<double>& doubles) {
+                                  recordArraysFromJs(u8, i8, u16, i16, u32, i32, u64, i64, floats, doubles);
+                              });
+        webFront->cppFunction("recordTupleFromJs", [this](const tuple<int, string>& value) {
             state.jsTupleObserved = value == tuple<int, string>{42, "tuple"};
         });
     }
@@ -824,10 +827,6 @@ private:
         cppResult = requireUI().template jsFunction<string>("webfrontTests.returnToCpp")("from-cpp");
     }
 
-    void recordFromJs(const string& token) {
-        state.jsToCppObserved = token == jsToCppToken;
-    }
-
     bool cppResultMatches() {
         if (!cppResult.valid()) return false;
         try {
@@ -844,6 +843,8 @@ private:
 
     /// The last spec: everything the specs sent over this connection has been handled.
     void specsFinished() {
+        state.hostLoopStoppedByPage = state.hostLoopEnded.load();
+        joinHostLoop();
         shutdownDocument.emplace(connectedUI->document());
         shutdownNode            = shutdownDocument->text("pending at shutdown");
         state.cppResultObserved = cppResultMatches();
@@ -870,7 +871,7 @@ private:
             return 1;
         }
         if (!(state.domDocumentObserved && state.domAwaitObserved && state.domBatchSent && state.domRejectionObserved && state.domEventsObserved && state.formsObserved && state.browserReady
-              && state.subscriberNotified && browserCallsObserved() && cppCallsObserved() && rejectedWebSocket->rejectedRequests() >= 2)) {
+              && state.subscriberNotified && state.hostLoopStoppedByPage && browserCallsObserved() && cppCallsObserved() && rejectedWebSocket->rejectedRequests() >= 2)) {
             log::error("The specs passed but one of the bridge-direction checks failed");
             return 1;
         }

@@ -4,27 +4,113 @@
 [![Windows · MSVC](https://img.shields.io/badge/CI-Windows%20%C2%B7%20MSVC-0078D4)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
 [![macOS · Apple Clang](https://img.shields.io/badge/CI-macOS%20%C2%B7%20Apple%20Clang-555555)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
 [![Linux · GCC](https://img.shields.io/badge/CI-Linux%20%C2%B7%20GCC-E95420)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
+[![Linux · aarch64](https://img.shields.io/badge/CI-Linux%20%C2%B7%20aarch64%20%C2%B7%20GCC%2013-E95420)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
+[![Jetson Orin](https://img.shields.io/badge/CI-Jetson%20Orin-76B900)](docs/JETSON.md)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C)](CMakeLists.txt)
 [![Header-only](https://img.shields.io/badge/library-header--only-2EA043)](include/)
 
-**WebFront is a header-only C++23 library for building rich, modern user interfaces.**
-Keep application logic in C++ and create reactive interfaces with TypeScript, React and the existing JavaScript package ecosystem. WebFront brings the UI tools into your application: there is no separate JavaScript development environment to install.
+[English](README.md) · [Français](README.fr.md)
 
-**Website and book: [webfront.fr](https://webfront.fr/en/)** ([en français](https://webfront.fr/fr/)) · [The WebFront Book](https://webfront.fr/en/book/) · [Documentation](docs/) · [Changelog](docs/CHANGELOG.md)
+WebFront is a **header-only C++23 library for building rich, modern user interfaces.** Keep application logic in C++ and create reactive interfaces with TypeScript, React and the existing JavaScript package ecosystem. WebFront brings UI development tools into your application: there is no separate TypeScript development environment to install.
 
-- **C++ in front, web technologies for the screen.** Functions registered with `cppFunction` are called from TypeScript over an asynchronous binary bridge; C++ calls browser functions with `ui.jsFunction`.
-- **Native window or browser, same sources.** WebView2 (Windows), WKWebView (macOS), WebKitGTK (Linux), optional CEF, or the system browser as fallback.
-- **A development environment inside your application.** `wf` installs dependencies, compiles TS/TSX, type-checks, runs Jasmine specs and previews on save, with no Node.js or package manager on the machine.
-- **One executable to ship.** `wf embed` packages the interface into a C++ header; the distributed build runs offline without the development tools.
-- **Ready for AI harnesses.** An optional local launcher (MCP or JSON CLI) lets an agent create, check, build and test a screen under explicit grants.
+WebFront has no dependencies and can be deployed on any device with a recent C++ standard library.
 
-Desktop Windows, macOS and Linux are the qualified platforms; embedded targets and microcontrollers are not. WebFront already drives a real application: [SiliconForge](https://github.com/ambroise-leclerc/SiliconForge), a microcontroller simulator.
+<a href="#game-of-life-from-console-to-native-application"><img src="docs/images/life-bootstrap.gif" width="100%" alt="Game of Life walkthrough: the C++ application beside the WebFront window, where wf create life, dependency installation and wf preview bring the React interface up below the terminal"></a>
+
+The animation shows the C++ application and the Game of Life example, with terminal output and timing condensed and the preview expanded for readability. [Follow the walkthrough below ↓](#game-of-life-from-console-to-native-application)
+
+- **Integrate into an existing application.** Keep your simulation, device control, SIMD computations, CUDA kernels... and worker threads in C++. Use a native window or even a web browser without surrendering your event loop. [Host integration →](docs/HOST_INTEGRATION.md)
+- **Support human developers and coding agents.** The integrated `wf` tools compile, type-check, test and embed the UI. An opt-in MCP server and JSON CLI let coding agents operate your application's own window and run permitted checks and callbacks. [Agent workflow →](#developing-with-an-agent)
+- **Move numerical data directly.** Typed arrays and packed bitsets cross a binary WebSocket bridge without JSON or base64 conversion. Coroutines, futures and senders connect asynchronous UI calls to native work. [Execution model →](docs/ASYNC_EXECUTION.md)
+- **Build for distribution.** Embed assets, pin package versions and verify downloads; run the resulting application offline. CMake consumer targets and browser tests support repeatable builds and CI. [Integrate →](#use-webfront-in-your-project) · [Test →](#test-your-application)
+- **Choose your UI stack.** Use TypeScript, React and browser-compatible packages, or build DOM islands directly from C++. Optional forms and inspectors derive from C++ type descriptors. [DOM →](docs/DOM.md) · [React →](docs/REACT.md) · [Forms →](docs/FORMS.md)
+
+
+
+**Website and book: [webfront.fr](https://webfront.fr/en/)** · [The WebFront Book](https://webfront.fr/en/book/) · [Documentation](docs/) · [Changelog](docs/CHANGELOG.md)
+
+## Platforms and deployment
+
+| Target | Interface options | Validation scope |
+| --- | --- | --- |
+| Windows | System browser, native WebView2, optional CEF | Desktop CI with MSVC; WebView2 needs the Evergreen runtime |
+| macOS 13.3+ for the native window | System browser, system WKWebView, optional CEF | Desktop CI with AppleClang |
+| Linux | System browser, native WebKitGTK 6.0, optional CEF | Desktop CI with GCC; extended Clang coverage |
+| Linux ARM64 / NVIDIA Jetson | System browser, WebKitGTK or CEF where available | GCC 13 ARM64 CI and on-board **Orin Nano Super 8 GB** validation; see the [Jetson guide](docs/JETSON.md) |
+
+Designed to follow standard C++ across platforms, the core uses standard facilities and a replaceable networking provider. The default browser path avoids linking a native GUI toolkit or web-view engine. A target needs a suitable **C++23 compiler and standard library, OS networking and threads, and a browser**. GCC 13 is the best-effort minimum; the [support policy](docs/adr/ADR-022-profils-et-niveaux-de-support.md) defines tested toolchains and support levels.
+
+**No dependencies. No separate WebFront runtime.** The core follows the standard C++ networking and execution model. While these facilities are being standardized and adopted by standard libraries, CMake supplies pinned external implementations: the maintained `stdnet` networking layer and, when needed, `stdexec` for senders. These provide the interim implementation at build time; there is no WebFront library binary to install. Native web views retain their platform requirements, and CEF is optional. The developer environment caches verified tools and packages on first use; the embedded production build needs neither that cache nor the UI sources.
+
+### CUDA and embedded applications
+
+**Keep CUDA in your C++ application, including on NVIDIA Jetson Orin Nano.** WebFront does not prescribe the compute backend: your host loop or workers run CPU or CUDA code, while the web interface changes parameters and displays results through typed arrays. Keep `.cu` translation units separate from the C++23 WebFront headers when the CUDA compiler requires it. No CUDA toolkit is needed for applications that do not use CUDA.
+
+**The included [Boing Ball example](docs/HOST_LOOP_EXAMPLE.md) runs on CPU or CUDA.** A checkered ball bounces above a reflective floor; switch to tinted glass to reveal reflection, refraction and coloured light beams. Every pixel is computed by the C++ host, while the page displays the resulting typed array on a canvas. The same host loop works with a native window or the system browser.
+
+![CUDA Boing Ball animation in a native window on Jetson Orin Nano: checkered ball, then illuminated glass](docs/images/host-loop-boing.gif)
+
+```bash
+cmake --build build --target WebFrontHostLoop --parallel 2
+build/examples/WebFrontHostLoop --quality 0
+# On a CUDA-equipped build and device:
+build/examples/WebFrontHostLoop --engine cuda --glass --stats
+```
+
+With a multi-configuration generator such as Visual Studio, replace `build/examples/` in the commands above with `build/examples/Debug/`, or `build/examples/Release/` after building with `--config Release`. The executable is named `WebFrontHostLoop.exe`.
+
+Run these commands from the repository root after configuration. CUDA detection is automatic; `-DWEBFRONT_HOST_LOOP_CUDA=OFF` builds the complete CPU example without the toolkit. Add `--browser` to select the system browser. The [example guide](docs/HOST_LOOP_EXAMPLE.md) covers quality, benchmarking and the separate CUDA compiler configuration.
+
+**Qualified on Jetson Orin Nano Super 8 GB:** real-board builds, CPU/CUDA rendering, native-window and bridge tests, and sandboxed distribution checks. A trusted [hardware validation workflow](docs/JETSON_RUNNER.md) complements hosted ARM64 CI. See the [board qualification](docs/JETSON.md) and [rendering measurements](docs/HOST_LOOP_EXAMPLE.md) for the tested software stack and scope. NX/AGX and other JetPack versions require their own qualification; accelerated rendering inside WebKit's sandbox is not established by these results.
+
+On Linux, WebKitGTK defaults to development mode with its sandbox disabled. For distribution, select `-DWEBFRONT_DISTRIBUTION=ON` and package the application's sandbox profile where required. [Development and distribution →](docs/WEBKITGTK.md#development-and-distribution)
+
+## Performance by design
+
+Keep heavy computation native and send the data the interface needs: numeric buffers stay typed, bitsets stay packed, and bridge calls are asynchronous. The server has its own thread; your compute loop and workers remain independent. The optional React adapter coalesces C++ snapshots per browser, and the DOM API batches writes.
+
+These mechanisms help control serialization, update frequency and UI overhead. End-to-end performance still depends on message size, rendering and the target hardware. Measure computation, transport and display separately; the [execution guide](docs/ASYNC_EXECUTION.md) explains where work runs and how to keep callbacks responsive.
+
+For a measured example, the Boing Ball on **Orin Nano Super 8 GB at 25 W**, with a sandboxed WebKitGTK 2.52.6 window, displays:
+
+| Scene | CPU (6 threads) | CUDA |
+| --- | ---: | ---: |
+| Opaque ball | 12 images/s | 21 images/s |
+| Glass and light beams | About 0.6 images/s | 12 images/s |
+
+Scene: 960 × 720, four rays per pixel; window: 800 × 600 CSS pixels. Release build, GCC 13.3, CUDA 13.2.86, L4T R39.2.1. These are board-specific observations, not universal throughput guarantees. The [measurement report](docs/HOST_LOOP_EXAMPLE.md#system-browser-and-distribution-follow-up) separates compute, copy, transport and display, and compares the system browser with the native window.
+
+## Find your starting point
+
+- **Evaluate the library:** [Hello World](#hello-world), then the [Game of Life walkthrough](#game-of-life-from-console-to-native-application).
+- **Add a UI to existing software:** [CMake integration](#use-webfront-in-your-project) and the [host loop example](examples/host-loop/HostLoop.cpp).
+- **Work with a coding agent:** [developer workflow](#developing-with-an-agent) and [application automation](#let-an-agent-drive-your-application).
+- **Plan production:** [testing](#test-your-application), [contracts and limitations](#contracts-and-limitations) and [support status](docs/PROJECT_STATUS.md).
+
+## Developing with an agent
+
+If you are a coding agent, or work with one, read this before anything else. The [agent guide](docs/DEVELOPING_WITH_AGENTS.md) has the details.
+
+- **The model.** A WebFront application is a C++ program whose interface is TypeScript/TSX. The interface lives in **`ui/`** of the project directory (`ui/main.ts` or `ui/main.tsx`) and is developed with **`wf dev`**, in the terminal that `app.bootstrap("developer")` opens in the application's window. Pages of hand-written HTML and classic JavaScript served through `documentRoot` are not the development path: none of the tools apply to them.
+- **The sequence.** With the pinned developer environment: `wf create app` (the starter name, not your project's name), `wf init`, `wf install <package>` for browser dependencies, then `wf dev ui/main.ts`. Finish with `wf check`, `wf test` and `wf embed` using the project's configuration. Use `wf create life` for the React walkthrough. `wf help agents` prints the workflow.
+- **An agent runs `wf` itself, in JSON or MCP.** Do not ask a person to type the commands. Configure with `-DWEBFRONT_BUILD_AUTOMATION=ON` to build `webfront-agent`; the application opts in with `webfront::automation::enableAutomation(app, {.grants = {...}, .listen = directory})`, whose grants stay the owner's; then:
+
+```sh
+webfront-agent --list                                              # the sessions shared with agents
+webfront-agent --attach DIRECTORY --operation create --starter app
+webfront-agent --attach DIRECTORY --operation preview --entry ui/main.ts   # after each edit, in place of wf dev
+webfront-agent --print-mcp-config --attach DIRECTORY > .mcp.json   # the same operations as an MCP server
+```
+
+```json
+{"mcpServers": {"webfront": {"command": "/path/to/webfront-agent", "args": ["--attach", "/path/to/directory", "--mcp"]}}}
+```
+
+In a project that embeds WebFront, `webfront_write_agent_guide()` writes these rules as `AGENTS.md` at its root, and `wf create` writes them beside the starter's sources.
 
 ## From C++ to a reactive UI
 
 Register your simulation, bootstrap the tools, then build the interface in the application's terminal. `life-project` is the working directory for the UI sources:
-
-<a href="#game-of-life-from-console-to-native-application"><img src="docs/images/life-bootstrap.gif" width="100%" alt="Game of Life walkthrough: the C++ application beside the WebFront window, where wf create life, dependency installation and wf preview bring the React interface up below the terminal"></a>
 
 <details>
 <summary>The C++ application of the animation, as text</summary>
@@ -64,8 +150,6 @@ int main() {
 ```
 
 </details>
-
-The animation shows the C++ application and the Game of Life example, with terminal output and timing condensed and the preview expanded for readability. [Follow the walkthrough below ↓](#game-of-life-from-console-to-native-application)
 
 ## Hello World
 
@@ -112,7 +196,7 @@ int main() {
 
 ## Game of Life: from console to native application
 
-The example starts with a C++ simulation, adds a React interface, then embeds that interface in the executable. You need Git, CMake **3.31+** and a C++23 compiler. The initial CMake configuration, the first bootstrap and the first `wf install` need internet access; afterwards the downloaded environment and packages are cached and can be verified offline.
+The example starts with a C++ simulation, adds a React interface, then embeds that interface in the executable. You need Git, CMake **3.31+** and a C++23 compiler (GCC **13+**; GCC 13 has best-effort S2 support). See [build tools on LTS distributions](#build-tools-on-lts-distributions) when your distribution supplies an older CMake, and the [compiler support policy](docs/adr/ADR-022-profils-et-niveaux-de-support.md) for the tested toolchains and limits. The initial CMake configuration, the first bootstrap and the first `wf install` need internet access; afterwards the downloaded environment and packages are cached and can be verified offline.
 
 ```bash
 git clone https://github.com/ambroise-leclerc/WebFront.git
@@ -148,7 +232,7 @@ app.bootstrap("developer");
 app.show();
 ```
 
-The project directory gives the application access to its development files. `bootstrap("developer")` opens the integrated terminal and loads the version-pinned developer environment, checking its SHA-512 integrity. Downloads are cached, so later launches work offline. The terminal runs `wf` commands; no system shell is exposed and nothing is installed on your machine.
+The project directory gives the application access to its development files. `bootstrap("developer")` opens the integrated terminal and loads the version-pinned developer environment, checking its SHA-512 integrity. Downloads are cached, so later launches work offline. The terminal runs `wf` commands on the project and has `ls`, `cat`, `tree` and `mounts` to look at it; no system shell is exposed. Tools and packages are cached for this environment, without a host JavaScript installation.
 
 The build you made above is enough. Start the example from the `build` directory:
 
@@ -173,11 +257,14 @@ explicitly enabling WKWebView with such a target fails configuration. See [the m
 
 When the engine is missing, configuration still succeeds. CMake prints a `Native window: no native engine will be built` notice that says what to install, and `WebFrontLifeDeveloper` is compiled for the default browser: at start it prints that notice, serves the same application and opens it in your system browser. Install the dependency and run `cmake ..` again to get the native window. CEF (`-DWEBFRONT_EMBED_CEF=ON`) makes `CEFFrontend` available to your own applications; the examples do not select it.
 
-**Advanced options.**
+<details>
+<summary>Advanced native engine and environment options</summary>
 
 - Choose the engine yourself with `-DWEBFRONT_EMBED_WEBVIEW2=ON|OFF`, `-DWEBFRONT_EMBED_WKWEBVIEW=ON|OFF` or `-DWEBFRONT_EMBED_WEBKITGTK=ON|OFF`; an explicit value is never replaced by the detection. `-DWEBFRONT_AUTODETECT_NATIVE=OFF` disables it. Test builds (`-DWEBFRONT_ENABLE_TESTING=ON`) keep the explicit selection.
 - Automatic engine choices are recalculated on each configuration and do not create an engine option in the cache. To return from an explicit macOS choice to automatic detection, run `cmake .. -UWEBFRONT_EMBED_WKWEBVIEW` (or remove the corresponding engine option on another platform).
 - Another project directory, and another environment archive, can be passed: `examples/WebFrontLifeDeveloper <project> [<environment-url> <sha512-integrity>]`, for instance an environment [built from the sources](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers).
+
+</details>
 
 The example reports startup failures with a nonzero exit status.
 
@@ -192,7 +279,7 @@ wf install react@19.3.1 react-dom@19.3.1
 wf dev ui/main.tsx
 ```
 
-- `wf create life` writes the editable [TSX and CSS starter](examples/life/ui) into `ui/`; it never overwrites an existing directory.
+- `wf create life` writes the editable [TSX and CSS starter](examples/life/ui) into `ui/`; it never overwrites an existing directory. The argument names a starter, not your project: `wf create app` writes a minimal TypeScript interface for a new application instead.
 - `wf init` writes `webfront.project.json`, the manifest every other command reads: dependencies, entries, providers, scripts and permissions.
 - `wf install` resolves the packages and their dependencies from the registry, verifies their integrity and records exact versions in `webfront-packages.lock.json`. It does not run the installation scripts of packages. `wf restore` rebuilds the cache from the lock on another machine, and `wf restore --offline` verifies it without any network.
 - `wf dev` compiles the TSX with esbuild-wasm, opens the interface inside the application and rebuilds it whenever you save a source. A build error appears in the terminal and over the preview, which keeps its last good version. Ctrl+C stops it; `wf build` compiles once without opening anything.
@@ -254,17 +341,6 @@ The builds remove TypeScript types without checking them; `wf check` runs the Ty
 ```
 
 The type packages come next: `wf install typescript@5.9.3 @types/react@19.3.0 @types/react-dom@19.3.0` then `wf check` type-check the starter. Both commands are described in the [developer environment reference](docs/DEVELOPER_ENVIRONMENT.md).
-
-An optional native [automation launcher](docs/AUTOMATION.md) exposes the developer window through
-local stdio MCP or a JSON CLI, with explicit permissions for check/build/test/preview and bounded
-UI inspection/actions. It requires an environment containing automation API v1 (0.6.3 or later),
-built from the sources or obtained from a verified published distribution.
-
-An agent finds what it may drive without being told: `webfront-agent --list` prints the sessions their owners shared
-(project, grants, process and endpoint, never the attachment capability), `webfront-agent --print-mcp-config --attach <dir>`
-prints a ready `.mcp.json`, and `webfront-agent --schema` / `--agent-help` describe the contract. Your own application opts in
-with `webfront::automation::enableAutomation(app, {.grants = {...}, .listen = dir})`, so that the agent drives *its* window
-and callbacks; see [automation of your own application](docs/AUTOMATION.md#automating-your-own-application).
 
 ### 5. Try the result
 
@@ -338,15 +414,27 @@ app.shutdown();
 
 The [automation guide](docs/AUTOMATION.md#automating-your-own-application) covers grants, callbacks, discovery, deadlines and the MCP profile.
 
-## What's new since 0.5.0
+## Capabilities for production projects
 
-The [changelog](docs/CHANGELOG.md) is exhaustive; the main additions are:
+Beyond the basic bridge, WebFront provides [owned application coroutines and cancellation](docs/ASYNC_EXECUTION.md), broadcasts to connected browsers, [C++ DOM islands](docs/DOM.md), [forms and TypeScript declarations](docs/FORMS.md), and the optional [React store and `Island` adapter](docs/REACT.md). Adopt these independently; React is not required by the core.
 
-- **0.6.0.** `ui.document()` for [DOM islands from C++](docs/DOM.md); [forms and inspectors](docs/FORMS.md) generated from type descriptions (with an optional C++26 reflection layer); the [`@webfront/react` adapter](docs/REACT.md) with coalesced C++ stores and `Island`; `app.broadcast(...)` and `app.forEachUI(...)` to reach every browser from any thread; connection generations that reject a stale `UI`; local [automation](docs/AUTOMATION.md) (`webfront-agent`, stdio MCP and JSON CLI).
-- **0.7.0.** **Breaking:** test, fuzzing, coverage and sanitizer CMake options require the `WEBFRONT_` prefix (`WEBFRONT_ENABLE_TESTING`, ...); several agent shutdown fixes; faster pull-request CI.
-- **0.8.0.** Authorized native programs and private temporary files from [Jasmine specs](docs/CONSUMER_TESTING.md); PNG screenshots and image sequences of the web view (`webFrontCapture`); `webfront::embeddedFrontendAvailable` and `webfront::EmbeddedWebFront`; `init`, `create`, `install`, `restore` and `embed` available to automation.
-- **0.9.0.** The last minor revision before 1.0, with the developer environment at the same number. System services groundwork ([ADR-020](docs/adr/README.md)): writable storage confined to declared roots, typed access to the native window and an interface-thread executor for every frontend, dynamic and ranged HTTP routes, file inputs and downloads in the embedded frontends, automation of an application's own window, and the `@webfront/services` package skeleton. Developer environment 0.9.0 is the first published by the `release-developer` workflow.
-- **Developer distribution.** The developer environment is served from `dist.webfront.fr` ([ADR-021](docs/adr/README.md)). Libraries older than the sources' pin keep the former address, which no longer works for the developer bootstrap: rebuild against the current sources.
+For release history, migration notes and breaking changes, see the [changelog](docs/CHANGELOG.md). The [project status](docs/PROJECT_STATUS.md) records current validation and limitations; it is the reference when selecting a platform or frontend for production.
+
+## Build tools on LTS distributions
+
+WebFront requires CMake **3.31+** for both standalone builds and `add_subdirectory`/CPM consumers, including builds with tests disabled. Ubuntu 22.04 supplies CMake 3.22.1 and Ubuntu 24.04 supplies 3.28.3, so install a newer CMake before configuring. Git 2.34.1, as supplied by Ubuntu 22.04, works with the repository's commit checks. The [tooling decision and audit](docs/adr/ADR-022-profils-et-niveaux-de-support.md#outils-de-construction-distributions-lts-527) explain the common CMake floor; optional mddlog has [separate requirements](docs/mddlog-integration.md).
+
+One option is an isolated Python environment. On Ubuntu, install its prerequisite with `sudo apt-get install python3-venv` if needed, then run:
+
+```bash
+python3 -m venv "$HOME/.local/share/webfront-tools"
+"$HOME/.local/share/webfront-tools/bin/python" -m pip install 'cmake>=3.31,<4'
+export PATH="$HOME/.local/share/webfront-tools/bin:$PATH"
+cmake --version
+ctest --version
+```
+
+The CMake installation itself needs no root access. Run the `export PATH=...` line in each build shell (or add it to your shell profile); it selects the matching `cmake` and `ctest`. Then use the build commands below or the Game of Life walkthrough above. Alternatively, follow the [Kitware APT repository instructions](https://apt.kitware.com/) for your Ubuntu release. A newer CMake does not supply a newer C++ compiler: Ubuntu 22.04's default GCC 11 still needs replacing with a toolchain from the support policy.
 
 ## Use WebFront in your project
 
@@ -360,6 +448,9 @@ target_link_libraries(MyApp PRIVATE WebFront::WebFront)
 
 As a subproject, examples and tests are off by default and compiler settings do not leak into your targets. `WEBFRONT_BUILD_EXAMPLES=OFF` disables examples in a standalone build too.
 
+<details>
+<summary>GCC 16 and C++ module scanning</summary>
+
 GCC 16 crashes inside stdexec (`internal compiler error: Segmentation fault` in `__query.hpp`) when CMake scans C++ modules and adds `-fmodules-ts`, which happens by default for C++20 and later targets (CMP0155, Ninja). WebFront is header-only and needs no module scan. Turn it off for the targets that link WebFront and use no C++ modules, after creating them:
 
 ```cmake
@@ -372,7 +463,9 @@ Alternatively, `set(CMAKE_CXX_SCAN_FOR_MODULES OFF)` before creating your target
 
 Configuring WebFront as a subproject with GCC 16 and scanning enabled prints a warning naming each affected target, with these workarounds.
 
-`webfront::WebFront` always uses the system browser. For a native window with the same browser fallback as the examples, add this after linking your target (also works after `CPMAddPackage`):
+</details>
+
+`webfront::WebFront` always uses the system browser. For a native window with the same browser fallback as the Life examples, add this after linking your target (also works after `CPMAddPackage`):
 
 ```cmake
 webfront_use_native_window(MyApp)
@@ -423,16 +516,16 @@ shared projects and nested builds retain resource locks.
 See [test timings and parallelism](docs/TEST_PERFORMANCE.md) for measurements and constraints.
 `ctest -L fast` runs the unit tests in about a second; [test tiers](docs/TEST_TIERS.md) describes what CI runs on each pull request, weekly and before a merge into `master`.
 
-CI runs one combined C++ / native-browser job per desktop platform on each code change. The Linux job also collects and prints GCC line coverage (no external upload). Linux Clang, sanitizers, fuzzing and CEF compatibility run weekly, on demand and on pull requests into `master`. Manual dispatch with `repeat_desktop_tests=true` also runs the complete desktop CTest suite three times, recreating its fixtures on each pass. Workflow concurrency cancels superseded runs; dependency and compiler caches avoid repeated work. Platform badges above identify the configured matrix; the CI badge reports its aggregate status. Execution times depend on cache state and runner availability.
+CI exercises C++ and native-browser paths on Windows, macOS and Linux. Extended jobs cover Clang, sanitizers, fuzzing, CEF and Linux ARM64, including ARM64 CEF/WebKitGTK browser runs. The [test tiers](docs/TEST_TIERS.md) define the exact schedule and required gates; the [workflow](.github/workflows/BuildAndTest.yml) records toolchains and options. Hosted ARM64 coverage and [real Jetson board qualification](docs/JETSON.md) are separate evidence. Platform badges identify the configured matrix; the CI badge reports its aggregate status.
 
 ## Contracts and limitations
 
-- WebFront owns an HTTP/WebSocket server on a background thread. Callbacks run there, one at a time; avoid blocking it. Browser calls (`jsFunction`, `app.broadcast(name)(...)`) can be made from any thread and never wait for it; see [threads](docs/ASYNC_EXECUTION.md#threads). Native windows must be created and shown on the main thread. Application coroutines use `app.spawn(task)` or `ui.spawn(task)`; see [execution and cancellation](docs/ASYNC_EXECUTION.md).
+- WebFront owns an HTTP/WebSocket server on a background thread. Callbacks run there, one at a time; avoid blocking it. Browser calls (`jsFunction`, `app.broadcast(name)(...)`) can be made from any thread and never wait for it; see [threads](docs/ASYNC_EXECUTION.md#threads). Most native windows (WKWebView, WebKitGTK, CEF) must be created and shown on the main thread; WebView2 accepts a secondary thread. An application that keeps its own loop uses `app.start()` (system browser, returns at once), `app.requestClose()` or `webfront::UIThread`; see [host integration](docs/HOST_INTEGRATION.md). Application coroutines use `app.spawn(task)` or `ui.spawn(task)`; see [execution and cancellation](docs/ASYNC_EXECUTION.md).
 - JavaScript calls to C++ always return Promises. C++ `ui.jsFunction(name)(...)` is fire-and-forget; `ui.jsFunction<R>(name)(...)` returns `std::future<R>`. Missing functions, exceptions, malformed replies and disconnects fail the typed call.
-- The binary bridge supports scalars, strings, tuples, numeric typed arrays and packed bitsets. Arbitrary objects do not cross it. Strings have a 16-bit encoded length limit.
+- The binary bridge supports scalars, strings, tuples, numeric typed arrays, packed bitsets and homogeneous lists of supported compound values. Arbitrary objects do not cross it. Strings and messages are bounded by the message-size policy (64 MiB by default); strings of 65,536 bytes or more use the long-string encoding. See [the bridge contract](docs/adr/ADR-003-protocole-binaire-et-bornes.md).
 - Development project access is explicit and intended for trusted local code. Downloaded tools run with the application's bridge authority, and script permissions frame only the `context` API: neither is a sandbox. Only packages that run in a browser are supported; installation scripts and native add-ons are not executed. Builds transform TypeScript without type checking; `wf check` type-checks with the compiler the project locks.
 - The optional [`@webfront/react` adapter](docs/REACT.md) supplies coalesced C++ stores and empty React islands. `WebFrontLifeReact` demonstrates a C++ panel within the Game of Life React UI; its package archive is prepared locally for registry publication.
-- Embedded targets and microcontrollers are not qualified (C++23 support, memory, networking and remote transport security are unreviewed).
+- Embedded Linux has ARM64 CI coverage and specific Orin Nano board evidence; other boards, bare-metal targets and microcontrollers are not generally qualified. Check C++23, memory, networking and browser requirements for your target. The default local transport supplies neither TLS nor client authentication; remote deployment needs an application-specific security design.
 - Packaging, accessibility and native-engine deployment still need application-specific work. The optional [`ui.document()` API](docs/DOM.md) provides DOM islands, automatically batched writes, event callbacks and grouped sender reads. See [project status](docs/PROJECT_STATUS.md) for known limitations.
 
 ## License

@@ -16,11 +16,13 @@
 | 1.9 | 2026-10-19 | Acceptée | Ambroise Leclerc | Alias NativeWebViewFrontend avec sélection explicite par plateforme. | [7be859f](https://github.com/ambroise-leclerc/WebFront/commit/7be859f18957e770cc0db8382e7d9641689ba403) |
 | 1.10 | 2026-10-20 | Acceptée | Ambroise Leclerc | WKWebView respecte les bundles agents LSUIElement ; les exécutables de test ne créent plus d’icônes Dock. | À renseigner après intégration. |
 | 1.11 | 2026-11-09 | Acceptée | Ambroise Leclerc | Contrat facultatif `static UIExecutor uiExecutor()` : le thread d'interface d'un frontend, disponible pendant que `open()` fait tourner sa boucle (ADR-020, #462). Frontend `BrowserWithUILoopFrontend` : navigateur système avec boucle facultative. | Branche `462-ui-thread-executor` |
+| 1.12 | 2026-11-13 | Acceptée | Ambroise Leclerc | Intégration dans une application hôte : contrats facultatifs `launch()`, `requestClose()` et `requiresMainThread` ; `BasicWF::start()`, `BasicWF::requestClose()` et `webfront::UIThread` (#567). | Branche `567-host-integration` |
+| 1.13 | 2026-11-16 | Proposée | Ambroise Leclerc | Modes WebKitGTK développement par défaut et distribution exigeant le sandbox ; profil par exécutable généré pour le paquet applicatif, sans runtime (#596/#597). | Branche `596-jetson-native-launch` |
 
 ## État et chronologie
 
-**Acceptée.** Décision initiale : **2026-05-31** (version 1.0).
-Dernière révision : **2026-11-09** (version 1.11).
+**Acceptée jusqu’à 1.12 ; révision 1.13 proposée.** Décision initiale : **2026-05-31** (version 1.0).
+Dernière révision : **2026-11-16** (version 1.13).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -48,6 +50,33 @@ avec le serveur sur un thread distinct. `Action::closeServerAfterOpen` entraîne
 jonction après fermeture ; `keepServerRunning` laisse le serveur actif au retour. Si l’ouverture
 lève, `show()`/`openAndRun()` arrêtent et joignent avant de relancer l’exception d’origine.
 
+Pour WebKitGTK, le mode de compilation est explicite et indépendant de Debug/Release.
+Le développement, mode par défaut, désactive le sandbox WebKit pour permettre fenêtres
+natives et tests Jasmine sans préparation du système. La configuration et le lancement
+l'annoncent (logger filtrable au lancement). L'opt-out est limité à la création du
+contexte WebKit, puis l'environnement est restauré avant les callbacks ou le repli
+navigateur. Les politiques nomment deux spécialisations de frontend distinctes ;
+leur mélange dans un processus est refusé. `WEBFRONT_DISTRIBUTION=ON` ou `webfront_use_distribution(cible)` exige
+le sandbox ; une variable d'environnement ne peut pas affaiblir ce choix. Une
+configuration contradictoire ou un refus de l'espace utilisateur lève avant que WebKit
+n'abandonne le processus. `WEBFRONT_REQUIRE_WEBKIT_SANDBOX=1` garde ce comportement
+strict en développement. Le paquet peut intégrer l'autorisation AppArmor de son seul
+exécutable installé, générée par `webfront_generate_webkitgtk_profile`. La bibliothèque
+ne charge aucune politique à l'exécution et n'ajoute aucun runtime. La validation de
+distribution doit exercer le paquet installé avec le sandbox actif ; les tests de
+développement ne prouvent pas cette isolation (voir [WebKitGTK](../WEBKITGTK.md)).
+
+Une application hôte qui conserve sa boucle ne cède pas son thread à `show()` (#567). Trois
+contrats facultatifs le permettent. `launch()` ouvre l’interface et rend la main : seul un
+frontend sans boucle de fenêtre l’offre (navigateur système), et `BasicWF::start()` l’exige à la
+compilation. `requestClose()` demande, depuis tout thread, la fin de la session que `open()`
+exécute, comme si l’utilisateur fermait la fenêtre ; il renvoie faux si rien n’est ouvert et ne
+mémorise pas la demande. `requiresMainThread` déclare qu’`open()` appartient au thread principal
+(WKWebView, WebKitGTK, CEF, et la boucle du navigateur système sous macOS). `webfront::UIThread`
+possède le thread secondaire d’une application : il la construit, l’affiche, la ferme et la
+détruit après jonction, et refuse à la compilation un frontend du thread principal ou sans
+`requestClose()`. Le thread serveur reste distinct du thread d’interface dans tous les cas.
+
 Sous macOS, WKWebView respecte `LSUIElement=true` du bundle hôte : la session utilise
 la politique d’activation Accessory et conserve une fenêtre sans icône Dock ni barre de
 menus applicative. Un hôte ordinaire garde la politique Regular. La politique antérieure
@@ -63,6 +92,11 @@ Un frontend indisponible reste déclaré et échoue avec un diagnostic indiquant
   d’une sélection explicite.
 - Masquer toutes les différences de moteurs : impossible pour runtime, toolkit, rendu et
   politiques de navigation ; documenter les capacités par adaptateur.
+- Déplacer `show()` dans un thread quelconque, ou répartir automatiquement vers le thread
+  principal : AppKit et GTK l’interdisent ; l’hôte inverse alors les rôles (interface sur le
+  thread principal, travail de l’hôte ailleurs) et le refus est un diagnostic explicite.
+- Mémoriser une demande de fermeture antérieure à la fenêtre dans chaque adaptateur : l’appelant
+  qui doit conclure répète la demande jusqu’au retour de `show()` (`UIThread::stop()`).
 - Dupliquer les règles d’URL et les tests dans chaque moteur : crée des dérives, remplacées
   par les utilitaires et scénarios partagés.
 
@@ -86,6 +120,7 @@ Un frontend indisponible reste déclaré et échoue avec un diagnostic indiquant
 
 ## Sources et vérification
 
+- [Intégration dans une application hôte](../HOST_INTEGRATION.md).
 - [Contrat](../FRONTENDS.md), [concept](../../include/webfront/frontend/Frontend.hpp),
   [configuration](../../cmake/Frontends.cmake).
 - Tests : [FrontendContractTests](../../test/unit/FrontendContractTests.cpp),
