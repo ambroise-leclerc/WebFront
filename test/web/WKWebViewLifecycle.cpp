@@ -642,8 +642,9 @@ void firstFramePresentation(bool noFrame) {
     if (!noFrame) {
         require(sample[0] >= 0, "The displayed pixels could not be read");
         const auto near = [](double value, double expected) { return value > expected - 0.05 && value < expected + 0.05; };
-        require(near(sample[0], 0x12 / 255.0) && near(sample[1], 0x34 / 255.0) && near(sample[2], 0x56 / 255.0),
-                "The configured background is not what the window displays behind a transparent page");
+        if (!(near(sample[0], 0x12 / 255.0) && near(sample[1], 0x34 / 255.0) && near(sample[2], 0x56 / 255.0)))
+            throw std::runtime_error("The configured background is not what the window displays behind a transparent page: read rgb("
+                                     + std::to_string(sample[0]) + ", " + std::to_string(sample[1]) + ", " + std::to_string(sample[2]) + "), expected #123456");
     }
 }
 }  // namespace
