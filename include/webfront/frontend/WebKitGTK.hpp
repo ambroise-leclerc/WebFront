@@ -80,6 +80,7 @@ public:
     const char* (*windowGetTitle)(Object)                                         = symbol<decltype(windowGetTitle)>("gtk_window_get_title");
     void (*windowSize)(Object, int, int)                                          = symbol<decltype(windowSize)>("gtk_window_set_default_size");
     void (*windowChild)(Object, Object)                                           = symbol<decltype(windowChild)>("gtk_window_set_child");
+    void (*widgetOpacity)(Object, double)                                         = symbol<decltype(widgetOpacity)>("gtk_widget_set_opacity");
     void (*windowPresent)(Object)                                                 = symbol<decltype(windowPresent)>("gtk_window_present");
     void (*windowDestroy)(Object)                                                 = symbol<decltype(windowDestroy)>("gtk_window_destroy");
     Object (*loopNew)(Object, int)                                                = symbol<decltype(loopNew)>("g_main_loop_new");
@@ -100,6 +101,7 @@ public:
     const char* (*viewUri)(Object)                                                = symbol<decltype(viewUri)>("webkit_web_view_get_uri");
     const char* (*viewTitle)(Object)                                              = symbol<decltype(viewTitle)>("webkit_web_view_get_title");
     void (*windowClose)(Object)                                                   = symbol<decltype(windowClose)>("gtk_window_close");
+    void (*emitByName)(Object, const char*, ...)                                  = symbol<decltype(emitByName)>("g_signal_emit_by_name");
     void (*stop)(Object)                                                          = symbol<decltype(stop)>("webkit_web_view_stop_loading");
     Object (*navigationAction)(Object)                      = symbol<decltype(navigationAction)>("webkit_navigation_policy_decision_get_navigation_action");
     Object (*request)(Object)                               = symbol<decltype(request)>("webkit_navigation_action_get_request");
@@ -142,6 +144,9 @@ public:
     Object (*scriptNew)(const char*, int, int, const char* const*, const char* const*) = symbol<decltype(scriptNew)>("webkit_user_script_new");
     void (*scriptAdd)(Object, Object)                           = symbol<decltype(scriptAdd)>("webkit_user_content_manager_add_script");
     void (*scriptUnref)(Object)                                 = symbol<decltype(scriptUnref)>("webkit_user_script_unref");
+    // Script messages (WebKitGTK 2.40 added the world name; an extra null argument is harmless to older callers' ABI).
+    int (*registerMessage)(Object, const char*, const char*)    = symbol<decltype(registerMessage)>("webkit_user_content_manager_register_script_message_handler");
+    void (*viewBackground)(Object, const float*)                = symbol<decltype(viewBackground)>("webkit_web_view_set_background_color");
     // Portal identifier of the window (ADR-020): the backend's own symbols exist only when GTK was built with it, so each is
     // optional and a missing one leaves the identifier empty.
     Object (*nativeSurface)(Object)                             = optionalSymbol<decltype(nativeSurface)>("gtk_native_get_surface");
@@ -348,13 +353,20 @@ struct Session : FailureState {
     bool                                 closed            = false;
     bool                                 initialNavigation = true;
     unsigned                             navigationTimer   = 0;
+    unsigned                             presentTimer      = 0;  // presents the window anyway when the first frame is late
+    bool                                 presented         = false;
+    std::chrono::steady_clock::time_point created          = std::chrono::steady_clock::now();
     unsigned                             portalTimer       = 0;  // retries the Wayland export until the toplevel can be exported
     int                                  portalAttempts    = 0;
     std::uint64_t                        portalGeneration  = 0;  // the publication this session's identifier belongs to
     unsigned long                        windowHandler     = 0;
     std::vector<unsigned long>           viewHandlers;
+    unsigned long                        messageHandler = 0;  // on the content manager, not on the view
     std::shared_ptr<CaptureTarget>       captureTarget = std::make_shared<CaptureTarget>();
     CaptureRegistration                  captureRegistration;
+
+    /// The window is presented at the latest this long after the load starts, painted or not.
+    static constexpr unsigned maximumPresentDelayMs = 1000;
 
     explicit Session(webfront::detail::BoundContentPolicy rules, WindowOptions settings = {})
         : policy(std::move(rules)), windowOptions(resolveWindow(std::move(settings))) {}
@@ -364,6 +376,7 @@ struct Session : FailureState {
         if (portalTimer)
             a.sourceRemove(std::exchange(portalTimer, 0));
         stopNavigationTimer();
+        stopPresentTimer();
         releaseDownloads();
         releaseView();
         destroyWindow();
@@ -379,6 +392,10 @@ struct Session : FailureState {
         if (navigationTimer)
             a.sourceRemove(std::exchange(navigationTimer, 0));
     }
+    void stopPresentTimer() {
+        if (presentTimer)
+            a.sourceRemove(std::exchange(presentTimer, 0));
+    }
     void releaseView() {
         captureRegistration = {};
         abandonCaptures(*captureTarget);
@@ -386,6 +403,8 @@ struct Session : FailureState {
             return;
         for (auto handler : viewHandlers)
             a.disconnect(view, handler);
+        if (messageHandler)
+            a.disconnect(a.contentManager(view), std::exchange(messageHandler, 0));
         a.stop(view);
         release(view);
     }
@@ -449,12 +468,77 @@ struct Session : FailureState {
         a.windowSize(window, windowOptions.width, windowOptions.height);
         a.windowChild(window, view);
         configureSettings();
+        applyBackground();
         installViewAssociation();
+        installFirstFrameProbe();
         registerHandlers();
         downloadStartedHandler = a.connect(network, "download-started", reinterpret_cast<Api::Callback>(onDownloadStarted), this, nullptr, 0);
         captureTarget->view = view;
         captureTarget->pending.open();
         captureRegistration = CaptureRegistration{captureProvider(captureTarget)};
+    }
+
+    void applyBackground() {
+        if (const auto color = parseBackground(windowOptions.background))
+            a.viewBackground(view, color->data());
+    }
+
+    /// The window is mapped at once but fully transparent: WebKit paints, and animation frames run, only in a mapped view, so
+    /// the first frame can be awaited. Without a compositing manager the opacity is ignored and the window shows as before.
+    /// WEBFRONT_STARTUP_TRACE=1 reports the milestones of the view's start, in milliseconds since the session was created.
+    void trace(const char* milestone) const {
+        static const bool enabled = [] {
+            const auto* value = std::getenv("WEBFRONT_STARTUP_TRACE");
+            return value && *value && std::string_view{value} != "0";
+        }();
+        if (enabled)
+            std::fprintf(stderr, "WebFront startup: %s at %lld ms\n", milestone,
+                         static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - created).count()));
+    }
+    void presentHidden() {
+        a.widgetOpacity(window, 0.01);  // GTK does not draw a widget at 0, and WebKit would wait for a frame forever
+        a.windowPresent(window);
+        startPortalExport();
+    }
+    /// Shows the window once the page painted its first frame, or when the delay expired.
+    void presentWindow() {
+        if (presented || closed)
+            return;
+        presented = true;
+        stopPresentTimer();
+        a.widgetOpacity(window, 1.0);
+        trace("window shown");
+    }
+    static void onFirstFrame(Api::Object, Api::Object, Session* self) noexcept {
+        self->trace("first frame");
+        self->guard([self] {
+            self->presentWindow();
+        });
+    }
+    static int onPresentTimeout(void* data) noexcept {
+        auto* self         = static_cast<Session*>(data);
+        self->presentTimer = 0;
+        self->trace("present delay expired");
+        self->guard([self] {
+            self->presentWindow();
+        });
+        return 0;
+    }
+    /// The page tells the toolkit that its first frame is painted (two animation frames after DOMContentLoaded), so that the
+    /// window appears with content instead of black. The message handler is the content manager's: a page can only advance the
+    /// presentation, which the timer would do anyway.
+    void installFirstFrameProbe() {
+        constexpr const char* name   = "webfrontFirstFrame";
+        const auto            script = a.scriptNew(
+            R"js((function(){if(window.top!==window)return;var sent=false;function post(){if(sent)return;sent=true;try{window.webkit.messageHandlers.webfrontFirstFrame.postMessage(0);}catch(e){}}function frames(){requestAnimationFrame(function(){requestAnimationFrame(post);});}if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",frames);else frames();})();)js",
+            1,
+            0,
+            nullptr,
+            nullptr);
+        a.scriptAdd(a.contentManager(view), script);
+        a.scriptUnref(script);
+        a.registerMessage(a.contentManager(view), name, nullptr);
+        messageHandler = a.connect(a.contentManager(view), "script-message-received::webfrontFirstFrame", reinterpret_cast<Api::Callback>(onFirstFrame), this, nullptr, 0);
     }
 
     void installViewAssociation() {
@@ -778,8 +862,9 @@ struct Session : FailureState {
         if (closed)
             return;
         navigationTimer = a.timeoutAdd(30'000, onNavigationTimeout, this);
-        a.windowPresent(window);
-        startPortalExport();
+        presentTimer = a.timeoutAdd(maximumPresentDelayMs, onPresentTimeout, this);
+        presentHidden();
+        trace("load started");
         a.load(view, url.c_str());
         if (!closed)
             a.loopRun(loop);
@@ -857,7 +942,10 @@ struct BasicWebKitGTKFrontend {
     static bool requestClose([[maybe_unused]] std::optional<UISession> session = std::nullopt) noexcept {
 #if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
         return detail::requestWindowClose(uiExecutor(), nativeWindow(), [](const NativeWindowHandle& window) {
-            detail::webkitgtk::api().windowClose(window.pointer);  // emits close-request, as the window's button does
+            // gtk_window_close ignores a window that is not realized, and the window is presented only after the first frame:
+            // a request made before that must still end the session, so the close-request signal is emitted itself.
+            int handled = 0;
+            detail::webkitgtk::api().emitByName(window.pointer, "close-request", &handled);
         }, session);
 #else
         return false;

@@ -10,6 +10,12 @@ these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
+### Added
+- Choose the colour under the page with `WindowOptions::background`, and read the start-up milestones of a WebKitGTK view with `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WEBKITGTK.md`).
+
+### Changed
+- Show the WebKitGTK window when the page has painted its first frame, or after one second, instead of black at once; the embedded pages, the starter and the examples use the cheap `sans-serif` and `monospace` font stacks (#611, `docs/WEBKITGTK.md`).
+
 ## [1.0.0] - 2026-11-17
 
 WebFront 1.0 ships with developer environment 1.0.0. This release adds host-loop integration, developer tools and

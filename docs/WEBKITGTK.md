@@ -97,6 +97,23 @@ unit tests cover the policy decision table, null error diagnostics, preserving
 the first failure when a timeout or callback reports a later error, and the
 sandbox launcher check described below.
 
+## Startup and first display
+
+The window is mapped at once, but almost transparent, and is shown when the page reports its first frame (two animation
+frames after `DOMContentLoaded`) or after one second, whichever comes first, so a window is never presented black while
+the page loads. Without a compositing manager the opacity is ignored and the window appears immediately, as before. A
+page that never paints still shows the window after the delay, and the navigation timeout and its diagnostics are
+unchanged. `WindowOptions::background` (`"#rgb"`, `"#rrggbb"` or `"#rrggbbaa"`) paints the colour under the page, so a
+dark interface does not flash white. `WEBFRONT_STARTUP_TRACE=1` prints the view's milestones (load started, first frame,
+window shown) on standard error. A close request (`requestClose()`) made before the window is shown still ends the
+session.
+
+The cost of the first layout depends on the fonts of the page: fontconfig walks every installed font for each family it
+cannot find or that is a CSS generic such as `system-ui` or `ui-monospace`, for each weight and style. A page that
+lists several absent families (`"Segoe UI"`, `Inter`, `"JetBrains Mono"`, `Menlo`) can spend hundreds of milliseconds
+before its first paint on a machine with thousands of fonts. Prefer the generics `sans-serif` and `monospace`, or one
+family you know to be installed, first in the stack; the embedded pages, the starter and the examples do.
+
 ## Development and distribution
 
 WebKitGTK has two **build modes**, independent of Debug/Release, `NDEBUG`,

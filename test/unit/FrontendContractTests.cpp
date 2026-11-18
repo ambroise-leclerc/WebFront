@@ -270,6 +270,35 @@ WindowOptions windowReceivedBy(WebFrontConfig config) {
 }
 }  // namespace
 
+const Scenario windowBackground{"The window background is a CSS hexadecimal colour that is never guessed", [] {
+    given("valid colours", [&] {
+        then("short, long and translucent forms are read", [&] {
+            const auto white = frontend::detail::parseBackground("#fff");
+            const auto navy  = frontend::detail::parseBackground("#101c1d");
+            const auto clear = frontend::detail::parseBackground("#00000080");
+            require(white && navy && clear);
+            check((*white)[0] == 1.0f && (*white)[3] == 1.0f);
+            check((*navy)[0] == 16.0f / 255.0f && (*navy)[1] == 28.0f / 255.0f && (*navy)[2] == 29.0f / 255.0f && (*navy)[3] == 1.0f);
+            check((*clear)[3] == 128.0f / 255.0f);
+        });
+    });
+    given("invalid or empty text", [&] {
+        then("nothing is returned, so the toolkit's default stays", [&] {
+            check(!frontend::detail::parseBackground(""));
+            check(!frontend::detail::parseBackground("red"));
+            check(!frontend::detail::parseBackground("#12"));
+            check(!frontend::detail::parseBackground("#12345"));
+            check(!frontend::detail::parseBackground("#ggg"));
+        });
+    });
+    given("a configuration with a background", [&] {
+        const auto window = windowReceivedBy({.window = {.background = "#101c1d"}});
+        then("the frontend receives it unchanged", [&] {
+            check(window.background == "#101c1d");
+        });
+    });
+}};
+
 const Scenario applicationChooses{"The application chooses the title and the size of the embedded window", [] {
     given("a configuration with a window title and size", [&] {
         const auto window = windowReceivedBy({.window = {.title = "SiliconForge", .width = 640, .height = 480}});
