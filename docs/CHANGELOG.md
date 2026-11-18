@@ -14,12 +14,12 @@ these entries stays in the GitHub releases and the Git history.
 - Skip GStreamer's initialization, and its plugin scan, in WebKitGTK for an application whose pages never use audio or video, with `WindowOptions::media = false`; the default keeps media (#611, `docs/WEBKITGTK.md`).
 - WKWebView supports `WindowOptions::background` and `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WKWEBVIEW.md`).
 - WebView2 supports `WindowOptions::background` and `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WEBVIEW2.md`).
-- Choose the colour of the WebKitGTK view under the page with `WindowOptions::background` (WebKitGTK; WebView2 below; the other frontends ignore it), and read the start-up milestones of a WebKitGTK view with `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WEBKITGTK.md`).
+- Choose the colour of the WebKitGTK view under the page with `WindowOptions::background` (WebKitGTK; WebView2 and WKWebView are listed above; CEF ignores it), and read the start-up milestones of a WebKitGTK view with `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WEBKITGTK.md`).
 
 ### Changed
 - Reveal the WKWebView window when the document has loaded or after one second (#611, `docs/WKWEBVIEW.md`).
 - Reveal the WebView2 window after the first frame or one second (#611, `docs/WEBVIEW2.md`).
-- Show the WebKitGTK window when the page reports its first frame, or after one second at the latest even if the page has not painted, instead of at once; the embedded pages, the starter and the examples use the cheap `sans-serif` and `monospace` font stacks (#611, `docs/WEBKITGTK.md`).
+- Show the WebKitGTK window when the page reports its first frame, or when a one-second timer fires, even if the page has not painted, instead of at once; the embedded pages, the starter and the examples use the cheap `sans-serif` and `monospace` font stacks (#611, `docs/WEBKITGTK.md`).
 
 ### Fixed
 - Remove the white flash of an embedded view between the developer environment's bootstrap page and the project's page, by giving the window the environment's dark colour (`#141821`) when the application sets none; on macOS the view then no longer paints its own white behind it (#611, `docs/WKWEBVIEW.md`).

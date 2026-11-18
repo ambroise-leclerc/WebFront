@@ -597,20 +597,20 @@ void navigationDiagnostic() {
         "initial navigation failed");
 }
 
-// The window is nearly transparent until the page reports its first frame; a page that never does is shown by the delay.
-void firstFramePresentation(bool noFrame) {
+// The window is nearly transparent until the initial document has loaded; without that signal the delay shows it.
+void loadRevealPresentation(bool delayOnly) {
     Object pool(send(type("NSAutoreleasePool"), "new"));
     webfront::http::Server<webfront::NetProvider, webfront::fs::NativeDebugFS> server("127.0.0.1", "9002", std::filesystem::current_path());
     std::jthread worker([&](std::stop_token stop) {
         std::stop_callback cleanup(stop, [&] { server.stop(); });
         server.run();
     });
-    Session session(noFrame ? "http://127.0.0.1:9002/first-frame.html?no-frame" : "http://127.0.0.1:9002/first-frame.html",
+    Session session("http://127.0.0.1:9002/first-frame.html",
                     {.window = {.background = "#123456"}, .visible = true});
-    session.revealOnLoad = !noFrame;
-    session.presentDelay = noFrame ? 1.0 : 60.0;  // the load, not the delay, must show the window
+    session.revealOnLoad = !delayOnly;
+    session.presentDelay = delayOnly ? 1.0 : 60.0;  // the load, not the delay, must show the window
     session.create();
-    require(send<double>(session.window, "alphaValue") < 0.5, "The window was not nearly transparent before the first frame");
+    require(send<double>(session.window, "alphaValue") < 0.5, "The window was not nearly transparent before the load");
     {
         Object key(text("drawsBackground"));
         require(!send<BOOL>(send(session.view, "valueForKey:", key.get()), "boolValue"), "The view still paints its own background");
@@ -623,7 +623,7 @@ void firstFramePresentation(bool noFrame) {
     session.start();
     session.run();
     require(shownAlpha == 1.0, "The window was not made opaque");
-    require(session.presentedByFrame != noFrame, noFrame ? "A suppressed frame was reported" : "The window waited for the delay instead of the frame");
+    require(session.presentedByFrame != delayOnly, delayOnly ? "The load revealed the window although it was disabled" : "The window waited for the delay instead of the document load");
     // The displayed pixels are not read: cacheDisplayInRect renders neither the window's fill nor the web content (it reads black),
     // and capturing the screen needs a permission the CI does not have. The state that produces them is checked instead: the
     // window's colour, and the view no longer painting its own background (above).
@@ -663,8 +663,8 @@ int main(int argc, char** argv) {
             {       "script-dialogs",       scriptDialogs},
             { "close-with-script-dialog", closeWithScriptDialog},
             { "sandboxed-script-dialog", sandboxedScriptDialog},
-            {          "first-frame",          [] { firstFramePresentation(false); }},
-            {        "present-timeout",        [] { firstFramePresentation(true); }}
+            {          "load-reveal",          [] { loadRevealPresentation(false); }},
+            {        "present-timeout",        [] { loadRevealPresentation(true); }}
         };
         cases.at(argc == 2 ? argv[1] : "")();
         return 0;

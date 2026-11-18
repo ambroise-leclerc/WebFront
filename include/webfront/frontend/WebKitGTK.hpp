@@ -357,6 +357,7 @@ struct Session : FailureState {
     unsigned                             navigationTimer   = 0;
     unsigned                             presentTimer      = 0;  // presents the window anyway when the first frame is late
     bool                                 presented         = false;
+    bool                                 firstNotified     = false;  // the page's first notification of the session came, whenever it did
     bool                                 shownByFrame      = false;  // the page's first frame, not the delay, made the window opaque
     std::function<void()>                windowShown;               // test hook: called once the window is made opaque
     std::chrono::steady_clock::time_point created          = std::chrono::steady_clock::now();
@@ -568,8 +569,10 @@ struct Session : FailureState {
             windowShown();
     }
     static void onFirstFrame(Api::Object, Api::Object, Session* self) noexcept {
-        if (!self->presented)  // a reload injects the probe again: only the first notification is a milestone
-            self->trace(self->presentTimer ? "first frame" : "first frame (after the delay)");
+        if (!self->firstNotified) {  // a reload injects the probe again: only the first notification is a milestone
+            self->firstNotified = true;
+            self->trace(self->presented ? "first frame (after the delay)" : "first frame");
+        }
         self->guard([self] {
             self->presentWindow(true);
         });
