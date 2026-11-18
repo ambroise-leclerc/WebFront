@@ -1,4 +1,5 @@
 #include "../driver/TestFrontend.hpp"
+#include <webfront/system/NativeFS.hpp>
 #include <webfront/WebFront.hpp>
 
 #include <filesystem>
