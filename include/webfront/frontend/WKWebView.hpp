@@ -590,6 +590,10 @@ struct Session {
             const auto native = send(type("NSColor"), "colorWithSRGBRed:green:blue:alpha:", static_cast<CGFloat>((*color)[0]), static_cast<CGFloat>((*color)[1]),
                                      static_cast<CGFloat>((*color)[2]), static_cast<CGFloat>((*color)[3]));
             send<void>(window, "setBackgroundColor:", native);
+            // A translucent colour is only seen through if the window is not opaque: without this AppKit fills the window as
+            // if the alpha were 1. Opaque colours keep the default opaque window, which is cheaper to composite.
+            if ((*color)[3] < 1.0f)
+                send<void>(window, "setOpaque:", static_cast<BOOL>(false));
             if (send<BOOL>(view, "respondsToSelector:", sel_registerName("setUnderPageBackgroundColor:")))  // macOS 12
                 send<void>(view, "setUnderPageBackgroundColor:", native);  // behind the page, e.g. when scrolling past its edge
             // The view paints its own white behind a page that does not paint: stop it, so the window's colour shows through

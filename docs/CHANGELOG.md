@@ -12,7 +12,7 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Added
 - Skip GStreamer's initialization, and its plugin scan, in WebKitGTK for an application whose pages never use audio or video, with `WindowOptions::media = false`; the default keeps media (#611, `docs/WEBKITGTK.md`).
-- WKWebView supports `WindowOptions::background` and `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WKWEBVIEW.md`).
+- WKWebView supports `WindowOptions::background`, translucent colours included, and `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WKWEBVIEW.md`).
 - WebView2 supports `WindowOptions::background` and `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WEBVIEW2.md`).
 - Choose the colour of the WebKitGTK view under the page with `WindowOptions::background` (WebKitGTK; WebView2 and WKWebView are listed above; CEF ignores it), and read the start-up milestones of a WebKitGTK view with `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WEBKITGTK.md`).
 

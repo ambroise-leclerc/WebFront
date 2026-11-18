@@ -220,6 +220,21 @@ void settings() {
         require(utf8(send(send(send(session.app, "mainMenu"), "itemAtIndex:", 1L), "title")) == "Edit", "Edit menu has no visible title");
     }
 }
+// A translucent background colour makes the window non-opaque, so what is behind it shows through; an opaque one does not.
+void translucentBackground() {
+    Object pool(send(type("NSAutoreleasePool"), "new"));
+    for (const auto& [colour, translucent] : {std::pair<const char*, bool>{"#12345680", true}, {"#123456", false}, {"#123456ff", false}}) {
+        Session session("http://127.0.0.1:9002/", {.window = {.background = colour}, .visible = webfront::testdriver::visibleWindows});
+        session.create();
+        require(static_cast<bool>(send<BOOL>(session.window, "isOpaque")) != translucent,
+                translucent ? "A translucent background left the window opaque" : "An opaque background made the window translucent");
+        const auto converted = send(send(session.window, "backgroundColor"), "colorUsingColorSpace:", send(type("NSColorSpace"), "sRGBColorSpace"));
+        require(converted != nullptr, "The window has no colour in the sRGB space");
+        const auto alpha = send<double>(converted, "alphaComponent");
+        require(translucent ? (alpha > 0.49 && alpha < 0.51) : alpha == 1.0, "The window's colour does not carry the requested alpha");
+    }
+}
+
 void hiddenScheduling() {
     Object  pool(send(type("NSAutoreleasePool"), "new"));
     Object configuration(send(type("WKWebViewConfiguration"), "new"));
@@ -648,6 +663,7 @@ int main(int argc, char** argv) {
             {      "redirect-policy",       redirectPolicy},
             {             "settings",             settings},
             {    "hidden-scheduling",     hiddenScheduling},
+            {"translucent-background", translucentBackground},
             {"navigation-diagnostic", navigationDiagnostic},
             {     "missing-response",      missingResponse},
             { "committed-navigation",  committedNavigation},
