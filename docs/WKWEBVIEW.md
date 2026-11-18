@@ -1,8 +1,8 @@
 # WKWebView frontend (macOS)
 
-The native window starts nearly transparent (alpha 0.01) while WKWebView loads the page. It becomes opaque when the page reports its first layout (two
-animation frames after `DOMContentLoaded`, or 100 ms after the layout is forced when a window that is nearly transparent
-throttles them), or after one second if the page reports nothing; the timer runs in
+The native window starts nearly transparent (alpha 0.01) while WKWebView loads the page. It becomes opaque when the initial document has finished loading
+(`didFinishNavigation`; a page's animation frames are throttled in a window that is nearly transparent, so they cannot be
+awaited as on the other frontends), or after one second if it has not; the timer runs in
 the common run-loop modes, so it also fires while the system tracks a window move or resize. The startup deadline and
 the navigation diagnostics still apply. `WindowOptions::background` accepts `#rgb`, `#rrggbb` and `#rrggbbaa`: it is the
 colour of the window and, from macOS 12, of the view under the page. Hidden sessions (`visible = false`) skip the

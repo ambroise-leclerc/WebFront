@@ -335,9 +335,9 @@ struct Session {
     id                                   app = nullptr, window = nullptr, view = nullptr, delegate = nullptr, timer = nullptr;
     /// The window is shown nearly transparent and made opaque at the page's first frame, or when this timer expires.
     id                                   presentTimer = nullptr;
-    bool                                 presented = false, presentedByFrame = false, probeInstalled = false;
-    /// Test hook: false installs no probe, so only the delay can show the window.
-    bool                                 firstFrameProbe = true;
+    bool                                 presented = false, presentedByFrame = false;
+    /// Test hook: false does not show the window when the document finishes loading, so only the delay can.
+    bool                                 revealOnLoad = true;
     /// Test hook: called on the main thread when the window has been made opaque.
     std::function<void()>                windowShown;
     const std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
@@ -362,10 +362,6 @@ struct Session {
         if (presentTimer) {
             send<void>(presentTimer, "invalidate");
             send<void>(presentTimer, "release");
-        }
-        if (view && probeInstalled) {  // the content controller retains its handler: break the cycle with the delegate
-            Object name(text("webfrontFirstFrame"));
-            send<void>(send(send(view, "configuration"), "userContentController"), "removeScriptMessageHandlerForName:", name.get());
         }
         if (view) {
             send<void>(view, "setNavigationDelegate:", static_cast<id>(nullptr));
@@ -564,18 +560,6 @@ struct Session {
             Object source(text(::webfront::detail::viewSecretScript(options.launch.secret, options.launch.origin)));
             Object script(send(send(type("WKUserScript"), "alloc"), "initWithSource:injectionTime:forMainFrameOnly:", source.get(), 0L, static_cast<BOOL>(true)));
             send<void>(send(configuration.get(), "userContentController"), "addUserScript:", script.get());
-        }
-        if (options.visible && firstFrameProbe) {
-            // After the first layout, in the main frame: the page tells the window it can be shown. Two animation frames end the
-            // wait when they run; a window nearly transparent can be treated as occluded, which throttles them, so a short
-            // timer after the forced layout ends it too.
-            Object probeSource(text(R"js((function(){if(window.top!==window)return;var sent=false;function post(){if(sent)return;sent=true;try{window.webkit.messageHandlers.webfrontFirstFrame.postMessage(0);}catch(e){}}function frames(){void document.documentElement.offsetHeight;requestAnimationFrame(function(){requestAnimationFrame(post);});setTimeout(post,100);}if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",frames);else frames();})();)js"));
-            Object probe(send(send(type("WKUserScript"), "alloc"), "initWithSource:injectionTime:forMainFrameOnly:", probeSource.get(), 0L, static_cast<BOOL>(true)));
-            const auto content = send(configuration.get(), "userContentController");
-            send<void>(content, "addUserScript:", probe.get());
-            Object name(text("webfrontFirstFrame"));
-            send<void>(content, "addScriptMessageHandler:name:", delegate, name.get());
-            probeInstalled = true;
         }
         // Deliver script-created popup attempts to the delegates, which always cancel unmanaged views.
         send<void>(send(configuration.get(), "preferences"), "setJavaScriptCanOpenWindowsAutomatically:", static_cast<BOOL>(true));
@@ -978,16 +962,6 @@ inline void presentDelayExpired(id self, SEL, id) {
     }
 }
 
-inline void firstFrameReceived(id self, SEL, id, id) {
-    if (auto s = session(self)) {
-        if (!s->presented)  // a reload injects the probe again: only the first notification is a milestone
-            s->trace("first frame");
-        s->guard([&] {
-            s->presentWindow(true);
-        });
-    }
-}
-
 inline void navigationFinished(id self, SEL, id, id) {
     if (auto s = session(self)) {
         if (!s->receivedResponse) {
@@ -997,6 +971,12 @@ inline void navigationFinished(id self, SEL, id, id) {
         } else {
             s->loaded = true;
             send<void>(s->timer, "invalidate");
+            if (s->revealOnLoad) {
+                s->trace("document loaded");
+                s->guard([&] {
+                    s->presentWindow(true);
+                });
+            }
         }
     }
 }
@@ -1027,7 +1007,6 @@ inline void addApplicationMethods(Class cls) {
     addMethod(cls, "applicationShouldTerminateAfterLastWindowClosed:", terminateAfterLastWindow, "B@:@");
     addMethod(cls, "webfrontTimeout:", startupTimedOut, "v@:@");
     addMethod(cls, "webfrontPresent:", presentDelayExpired, "v@:@");
-    addMethod(cls, "userContentController:didReceiveScriptMessage:", firstFrameReceived, "v@:@@");
 }
 
 inline void addNavigationMethods(Class cls) {

@@ -17,7 +17,7 @@ these entries stays in the GitHub releases and the Git history.
 - Choose the colour of the WebKitGTK view under the page with `WindowOptions::background` (WebKitGTK; WebView2 below; the other frontends ignore it), and read the start-up milestones of a WebKitGTK view with `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WEBKITGTK.md`).
 
 ### Changed
-- Reveal the WKWebView window after the first frame or one second (#611, `docs/WKWEBVIEW.md`).
+- Reveal the WKWebView window when the document has loaded or after one second (#611, `docs/WKWEBVIEW.md`).
 - Reveal the WebView2 window after the first frame or one second (#611, `docs/WEBVIEW2.md`).
 - Show the WebKitGTK window when the page reports its first frame, or after one second at the latest even if the page has not painted, instead of at once; the embedded pages, the starter and the examples use the cheap `sans-serif` and `monospace` font stacks (#611, `docs/WEBKITGTK.md`).
 
