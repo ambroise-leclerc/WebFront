@@ -336,6 +336,8 @@ struct Session {
     /// The window is shown nearly transparent and made opaque at the page's first frame, or when this timer expires.
     id                                   presentTimer = nullptr;
     bool                                 presented = false, presentedByFrame = false, probeInstalled = false;
+    /// Test hook: false installs no probe, so only the delay can show the window.
+    bool                                 firstFrameProbe = true;
     /// Test hook: called on the main thread when the window has been made opaque.
     std::function<void()>                windowShown;
     const std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
@@ -563,9 +565,11 @@ struct Session {
             Object script(send(send(type("WKUserScript"), "alloc"), "initWithSource:injectionTime:forMainFrameOnly:", source.get(), 0L, static_cast<BOOL>(true)));
             send<void>(send(configuration.get(), "userContentController"), "addUserScript:", script.get());
         }
-        if (options.visible) {
-            // Two animation frames after DOMContentLoaded, in the main frame: the page tells the window it can be shown.
-            Object probeSource(text(R"js((function(){if(window.top!==window)return;var sent=false;function post(){if(sent)return;sent=true;try{window.webkit.messageHandlers.webfrontFirstFrame.postMessage(0);}catch(e){}}function frames(){requestAnimationFrame(function(){requestAnimationFrame(post);});}if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",frames);else frames();})();)js"));
+        if (options.visible && firstFrameProbe) {
+            // After the first layout, in the main frame: the page tells the window it can be shown. Two animation frames end the
+            // wait when they run; a window nearly transparent can be treated as occluded, which throttles them, so a short
+            // timer after the forced layout ends it too.
+            Object probeSource(text(R"js((function(){if(window.top!==window)return;var sent=false;function post(){if(sent)return;sent=true;try{window.webkit.messageHandlers.webfrontFirstFrame.postMessage(0);}catch(e){}}function frames(){void document.documentElement.offsetHeight;requestAnimationFrame(function(){requestAnimationFrame(post);});setTimeout(post,100);}if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",frames);else frames();})();)js"));
             Object probe(send(send(type("WKUserScript"), "alloc"), "initWithSource:injectionTime:forMainFrameOnly:", probeSource.get(), 0L, static_cast<BOOL>(true)));
             const auto content = send(configuration.get(), "userContentController");
             send<void>(content, "addUserScript:", probe.get());
