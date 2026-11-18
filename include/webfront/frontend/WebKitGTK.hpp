@@ -17,6 +17,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <fstream>
+#include <sstream>
 #include <filesystem>
 #include <functional>
 #include <future>
@@ -80,6 +82,7 @@ public:
     const char* (*windowGetTitle)(Object)                                         = symbol<decltype(windowGetTitle)>("gtk_window_get_title");
     void (*windowSize)(Object, int, int)                                          = symbol<decltype(windowSize)>("gtk_window_set_default_size");
     void (*windowChild)(Object, Object)                                           = symbol<decltype(windowChild)>("gtk_window_set_child");
+    void (*widgetOpacity)(Object, double)                                         = symbol<decltype(widgetOpacity)>("gtk_widget_set_opacity");
     void (*windowPresent)(Object)                                                 = symbol<decltype(windowPresent)>("gtk_window_present");
     void (*windowDestroy)(Object)                                                 = symbol<decltype(windowDestroy)>("gtk_window_destroy");
     Object (*loopNew)(Object, int)                                                = symbol<decltype(loopNew)>("g_main_loop_new");
@@ -100,6 +103,7 @@ public:
     const char* (*viewUri)(Object)                                                = symbol<decltype(viewUri)>("webkit_web_view_get_uri");
     const char* (*viewTitle)(Object)                                              = symbol<decltype(viewTitle)>("webkit_web_view_get_title");
     void (*windowClose)(Object)                                                   = symbol<decltype(windowClose)>("gtk_window_close");
+    void (*emitByName)(Object, const char*, ...)                                  = symbol<decltype(emitByName)>("g_signal_emit_by_name");
     void (*stop)(Object)                                                          = symbol<decltype(stop)>("webkit_web_view_stop_loading");
     Object (*navigationAction)(Object)                      = symbol<decltype(navigationAction)>("webkit_navigation_policy_decision_get_navigation_action");
     Object (*request)(Object)                               = symbol<decltype(request)>("webkit_navigation_action_get_request");
@@ -142,6 +146,9 @@ public:
     Object (*scriptNew)(const char*, int, int, const char* const*, const char* const*) = symbol<decltype(scriptNew)>("webkit_user_script_new");
     void (*scriptAdd)(Object, Object)                           = symbol<decltype(scriptAdd)>("webkit_user_content_manager_add_script");
     void (*scriptUnref)(Object)                                 = symbol<decltype(scriptUnref)>("webkit_user_script_unref");
+    // Script messages (WebKitGTK 2.40 added the world name; an extra null argument is harmless to older callers' ABI).
+    int (*registerMessage)(Object, const char*, const char*)    = symbol<decltype(registerMessage)>("webkit_user_content_manager_register_script_message_handler");
+    void (*viewBackground)(Object, const float*)                = symbol<decltype(viewBackground)>("webkit_web_view_set_background_color");
     // Portal identifier of the window (ADR-020): the backend's own symbols exist only when GTK was built with it, so each is
     // optional and a missing one leaves the identifier empty.
     Object (*nativeSurface)(Object)                             = optionalSymbol<decltype(nativeSurface)>("gtk_native_get_surface");
@@ -350,13 +357,25 @@ struct Session : FailureState {
     bool                                 closed            = false;
     bool                                 initialNavigation = true;
     unsigned                             navigationTimer   = 0;
+    unsigned                             presentTimer      = 0;  // presents the window anyway when the first frame is late
+    bool                                 presented         = false;
+    bool                                 firstNotified     = false;  // the page's first notification of the session came, whenever it did
+    bool                                 shownByFrame      = false;  // the page's first frame, not the delay, made the window opaque
+    std::function<void()>                windowShown;               // test hook: called once the window is made opaque
+    std::chrono::steady_clock::time_point created          = std::chrono::steady_clock::now();
     unsigned                             portalTimer       = 0;  // retries the Wayland export until the toplevel can be exported
     int                                  portalAttempts    = 0;
     std::uint64_t                        portalGeneration  = 0;  // the publication this session's identifier belongs to
     unsigned long                        windowHandler     = 0;
     std::vector<unsigned long>           viewHandlers;
+    /// Profile files of the GStreamer opt-out (`WindowOptions::media == false`); empty otherwise.
+    std::filesystem::path                mediaPlugins, mediaRegistry;
+    unsigned long                        messageHandler = 0;  // on the content manager, not on the view
     std::shared_ptr<CaptureTarget>       captureTarget = std::make_shared<CaptureTarget>();
     CaptureRegistration                  captureRegistration;
+
+    /// The window is presented at the latest this long after the load starts, painted or not.
+    static constexpr unsigned maximumPresentDelayMs = 1000;
 
     explicit Session(webfront::detail::BoundContentPolicy rules, WindowOptions settings = {})
         : policy(std::move(rules)), windowOptions(resolveWindow(std::move(settings))) {}
@@ -366,6 +385,7 @@ struct Session : FailureState {
         if (portalTimer)
             a.sourceRemove(std::exchange(portalTimer, 0));
         stopNavigationTimer();
+        stopPresentTimer();
         releaseDownloads();
         releaseView();
         destroyWindow();
@@ -381,6 +401,10 @@ struct Session : FailureState {
         if (navigationTimer)
             a.sourceRemove(std::exchange(navigationTimer, 0));
     }
+    void stopPresentTimer() {
+        if (presentTimer)
+            a.sourceRemove(std::exchange(presentTimer, 0));
+    }
     void releaseView() {
         captureRegistration = {};
         abandonCaptures(*captureTarget);
@@ -388,6 +412,8 @@ struct Session : FailureState {
             return;
         for (auto handler : viewHandlers)
             a.disconnect(view, handler);
+        if (messageHandler)
+            a.disconnect(a.contentManager(view), std::exchange(messageHandler, 0));
         a.stop(view);
         release(view);
     }
@@ -412,6 +438,7 @@ struct Session : FailureState {
 
     void close() noexcept {
         closed = true;
+        mediaScope.reset();
         a.loopQuit(loop);
     }
     void failAndClose(std::string_view message) noexcept {
@@ -435,10 +462,33 @@ struct Session : FailureState {
         viewHandlers.push_back(a.connect(view, signal, reinterpret_cast<Api::Callback>(callback), this, nullptr, flags));
     }
 
+    /// The environment WebKit's processes inherit when the application has no media: GStreamer finds no plugin to scan.
+    std::optional<ScopedEnvironment> mediaScope;  // set from the first load until the page's load starts
+    ScopedEnvironment mediaEnvironment() const {
+        ScopedEnvironment environment;
+        if (!mediaPlugins.empty()) {
+            environment.set("GST_PLUGIN_SYSTEM_PATH_1_0", mediaPlugins.string());
+            environment.set("GST_PLUGIN_PATH_1_0", mediaPlugins.string());
+            environment.set("GST_REGISTRY_1_0", mediaRegistry.string());
+        }
+        return environment;
+    }
+
     void create(SandboxMode mode = SandboxMode::development) {
+        trace("session creation");
         const auto data  = profileDirectory("XDG_DATA_HOME", ".local/share");
         const auto cache = profileDirectory("XDG_CACHE_HOME", ".cache");
-        network          = a.networkNew(data.c_str(), cache.c_str());
+        if (!windowOptions.media) {
+            mediaPlugins  = data / "no-media-plugins";
+            mediaRegistry = data / "no-media-registry.bin";  // never rewrite the user's own registry
+            std::filesystem::create_directories(mediaPlugins);
+        }
+        // WebKit launches a web process when the context is created (a spare one) and another from its main loop shortly after
+        // the first load is requested: the variables stay set from here until the page reports that its load started (or
+        // the delay expires), then are restored. The environment is process-wide, so the application is exposed during that
+        // window, as docs/WEBKITGTK.md says; a web process launched later (a process swap) runs without the restriction.
+        mediaScope.emplace(mediaEnvironment());
+        network = a.networkNew(data.c_str(), cache.c_str());
         Api::Object context;
         {
             DevelopmentSandboxEnvironment environment(mode);
@@ -451,12 +501,109 @@ struct Session : FailureState {
         a.windowSize(window, windowOptions.width, windowOptions.height);
         a.windowChild(window, view);
         configureSettings();
+        applyBackground();
         installViewAssociation();
+        installFirstFrameProbe();
         registerHandlers();
         downloadStartedHandler = a.connect(network, "download-started", reinterpret_cast<Api::Callback>(onDownloadStarted), this, nullptr, 0);
+        trace("view created");
         captureTarget->view = view;
         captureTarget->pending.open();
         captureRegistration = CaptureRegistration{captureProvider(captureTarget)};
+    }
+
+    void applyBackground() {
+        if (const auto color = parseBackground(windowOptions.background))
+            a.viewBackground(view, color->data());
+    }
+
+    /// The window is mapped at once but fully transparent: WebKit paints, and animation frames run, only in a mapped view, so
+    /// the first frame can be awaited. Without a compositing manager the opacity is ignored and the window shows as before.
+    /// Milliseconds since the process was executed (field 22 of /proc/self/stat against the uptime), so that the trace of a
+    /// start covers the loading of the libraries and the toolkit's initialization, not only the session.
+    static long long millisecondsSinceExec() {
+        try {
+            std::ifstream stat("/proc/self/stat");
+            std::string   text;
+            std::getline(stat, text);
+            const auto close = text.rfind(')');  // the command name may contain spaces
+            if (close == std::string::npos)
+                return -1;
+            std::istringstream fields(text.substr(close + 2));
+            std::string        field;
+            for (int index = 3; index <= 22 && fields >> field; ++index)
+                if (index == 22) {
+                    std::ifstream uptime("/proc/uptime");
+                    double        seconds = 0;
+                    uptime >> seconds;
+                    const double ticks = static_cast<double>(sysconf(_SC_CLK_TCK));
+                    return static_cast<long long>((seconds - std::stod(field) / ticks) * 1000.0);
+                }
+        } catch (...) {
+        }
+        return -1;
+    }
+    /// WEBFRONT_STARTUP_TRACE=1 reports the milestones of the view's start, in milliseconds since the process was executed.
+    void trace(const char* milestone) const {
+        static const bool enabled = [] {
+            const auto* value = std::getenv("WEBFRONT_STARTUP_TRACE");
+            return value && *value && std::string_view{value} != "0";
+        }();
+        if (enabled)
+            std::fprintf(stderr, "WebFront startup: %s at %lld ms (session %lld ms)\n", milestone, millisecondsSinceExec(),
+                         static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - created).count()));
+    }
+    void presentHidden() {
+        a.widgetOpacity(window, 0.01);  // GTK does not draw a widget at 0, and WebKit would wait for a frame forever
+        a.windowPresent(window);
+        startPortalExport();
+    }
+    /// Shows the window once the page painted its first frame, or when the delay expired.
+    void presentWindow(bool byFrame) {
+        if (presented || closed)
+            return;
+        presented     = true;
+        shownByFrame  = byFrame;
+        stopPresentTimer();
+        a.widgetOpacity(window, 1.0);
+        trace("window shown");
+        if (windowShown)
+            windowShown();
+    }
+    static void onFirstFrame(Api::Object, Api::Object, Session* self) noexcept {
+        if (!self->firstNotified) {  // a reload injects the probe again: only the first notification is a milestone
+            self->firstNotified = true;
+            self->trace(self->presented ? "first frame (after the delay)" : "first frame");
+        }
+        self->guard([self] {
+            self->presentWindow(true);
+        });
+    }
+    static int onPresentTimeout(void* data) noexcept {
+        auto* self         = static_cast<Session*>(data);
+        self->presentTimer = 0;
+        self->mediaScope.reset();  // a page that reports nothing must not keep the environment changed
+        self->trace("present delay expired");
+        self->guard([self] {
+            self->presentWindow(false);
+        });
+        return 0;
+    }
+    /// The page tells the toolkit that its first frame is painted (two animation frames after DOMContentLoaded), so that the
+    /// window appears with content instead of black. The message handler is the content manager's: a page can only advance the
+    /// presentation, which the timer would do anyway.
+    void installFirstFrameProbe() {
+        constexpr const char* name   = "webfrontFirstFrame";
+        const auto            script = a.scriptNew(
+            R"js((function(){if(window.top!==window)return;var sent=false;function post(){if(sent)return;sent=true;try{window.webkit.messageHandlers.webfrontFirstFrame.postMessage(0);}catch(e){}}function frames(){requestAnimationFrame(function(){requestAnimationFrame(post);});}if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",frames);else frames();})();)js",
+            1,
+            0,
+            nullptr,
+            nullptr);
+        a.scriptAdd(a.contentManager(view), script);
+        a.scriptUnref(script);
+        a.registerMessage(a.contentManager(view), name, nullptr);
+        messageHandler = a.connect(a.contentManager(view), "script-message-received::webfrontFirstFrame", reinterpret_cast<Api::Callback>(onFirstFrame), this, nullptr, 0);
     }
 
     void installViewAssociation() {
@@ -609,6 +756,7 @@ struct Session : FailureState {
         return self->policy.options().contextMenusEnabled ? 0 : 1;
     }
     static void onLoadChanged(Api::Object, int event, Session* self) noexcept {
+        self->mediaScope.reset();  // the web process was launched with the opt-out
         if (event == 2)  // WEBKIT_LOAD_COMMITTED: slow subresources are not a startup failure.
             self->guard([self] {
                 self->navigationCommitted();
@@ -780,8 +928,9 @@ struct Session : FailureState {
         if (closed)
             return;
         navigationTimer = a.timeoutAdd(30'000, onNavigationTimeout, this);
-        a.windowPresent(window);
-        startPortalExport();
+        presentTimer = a.timeoutAdd(maximumPresentDelayMs, onPresentTimeout, this);
+        presentHidden();
+        trace("load started");
         a.load(view, url.c_str());
         if (!closed)
             a.loopRun(loop);
@@ -859,7 +1008,10 @@ struct BasicWebKitGTKFrontend {
     static bool requestClose([[maybe_unused]] std::optional<UISession> session = std::nullopt) noexcept {
 #if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
         return detail::requestWindowClose(uiExecutor(), nativeWindow(), [](const NativeWindowHandle& window) {
-            detail::webkitgtk::api().windowClose(window.pointer);  // emits close-request, as the window's button does
+            // gtk_window_close ignores a window that is not realized, and the window is presented only after the first frame:
+            // a request made before that must still end the session, so the close-request signal is emitted itself.
+            int handled = 0;
+            detail::webkitgtk::api().emitByName(window.pointer, "close-request", &handled);
         }, session);
 #else
         return false;

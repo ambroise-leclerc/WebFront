@@ -41,6 +41,7 @@ struct WebView2Options {
     #include "../system/WindowsCompat.hpp"
 
     #include <cstdint>
+    #include <cstdio>
     #include <deque>
     #include <exception>
     #include <filesystem>
@@ -296,6 +297,8 @@ public:
             DestroyWindow(window);
         if (registered)
             UnregisterClassW(className.c_str(), GetModuleHandleW(nullptr));
+        if (backgroundBrush)
+            DeleteObject(backgroundBrush);
     }
 
     void navigationStarting(ICoreWebView2NavigationStartingEventArgs* args) noexcept {
@@ -339,6 +342,7 @@ public:
 
     void close() noexcept {
         stopStartupTimer();
+        stopPresentTimer();
         if (closed)
             return;
         closed              = true;
@@ -398,17 +402,25 @@ public:
 
     void createWindow(bool visible = true, WindowOptions settings = {}) {
         windowOptions = frontend::detail::resolveWindow(std::move(settings));
+        visibleWindow = visible;
+        trace("session creation");
         className = L"WebFront.WebView2." + std::to_wstring(reinterpret_cast<std::uintptr_t>(this));
         WNDCLASSW windowClass{};
         windowClass.lpfnWndProc   = windowProcedure;
         windowClass.hInstance     = GetModuleHandleW(nullptr);
         windowClass.hCursor       = LoadCursor(nullptr, IDC_ARROW);
         windowClass.lpszClassName = className.c_str();
-        windowClass.hbrBackground = GetSysColorBrush(COLOR_WINDOW);
+        if (const auto color = frontend::detail::parseBackground(windowOptions.background)) {
+            const auto byte = [](float value) { return static_cast<BYTE>(value * 255.0f + 0.5f); };
+            backgroundBrush = CreateSolidBrush(RGB(byte((*color)[0]), byte((*color)[1]), byte((*color)[2])));
+            if (!backgroundBrush)
+                throw std::runtime_error("WebView2: cannot create background brush");
+        }
+        windowClass.hbrBackground = backgroundBrush ? backgroundBrush : GetSysColorBrush(COLOR_WINDOW);
         if (!RegisterClassW(&windowClass))
             throw std::runtime_error("WebView2: cannot register window class");
         registered = true;
-        window     = CreateWindowExW(0,
+        window     = CreateWindowExW(visible ? WS_EX_LAYERED : 0,
                                      className.c_str(),
                                      utf16(windowOptions.title).c_str(),
                                      WS_OVERLAPPEDWINDOW,
@@ -426,8 +438,16 @@ public:
         startupTimer = SetTimer(nullptr, 0, startupTimeoutMilliseconds, nullptr);
         if (!startupTimer)
             throw std::runtime_error("WebView2: cannot start startup timer");
-        if (visible)
+        if (visible) {
+            if (!SetLayeredWindowAttributes(window, 0, 3, LWA_ALPHA))
+                throw std::runtime_error("WebView2: cannot set initial window opacity");
+            // Armed with the window, not with the navigation: the engine can take seconds to start, and until then a nearly
+            // transparent window would still receive the user's clicks. After the delay the window is shown, empty if need be.
+            presentTimer = SetTimer(window, presentTimerId, 1000, nullptr);
+            if (!presentTimer)
+                throw std::runtime_error("WebView2: cannot start presentation timer");
             ShowWindow(window, SW_SHOW);
+        }
     }
 
     void start(const std::filesystem::path& profile, EnvironmentFactory createEnvironment = CreateCoreWebView2EnvironmentWithOptions) {
@@ -451,6 +471,49 @@ public:
 
 private:
     std::wstring className;
+    HBRUSH   backgroundBrush = nullptr;
+    bool     visibleWindow = false;
+    bool     presented = false;
+    UINT_PTR presentTimer = 0;
+    const std::chrono::steady_clock::time_point createdAt = std::chrono::steady_clock::now();
+
+    void trace(const char* milestone) const {
+        wchar_t value[8]{};
+        const auto length = GetEnvironmentVariableW(L"WEBFRONT_STARTUP_TRACE", value, 8);
+        if (!length || (length == 1 && value[0] == L'0'))
+            return;
+        FILETIME creation{}, exit{}, kernel{}, user{}, now{};
+        long long elapsed = -1;
+        if (GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernel, &user)) {
+            GetSystemTimeAsFileTime(&now);
+            ULARGE_INTEGER start{}, current{};
+            start.LowPart = creation.dwLowDateTime;
+            start.HighPart = creation.dwHighDateTime;
+            current.LowPart = now.dwLowDateTime;
+            current.HighPart = now.dwHighDateTime;
+            elapsed = static_cast<long long>((current.QuadPart - start.QuadPart) / 10000);
+        }
+        std::fprintf(stderr, "WebFront startup: %s at %lld ms (session %lld ms)\n", milestone, elapsed,
+                     static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - createdAt).count()));
+    }
+    // Bound to the window and handled by its procedure, so that the delay also runs during the system's modal loops
+    // (moving or resizing by the title bar), which dispatch window messages without going through dispatchNextMessage().
+    static constexpr UINT_PTR presentTimerId = 0x5746;
+    void stopPresentTimer() noexcept {
+        if (presentTimer && window)
+            KillTimer(window, presentTimer);
+        presentTimer = 0;
+    }
+    void presentWindow() noexcept {
+        if (presented || closed)
+            return;
+        presented = true;
+        stopPresentTimer();
+        if (visibleWindow && window) {
+            SetLayeredWindowAttributes(window, 0, 255, LWA_ALPHA);
+            trace("window shown");
+        }
+    }
     WindowOptions windowOptions;
     bool         registered                 = false;
     bool         initialNavigationPending   = true;
@@ -483,7 +546,7 @@ private:
         startupTimer = 0;
     }
 
-    void checkStartupTimeout(const MSG& message) const {
+    void checkStartupTimeout(const MSG& message) {
         // close() and fail() clear the timer, including messages queued before KillTimer().
         if (!startupTimer)
             return;
@@ -491,11 +554,15 @@ private:
             return;
         if (message.message != WM_TIMER)
             return;
-        if (message.wParam == startupTimer)
+        if (message.wParam == startupTimer) {
+            // The window is nearly transparent until its first frame and still receives the user's clicks: show it
+            // before the failure ends the session, so that nothing invisible is left to interact with.
+            presentWindow();
             throw std::runtime_error(std::format("WebView2: runtime startup timed out after {} milliseconds", startupTimeoutMilliseconds));
+        }
     }
 
-    bool dispatchNextMessage() const {
+    bool dispatchNextMessage() {
         MSG        message{};
         const auto result = GetMessageW(&message, nullptr, 0, 0);
         if (result == -1)
@@ -533,6 +600,15 @@ private:
             if (!created)
                 throw std::runtime_error("WebView2: no controller returned");
             controller = created;
+            if (const auto color = frontend::detail::parseBackground(windowOptions.background)) {
+                Microsoft::WRL::ComPtr<ICoreWebView2Controller2> controller2;
+                check(created->QueryInterface(IID_PPV_ARGS(&controller2)), "getting background color controller");
+                const auto byte = [](float value) { return static_cast<BYTE>(value * 255.0f + 0.5f); };
+                // WebView2 supports only fully transparent or fully opaque alpha.
+                COREWEBVIEW2_COLOR native{byte((*color)[3]) == 0 ? BYTE{0} : BYTE{255}, byte((*color)[0]), byte((*color)[1]), byte((*color)[2])};
+                check(controller2->put_DefaultBackgroundColor(native), "setting background color");
+            }
+            trace("view created");
             check(created->get_CoreWebView2(&view), "getting browser");
             configure();
         } catch (...) {
@@ -573,6 +649,7 @@ private:
             BOOL success = FALSE;
             check(args->get_IsSuccess(&success), "reading navigation result");
             if (!success) {
+                presentWindow();
                 handleInitialNavigationFailure(args);
                 return;
             }
@@ -673,6 +750,11 @@ private:
             SetWindowLongPtrW(handle, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
             self->window = handle;
         }
+        if (self && message == WM_TIMER && wParam == presentTimerId && self->presentTimer) {
+            self->trace("present delay expired");
+            self->presentWindow();
+            return 0;
+        }
         if (self) {
             try {
                 if (self->handleWindowMessage(handle, message, lParam))
@@ -726,7 +808,13 @@ private:
                       LPWSTR raw = nullptr;
                       if (SUCCEEDED(args->TryGetWebMessageAsString(&raw)) && raw) {
                           const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> message(raw, CoTaskMemFree);
-                          if (std::wstring_view{message.get()} == windowCloseMessage())
+                          if (std::wstring_view{message.get()} == L"webfront:first-frame") {
+                              if (const auto self = weak.lock()) {
+                                  if (!self->presented)  // a reload injects the probe again: only the first is a milestone
+                                      self->trace("first frame");
+                                  self->presentWindow();
+                              }
+                          } else if (std::wstring_view{message.get()} == windowCloseMessage())
                               if (const auto self = weak.lock())
                                   self->requestWindowClose();
                       }
@@ -849,9 +937,14 @@ public:
                "configurable:true,writable:true});})();";
     }
 
+    static std::string firstFrameScript() {
+        return "(()=>{if(window.top!==window)return;function frames(){requestAnimationFrame(()=>requestAnimationFrame(()=>{try{window.chrome.webview.postMessage('webfront:first-frame')}catch(e){}}));}"
+               "if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',frames,{once:true});else frames();})();";
+    }
+
     template <typename Browser>
     void installViewAssociationThenNavigate(Browser* browser) {
-        const auto source = windowCloseScript() + webfront::detail::viewSecretScript(viewLaunch.secret, viewLaunch.origin);
+        const auto source = windowCloseScript() + firstFrameScript() + webfront::detail::viewSecretScript(viewLaunch.secret, viewLaunch.origin);
         {
             auto       weak   = weak_from_this();
             const auto script = utf16(source);
@@ -862,6 +955,7 @@ public:
                               try {
                                   check(result, "installing the view association script");
                                   self->stopStartupTimer();
+                                  self->trace("load started");
                                   check(browser->Navigate(self->url.c_str()), "navigating to application");
                               } catch (...) {
                                   self->fail();

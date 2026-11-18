@@ -92,6 +92,73 @@ const Scenario webView2Encodes{"WebView2 encodes application paths", [] {
     });
 }};
 
+const Scenario webView2Presentation{"WebView2 prepares a background and a first-frame probe", [] {
+    using namespace webfront::frontend::detail::webview2;
+    Apartment apartment;
+    auto session = std::make_shared<Session>();
+    webfront::WindowOptions options;
+    options.background = "#123456";
+    session->createWindow(false, options);
+    const auto brush = reinterpret_cast<HBRUSH>(GetClassLongPtrW(session->window, GCLP_HBRBACKGROUND));
+    LOGBRUSH description{};
+    require(GetObjectW(brush, sizeof(description), &description) == static_cast<int>(sizeof(description)));
+    require(description.lbColor == RGB(0x12, 0x34, 0x56));
+    const auto script = Session::firstFrameScript();
+    require(script, contains("window.top!==window"));
+    require(script, contains("DOMContentLoaded"));
+    require(script, contains("webfront:first-frame"));
+    require(script, contains("requestAnimationFrame(()=>requestAnimationFrame"));
+}};
+
+const Scenario webView2PresentationDeadline{"WebView2 reveals a page that never reports its first frame", [] {
+    using namespace webfront::frontend::detail::webview2;
+    Apartment apartment;
+    auto session = std::make_shared<Session>();
+    session->createWindow();
+    BYTE initial = 0;
+    require(GetLayeredWindowAttributes(session->window, nullptr, &initial, nullptr));
+    require(initial == 3);
+    ViewRegistrationBrowser browser;
+    session->installViewAssociationThenNavigate(&browser);
+    require(browser.completion->Invoke(S_OK, L"script") == S_OK);
+    BYTE finalAlpha = 0;
+    const HWND window = session->window;
+    std::jthread observer([&] {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+        do {
+            std::this_thread::sleep_for(std::chrono::milliseconds{20});
+            GetLayeredWindowAttributes(window, nullptr, &finalAlpha, nullptr);
+        } while (finalAlpha != 255 && std::chrono::steady_clock::now() < deadline);
+        PostMessageW(window, WM_CLOSE, 0, 0);
+    });
+    session->run();
+    observer.join();
+    require(finalAlpha == 255);
+}};
+
+const Scenario webView2EngineSlowToStart{"WebView2 shows its window after the delay even when the engine never starts", [] {
+    using namespace webfront::frontend::detail::webview2;
+    Apartment apartment;
+    auto session = std::make_shared<Session>();
+    session->createWindow();  // no environment, no controller, no navigation: the engine is still starting
+    BYTE initial = 0;
+    require(GetLayeredWindowAttributes(session->window, nullptr, &initial, nullptr));
+    require(initial == 3);
+    BYTE finalAlpha = 0;
+    const HWND window = session->window;
+    std::jthread observer([&] {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+        do {
+            std::this_thread::sleep_for(std::chrono::milliseconds{20});
+            GetLayeredWindowAttributes(window, nullptr, &finalAlpha, nullptr);
+        } while (finalAlpha != 255 && std::chrono::steady_clock::now() < deadline);
+        PostMessageW(window, WM_CLOSE, 0, 0);
+    });
+    session->run();
+    observer.join();
+    require(finalAlpha == 255);
+}};
+
 const Scenario webView2Runtime{"WebView2 runtime startup has a configurable deadline", [] {
     using namespace webfront::frontend::detail::webview2;
     using namespace std::chrono_literals;

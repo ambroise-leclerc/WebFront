@@ -161,6 +161,60 @@ int startupCompletion(bool failed) {
     return 0;
 }
 
+int firstFramePresentation(bool noFrame) {
+    using namespace webfront::frontend::detail::webview2;
+    webfront::http::Server<webfront::NetProvider, webfront::fs::NativeDebugFS> server("127.0.0.1", "9002", std::filesystem::current_path());
+    std::jthread worker([&](std::stop_token stop) {
+        std::stop_callback cleanup(stop, [&] { server.stop(); });
+        server.run();
+    });
+    Apartment apartment;
+    auto session = std::make_shared<Session>();
+    session->url = noFrame ? L"http://127.0.0.1:9002/first-frame.html?no-frame" : L"http://127.0.0.1:9002/first-frame.html";
+    session->contentPolicy = webfront::detail::BoundContentPolicy{"http://127.0.0.1:9002", {}};
+    webfront::WindowOptions options;
+    options.background = "#123456";
+    session->createWindow(true, options);
+    BYTE alpha = 0;
+    require(GetLayeredWindowAttributes(session->window, nullptr, &alpha, nullptr) && alpha == 3, "Window was not initially nearly transparent");
+    bool messageReceived = false;
+    bool observed = false;
+    Actions actions;
+    actions.onFailure = [&] { session->fail(); };
+    session->viewReady = [&] {
+        Microsoft::WRL::ComPtr<ICoreWebView2Controller2> controller;
+        check(session->controller.As(&controller), "querying background controller");
+        COREWEBVIEW2_COLOR color{};
+        check(controller->get_DefaultBackgroundColor(&color), "reading background color");
+        require(color.A == 255 && color.R == 0x12 && color.G == 0x34 && color.B == 0x56, "Background did not reach WebView2");
+        EventRegistrationToken token{};
+        check(session->view->add_WebMessageReceived(
+            Microsoft::WRL::Callback<ICoreWebView2WebMessageReceivedEventHandler>([&](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
+                LPWSTR raw = nullptr;
+                if (SUCCEEDED(args->TryGetWebMessageAsString(&raw)) && raw) {
+                    const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> message(raw, CoTaskMemFree);
+                    if (std::wstring_view{message.get()} == L"webfront:first-frame") messageReceived = true;
+                }
+                return S_OK;
+            }).Get(), &token), "observing first frame");
+    };
+    actions.dispatch = [&](UINT) {
+        BYTE current = 0;
+        if (!GetLayeredWindowAttributes(session->window, nullptr, &current, nullptr) || current != 255) return;
+        if (!noFrame && !messageReceived) return;
+        require(!noFrame || !messageReceived, "A suppressed frame unexpectedly arrived");
+        observed = true;
+        KillTimer(actions.window, 1);
+        PostMessageW(session->window, WM_CLOSE, 0, 0);
+    };
+    require(SetTimer(actions.window, 1, 10, nullptr) != 0, "Cannot start presentation observer");
+    session->start(userDataFolder());
+    session->run();
+    if (actions.failure) std::rethrow_exception(actions.failure);
+    require(observed, "Window was not revealed");
+    return 0;
+}
+
 int lateNavigationFailure() {
     using namespace webfront::frontend::detail::webview2;
     // Start on allowed HTTP content; about:blank is deliberately outside the content policy.
@@ -574,6 +628,8 @@ int run(std::string_view mode) {
     if (!webView2ClosesServer())
         return 1;
     const std::map<std::string_view, std::function<int()>> cases{
+        {"first-frame", [] { return firstFramePresentation(false); }},
+        {"present-timeout", [] { return firstFramePresentation(true); }},
         {            "file-choose",
          [] {
          return fileServices("choose");
