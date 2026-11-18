@@ -357,12 +357,17 @@ struct Session : FailureState {
     unsigned                             navigationTimer   = 0;
     unsigned                             presentTimer      = 0;  // presents the window anyway when the first frame is late
     bool                                 presented         = false;
+    bool                                 shownByFrame      = false;  // the page's first frame, not the delay, made the window opaque
+    std::function<void()>                windowShown;               // test hook: called once the window is made opaque
     std::chrono::steady_clock::time_point created          = std::chrono::steady_clock::now();
     unsigned                             portalTimer       = 0;  // retries the Wayland export until the toplevel can be exported
     int                                  portalAttempts    = 0;
     std::uint64_t                        portalGeneration  = 0;  // the publication this session's identifier belongs to
     unsigned long                        windowHandler     = 0;
     std::vector<unsigned long>           viewHandlers;
+    /// Held for the whole session, not only the creation: WebKit launches the web process at the first load and again after
+    /// a crash, and each launch inherits the environment of the moment.
+    ScopedEnvironment                    media;
     unsigned long                        messageHandler = 0;  // on the content manager, not on the view
     std::shared_ptr<CaptureTarget>       captureTarget = std::make_shared<CaptureTarget>();
     CaptureRegistration                  captureRegistration;
@@ -459,7 +464,6 @@ struct Session : FailureState {
         const auto data  = profileDirectory("XDG_DATA_HOME", ".local/share");
         const auto cache = profileDirectory("XDG_CACHE_HOME", ".cache");
         // Every process WebKit launches while this is in scope inherits it; without media its GStreamer finds no plugin to scan.
-        ScopedEnvironment media;
         if (!windowOptions.media) {
             const auto empty = data / "no-media-plugins";
             std::filesystem::create_directories(empty);
@@ -538,18 +542,22 @@ struct Session : FailureState {
         startPortalExport();
     }
     /// Shows the window once the page painted its first frame, or when the delay expired.
-    void presentWindow() {
+    void presentWindow(bool byFrame) {
         if (presented || closed)
             return;
-        presented = true;
+        presented     = true;
+        shownByFrame  = byFrame;
         stopPresentTimer();
         a.widgetOpacity(window, 1.0);
         trace("window shown");
+        if (windowShown)
+            windowShown();
     }
     static void onFirstFrame(Api::Object, Api::Object, Session* self) noexcept {
-        self->trace("first frame");
+        if (!self->presented)  // a reload injects the probe again: only the first notification is a milestone
+            self->trace(self->presentTimer ? "first frame" : "first frame (after the delay)");
         self->guard([self] {
-            self->presentWindow();
+            self->presentWindow(true);
         });
     }
     static int onPresentTimeout(void* data) noexcept {
@@ -557,7 +565,7 @@ struct Session : FailureState {
         self->presentTimer = 0;
         self->trace("present delay expired");
         self->guard([self] {
-            self->presentWindow();
+            self->presentWindow(false);
         });
         return 0;
     }

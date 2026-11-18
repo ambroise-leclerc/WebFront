@@ -1,5 +1,12 @@
 # WKWebView frontend (macOS)
 
+The native window starts nearly transparent (alpha 0.01) while WKWebView loads the page. It becomes opaque after two
+animation frames following `DOMContentLoaded`, or after one second if the page does not report a frame; the timer runs in
+the common run-loop modes, so it also fires while the system tracks a window move or resize. The startup deadline and
+the navigation diagnostics still apply. `WindowOptions::background` accepts `#rgb`, `#rrggbb` and `#rrggbbaa`: it is the
+colour of the window and, from macOS 12, of the view under the page. Hidden sessions (`visible = false`) skip the
+presentation. Set `WEBFRONT_STARTUP_TRACE=1` to log the milestones to stderr.
+
 `WKWebViewFrontend` opens a native AppKit window with the WebKit engine supplied by macOS.
 It is optional and never changes `webfront::WebFront`'s system-browser default.
 

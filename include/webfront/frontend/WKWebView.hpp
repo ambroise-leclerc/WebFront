@@ -68,6 +68,9 @@ struct WKWebViewOptions {
 
 #if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
     #include <bit>
+    #include <chrono>
+    #include <cstdio>
+    #include <cstdlib>
     #include <exception>
     #include <functional>
     #include <future>
@@ -83,6 +86,9 @@ struct WKWebViewOptions {
     #include <objc/message.h>
     #include <objc/runtime.h>
     #include <pthread.h>
+    #include <sys/sysctl.h>
+    #include <sys/time.h>
+    #include <unistd.h>
 
 namespace webfront::frontend::detail::wkwebview {
 
@@ -327,6 +333,12 @@ struct Session {
     /// What the answers of a system panel hold instead of `this`: AppKit may deliver one after the session is gone.
     std::shared_ptr<Session*>            alive = std::make_shared<Session*>(this);
     id                                   app = nullptr, window = nullptr, view = nullptr, delegate = nullptr, timer = nullptr;
+    /// The window is shown nearly transparent and made opaque at the page's first frame, or when this timer expires.
+    id                                   presentTimer = nullptr;
+    bool                                 presented = false, presentedByFrame = false, probeInstalled = false;
+    /// Test hook: called on the main thread when the window has been made opaque.
+    std::function<void()>                windowShown;
+    const std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
     id                                   previousDelegate = nullptr, previousMenu = nullptr;
     long                                 previousActivationPolicy = 0;
     bool                                 installed = false, running = false, closed = false, loaded = false;
@@ -344,6 +356,14 @@ struct Session {
         if (timer) {
             send<void>(timer, "invalidate");
             send<void>(timer, "release");
+        }
+        if (presentTimer) {
+            send<void>(presentTimer, "invalidate");
+            send<void>(presentTimer, "release");
+        }
+        if (view && probeInstalled) {  // the content controller retains its handler: break the cycle with the delegate
+            Object name(text("webfrontFirstFrame"));
+            send<void>(send(send(view, "configuration"), "userContentController"), "removeScriptMessageHandlerForName:", name.get());
         }
         if (view) {
             send<void>(view, "setNavigationDelegate:", static_cast<id>(nullptr));
@@ -375,6 +395,46 @@ struct Session {
             attach(delegate, nullptr);
             send<void>(delegate, "release");
         }
+    }
+
+    /// Milliseconds since the process was executed, so the trace covers the loading of the frameworks too.
+    static long long millisecondsSinceExec() noexcept {
+        int         mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, static_cast<int>(getpid())};
+        kinfo_proc  info{};
+        std::size_t size = sizeof(info);
+        if (sysctl(mib, 4, &info, &size, nullptr, 0) != 0)
+            return -1;
+        const timeval started = info.kp_proc.p_un.__p_starttime;
+        timeval       now{};
+        gettimeofday(&now, nullptr);
+        return static_cast<long long>(now.tv_sec - started.tv_sec) * 1000 + (now.tv_usec - started.tv_usec) / 1000;
+    }
+    /// WEBFRONT_STARTUP_TRACE=1 reports the milestones of the view's start on standard error.
+    void trace(const char* milestone) const noexcept {
+        static const bool enabled = [] {
+            const auto* value = std::getenv("WEBFRONT_STARTUP_TRACE");
+            return value && *value && std::string_view{value} != "0";
+        }();
+        if (enabled)
+            std::fprintf(stderr, "WebFront startup: %s at %lld ms (session %lld ms)\n", milestone, millisecondsSinceExec(),
+                         static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - created).count()));
+    }
+    /// Makes the window opaque, once: at the page's first frame, or when the delay has expired.
+    void presentWindow(bool byFrame) {
+        if (presented || closed || !window)
+            return;
+        presented        = true;
+        presentedByFrame = byFrame;
+        if (presentTimer) {
+            send<void>(presentTimer, "invalidate");
+            send<void>(presentTimer, "release");
+            presentTimer = nullptr;
+        }
+        if (options.visible)
+            send<void>(window, "setAlphaValue:", 1.0);
+        trace("window shown");
+        if (windowShown)
+            windowShown();
     }
 
     /// Dismisses the panels attached to the window: their completion handlers run, so WebKit gets its answers.
@@ -503,6 +563,16 @@ struct Session {
             Object script(send(send(type("WKUserScript"), "alloc"), "initWithSource:injectionTime:forMainFrameOnly:", source.get(), 0L, static_cast<BOOL>(true)));
             send<void>(send(configuration.get(), "userContentController"), "addUserScript:", script.get());
         }
+        if (options.visible) {
+            // Two animation frames after DOMContentLoaded, in the main frame: the page tells the window it can be shown.
+            Object probeSource(text(R"js((function(){if(window.top!==window)return;var sent=false;function post(){if(sent)return;sent=true;try{window.webkit.messageHandlers.webfrontFirstFrame.postMessage(0);}catch(e){}}function frames(){requestAnimationFrame(function(){requestAnimationFrame(post);});}if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",frames);else frames();})();)js"));
+            Object probe(send(send(type("WKUserScript"), "alloc"), "initWithSource:injectionTime:forMainFrameOnly:", probeSource.get(), 0L, static_cast<BOOL>(true)));
+            const auto content = send(configuration.get(), "userContentController");
+            send<void>(content, "addUserScript:", probe.get());
+            Object name(text("webfrontFirstFrame"));
+            send<void>(content, "addScriptMessageHandler:name:", delegate, name.get());
+            probeInstalled = true;
+        }
         // Deliver script-created popup attempts to the delegates, which always cancel unmanaged views.
         send<void>(send(configuration.get(), "preferences"), "setJavaScriptCanOpenWindowsAutomatically:", static_cast<BOOL>(true));
         const auto   windowOptions = frontend::detail::resolveWindow(options.window);
@@ -525,13 +595,23 @@ struct Session {
         if (!window)
             throw std::runtime_error("WKWebView: cannot create window (a WindowServer session is required)");
         send<void>(window, "setReleasedWhenClosed:", static_cast<BOOL>(false));
+        if (const auto color = frontend::detail::parseBackground(windowOptions.background)) {
+            const auto native = send(type("NSColor"), "colorWithSRGBRed:green:blue:alpha:", static_cast<CGFloat>((*color)[0]), static_cast<CGFloat>((*color)[1]),
+                                     static_cast<CGFloat>((*color)[2]), static_cast<CGFloat>((*color)[3]));
+            send<void>(window, "setBackgroundColor:", native);
+            if (send<BOOL>(view, "respondsToSelector:", sel_registerName("setUnderPageBackgroundColor:")))  // macOS 12
+                send<void>(view, "setUnderPageBackgroundColor:", native);
+        }
         send<void>(window, "setDelegate:", delegate);
         Object title(text(windowOptions.title));
         send<void>(window, "setTitle:", title.get());
         send<void>(window, "setContentView:", view);
         send<BOOL>(window, "makeFirstResponder:", view);
         send<void>(window, "center");
+        trace("view created");
         if (options.visible) {
+            // Nearly transparent, not hidden: an occluded window would suspend the page's animation frames.
+            send<void>(window, "setAlphaValue:", 0.01);
             send<void>(window, "makeKeyAndOrderFront:", static_cast<id>(nullptr));
             send<void>(app, "activateIgnoringOtherApps:", static_cast<BOOL>(true));
         }
@@ -546,6 +626,20 @@ struct Session {
                           static_cast<id>(nullptr),
                           static_cast<BOOL>(false)),
                      "retain");
+        if (options.visible) {
+            presentTimer = send(send(type("NSTimer"),
+                                     "timerWithTimeInterval:target:selector:userInfo:repeats:",
+                                     1.0,
+                                     delegate,
+                                     sel_registerName("webfrontPresent:"),
+                                     static_cast<id>(nullptr),
+                                     static_cast<BOOL>(false)),
+                                "retain");
+            // Common modes: the delay also runs while the system tracks a window move or resize.
+            Object mode(text("kCFRunLoopCommonModes"));
+            send<void>(send(type("NSRunLoop"), "currentRunLoop"), "addTimer:forMode:", presentTimer, mode.get());
+        }
+        trace("load started");
         Object urlText(text(url));
         auto   nativeUrl = send(type("NSURL"), "URLWithString:", urlText.get());
         if (!nativeUrl)
@@ -871,6 +965,25 @@ inline void startupTimedOut(id self, SEL, id) {
         s->fail("initial navigation timed out after " + std::to_string(s->options.startupTimeout.count()) + " milliseconds");
 }
 
+inline void presentDelayExpired(id self, SEL, id) {
+    if (auto s = session(self)) {
+        s->trace("present delay expired");
+        s->guard([&] {
+            s->presentWindow(false);
+        });
+    }
+}
+
+inline void firstFrameReceived(id self, SEL, id, id) {
+    if (auto s = session(self)) {
+        if (!s->presented)  // a reload injects the probe again: only the first notification is a milestone
+            s->trace("first frame");
+        s->guard([&] {
+            s->presentWindow(true);
+        });
+    }
+}
+
 inline void navigationFinished(id self, SEL, id, id) {
     if (auto s = session(self)) {
         if (!s->receivedResponse) {
@@ -909,6 +1022,8 @@ inline void addApplicationMethods(Class cls) {
     addMethod(cls, "applicationShouldTerminate:", applicationShouldTerminate, "Q@:@");
     addMethod(cls, "applicationShouldTerminateAfterLastWindowClosed:", terminateAfterLastWindow, "B@:@");
     addMethod(cls, "webfrontTimeout:", startupTimedOut, "v@:@");
+    addMethod(cls, "webfrontPresent:", presentDelayExpired, "v@:@");
+    addMethod(cls, "userContentController:didReceiveScriptMessage:", firstFrameReceived, "v@:@@");
 }
 
 inline void addNavigationMethods(Class cls) {

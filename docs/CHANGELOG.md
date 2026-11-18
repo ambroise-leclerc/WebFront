@@ -10,16 +10,16 @@ these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
-### Breaking
-- WebKitGTK no longer initializes GStreamer unless the application sets `WindowOptions::media = true`: a page's audio and video cannot play by default, which removes the plugin scan from the start of every page (#611, `docs/WEBKITGTK.md`).
-
 ### Added
+- Skip GStreamer's initialization, and its plugin scan, in WebKitGTK for an application whose pages never use audio or video, with `WindowOptions::media = false`; the default keeps media (#611, `docs/WEBKITGTK.md`).
+- WKWebView supports `WindowOptions::background` and `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WKWEBVIEW.md`).
 - WebView2 supports `WindowOptions::background` and `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WEBVIEW2.md`).
-- Choose the colour under the page with `WindowOptions::background`, and read the start-up milestones of a WebKitGTK view with `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WEBKITGTK.md`).
+- Choose the colour of the WebKitGTK view under the page with `WindowOptions::background` (WebKitGTK; WebView2 below; the other frontends ignore it), and read the start-up milestones of a WebKitGTK view with `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WEBKITGTK.md`).
 
 ### Changed
+- Reveal the WKWebView window after the first frame or one second (#611, `docs/WKWEBVIEW.md`).
 - Reveal the WebView2 window after the first frame or one second (#611, `docs/WEBVIEW2.md`).
-- Show the WebKitGTK window when the page has painted its first frame, or after one second, instead of black at once; the embedded pages, the starter and the examples use the cheap `sans-serif` and `monospace` font stacks (#611, `docs/WEBKITGTK.md`).
+- Show the WebKitGTK window when the page reports its first frame, or after one second at the latest even if the page has not painted, instead of at once; the embedded pages, the starter and the examples use the cheap `sans-serif` and `monospace` font stacks (#611, `docs/WEBKITGTK.md`).
 
 ### Fixed
 - Select detected GPU architectures supported by nvcc by default for the host-loop CUDA renderer (`docs/HOST_LOOP_EXAMPLE.md`).

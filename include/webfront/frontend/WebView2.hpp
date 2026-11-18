@@ -491,9 +491,12 @@ private:
         std::fprintf(stderr, "WebFront startup: %s at %lld ms (session %lld ms)\n", milestone, elapsed,
                      static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - createdAt).count()));
     }
+    // Bound to the window and handled by its procedure, so that the delay also runs during the system's modal loops
+    // (moving or resizing by the title bar), which dispatch window messages without going through dispatchNextMessage().
+    static constexpr UINT_PTR presentTimerId = 0x5746;
     void stopPresentTimer() noexcept {
-        if (presentTimer)
-            KillTimer(nullptr, presentTimer);
+        if (presentTimer && window)
+            KillTimer(window, presentTimer);
         presentTimer = 0;
     }
     void presentWindow() noexcept {
@@ -538,7 +541,7 @@ private:
         startupTimer = 0;
     }
 
-    void checkStartupTimeout(const MSG& message) const {
+    void checkStartupTimeout(const MSG& message) {
         // close() and fail() clear the timer, including messages queued before KillTimer().
         if (!startupTimer)
             return;
@@ -546,8 +549,12 @@ private:
             return;
         if (message.message != WM_TIMER)
             return;
-        if (message.wParam == startupTimer)
+        if (message.wParam == startupTimer) {
+            // The window is nearly transparent until its first frame and still receives the user's clicks: show it
+            // before the failure ends the session, so that nothing invisible is left to interact with.
+            presentWindow();
             throw std::runtime_error(std::format("WebView2: runtime startup timed out after {} milliseconds", startupTimeoutMilliseconds));
+        }
     }
 
     bool dispatchNextMessage() {
@@ -560,11 +567,6 @@ private:
             return false;
         }
         checkStartupTimeout(message);
-        if (!message.hwnd && message.message == WM_TIMER && presentTimer && message.wParam == presentTimer) {
-            trace("present delay expired");
-            presentWindow();
-            return true;
-        }
         TranslateMessage(&message);
         DispatchMessageW(&message);
         return true;
@@ -743,6 +745,11 @@ private:
             SetWindowLongPtrW(handle, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
             self->window = handle;
         }
+        if (self && message == WM_TIMER && wParam == presentTimerId && self->presentTimer) {
+            self->trace("present delay expired");
+            self->presentWindow();
+            return 0;
+        }
         if (self) {
             try {
                 if (self->handleWindowMessage(handle, message, lParam))
@@ -798,7 +805,8 @@ private:
                           const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> message(raw, CoTaskMemFree);
                           if (std::wstring_view{message.get()} == L"webfront:first-frame") {
                               if (const auto self = weak.lock()) {
-                                  self->trace("first frame");
+                                  if (!self->presented)  // a reload injects the probe again: only the first is a milestone
+                                      self->trace("first frame");
                                   self->presentWindow();
                               }
                           } else if (std::wstring_view{message.get()} == windowCloseMessage())
@@ -943,7 +951,7 @@ public:
                                   check(result, "installing the view association script");
                                   self->stopStartupTimer();
                                   if (self->visibleWindow) {
-                                      self->presentTimer = SetTimer(nullptr, 0, 1000, nullptr);
+                                      self->presentTimer = SetTimer(self->window, presentTimerId, 1000, nullptr);
                                       if (!self->presentTimer)
                                           throw std::runtime_error("WebView2: cannot start presentation timer");
                                   }

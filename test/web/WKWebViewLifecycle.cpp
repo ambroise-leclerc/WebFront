@@ -595,6 +595,29 @@ void navigationDiagnostic() {
         },
         "initial navigation failed");
 }
+
+// The window is nearly transparent until the page reports its first frame; a page that never does is shown by the delay.
+void firstFramePresentation(bool noFrame) {
+    Object pool(send(type("NSAutoreleasePool"), "new"));
+    webfront::http::Server<webfront::NetProvider, webfront::fs::NativeDebugFS> server("127.0.0.1", "9002", std::filesystem::current_path());
+    std::jthread worker([&](std::stop_token stop) {
+        std::stop_callback cleanup(stop, [&] { server.stop(); });
+        server.run();
+    });
+    Session session(noFrame ? "http://127.0.0.1:9002/first-frame.html?no-frame" : "http://127.0.0.1:9002/first-frame.html",
+                    {.window = {.background = "#123456"}, .visible = true});
+    session.create();
+    require(send<double>(session.window, "alphaValue") < 0.5, "The window was not nearly transparent before the first frame");
+    double shownAlpha = 0;
+    session.windowShown = [&] {
+        shownAlpha = send<double>(session.window, "alphaValue");
+        session.close();
+    };
+    session.start();
+    session.run();
+    require(shownAlpha == 1.0, "The window was not made opaque");
+    require(session.presentedByFrame != noFrame, noFrame ? "A suppressed frame was reported" : "The window waited for the delay instead of the frame");
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -623,7 +646,9 @@ int main(int argc, char** argv) {
             {   "close-with-save-panel",   closeWithSavePanel},
             {       "script-dialogs",       scriptDialogs},
             { "close-with-script-dialog", closeWithScriptDialog},
-            { "sandboxed-script-dialog", sandboxedScriptDialog}
+            { "sandboxed-script-dialog", sandboxedScriptDialog},
+            {          "first-frame",          [] { firstFramePresentation(false); }},
+            {        "present-timeout",        [] { firstFramePresentation(true); }}
         };
         cases.at(argc == 2 ? argv[1] : "")();
         return 0;

@@ -292,9 +292,9 @@ const Scenario windowBackground{"The window background is a CSS hexadecimal colo
         });
     });
     given("a default configuration", [&] {
-        then("the page gets no media: GStreamer is initialized only for an application that asks for it", [&] {
-            check(!WindowOptions{}.media);
-            check(windowReceivedBy({.window = {.media = true}}).media);
+        then("the page keeps its media; an application without media opts out to skip GStreamer's initialization", [&] {
+            check(WindowOptions{}.media);
+            check(!windowReceivedBy({.window = {.media = false}}).media);
         });
     });
     given("a configuration with a background", [&] {

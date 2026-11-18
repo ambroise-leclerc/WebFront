@@ -35,6 +35,7 @@ if(WIN32 AND GENERATOR STREQUAL "Ninja")
     file(WRITE "${WORK}/project/CMakeLists.txt"
         "cmake_minimum_required(VERSION 3.31)\nproject(DiscoveryProbe LANGUAGES CXX)\ninclude([==[${SCRIPT}]==])\nadd_executable(probe main.cpp)\nbdd_discover_tests(probe PROPERTIES TIMEOUT 10 LABELS [==[one|two]==])\n")
     execute_process(COMMAND "${CMAKE_COMMAND}" -S "${WORK}/project" -B "${WORK}/build" -G Ninja
+        "-DCMAKE_CXX_COMPILER=${CXX_COMPILER}"
         RESULT_VARIABLE configured OUTPUT_VARIABLE configure_output ERROR_VARIABLE configure_error)
     if(NOT configured EQUAL 0)
         message(FATAL_ERROR "Discovery regression configuration failed: ${configure_output}${configure_error}")

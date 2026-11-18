@@ -56,7 +56,9 @@ On a fresh native build, CMake selects installed NVIDIA GPUs that `nvcc` support
 avoids depending on the driver's PTX compiler, which may be older than the toolkit. If detection is unavailable, CMake
 keeps the compiler's default. Explicit `CMAKE_CUDA_ARCHITECTURES` and `CUDAARCHS` choices take precedence; select all
 target architectures for a distribution or cross-build. A previous build retains its cached choice: remove that cache
-entry to redetect the local GPU. With a Visual Studio generator, rebuild `WebFront_boing_cuda` after changing it, since
+entry to redetect the local GPU. If the redetection fails (`nvidia-smi` unavailable), CMake keeps no architecture in an
+already configured build directory: give `CMAKE_CUDA_ARCHITECTURES` explicitly or start from a fresh build directory
+before generating `WebFront_boing_cuda`. With a Visual Studio generator, rebuild `WebFront_boing_cuda` after changing it, since
 MSBuild may otherwise retain the previous CUDA object.
 
 **The window.** With the platform's native engine in the build (WebKitGTK on Linux, autodetected), the example opens

@@ -496,6 +496,26 @@ void windowTitle() {
         throw std::runtime_error("Unexpected default window title: " + defaultTitle);
 }
 
+/// The window becomes opaque at the page's first frame; a page that never reports one is shown by the delay.
+void firstFramePresentation(bool noFrame) {
+    bool shown = false, byFrame = false;
+    ScenarioFrontend::configure = [&](gtk::Session& session) {
+        session.windowShown = [&] {
+            shown   = true;
+            byFrame = session.shownByFrame;
+        };
+    };
+    ScenarioFrontend::finished = [&](gtk::Session&) {
+        return shown;
+    };
+    ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path(), .window = {.background = "#123456", .media = false}});  // no media: the web process runs without GStreamer plugins
+    app.show(noFrame ? "first-frame.html?no-frame" : "first-frame.html");
+    if (!shown)
+        throw std::runtime_error("The window was never shown");
+    if (byFrame == noFrame)
+        throw std::runtime_error(noFrame ? "A suppressed first frame was reported" : "The window waited for the delay instead of the first frame");
+}
+
 void preRunFailure() {
     // No GTK display or window is needed to preserve an error recorded by configure().
     gtk::Session session(webfront::detail::BoundContentPolicy{});
@@ -539,7 +559,9 @@ void run(std::string_view mode) {
         {       "choose-file",          chooseOne},
         {     "cancel-choose",       chooseCancel},
         {    "script-dialogs",       scriptDialogs},
-        {"close-with-script-dialog", closeWithScriptDialog}
+        {"close-with-script-dialog", closeWithScriptDialog},
+        {        "first-frame",        [] { firstFramePresentation(false); }},
+        {      "present-timeout",      [] { firstFramePresentation(true); }}
     };
     const auto selected = cases.find(mode);
     if (selected == cases.end())

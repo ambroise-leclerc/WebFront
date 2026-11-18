@@ -20,20 +20,21 @@ namespace webfront {
  * @brief Initial native window of the embedded frontends (the system browser ignores it).
  *
  * An empty title selects the executable's name. Sizes are in the toolkit's logical pixels; a
- * non-positive size selects the default. `background` is a CSS hexadecimal colour ("#rgb", "#rrggbb" or "#rrggbbaa") painted
- * under the page, so that the window is never black or white against a contrary theme before the first frame; empty keeps the
- * toolkit's default and an invalid value is ignored. `media` is described below.
+ * non-positive size selects the default. `background` is a CSS hexadecimal colour ("#rgb", "#rrggbb" or "#rrggbbaa") that WebKitGTK applies as the colour of the
+ * view under the page; WebView2 applies it to its window and WKWebView to its view, and nothing guarantees the window's look before the first
+ * frame. Empty keeps the toolkit's default and an invalid value is ignored. `media` is described below.
  */
 struct WindowOptions {
     std::string title{};
     int         width{1200};
     int         height{800};
     std::string background{};
-    /// Whether the page may play audio or video. WebKitGTK initializes GStreamer, and scans its plugins, in the page's process
-    /// as soon as a page loads, even if it never plays anything (up to 1.7 s on a cold plugin registry). False, the default,
-    /// gives that process no plugins, so nothing is initialized and a page's `<audio>` and `<video>` cannot play. Set it
-    /// to true for an application with media. Frontends other than WebKitGTK ignore it.
-    bool media{false};
+    /// Whether the page may use audio or video (`<audio>`, `<video>`, Web Audio). WebKitGTK initializes GStreamer, and scans
+    /// its plugins, in the page's process as soon as a page loads, even if it never uses media (up to 1.7 s on a cold plugin
+    /// registry). An application whose pages never use media sets this to false: the process then has no plugins and
+    /// nothing is initialized. A page that does touch media in that case terminates its web process (WebKitGTK cannot create
+    /// its media elements), so the default stays true. Frontends other than WebKitGTK ignore it.
+    bool media{true};
 };
 
 namespace frontend::detail {

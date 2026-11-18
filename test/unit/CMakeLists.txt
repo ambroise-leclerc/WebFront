@@ -35,7 +35,7 @@ target_link_libraries(bdd_discovery_probe PRIVATE WebFront_test_hardening WebFro
 target_compile_features(bdd_discovery_probe PRIVATE cxx_std_23)
 add_test(NAME BddDiscovery COMMAND ${CMAKE_COMMAND} -DPROBE=$<TARGET_FILE:bdd_discovery_probe>
     -DSCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/BddDiscoverTests.cmake -DWORK=${CMAKE_CURRENT_BINARY_DIR}/bdd-discovery
-    "-DGENERATOR=${CMAKE_GENERATOR}"
+    "-DGENERATOR=${CMAKE_GENERATOR}" "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}"
     -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckBddDiscovery.cmake)
 set_tests_properties(BddSelfTest BddDiscovery PROPERTIES TIMEOUT 30 LABELS fast)
 

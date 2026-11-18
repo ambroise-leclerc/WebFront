@@ -99,31 +99,40 @@ sandbox launcher check described below.
 
 ## Startup and first display
 
-The window is mapped at once, but almost transparent, and is shown when the page reports its first frame (two animation
-frames after `DOMContentLoaded`) or after one second, whichever comes first, so a window is never presented black while
-the page loads. Without a compositing manager the opacity is ignored and the window appears immediately, as before. A
-page that never paints still shows the window after the delay, and the navigation timeout and its diagnostics are
-unchanged. `WindowOptions::background` (`"#rgb"`, `"#rrggbb"` or `"#rrggbbaa"`) paints the colour under the page, so a
-dark interface does not flash white. `WEBFRONT_STARTUP_TRACE=1` prints the view's milestones (load started, first frame,
-window shown) on standard error, in milliseconds since the process was executed. A close request (`requestClose()`) made before the window is shown still ends the
-session.
+The window is mapped at once, but almost transparent, and becomes opaque when the page reports its first frame (two
+animation frames after `DOMContentLoaded`). If no frame is reported, a one-second timer shows it anyway, even when the
+server has sent nothing yet, so a window may still appear empty (in the colour of `background`, if any) when the load is
+slow; GLib can also run the timer late when other events keep the main loop busy. Without a compositing manager the
+opacity is ignored and the window appears immediately, as before. The navigation timeout and its diagnostics are
+unchanged. `WindowOptions::background` (`"#rgb"`, `"#rrggbb"` or `"#rrggbbaa"`) is the colour of the view under the page,
+so a dark interface does not flash white once the window is shown; only WebKitGTK applies it so far.
+`WEBFRONT_STARTUP_TRACE=1` prints the view's milestones (session creation, view created, load started, first frame,
+window shown) on standard error, in milliseconds since the process was executed; only the first frame notification of
+the session is a milestone (a late one is marked as such), a reload is not. A close request (`requestClose()`) made
+before the window is shown still ends the session.
 
-### Media is opt-in
+### Skipping GStreamer
 
-WebKitGTK initializes GStreamer in the page's process shortly after a page loads, even if it never plays anything, and
-scans every plugin when the registry is cold (the first launch of a user, and after each update of the system's
-plugins): up to 1.7 s during which the WebSocket handshake and the frames of the page are blocked. Disabling the media
-settings of the view does not prevent it. `WindowOptions::media` is therefore `false` by default: WebKit's processes
-are launched with an empty `GST_PLUGIN_SYSTEM_PATH_1_0` and `GST_PLUGIN_PATH_1_0` and a registry of the application's profile
-(`no-media-registry.bin`, so that the user's own registry is never rewritten); the application's environment is restored
-at once. The consequence is that `<audio>`, `<video>` and Web Audio cannot play. An application with media sets
-`WebFrontConfig::window.media = true` and gets the previous behaviour. Other frontends ignore the option.
+WebKitGTK initializes GStreamer in the page's process shortly after a page loads, even if it never uses media, and scans
+every plugin when the registry is cold (the first launch of a user, and after each update of the system's plugins): up to
+1.7 s during which the WebSocket handshake and the frames of the page are blocked. Disabling the media settings of the
+view does not prevent it, and WebFront cannot know in advance whether a page will use media. An application whose pages
+never use `<audio>`, `<video>` or Web Audio therefore opts out with `WebFrontConfig::window.media = false`: WebKit's
+processes are launched with an empty `GST_PLUGIN_SYSTEM_PATH_1_0` and `GST_PLUGIN_PATH_1_0` and a registry of the
+application's profile (`no-media-registry.bin`, so that the user's own registry is never rewritten). The variables stay
+set while the session runs, because WebKit launches the web process at the first load and again after a crash, and each
+launch inherits the environment of the moment; they are restored when the session ends. **A page that does use media
+after the opt-out terminates its web process** (WebKitGTK cannot create its media elements without the plugins, and the
+session fails with "web process terminated"), which is why the default is `true`. Other frontends ignore the option.
 
 The cost of the first layout depends on the fonts of the page: fontconfig walks every installed font for each family it
 cannot find or that is a CSS generic such as `system-ui` or `ui-monospace`, for each weight and style. A page that
 lists several absent families (`"Segoe UI"`, `Inter`, `"JetBrains Mono"`, `Menlo`) can spend hundreds of milliseconds
-before its first paint on a machine with thousands of fonts. Prefer the generics `sans-serif` and `monospace`, or one
-family you know to be installed, first in the stack; the embedded pages, the starter and the examples do.
+before its first paint on a machine with thousands of fonts (hundreds of milliseconds measured on Ubuntu 26.04 with
+WebKitGTK 2.52 and 2 333 installed fonts, for the stacks of one application). Even a generic or an installed family is
+looked up once per variant, so a short stack does not make the first family free: it avoids the lookups of every family
+that follows it. Keep stacks to a generic (`sans-serif`, `monospace`) or to a family you know to be installed, with no
+absent families after it; the embedded pages, the starter and the examples do.
 
 ## Development and distribution
 
