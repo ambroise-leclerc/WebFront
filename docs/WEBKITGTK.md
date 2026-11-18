@@ -119,9 +119,12 @@ every plugin when the registry is cold (the first launch of a user, and after ea
 view does not prevent it, and WebFront cannot know in advance whether a page will use media. An application whose pages
 never use `<audio>`, `<video>` or Web Audio therefore opts out with `WebFrontConfig::window.media = false`: WebKit's
 processes are launched with an empty `GST_PLUGIN_SYSTEM_PATH_1_0` and `GST_PLUGIN_PATH_1_0` and a registry of the
-application's profile (`no-media-registry.bin`, so that the user's own registry is never rewritten). The variables stay
-set while the session runs, because WebKit launches the web process at the first load and again after a crash, and each
-launch inherits the environment of the moment; they are restored when the session ends. **A page that does use media
+application's profile (`no-media-registry.bin`, so that the user's own registry is never rewritten). The variables are set from the creation of the view, which makes
+WebKit launch a spare web process, until the page reports that its load started, then restored: the application's
+environment is changed for a few hundred milliseconds at the start of the session only (a process the application
+starts from another thread in that window would inherit them), and GStreamer's other users in the process are
+unaffected. A web process launched later in the session runs without the restriction: it initializes GStreamer as
+usual, only slower. **A page that does use media
 after the opt-out terminates its web process** (WebKitGTK cannot create its media elements without the plugins, and the
 session fails with "web process terminated"), which is why the default is `true`. Other frontends ignore the option.
 

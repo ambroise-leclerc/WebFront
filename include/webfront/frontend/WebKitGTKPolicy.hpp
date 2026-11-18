@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #if defined(__linux__)
@@ -294,6 +295,7 @@ public:
     ScopedEnvironment() = default;
     ScopedEnvironment(const ScopedEnvironment&)            = delete;
     ScopedEnvironment& operator=(const ScopedEnvironment&) = delete;
+    ScopedEnvironment(ScopedEnvironment&& other) noexcept : entries(std::exchange(other.entries, {})) { }
     void set(const char* name, const std::string& value) {
         Entry entry{name, std::nullopt};
         if (const auto* current = std::getenv(name))

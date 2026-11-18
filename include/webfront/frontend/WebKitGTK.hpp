@@ -365,9 +365,8 @@ struct Session : FailureState {
     std::uint64_t                        portalGeneration  = 0;  // the publication this session's identifier belongs to
     unsigned long                        windowHandler     = 0;
     std::vector<unsigned long>           viewHandlers;
-    /// Held for the whole session, not only the creation: WebKit launches the web process at the first load and again after
-    /// a crash, and each launch inherits the environment of the moment.
-    ScopedEnvironment                    media;
+    /// Profile files of the GStreamer opt-out (`WindowOptions::media == false`); empty otherwise.
+    std::filesystem::path                mediaPlugins, mediaRegistry;
     unsigned long                        messageHandler = 0;  // on the content manager, not on the view
     std::shared_ptr<CaptureTarget>       captureTarget = std::make_shared<CaptureTarget>();
     CaptureRegistration                  captureRegistration;
@@ -436,6 +435,7 @@ struct Session : FailureState {
 
     void close() noexcept {
         closed = true;
+        mediaScope.reset();
         a.loopQuit(loop);
     }
     void failAndClose(std::string_view message) noexcept {
@@ -459,18 +459,32 @@ struct Session : FailureState {
         viewHandlers.push_back(a.connect(view, signal, reinterpret_cast<Api::Callback>(callback), this, nullptr, flags));
     }
 
+    /// The environment WebKit's processes inherit when the application has no media: GStreamer finds no plugin to scan.
+    std::optional<ScopedEnvironment> mediaScope;  // set from the first load until the page's load starts
+    ScopedEnvironment mediaEnvironment() const {
+        ScopedEnvironment environment;
+        if (!mediaPlugins.empty()) {
+            environment.set("GST_PLUGIN_SYSTEM_PATH_1_0", mediaPlugins.string());
+            environment.set("GST_PLUGIN_PATH_1_0", mediaPlugins.string());
+            environment.set("GST_REGISTRY_1_0", mediaRegistry.string());
+        }
+        return environment;
+    }
+
     void create(SandboxMode mode = SandboxMode::development) {
         trace("session creation");
         const auto data  = profileDirectory("XDG_DATA_HOME", ".local/share");
         const auto cache = profileDirectory("XDG_CACHE_HOME", ".cache");
-        // Every process WebKit launches while this is in scope inherits it; without media its GStreamer finds no plugin to scan.
         if (!windowOptions.media) {
-            const auto empty = data / "no-media-plugins";
-            std::filesystem::create_directories(empty);
-            media.set("GST_PLUGIN_SYSTEM_PATH_1_0", empty.string());
-            media.set("GST_PLUGIN_PATH_1_0", empty.string());
-            media.set("GST_REGISTRY_1_0", (data / "no-media-registry.bin").string());  // never rewrite the user's own registry
+            mediaPlugins  = data / "no-media-plugins";
+            mediaRegistry = data / "no-media-registry.bin";  // never rewrite the user's own registry
+            std::filesystem::create_directories(mediaPlugins);
         }
+        // WebKit launches a web process when the context is created (a spare one) and another from its main loop shortly after
+        // the first load is requested: the variables stay set from here until the page reports that its load started, then
+        // are restored. Only the start of the session is exposed; a web process launched later (a process swap) runs without
+        // the restriction: it initializes GStreamer as usual, only slower.
+        mediaScope.emplace(mediaEnvironment());
         network = a.networkNew(data.c_str(), cache.c_str());
         Api::Object context;
         {
@@ -736,6 +750,7 @@ struct Session : FailureState {
         return self->policy.options().contextMenusEnabled ? 0 : 1;
     }
     static void onLoadChanged(Api::Object, int event, Session* self) noexcept {
+        self->mediaScope.reset();  // the web process was launched with the opt-out
         if (event == 2)  // WEBKIT_LOAD_COMMITTED: slow subresources are not a startup failure.
             self->guard([self] {
                 self->navigationCommitted();
