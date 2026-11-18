@@ -1,5 +1,11 @@
 # WebView2 frontend
 
+The native window starts nearly transparent while WebView2 loads the page. It becomes opaque after two animation frames
+following `DOMContentLoaded`, or after one second if the page does not report a frame. The runtime startup deadline and
+navigation diagnostics still apply. `WindowOptions::background` accepts `#rgb`, `#rrggbb` and `#rrggbbaa`; invalid or
+empty values keep the default. The Win32 window uses the RGB components. WebView2 supports only alpha 0 or 255 for its
+background, so nonzero alpha values are treated as opaque. Set `WEBFRONT_STARTUP_TRACE=1` to log startup milestones to stderr.
+
 This page covers what is specific to WebView2. The rules shared by every frontend are in [Frontends](FRONTENDS.md).
 
 [Back to the README](../README.md#choose-how-your-interface-opens)

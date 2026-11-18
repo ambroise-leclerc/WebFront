@@ -55,7 +55,7 @@ target_include_directories(WebFront SYSTEM INTERFACE "${WebView2SDK_SOURCE_DIR}/
 target_compile_definitions(WebFront INTERFACE WEBFRONT_EMBED_WEBVIEW2)
 target_link_libraries(WebFront INTERFACE
     "${WebView2SDK_SOURCE_DIR}/build/native/${_webview2_arch}/WebView2LoaderStatic.lib"
-    ole32 oleaut32 user32 shell32 shlwapi version)
+    ole32 oleaut32 user32 gdi32 shell32 shlwapi version)
 
 # Register lifecycle coverage once, alongside the shared Jasmine runner; paths are module-relative.
 function(webfront_add_webview2_tests)
@@ -66,7 +66,7 @@ function(webfront_add_webview2_tests)
     target_link_libraries(webview2_lifecycle PRIVATE WebFront WebFront_warnings WebFront_options)
     foreach(mode repeated-show native-early-close navigation-diagnostic mta missing-runtime
                  closed-startup-timeout failed-startup-timeout late-navigation-failure runtime-ready
-                 file-choose file-cancel file-download script-dialogs)
+                 file-choose file-cancel file-download script-dialogs first-frame present-timeout)
         add_test(NAME WebView2Lifecycle-${mode} COMMAND webview2_lifecycle ${mode})
         webfront_set_browser_test_properties("WebView2Lifecycle-${mode}" "${webtest_source_dir}" 45)
     endforeach()
