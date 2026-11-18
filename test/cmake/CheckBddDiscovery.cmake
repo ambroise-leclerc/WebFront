@@ -2,10 +2,15 @@
 # whatever brackets and semicolons their titles hold.
 file(REMOVE_RECURSE "${WORK}")
 file(MAKE_DIRECTORY "${WORK}")
+file(WRITE "${WORK}/properties.cmake" "set(properties [==[TIMEOUT;10;LABELS;one|two]==])\n")
 execute_process(COMMAND "${CMAKE_COMMAND}" "-DEXECUTABLE=${PROBE}" "-DOUTPUT=${WORK}/tests.cmake" -DPREFIX=Probe.
-                        "-DPROPERTIES=TIMEOUT|10" -P "${SCRIPT}" RESULT_VARIABLE result ERROR_VARIABLE errors)
+                        "-DPROPERTIES_FILE=${WORK}/properties.cmake" -P "${SCRIPT}" RESULT_VARIABLE result ERROR_VARIABLE errors)
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "The discovery script failed: ${errors}")
+endif()
+file(READ "${WORK}/tests.cmake" generated)
+if(NOT generated MATCHES "\\[==\\[one\\|two\\]==\\]")
+    message(FATAL_ERROR "Discovery did not preserve a pipe in the test properties")
 endif()
 file(WRITE "${WORK}/CTestTestfile.cmake" "include(\"${WORK}/tests.cmake\")\n")
 execute_process(COMMAND "${CMAKE_CTEST_COMMAND}" -N WORKING_DIRECTORY "${WORK}" OUTPUT_VARIABLE listed RESULT_VARIABLE result)
@@ -21,4 +26,26 @@ foreach(title IN ITEMS "A [b title" "Second\; one" "Third ]x" "Fourth [tag] titl
 endforeach()
 if(NOT listed MATCHES "Total Tests: 4\n")
     message(FATAL_ERROR "CTest should list 4 cases:\n${listed}")
+endif()
+
+# Exercise the actual post-build command through cmd.exe: pipes in its arguments used to break Ninja on Windows.
+if(WIN32 AND GENERATOR STREQUAL "Ninja")
+    file(MAKE_DIRECTORY "${WORK}/project")
+    file(WRITE "${WORK}/project/main.cpp" "#include <iostream>\nint main() { std::cout << \"probe\\n\"; }\n")
+    file(WRITE "${WORK}/project/CMakeLists.txt"
+        "cmake_minimum_required(VERSION 3.31)\nproject(DiscoveryProbe LANGUAGES CXX)\ninclude([==[${SCRIPT}]==])\nadd_executable(probe main.cpp)\nbdd_discover_tests(probe PROPERTIES TIMEOUT 10 LABELS [==[one|two]==])\n")
+    execute_process(COMMAND "${CMAKE_COMMAND}" -S "${WORK}/project" -B "${WORK}/build" -G Ninja
+        RESULT_VARIABLE configured OUTPUT_VARIABLE configure_output ERROR_VARIABLE configure_error)
+    if(NOT configured EQUAL 0)
+        message(FATAL_ERROR "Discovery regression configuration failed: ${configure_output}${configure_error}")
+    endif()
+    execute_process(COMMAND "${CMAKE_COMMAND}" --build "${WORK}/build"
+        RESULT_VARIABLE built OUTPUT_VARIABLE build_output ERROR_VARIABLE build_error)
+    if(NOT built EQUAL 0)
+        message(FATAL_ERROR "Discovery post-build command failed: ${build_output}${build_error}")
+    endif()
+    file(READ "${WORK}/build/probe_tests.cmake" actual)
+    if(NOT actual MATCHES "\\[==\\[one\\|two\\]==\\]")
+        message(FATAL_ERROR "The post-build command did not preserve the property")
+    endif()
 endif()

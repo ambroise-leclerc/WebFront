@@ -52,6 +52,12 @@ working CUDA compiler, and the example is complete without one. `ON` makes a mis
 `.cu` unit compiled at C++17, and `CMAKE_CUDA_HOST_COMPILER` names another host compiler when nvcc refuses the default
 one. At run time the engine is offered only when a device answers.
 
+For a local GPU build, set `CMAKE_CUDA_ARCHITECTURES` to the device's compute capability when the compiler's default
+does not include it (for example, `-DCMAKE_CUDA_ARCHITECTURES=89` for an RTX 4060 Ti). This embeds native code for that
+device. Otherwise execution can require the driver's PTX compiler, which must understand the toolkit's PTX version;
+an older driver may report an unsupported toolchain even when the toolkit builds successfully. Distribution builds
+should select architectures appropriate for their target devices.
+
 **The window.** With the platform's native engine in the build (WebKitGTK on Linux, autodetected), the example opens
 a native window; otherwise, or with `--browser`, it opens the system browser. On a Jetson Orin (L4T R39.2.1,
 Ubuntu 24.04) the native window opens with no change to the system: no AppArmor profile, no sysctl, no package.

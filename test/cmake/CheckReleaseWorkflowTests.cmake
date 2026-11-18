@@ -69,7 +69,17 @@ check("a release that does not compare its version with the published pin" refus
     "check-release-version.sh \"$VERSION\" \"$sources\" \"$pinned\"" "check-release-version.sh \"$VERSION\" \"$sources\" \"$sources\"")
 
 # The version rule itself: <requested> <sources> <pinned>. It needs bash, as the workflow that runs it does.
-find_program(BASH_PROGRAM bash)
+if(WIN32)
+    # System32's bash is the WSL launcher and cannot open a native Windows path. Prefer Git for Windows' Bash.
+    find_program(RELEASE_GIT git)
+    if(RELEASE_GIT)
+        get_filename_component(git_bin "${RELEASE_GIT}" DIRECTORY)
+        find_program(BASH_PROGRAM bash HINTS "${git_bin}/../bin" "${git_bin}/../usr/bin" NO_DEFAULT_PATH)
+    endif()
+endif()
+if(NOT BASH_PROGRAM)
+    find_program(BASH_PROGRAM bash)
+endif()
 if(NOT BASH_PROGRAM)
     message(STATUS "bash not found: the version rule of the release is not exercised")
     return()
