@@ -1190,6 +1190,10 @@ protected:
     /// For the developer application: its document root is the project that wf builds, which is the development path.
     void useDeveloperEnvironment() noexcept {
         developerEnvironment = true;
+        // The environment's own dark theme under its pages: without a colour of the application's, an embedded view shows its
+        // toolkit's white between the bootstrap page and the project's page (a flash on every navigation).
+        if (windowOptions.background.empty())
+            windowOptions.background = "#141821";
     }
 
 private:

@@ -268,7 +268,36 @@ WindowOptions windowReceivedBy(WebFrontConfig config) {
     app.stop();
     return WindowRecorder::received;
 }
+
+WindowOptions windowReceivedByDeveloperApp(WebFrontConfig config) {
+    using Base = BasicWF<ContractNet, MockFileSystem<>, http::DefaultBuffersPolicy, WindowRecorder>;
+    struct DeveloperLike : Base {
+        using Base::Base;
+        void enable() {
+            useDeveloperEnvironment();
+        }
+    };
+    WindowRecorder::received = {.title = "unset", .width = -1, .height = -1};
+    DeveloperLike app(std::move(config));
+    app.enable();
+    app.show();
+    app.stop();
+    return WindowRecorder::received;
+}
 }  // namespace
+
+const Scenario developerBackground{"The developer environment gives its own dark colour to a window that has none", [] {
+    given("a developer application without a window colour", [&] {
+        then("the view does not flash its toolkit's white between the bootstrap and the project's page", [&] {
+            check(windowReceivedByDeveloperApp({}).background == "#141821");
+        });
+    });
+    given("a developer application with a window colour", [&] {
+        then("the application's colour is kept", [&] {
+            check(windowReceivedByDeveloperApp({.window = {.background = "#ffffff"}}).background == "#ffffff");
+        });
+    });
+}};
 
 const Scenario windowBackground{"The window background is a CSS hexadecimal colour that is never guessed", [] {
     given("valid colours", [&] {
