@@ -61,6 +61,34 @@ On WSLg, preserve its supplied display variables and runtime directory. Native
 Wayland and WSLg require manual verification on those desktops; automated coverage
 uses X11/Xvfb. No WSL-specific library environment changes are applied.
 
+### Snap-hosted editor terminals
+
+A terminal inherited from a Snap-packaged editor can expose Snap library or GTK
+module paths to a host application. This has been observed with VSCodium: the
+system WebKit network process loaded Snap's `libpthread.so.0` and failed with a
+`GLIBC_PRIVATE` symbol error. The particular variable responsible has not been
+isolated; other Snap-hosted editors, including VS Code, may pass similar paths,
+but have not been verified. WebFront warns when the common variables below contain
+`/snap/` or `/var/lib/snapd/snap/` paths outside verified Snap confinement. This
+heuristic does not prove a failure or cover every possible path and does not alter
+the environment. The warning uses the WebFront logger and can be filtered by the
+application.
+
+If this failure occurs, start the host application with a clean environment for
+these variables, replacing the executable path as needed:
+
+```bash
+env -u LD_LIBRARY_PATH -u LD_PRELOAD \
+    -u GIO_MODULE_DIR -u GTK_PATH -u GTK_EXE_PREFIX \
+    -u GTK_IM_MODULE_FILE -u GSETTINGS_SCHEMA_DIR -u LOCPATH \
+    ./examples/WebFrontLifeDeveloper
+```
+
+This removes all values of those variables for the application and its children,
+including legitimate custom configuration. Adjust the launcher if it needs any of
+them. WebFront cannot safely remove them globally: the host application and other
+threads may depend on them, and WebKit may launch child processes later.
+
 Persistent data lives in `$XDG_DATA_HOME/webfront/<executable>-<path-hash>` and caches
 in `$XDG_CACHE_HOME/webfront/<executable>-<path-hash>`. Absolute XDG paths are honored;
 otherwise absolute `$HOME/.local/share` and `$HOME/.cache` are used. The stable hash
