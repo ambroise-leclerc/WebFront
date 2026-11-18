@@ -165,6 +165,8 @@ inline void requireMainThread() {
 
 inline void initialize(SandboxMode mode = SandboxMode::development) {
     requireMainThread();
+    if (inheritedSnapToolkitPaths() && !snapConfinementVerified())
+        log::warn("WebKitGTK: inherited Snap library or toolkit paths may break host WebKit processes; see docs/WEBKITGTK.md for a clean launch");
     requireSandboxEnvironment(mode);
     static std::optional<SandboxMode> prepared;
     if (prepared && *prepared != mode)

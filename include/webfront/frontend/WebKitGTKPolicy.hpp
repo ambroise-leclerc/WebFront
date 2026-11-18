@@ -2,6 +2,7 @@
 
 #include "../ContentPolicy.hpp"
 
+#include <array>
 #include <chrono>
 #include <exception>
 #include <filesystem>
@@ -97,6 +98,30 @@ struct FailureState {
 enum class SandboxMode { development, distribution };
 
 #if defined(__linux__)
+
+// These variables can point the host toolkit or its children at libraries and modules
+// from a different runtime. Inspect names only in diagnostics; values may be private.
+inline bool containsSnapPath(std::string_view value) {
+    while (!value.empty()) {
+        const auto end = value.find_first_of(": \t\n");
+        const auto part = value.substr(0, end);
+        if (part.starts_with("/snap/") || part.starts_with("/var/lib/snapd/snap/"))
+            return true;
+        if (end == std::string_view::npos)
+            break;
+        value.remove_prefix(end + 1);
+    }
+    return false;
+}
+
+inline bool inheritedSnapToolkitPaths() {
+    constexpr std::array names = {"LD_LIBRARY_PATH", "LD_PRELOAD", "GIO_MODULE_DIR", "GTK_PATH", "GTK_EXE_PREFIX",
+                                  "GTK_IM_MODULE_FILE", "GSETTINGS_SCHEMA_DIR", "LOCPATH"};
+    for (const auto* name : names)
+        if (const auto* value = std::getenv(name); value && containsSnapPath(value))
+            return true;
+    return false;
+}
 
 // Development is the default, independently of optimization level. A distribution binary requires the sandbox;
 // an inherited environment variable cannot weaken its build policy.
