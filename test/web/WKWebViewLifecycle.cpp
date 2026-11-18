@@ -611,15 +611,40 @@ void firstFramePresentation(bool noFrame) {
     session.presentDelay = noFrame ? 1.0 : 60.0;  // the load, not the delay, must show the window
     session.create();
     require(send<double>(session.window, "alphaValue") < 0.5, "The window was not nearly transparent before the first frame");
+    {
+        Object key(text("drawsBackground"));
+        require(!send<BOOL>(send(session.view, "valueForKey:", key.get()), "boolValue"), "The view still paints its own background");
+    }
     double shownAlpha = 0;
+    double sample[3]  = {-1, -1, -1};
     session.windowShown = [&] {
         shownAlpha = send<double>(session.window, "alphaValue");
+        // A corner of the window the page leaves empty: it shows the configured colour, not the view's own white.
+        const auto frame = send(send(session.window, "contentView"), "superview");
+        const CGRect area{{1100, 100}, {10, 10}};
+        if (const auto bitmap = send(frame, "bitmapImageRepForCachingDisplayInRect:", area)) {
+            send<void>(frame, "cacheDisplayInRect:toBitmapImageRep:", area, bitmap);
+            if (const auto color = send(bitmap, "colorAtX:y:", 5L, 5L)) {
+                const auto srgb = send(color, "colorUsingColorSpace:", send(type("NSColorSpace"), "sRGBColorSpace"));
+                if (srgb) {
+                    sample[0] = send<double>(srgb, "redComponent");
+                    sample[1] = send<double>(srgb, "greenComponent");
+                    sample[2] = send<double>(srgb, "blueComponent");
+                }
+            }
+        }
         session.close();
     };
     session.start();
     session.run();
     require(shownAlpha == 1.0, "The window was not made opaque");
     require(session.presentedByFrame != noFrame, noFrame ? "A suppressed frame was reported" : "The window waited for the delay instead of the frame");
+    if (!noFrame) {
+        require(sample[0] >= 0, "The displayed pixels could not be read");
+        const auto near = [](double value, double expected) { return value > expected - 0.05 && value < expected + 0.05; };
+        require(near(sample[0], 0x12 / 255.0) && near(sample[1], 0x34 / 255.0) && near(sample[2], 0x56 / 255.0),
+                "The configured background is not what the window displays behind a transparent page");
+    }
 }
 }  // namespace
 

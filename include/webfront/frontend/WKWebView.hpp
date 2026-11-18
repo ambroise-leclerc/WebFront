@@ -591,7 +591,15 @@ struct Session {
                                      static_cast<CGFloat>((*color)[2]), static_cast<CGFloat>((*color)[3]));
             send<void>(window, "setBackgroundColor:", native);
             if (send<BOOL>(view, "respondsToSelector:", sel_registerName("setUnderPageBackgroundColor:")))  // macOS 12
-                send<void>(view, "setUnderPageBackgroundColor:", native);
+                send<void>(view, "setUnderPageBackgroundColor:", native);  // behind the page, e.g. when scrolling past its edge
+            // The view paints its own white behind a page that does not paint: stop it, so the window's colour shows through
+            // before the load and behind a transparent page. WebKit offers no public API for it: the `drawsBackground` key is
+            // set only when this runtime answers to its setter, never by calling an unknown key.
+            if (send<BOOL>(view, "respondsToSelector:", sel_registerName("_setDrawsBackground:"))
+                || send<BOOL>(view, "respondsToSelector:", sel_registerName("setDrawsBackground:"))) {
+                Object key(text("drawsBackground"));
+                send<void>(view, "setValue:forKey:", send(type("NSNumber"), "numberWithBool:", static_cast<BOOL>(false)), key.get());
+            }
         }
         send<void>(window, "setDelegate:", delegate);
         Object title(text(windowOptions.title));
