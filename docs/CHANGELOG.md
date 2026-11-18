@@ -10,6 +10,9 @@ these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
+### Breaking
+- WebKitGTK no longer initializes GStreamer unless the application sets `WindowOptions::media = true`: a page's audio and video cannot play by default, which removes the plugin scan from the start of every page (#611, `docs/WEBKITGTK.md`).
+
 ### Added
 - Choose the colour under the page with `WindowOptions::background`, and read the start-up milestones of a WebKitGTK view with `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WEBKITGTK.md`).
 

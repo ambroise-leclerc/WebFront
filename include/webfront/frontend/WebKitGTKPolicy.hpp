@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #if defined(__linux__)
     #include <cerrno>
@@ -277,6 +278,37 @@ public:
             setenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", previous->c_str(), 1);
         else
             unsetenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS");
+    }
+};
+
+/// Sets environment variables for the lifetime of the object and restores them, so the application's own environment is
+/// unchanged once the child processes WebKit launches in the meantime have inherited the values.
+class ScopedEnvironment {
+    struct Entry {
+        std::string                name;
+        std::optional<std::string> previous;
+    };
+    std::vector<Entry> entries;
+
+public:
+    ScopedEnvironment() = default;
+    ScopedEnvironment(const ScopedEnvironment&)            = delete;
+    ScopedEnvironment& operator=(const ScopedEnvironment&) = delete;
+    void set(const char* name, const std::string& value) {
+        Entry entry{name, std::nullopt};
+        if (const auto* current = std::getenv(name))
+            entry.previous = current;
+        if (setenv(name, value.c_str(), 1) != 0)
+            throw std::runtime_error(std::string("WebKitGTK: cannot set ") + name);
+        entries.push_back(std::move(entry));
+    }
+    ~ScopedEnvironment() {
+        for (auto entry = entries.rbegin(); entry != entries.rend(); ++entry) {
+            if (entry->previous)
+                setenv(entry->name.c_str(), entry->previous->c_str(), 1);
+            else
+                unsetenv(entry->name.c_str());
+        }
     }
 };
 

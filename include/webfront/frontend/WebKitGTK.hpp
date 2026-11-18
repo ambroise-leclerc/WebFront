@@ -17,6 +17,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <fstream>
+#include <sstream>
 #include <filesystem>
 #include <functional>
 #include <future>
@@ -453,9 +455,19 @@ struct Session : FailureState {
     }
 
     void create(SandboxMode mode = SandboxMode::development) {
+        trace("session creation");
         const auto data  = profileDirectory("XDG_DATA_HOME", ".local/share");
         const auto cache = profileDirectory("XDG_CACHE_HOME", ".cache");
-        network          = a.networkNew(data.c_str(), cache.c_str());
+        // Every process WebKit launches while this is in scope inherits it; without media its GStreamer finds no plugin to scan.
+        ScopedEnvironment media;
+        if (!windowOptions.media) {
+            const auto empty = data / "no-media-plugins";
+            std::filesystem::create_directories(empty);
+            media.set("GST_PLUGIN_SYSTEM_PATH_1_0", empty.string());
+            media.set("GST_PLUGIN_PATH_1_0", empty.string());
+            media.set("GST_REGISTRY_1_0", (data / "no-media-registry.bin").string());  // never rewrite the user's own registry
+        }
+        network = a.networkNew(data.c_str(), cache.c_str());
         Api::Object context;
         {
             DevelopmentSandboxEnvironment environment(mode);
@@ -473,6 +485,7 @@ struct Session : FailureState {
         installFirstFrameProbe();
         registerHandlers();
         downloadStartedHandler = a.connect(network, "download-started", reinterpret_cast<Api::Callback>(onDownloadStarted), this, nullptr, 0);
+        trace("view created");
         captureTarget->view = view;
         captureTarget->pending.open();
         captureRegistration = CaptureRegistration{captureProvider(captureTarget)};
@@ -485,14 +498,38 @@ struct Session : FailureState {
 
     /// The window is mapped at once but fully transparent: WebKit paints, and animation frames run, only in a mapped view, so
     /// the first frame can be awaited. Without a compositing manager the opacity is ignored and the window shows as before.
-    /// WEBFRONT_STARTUP_TRACE=1 reports the milestones of the view's start, in milliseconds since the session was created.
+    /// Milliseconds since the process was executed (field 22 of /proc/self/stat against the uptime), so that the trace of a
+    /// start covers the loading of the libraries and the toolkit's initialization, not only the session.
+    static long long millisecondsSinceExec() {
+        try {
+            std::ifstream stat("/proc/self/stat");
+            std::string   text;
+            std::getline(stat, text);
+            const auto close = text.rfind(')');  // the command name may contain spaces
+            if (close == std::string::npos)
+                return -1;
+            std::istringstream fields(text.substr(close + 2));
+            std::string        field;
+            for (int index = 3; index <= 22 && fields >> field; ++index)
+                if (index == 22) {
+                    std::ifstream uptime("/proc/uptime");
+                    double        seconds = 0;
+                    uptime >> seconds;
+                    const double ticks = static_cast<double>(sysconf(_SC_CLK_TCK));
+                    return static_cast<long long>((seconds - std::stod(field) / ticks) * 1000.0);
+                }
+        } catch (...) {
+        }
+        return -1;
+    }
+    /// WEBFRONT_STARTUP_TRACE=1 reports the milestones of the view's start, in milliseconds since the process was executed.
     void trace(const char* milestone) const {
         static const bool enabled = [] {
             const auto* value = std::getenv("WEBFRONT_STARTUP_TRACE");
             return value && *value && std::string_view{value} != "0";
         }();
         if (enabled)
-            std::fprintf(stderr, "WebFront startup: %s at %lld ms\n", milestone,
+            std::fprintf(stderr, "WebFront startup: %s at %lld ms (session %lld ms)\n", milestone, millisecondsSinceExec(),
                          static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - created).count()));
     }
     void presentHidden() {

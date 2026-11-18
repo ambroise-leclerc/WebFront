@@ -105,8 +105,19 @@ the page loads. Without a compositing manager the opacity is ignored and the win
 page that never paints still shows the window after the delay, and the navigation timeout and its diagnostics are
 unchanged. `WindowOptions::background` (`"#rgb"`, `"#rrggbb"` or `"#rrggbbaa"`) paints the colour under the page, so a
 dark interface does not flash white. `WEBFRONT_STARTUP_TRACE=1` prints the view's milestones (load started, first frame,
-window shown) on standard error. A close request (`requestClose()`) made before the window is shown still ends the
+window shown) on standard error, in milliseconds since the process was executed. A close request (`requestClose()`) made before the window is shown still ends the
 session.
+
+### Media is opt-in
+
+WebKitGTK initializes GStreamer in the page's process shortly after a page loads, even if it never plays anything, and
+scans every plugin when the registry is cold (the first launch of a user, and after each update of the system's
+plugins): up to 1.7 s during which the WebSocket handshake and the frames of the page are blocked. Disabling the media
+settings of the view does not prevent it. `WindowOptions::media` is therefore `false` by default: WebKit's processes
+are launched with an empty `GST_PLUGIN_SYSTEM_PATH_1_0` and `GST_PLUGIN_PATH_1_0` and a registry of the application's profile
+(`no-media-registry.bin`, so that the user's own registry is never rewritten); the application's environment is restored
+at once. The consequence is that `<audio>`, `<video>` and Web Audio cannot play. An application with media sets
+`WebFrontConfig::window.media = true` and gets the previous behaviour. Other frontends ignore the option.
 
 The cost of the first layout depends on the fonts of the page: fontconfig walks every installed font for each family it
 cannot find or that is a CSS generic such as `system-ui` or `ui-monospace`, for each weight and style. A page that

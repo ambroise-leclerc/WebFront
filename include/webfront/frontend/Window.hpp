@@ -22,13 +22,18 @@ namespace webfront {
  * An empty title selects the executable's name. Sizes are in the toolkit's logical pixels; a
  * non-positive size selects the default. `background` is a CSS hexadecimal colour ("#rgb", "#rrggbb" or "#rrggbbaa") painted
  * under the page, so that the window is never black or white against a contrary theme before the first frame; empty keeps the
- * toolkit's default and an invalid value is ignored.
+ * toolkit's default and an invalid value is ignored. `media` is described below.
  */
 struct WindowOptions {
     std::string title{};
     int         width{1200};
     int         height{800};
     std::string background{};
+    /// Whether the page may play audio or video. WebKitGTK initializes GStreamer, and scans its plugins, in the page's process
+    /// as soon as a page loads, even if it never plays anything (up to 1.7 s on a cold plugin registry). False, the default,
+    /// gives that process no plugins, so nothing is initialized and a page's `<audio>` and `<video>` cannot play. Set it
+    /// to true for an application with media. Frontends other than WebKitGTK ignore it.
+    bool media{false};
 };
 
 namespace frontend::detail {

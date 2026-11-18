@@ -291,6 +291,12 @@ const Scenario windowBackground{"The window background is a CSS hexadecimal colo
             check(!frontend::detail::parseBackground("#ggg"));
         });
     });
+    given("a default configuration", [&] {
+        then("the page gets no media: GStreamer is initialized only for an application that asks for it", [&] {
+            check(!WindowOptions{}.media);
+            check(windowReceivedBy({.window = {.media = true}}).media);
+        });
+    });
     given("a configuration with a background", [&] {
         const auto window = windowReceivedBy({.window = {.background = "#101c1d"}});
         then("the frontend receives it unchanged", [&] {
