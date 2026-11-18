@@ -120,11 +120,13 @@ view does not prevent it, and WebFront cannot know in advance whether a page wil
 never use `<audio>`, `<video>` or Web Audio therefore opts out with `WebFrontConfig::window.media = false`: WebKit's
 processes are launched with an empty `GST_PLUGIN_SYSTEM_PATH_1_0` and `GST_PLUGIN_PATH_1_0` and a registry of the
 application's profile (`no-media-registry.bin`, so that the user's own registry is never rewritten). The variables are set from the creation of the view, which makes
-WebKit launch a spare web process, until the page reports that its load started, then restored: the application's
-environment is changed for a few hundred milliseconds at the start of the session only (a process the application
-starts from another thread in that window would inherit them), and GStreamer's other users in the process are
-unaffected. A web process launched later in the session runs without the restriction: it initializes GStreamer as
-usual, only slower. **A page that does use media
+WebKit launch a spare web process, until the page reports that its load started (or the one-second delay expires), then
+restored. WebKitGTK offers no per-process environment, so **the variables are process-wide during that window**, a few
+hundred milliseconds at the start of the session: a thread that initializes GStreamer in the application during it
+reads the empty plugin directory and keeps that configuration after the restoration, and a process the application
+starts during it inherits the variables. An application that starts GStreamer or child processes from other threads
+at startup must keep `media = true` or wait for its page before doing so. A web process launched later in the session
+(a process swap) runs without the restriction: it initializes GStreamer as usual, only slower. **A page that does use media
 after the opt-out terminates its web process** (WebKitGTK cannot create its media elements without the plugins, and the
 session fails with "web process terminated"), which is why the default is `true`. Other frontends ignore the option.
 

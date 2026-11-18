@@ -481,9 +481,9 @@ struct Session : FailureState {
             std::filesystem::create_directories(mediaPlugins);
         }
         // WebKit launches a web process when the context is created (a spare one) and another from its main loop shortly after
-        // the first load is requested: the variables stay set from here until the page reports that its load started, then
-        // are restored. Only the start of the session is exposed; a web process launched later (a process swap) runs without
-        // the restriction: it initializes GStreamer as usual, only slower.
+        // the first load is requested: the variables stay set from here until the page reports that its load started (or
+        // the delay expires), then are restored. The environment is process-wide, so the application is exposed during that
+        // window, as docs/WEBKITGTK.md says; a web process launched later (a process swap) runs without the restriction.
         mediaScope.emplace(mediaEnvironment());
         network = a.networkNew(data.c_str(), cache.c_str());
         Api::Object context;
@@ -577,6 +577,7 @@ struct Session : FailureState {
     static int onPresentTimeout(void* data) noexcept {
         auto* self         = static_cast<Session*>(data);
         self->presentTimer = 0;
+        self->mediaScope.reset();  // a page that reports nothing must not keep the environment changed
         self->trace("present delay expired");
         self->guard([self] {
             self->presentWindow(false);

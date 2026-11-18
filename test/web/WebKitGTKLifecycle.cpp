@@ -539,7 +539,11 @@ void mediaOptOutIsScoped() {
     setenv("GST_PLUGIN_SYSTEM_PATH_1_0", "/webfront-sentinel", 1);
     bool shown = false, checked = false;
     std::string failure;
+    bool exposedAtStart = false;
     ScenarioFrontend::configure = [&](gtk::Session& session) {
+        // The documented window: process-wide until the load starts, so the opt-out is visible to the application here.
+        const auto during = std::getenv("GST_PLUGIN_SYSTEM_PATH_1_0");
+        exposedAtStart    = during && std::string_view(during) == session.mediaPlugins.string();
         session.windowShown = [&] {
             shown = true;
         };
@@ -578,7 +582,13 @@ void mediaOptOutIsScoped() {
     };
     ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path(), .window = {.media = false}});
     app.show("first-frame.html");
+    const auto after = std::getenv("GST_PLUGIN_SYSTEM_PATH_1_0");
+    const bool restored = after && std::string_view(after) == "/webfront-sentinel";
     unsetenv("GST_PLUGIN_SYSTEM_PATH_1_0");
+    if (!restored)
+        throw std::runtime_error("The application's environment was not restored when the session ended");
+    if (!exposedAtStart)
+        throw std::runtime_error("The opt-out was not in effect while WebKit's processes were launched");
     if (!checked)
         throw std::runtime_error("The environment check never ran");
     if (!failure.empty())

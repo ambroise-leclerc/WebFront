@@ -441,6 +441,11 @@ public:
         if (visible) {
             if (!SetLayeredWindowAttributes(window, 0, 3, LWA_ALPHA))
                 throw std::runtime_error("WebView2: cannot set initial window opacity");
+            // Armed with the window, not with the navigation: the engine can take seconds to start, and until then a nearly
+            // transparent window would still receive the user's clicks. After the delay the window is shown, empty if need be.
+            presentTimer = SetTimer(window, presentTimerId, 1000, nullptr);
+            if (!presentTimer)
+                throw std::runtime_error("WebView2: cannot start presentation timer");
             ShowWindow(window, SW_SHOW);
         }
     }
@@ -950,11 +955,6 @@ public:
                               try {
                                   check(result, "installing the view association script");
                                   self->stopStartupTimer();
-                                  if (self->visibleWindow) {
-                                      self->presentTimer = SetTimer(self->window, presentTimerId, 1000, nullptr);
-                                      if (!self->presentTimer)
-                                          throw std::runtime_error("WebView2: cannot start presentation timer");
-                                  }
                                   self->trace("load started");
                                   check(browser->Navigate(self->url.c_str()), "navigating to application");
                               } catch (...) {
