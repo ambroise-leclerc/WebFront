@@ -106,7 +106,7 @@ private:
         auto& registry = detail::captureRegistry();
         {
             std::scoped_lock lock{registry.mutex};
-            if (registry.provider == owned)
+            if (registry.provider.get() == owned.get())
                 registry.provider.reset();
         }
         owned.reset();
