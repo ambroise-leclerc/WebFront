@@ -608,6 +608,7 @@ void firstFramePresentation(bool noFrame) {
     Session session(noFrame ? "http://127.0.0.1:9002/first-frame.html?no-frame" : "http://127.0.0.1:9002/first-frame.html",
                     {.window = {.background = "#123456"}, .visible = true});
     session.revealOnLoad = !noFrame;
+    session.presentDelay = noFrame ? 1.0 : 60.0;  // the load, not the delay, must show the window
     session.create();
     require(send<double>(session.window, "alphaValue") < 0.5, "The window was not nearly transparent before the first frame");
     double shownAlpha = 0;

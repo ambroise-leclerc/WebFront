@@ -338,6 +338,9 @@ struct Session {
     bool                                 presented = false, presentedByFrame = false;
     /// Test hook: false does not show the window when the document finishes loading, so only the delay can.
     bool                                 revealOnLoad = true;
+    /// Seconds before the window is shown even if the document has not loaded. A test lengthens it so that a slow
+    /// first launch of the web content process cannot make the delay win against the load it observes.
+    double                               presentDelay = 1.0;
     /// Test hook: called on the main thread when the window has been made opaque.
     std::function<void()>                windowShown;
     const std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
@@ -617,7 +620,7 @@ struct Session {
         if (options.visible) {
             presentTimer = send(send(type("NSTimer"),
                                      "timerWithTimeInterval:target:selector:userInfo:repeats:",
-                                     1.0,
+                                     presentDelay,
                                      delegate,
                                      sel_registerName("webfrontPresent:"),
                                      static_cast<id>(nullptr),
