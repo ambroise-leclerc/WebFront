@@ -616,36 +616,23 @@ void firstFramePresentation(bool noFrame) {
         require(!send<BOOL>(send(session.view, "valueForKey:", key.get()), "boolValue"), "The view still paints its own background");
     }
     double shownAlpha = 0;
-    double sample[3]  = {-1, -1, -1};
     session.windowShown = [&] {
         shownAlpha = send<double>(session.window, "alphaValue");
-        // A corner of the window the page leaves empty: it shows the configured colour, not the view's own white.
-        const auto frame = send(send(session.window, "contentView"), "superview");
-        const CGRect area{{1100, 100}, {10, 10}};
-        if (const auto bitmap = send(frame, "bitmapImageRepForCachingDisplayInRect:", area)) {
-            send<void>(frame, "cacheDisplayInRect:toBitmapImageRep:", area, bitmap);
-            if (const auto color = send(bitmap, "colorAtX:y:", 5L, 5L)) {
-                const auto srgb = send(color, "colorUsingColorSpace:", send(type("NSColorSpace"), "sRGBColorSpace"));
-                if (srgb) {
-                    sample[0] = send<double>(srgb, "redComponent");
-                    sample[1] = send<double>(srgb, "greenComponent");
-                    sample[2] = send<double>(srgb, "blueComponent");
-                }
-            }
-        }
         session.close();
     };
     session.start();
     session.run();
     require(shownAlpha == 1.0, "The window was not made opaque");
     require(session.presentedByFrame != noFrame, noFrame ? "A suppressed frame was reported" : "The window waited for the delay instead of the frame");
-    if (!noFrame) {
-        require(sample[0] >= 0, "The displayed pixels could not be read");
-        const auto near = [](double value, double expected) { return value > expected - 0.05 && value < expected + 0.05; };
-        if (!(near(sample[0], 0x12 / 255.0) && near(sample[1], 0x34 / 255.0) && near(sample[2], 0x56 / 255.0)))
-            throw std::runtime_error("The configured background is not what the window displays behind a transparent page: read rgb("
-                                     + std::to_string(sample[0]) + ", " + std::to_string(sample[1]) + ", " + std::to_string(sample[2]) + "), expected #123456");
-    }
+    // The displayed pixels are not read: cacheDisplayInRect renders neither the window's fill nor the web content (it reads black),
+    // and capturing the screen needs a permission the CI does not have. The state that produces them is checked instead: the
+    // window's colour, and the view no longer painting its own background (above).
+    const auto color = send(send(session.window, "backgroundColor"), "colorUsingColorSpace:", send(type("NSColorSpace"), "sRGBColorSpace"));
+    require(color != nullptr, "The window has no colour in the sRGB space");
+    const auto near = [](double value, double expected) { return value > expected - 0.01 && value < expected + 0.01; };
+    require(near(send<double>(color, "redComponent"), 0x12 / 255.0) && near(send<double>(color, "greenComponent"), 0x34 / 255.0)
+                && near(send<double>(color, "blueComponent"), 0x56 / 255.0),
+            "The window does not have the configured background colour");
 }
 }  // namespace
 
