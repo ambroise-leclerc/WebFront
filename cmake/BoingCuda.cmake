@@ -6,6 +6,7 @@
 # default one, CMAKE_CUDA_HOST_COMPILER (or the CUDAHOSTCXX environment variable) names another.
 set(WEBFRONT_HOST_LOOP_CUDA "AUTO" CACHE STRING "CUDA renderer of the host-loop example: AUTO (when a working toolkit is found), ON or OFF")
 set_property(CACHE WEBFRONT_HOST_LOOP_CUDA PROPERTY STRINGS AUTO ON OFF)
+set(_WEBFRONT_BOING_CUDA_DIR "${CMAKE_CURRENT_LIST_DIR}")
 
 # A macro: enable_language() must run in the scope of the top-level CMakeLists.txt, above every directory whose
 # targets link the CUDA unit. Defines WebFront_boing, which a target computing the scene links: nothing on a CPU-only
@@ -15,6 +16,11 @@ macro(webfront_enable_host_loop_cuda)
         message(FATAL_ERROR "WEBFRONT_HOST_LOOP_CUDA must be AUTO, ON or OFF, not '${WEBFRONT_HOST_LOOP_CUDA}'")
     endif()
     set(WEBFRONT_HOST_LOOP_CUDA_ENABLED OFF)
+    # Record the choice before enable_language initializes its own compiler-dependent default.
+    set(_webfront_cuda_architectures_explicit FALSE)
+    if(DEFINED CMAKE_CUDA_ARCHITECTURES OR (DEFINED ENV{CUDAARCHS} AND NOT "$ENV{CUDAARCHS}" STREQUAL ""))
+        set(_webfront_cuda_architectures_explicit TRUE)
+    endif()
     if(WEBFRONT_HOST_LOOP_CUDA STREQUAL "ON")
         enable_language(CUDA)
         set(WEBFRONT_HOST_LOOP_CUDA_ENABLED ON)
@@ -27,6 +33,10 @@ macro(webfront_enable_host_loop_cuda)
         endif()
     endif()
     if(WEBFRONT_HOST_LOOP_CUDA_ENABLED)
+        if(CMAKE_CUDA_COMPILER_ID STREQUAL "NVIDIA")
+            include("${_WEBFRONT_BOING_CUDA_DIR}/BoingCudaArchitectures.cmake")
+            webfront_cuda_select_default("${_webfront_cuda_architectures_explicit}" "${CMAKE_CUDA_COMPILER}")
+        endif()
         message(STATUS "Host-loop example: CUDA ${CMAKE_CUDA_COMPILER_VERSION} renderer enabled (${CMAKE_CUDA_COMPILER})")
     else()
         message(STATUS "Host-loop example: CPU renderer only (WEBFRONT_HOST_LOOP_CUDA=${WEBFRONT_HOST_LOOP_CUDA}, no working CUDA compiler)")

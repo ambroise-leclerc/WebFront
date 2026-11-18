@@ -21,6 +21,9 @@ these entries stays in the GitHub releases and the Git history.
 - Reveal the WebView2 window after the first frame or one second (#611, `docs/WEBVIEW2.md`).
 - Show the WebKitGTK window when the page has painted its first frame, or after one second, instead of black at once; the embedded pages, the starter and the examples use the cheap `sans-serif` and `monospace` font stacks (#611, `docs/WEBKITGTK.md`).
 
+### Fixed
+- Select detected GPU architectures supported by nvcc by default for the host-loop CUDA renderer (`docs/HOST_LOOP_EXAMPLE.md`).
+
 ## [1.0.0] - 2026-11-17
 
 WebFront 1.0 ships with developer environment 1.0.0. This release adds host-loop integration, developer tools and
