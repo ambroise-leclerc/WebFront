@@ -17,7 +17,7 @@ import {parseTestOptions, specFiles, jasmineCore, runnerFiles, runInFrame, repor
 import {generateProvider, applicationPage} from './embed.mjs';
 import {typescriptPackage, parseCheckOptions, checkHost} from './typecheck.mjs';
 import {pinnedStarters} from './bootstrap.mjs';
-import {createWorkspace, isManaged} from './workspace.mjs';
+import {createWorkspace, isManaged, State} from './workspace.mjs';
 import {connectAutomation as connectAgent, clipText, automationHelp, onAutomationNotice} from './automation.mjs';
 import {ls, cat, tree, mounts, fileCommandHelp, withheld, withheldReason} from './files.mjs';
 import {dependencyTree, why as whyInstalled, info as packageInfo} from './dependencies.mjs';
@@ -689,6 +689,17 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
     const fitTerminal = () => { if (element.clientWidth && element.clientHeight) fit.fit(); };
     if (fitToElement) new ResizeObserver(fitTerminal).observe(element);
     terminal.onData(data => editor.handle(data));
+    // While the terminal has the window, the page around it (title, notice, blank areas) is not part of it: a click there
+    // would move the focus to the body and the keys would go nowhere (#608). Once the click ends the terminal takes the
+    // focus back, unless it selected text, a control took the click, or an interface owns the window.
+    const page = element.ownerDocument;
+    page.addEventListener('mouseup', event => {
+        if (workspace && workspace.state !== State.terminal) return;
+        if (event.target.closest?.('a,button,input,select,textarea,summary,iframe,[contenteditable],[tabindex]')) return;
+        setTimeout(() => {
+            if (!terminal.hasSelection() && !page.getSelection()?.toString()) terminal.focus();
+        }, 0);
+    });
     // Automation must be visible to the person using the terminal: say so once it is connected, grants and attach path included.
     onAutomationNotice(text => {
         write(`\r\x1b[K\x1b[33m${text}\x1b[0m\r\n`);

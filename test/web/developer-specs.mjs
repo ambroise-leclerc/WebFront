@@ -1298,6 +1298,20 @@ try {
         const lastRows = count => rows().slice(cursorRow() - count + 1, cursorRow() + 1);
         await type('echo hello\r');
         assert(JSON.stringify(lastRows(3)) === JSON.stringify(['> echo hello', 'hello', '> ']), `A C++ command must run from the terminal: ${lastRows(3)}`);
+        // A click on the page around the terminal (its title, a notice, a blank area) keeps the input focus (#608).
+        {
+            const textarea = host.querySelector('.xterm-helper-textarea');
+            const page = host.ownerDocument;
+            const outside = page.body;
+            assert(!host.contains(outside) && textarea.ownerDocument.activeElement === textarea, 'The terminal must have the focus before the click');
+            // A browser moves the focus to the body when a press lands outside any focusable element.
+            textarea.blur();
+            for (const type of ['mousedown', 'mouseup', 'click'])
+                outside.dispatchEvent(new MouseEvent(type, {bubbles: true, cancelable: true, button: 0}));
+            await eventually(() => page.activeElement === textarea, 'A click on the page around the terminal must leave the terminal focused', {every: 10});
+            await type('echo after-click\r');
+            assert(lastRows(2)[0] === 'after-click', `Typing after a click outside the terminal must run: ${lastRows(3)}`);
+        }
         // Initial dev errors must finish the session command, without requiring Ctrl+C (#560).
         for (const [manifest, message] of [[null, 'No webfront.project.json: run wf init'],
             [{format: 1, name: 'empty', version: '0.1.0'}, 'Usage: wf dev <entry.tsx>']]) {
