@@ -697,6 +697,9 @@ int checkStartupTime() {
         try {
             answer = session.exchange();
             readyMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin).count();
+            // The answer can come before the first frame: the window is shown at the first frame or, at the latest, one second
+            // after the load, so the close waits for that milestone to be traced (RunStartupTime.cmake requires it).
+            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
             app.requestClose();  // also on an empty answer: the check below reports it
         } catch (const std::exception& error) {
             answer = error.what();

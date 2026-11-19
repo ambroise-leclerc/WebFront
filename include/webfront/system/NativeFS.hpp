@@ -5,7 +5,6 @@
 
 #include "FileSystem.hpp"
 #include "FontStacks.hpp"
-#include <chrono>
 #include <fstream>
 #include <iterator>
 #include <system_error>
@@ -42,12 +41,15 @@ public:
         if (file && path.extension() == ".css") {
             try {
                 // Keyed by the full path: two roots may each serve a style.css.
-                const auto        full = (rootPath / path).generic_string();
-                std::error_code   sizeError, timeError;
-                const auto        bytes   = std::filesystem::file_size(rootPath / path, sizeError);
-                const auto        written = std::filesystem::last_write_time(rootPath / path, timeError);
-                const std::string stamp = std::to_string(bytes) + ":" + std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(written.time_since_epoch()).count());
-                if (!sizeError && !timeError && bytes <= 1024 * 1024 && fonts::unchecked(full, stamp)) {
+                const auto      full = (rootPath / path).generic_string();
+                std::error_code sizeError, timeError;
+                const auto      bytes   = std::filesystem::file_size(rootPath / path, sizeError);
+                const auto      written = std::filesystem::last_write_time(rootPath / path, timeError);
+                // The stamp keeps the file clock's own representation, and only after both reads succeeded.
+                if (sizeError || timeError || bytes > 1024 * 1024)
+                    return file;
+                const fonts::Stamp stamp{bytes, written};
+                if (fonts::unchecked(full, stamp)) {
                     std::ifstream css(rootPath / path, std::ios::binary);
                     std::string   text(std::istreambuf_iterator<char>(css), {});
                     fonts::warnLongStacks(full, text, stamp);

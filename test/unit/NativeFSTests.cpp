@@ -383,3 +383,23 @@ const Scenario nativeDebugFSFontStacksEdited{"NativeDebugFS checks an edited sty
         });
     });
 }};
+// Declarations are told from text, whatever the case of the property name (#611).
+const Scenario fontStacksParsing{"Font stack detection reads declarations, not quoted text, and ignores the property's case", [] {
+    given("a quoted string that looks like a declaration", [&] {
+        then("it is not reported", [&] {
+            check(fonts::longStacks("a::before { content: \"font-family: a,b,c,d\"; } b { content: 'x /* font-family: a,b,c,d */'; }").empty());
+        });
+    });
+    given("a property name in capitals", [&] {
+        const auto found = fonts::longStacks("body { FONT-FAMILY: a, b, c, d; } p { Font-Family : e, f, g, h }");
+        then("both are reported", [&] {
+            require(found.size() == 2);
+            check(found[0].costly == 4 && found[1].costly == 4);
+        });
+    });
+    given("a family whose quoted name contains a semicolon", [&] {
+        then("the value is not cut inside the quotes", [&] {
+            check(fonts::longStacks("x { font-family: \"A;B\", b, c, d; }").size() == 1);
+        });
+    });
+}};

@@ -137,7 +137,7 @@ so a dark interface does not flash white once the window is shown; only WebKitGT
 `WebKitGTKStartupTime-cold` and `-warm` (label `startup`, in the standard tier) start the lifecycle program's `startup-time`
 scenario with the trace enabled and fail when the page needs more than 10 s (cold: fresh `HOME` and `XDG_*` directories,
 hence an empty GStreamer registry and font cache) or 5 s (warm: the same directories after a first start) to answer the host.
-The limits only catch a regression of seconds on a loaded runner; they do not qualify the 500 ms and 1 s targets.
+The time runs from the start of the program, and each case also requires the window's `window shown` milestone (the close waits 1.5 s for it) and applies the limit to it. The limits only catch a regression of seconds on a loaded runner; they do not qualify the 500 ms and 1 s targets.
 `WEBFRONT_STARTUP_TRACE=1` prints the view's milestones (session creation, view created, load started, first frame,
 window shown) on standard error, in milliseconds since the process was executed; only the first frame notification of
 the session is a milestone (a late one is marked as such), a reload is not. A close request (`requestClose()`) made
