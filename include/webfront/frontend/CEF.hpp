@@ -14,6 +14,7 @@
 #include "Url.hpp"
 #include "Window.hpp"
 
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -27,6 +28,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #ifdef _WIN32
@@ -364,11 +366,23 @@ public:
         // Set window properties for a clean application window
         window->SetTitle(windowOptions.title);
         window->CenterWindow(CefSize(windowOptions.width, windowOptions.height));
-        window->Show();
+        if (const auto color = frontend::detail::parseBackground(windowOptions.background))
+            window->SetBackgroundColor(backgroundColor(*color));
+        // The window is shown when the first document has loaded, or after one second if it has not (#611): the page
+        // is then already painted instead of a blank window. Without a client to tell, it is shown at once.
+        if (!setReveal) {
+            window->Show();
+            return;
+        }
+        CefRefPtr<SimpleCEFWindowDelegate> self(this);
+        setReveal([self, window] { self->present(window); });
+        CefPostDelayedTask(TID_UI, new PresentTask(self, window), presentDelayMilliseconds);
     }
 
     void OnWindowDestroyed(CefRefPtr<CefWindow> /*window*/) override {
         browserView = nullptr;
+        if (setReveal)
+            setReveal(nullptr);
         // Quit the CEF message loop when the window is destroyed
         CefQuitMessageLoop();
     }
@@ -386,9 +400,44 @@ public:
         browserView = view;
     }
 
+    /// How the window learns that the first load has finished: `hook` registers (or, given null, clears) the function to
+    /// call then. Without one the window is shown when it is created.
+    void SetRevealHook(std::function<void(std::function<void()>)> hook) {
+        setReveal = std::move(hook);
+    }
+
+    /// The CEF colour (ARGB) of a parsed background.
+    static cef_color_t backgroundColor(const std::array<float, 4>& rgba) {
+        const auto byte = [](float v) { return static_cast<std::uint32_t>(v * 255.0f + 0.5f); };
+        return (byte(rgba[3]) << 24) | (byte(rgba[0]) << 16) | (byte(rgba[1]) << 8) | byte(rgba[2]);
+    }
+
+    /// Shows the window, once.
+    void present(CefRefPtr<CefWindow> window) {
+        if (presented || !browserView)
+            return;
+        presented = true;
+        window->Show();
+    }
+
 private:
+    static constexpr int64_t presentDelayMilliseconds = 1000;
+
+    class PresentTask : public CefTask {
+    public:
+        PresentTask(CefRefPtr<SimpleCEFWindowDelegate> owner, CefRefPtr<CefWindow> target) : delegate(std::move(owner)), window(std::move(target)) {}
+        void Execute() override { delegate->present(window); }
+
+    private:
+        CefRefPtr<SimpleCEFWindowDelegate> delegate;
+        CefRefPtr<CefWindow>               window;
+        IMPLEMENT_REFCOUNTING(PresentTask);
+    };
+
     CefRefPtr<CefBrowserView> browserView;
+    std::function<void(std::function<void()>)> setReveal;
     WindowOptions             windowOptions;
+    bool                      presented = false;
 
     #ifdef __clang__
         #pragma clang diagnostic push
@@ -757,9 +806,15 @@ public:
 
     void OnLoadEnd(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, int) override {
         // The first completed main-frame load deliberately ends startup error tracking.
-        if (frame->IsMain())
+        if (frame->IsMain()) {
             loadingInitialPage = false;
+            if (auto reveal = std::exchange(onInitialLoad, nullptr))
+                reveal();
+        }
     }
+
+    /// Called once on the UI thread when the first main-frame load has finished: the window delegate shows its window then (#611).
+    std::function<void()> onInitialLoad;
 
     void OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, ErrorCode error, const CefString& errorText, const CefString&) override {
         // Closing a window or replacing a navigation may abort a request normally.
@@ -979,6 +1034,8 @@ inline void openWindow(std::string url, webfront::detail::BoundContentPolicy con
 
     // Browser settings for the modern Views approach
     CefBrowserSettings browser_settings;
+    if (const auto color = frontend::detail::parseBackground(windowSettings.background))
+        browser_settings.background_color = SimpleCEFWindowDelegate::backgroundColor(*color);
 
     // Create a browser view using the modern Views API - this creates a chromeless browser
     CefRefPtr<CefDictionaryValue> extraInfo;
@@ -992,6 +1049,7 @@ inline void openWindow(std::string url, webfront::detail::BoundContentPolicy con
     // Create a window delegate for controlling the window appearance
     CefRefPtr<SimpleCEFWindowDelegate> window_delegate(new SimpleCEFWindowDelegate(frontend::detail::resolveWindow(std::move(windowSettings))));
     window_delegate->SetBrowserView(browser_view);
+    window_delegate->SetRevealHook([client](std::function<void()> reveal) { client->onInitialLoad = std::move(reveal); });
 
     // Create a top-level window with no browser chrome
     CefRefPtr<CefWindow> window = CefWindow::CreateTopLevelWindow(window_delegate);

@@ -448,6 +448,24 @@ function(webfront_add_browser_tests target frontend assets_directory lifecycle_t
             webfront_set_browser_test_properties("${lifecycle_name}" "${assets_directory}"
                 "${WEBFRONT_FRONTEND_${frontend}_TEST_TIMEOUT}")
         endforeach()
+        # Start-up time of the native windows, cold and warm (#611); CEF reports no start-up milestones.
+        if(NOT frontend STREQUAL "CEF")
+            foreach(temperature cold warm)
+                set(startup_name "${frontend}StartupTime-${temperature}")
+                set(startup_limit 10000)
+                if(temperature STREQUAL "warm")
+                    set(startup_limit 5000)
+                endif()
+                add_test(NAME ${startup_name} COMMAND "${CMAKE_COMMAND}"
+                    "-DPROGRAM=${lifecycle_command}" "-DWORK_DIRECTORY=${assets_directory}"
+                    "-DSCRATCH=${CMAKE_CURRENT_BINARY_DIR}/startup-${temperature}"
+                    -DTEMPERATURE=${temperature} -DLIMIT_MS=${startup_limit}
+                    -P "${PROJECT_SOURCE_DIR}/test/cmake/RunStartupTime.cmake")
+                list(APPEND shared_tests "${startup_name}")
+                webfront_set_browser_test_properties("${startup_name}" "${assets_directory}" 180)
+                set_property(TEST ${startup_name} APPEND PROPERTY LABELS startup)
+            endforeach()
+        endif()
         if(NOT ARG_SKIP_JASMINE)
             set(name "${WEBFRONT_FRONTEND_${frontend}_TEST_NAME}")
             add_test(NAME ${name} COMMAND ${command} ${ARG_ARGUMENTS})

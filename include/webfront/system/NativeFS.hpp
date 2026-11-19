@@ -4,7 +4,9 @@
 #pragma once
 
 #include "FileSystem.hpp"
+#include "FontStacks.hpp"
 #include <fstream>
+#include <iterator>
 
 namespace webfront::fs {
 
@@ -28,6 +30,22 @@ class NativeDebugFS : public detail::NativeRawFS {
 public:
     explicit NativeDebugFS(std::filesystem::path docRoot) {
         rootPath = docRoot;
+    }
+
+    /// Opens like the raw file system and, for a stylesheet, prints a hint once when a `font-family` lists many families
+    /// (#611, FontStacks.hpp). The development path only: a stylesheet over 1 MiB is not read.
+    std::optional<File> open(std::filesystem::path path) {
+        auto file = NativeRawFS::open(path);
+        if (file && path.extension() == ".css") {
+            try {
+                std::ifstream css(rootPath / path, std::ios::binary);
+                std::string   text(std::istreambuf_iterator<char>(css), {});
+                if (text.size() <= 1024 * 1024)
+                    fonts::warnLongStacks(path.generic_string(), text);
+            } catch (...) {  // a hint must never fail a request
+            }
+        }
+        return file;
     }
 };
 

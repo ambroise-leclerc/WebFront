@@ -68,7 +68,10 @@ embedded frontends (WebKitGTK, CEF, WebView2, WKWebView); the system browser ign
 executable's name ("WebFront" if it cannot be determined), and a non-positive size selects 1200 x 800. `BasicWF` passes the
 options to a frontend that provides `open(address, port, file, policy, window)`; WebView2 and WKWebView also accept
 them in `WebView2Options::window` and `WKWebViewOptions::window`. The title is fixed at creation: following
-`document.title` is not implemented.
+`document.title` is not implemented. `background` colours the view under the page and the window, and every embedded
+frontend shows its window when the first document has loaded or after one second (CEF and WKWebView at the document's load, WebKitGTK
+and WebView2 at their first frame), so that the window does not appear blank; CEF applies the colour to the browser
+and to its window, and `media` concerns WebKitGTK only.
 
 ## Content policy
 

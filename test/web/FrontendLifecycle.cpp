@@ -680,6 +680,45 @@ int checkHostThread() {
     }
 }
 
+// How long the window takes to reach a working bridge: the page asks the host, which prints the time since the application's
+// construction (#611). The CTest case StartupTime-* runs it with fresh profile directories (cold) or after a first run (warm).
+int checkStartupTime() {
+    const auto begin = std::chrono::steady_clock::now();
+    App        app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    lifecycleStage = LifecycleStage::startingInstrumented;
+    HostSession<App> session;
+    session.setup(app);
+    std::string answer;
+    long long   readyMilliseconds = -1;
+    std::thread host([&] {
+        try {
+            answer = session.exchange();
+            readyMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin).count();
+            if (!answer.empty())
+                app.requestClose();
+        } catch (const std::exception& error) {
+            answer = error.what();
+        }
+    });
+    struct Join {
+        HostSession<App>& session;
+        std::thread&      thread;
+        ~Join() {
+            session.abandon();
+            thread.join();
+        }
+    };
+    {
+        Join join{session, host};
+        app.show("host-close.html");
+        lifecycleStage = LifecycleStage::windowClosed;
+    }
+    if (answer != "host-from-page")
+        throw std::runtime_error("The page did not answer the host: '" + answer + "'");
+    std::cout << "startup-time: ready " << readyMilliseconds << " ms" << std::endl;
+    return 0;
+}
+
 int run(std::string_view mode) {
     std::map<std::string_view, int (*)()> cases;
     cases.emplace(
@@ -717,6 +756,7 @@ int run(std::string_view mode) {
     cases.emplace("native-window", checkNativeWindow);
     cases.emplace("second-open", checkSecondOpen);
     cases.emplace("host-close", checkHostClose);
+    cases.emplace("startup-time", checkStartupTime);
     cases.emplace("host-thread", +[] { return checkHostThread<App>(); });
     cases.emplace("view-association", checkViewAssociation);
     cases.emplace("stage-report", checkStageReport);

@@ -21,7 +21,7 @@ namespace webfront {
  *
  * An empty title selects the executable's name. Sizes are in the toolkit's logical pixels; a
  * non-positive size selects the default. `background` is a CSS hexadecimal colour ("#rgb", "#rrggbb" or "#rrggbbaa") that WebKitGTK applies as the colour of the
- * view under the page; WebView2 applies it to its window and WKWebView to its view, and nothing guarantees the window's look before the first
+ * view under the page; WebView2 applies it to its window and WKWebView to its view, CEF to its browser and window, and nothing guarantees the window's look before the first
  * frame. Empty keeps the toolkit's default and an invalid value is ignored. `media` is described below.
  */
 struct WindowOptions {

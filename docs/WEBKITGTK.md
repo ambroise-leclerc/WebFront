@@ -134,6 +134,10 @@ slow; GLib can also run the timer late when other events keep the main loop busy
 opacity is ignored and the window appears immediately, as before. The navigation timeout and its diagnostics are
 unchanged. `WindowOptions::background` (`"#rgb"`, `"#rrggbb"` or `"#rrggbbaa"`) is the colour of the view under the page,
 so a dark interface does not flash white once the window is shown; only WebKitGTK applies it so far.
+`WebKitGTKStartupTime-cold` and `-warm` (label `startup`, in the standard tier) start the lifecycle program's `startup-time`
+scenario with the trace enabled and fail when the page needs more than 10 s (cold: fresh `HOME` and `XDG_*` directories,
+hence an empty GStreamer registry and font cache) or 5 s (warm: the same directories after a first start) to answer the host.
+The limits only catch a regression of seconds on a loaded runner; they do not qualify the 500 ms and 1 s targets.
 `WEBFRONT_STARTUP_TRACE=1` prints the view's milestones (session creation, view created, load started, first frame,
 window shown) on standard error, in milliseconds since the process was executed; only the first frame notification of
 the session is a milestone (a late one is marked as such), a reload is not. A close request (`requestClose()`) made
@@ -166,6 +170,30 @@ WebKitGTK 2.52 and 2 333 installed fonts, for the stacks of one application). Ev
 looked up once per variant, so a short stack does not make the first family free: it avoids the lookups of every family
 that follows it. Keep stacks to a generic (`sans-serif`, `monospace`) or to a family you know to be installed, with no
 absent families after it; the embedded pages, the starter and the examples do.
+
+When an application serves a document root (`NativeDebugFS`, the development path), the first time it serves a `.css`
+file whose `font-family` declaration lists four or more families other than `serif`, `sans-serif`, `monospace`, `cursive`
+and `fantasy`, it writes one hint per file on standard error. The check (`include/webfront/system/FontStacks.hpp`) only
+counts families, because it cannot know which are installed: it ignores comments, `var()` and custom properties, reads
+nothing over 1 MiB and never fails a request. A production build serves embedded files and does not run it. `wf check`
+does not report font stacks: its checks type-check TypeScript, and a new check would change the environment's published
+archive.
+
+### Critical path and prewarming (analysis)
+
+This is reasoning from the code and the traces of the issue, not a measurement; the reference machine has not been
+used to qualify it. The sequence of a start is: `Frontend::initialize()` (toolkit and GPU initialization, about 90 ms in
+the issue's trace), then the server's bind and listen in the constructor of the application, then at `show()` the
+network session, the context (which launches a spare web process), the view and the load. The server answers no
+request before `show()` starts its thread, and the load is requested only when the view exists, so listening before
+`Frontend::initialize()` would move nothing on the path to the first request: it was not done. What can overlap is the
+launch of the web and network processes with the application's own start, which the creation of the context at
+construction would allow. It is not done because the context and the view take values known only at `show()` (the content
+policy, the view's secret and origin, the window options, and `media`, which sets the environment of the processes at
+creation); a context created earlier would have to be thrown away when any of them differs, and WebKitGTK has no
+per-process environment (see above). A change would need the reference machine to show a gain on the first request
+and a rule for what happens when the options differ, and the same question for WebView2 and WKWebView, whose web
+content starts with the view.
 
 ## Development and distribution
 

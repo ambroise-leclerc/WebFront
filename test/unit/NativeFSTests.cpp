@@ -307,3 +307,30 @@ const Scenario temporaryTestEnvironmentDestructor{"TemporaryTestEnvironment dest
     auto warningFound = capturedCerr.str().find("Warning: Failed to clean up test directory") != string::npos;
     require((warningFound || capturedCerr.str().empty()));
 }};
+// A stylesheet whose font-family lists many families is reported once by the development file system (#611).
+const Scenario nativeDebugFSFontStacks{"NativeDebugFS warns once about costly font stacks in stylesheets", [] {
+    given("stylesheets in a document root", [&] {
+        TemporaryTestEnvironment env;
+        env.createTextFile("long-stack.css", "/* font-family: a, b, c, d, e */ body { font-family: system-ui, -apple-system, \"Segoe UI\", \"Inter\", sans-serif; }");
+        env.createTextFile("short-stack.css", "body { font-family: system-ui, sans-serif; } code { font-family: \"A, B\", monospace; }");
+        env.createTextFile("variable.css", "body { font-family: var(--a), x, y, z, w; --font-family: p, q, r, s, t; }");
+        when("each is opened twice", [&] {
+            std::ostringstream warnings;
+            fonts::warningOutput = &warnings;
+            DebugFS root(env.getTestDir());
+            for (int i = 0; i < 2; ++i)
+                for (const auto* name : {"long-stack.css", "short-stack.css", "variable.css"})
+                    require(root.open(name).has_value());
+            fonts::warningOutput = nullptr;
+            const auto text = warnings.str();
+            then("only the long stack is reported, once, with its count", [&] {
+                require(text.find("long-stack.css") != string::npos);
+                require(text.find("lists 4 families") != string::npos);
+                require(text.find("short-stack.css") == string::npos);
+                require(text.find("variable.css") == string::npos);
+                require(text.find("long-stack.css") == text.rfind("long-stack.css"));
+                require(count(text.begin(), text.end(), '\n') == 1);
+            });
+        });
+    });
+}};
