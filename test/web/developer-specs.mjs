@@ -1311,6 +1311,29 @@ try {
             await eventually(() => page.activeElement === textarea, 'A click on the page around the terminal must leave the terminal focused', {every: 10});
             await type('echo after-click\r');
             assert(lastRows(2)[0] === 'after-click', `Typing after a click outside the terminal must run: ${lastRows(3)}`);
+            // Two terminals in the page: a click gives the focus back to the one that had it, and to no other.
+            const spare = page.createElement('div');
+            spare.style.cssText = 'width:320px;height:120px';
+            page.body.append(spare);
+            const other = await runtime.mount({bridge: terminalBridge, config, terminal: spare, preview: context.preview, onExit: () => {}, fitToElement: false});
+            try {
+                const settle = () => delay(50);  // the focus is given back after the click, in a task of its own
+                terminal.focus();
+                host.querySelector('.xterm-screen').dispatchEvent(new MouseEvent('mouseup', {bubbles: true, cancelable: true, button: 0}));
+                await settle();
+                assert(page.activeElement === terminal.textarea, 'A click in a terminal must not give the focus to another terminal');
+                other.terminal.focus();
+                spare.querySelector('.xterm-screen').dispatchEvent(new MouseEvent('mouseup', {bubbles: true, cancelable: true, button: 0}));
+                await settle();
+                assert(page.activeElement === other.terminal.textarea, 'A click in the second terminal must keep it focused');
+                other.terminal.textarea.blur();
+                page.body.dispatchEvent(new MouseEvent('mouseup', {bubbles: true, cancelable: true, button: 0}));
+                await eventually(() => page.activeElement === other.terminal.textarea, 'A click on the page must give the focus back to the terminal that had it', {every: 10});
+            } finally {
+                other.terminal.dispose();
+                spare.remove();
+                terminal.focus();
+            }
         }
         // Initial dev errors must finish the session command, without requiring Ctrl+C (#560).
         for (const [manifest, message] of [[null, 'No webfront.project.json: run wf init'],
