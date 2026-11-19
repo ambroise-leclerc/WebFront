@@ -191,6 +191,7 @@ engines show it only after a user gesture on the page); its wiring is implemente
 | `TEST_NAME`, `TEST_TIMEOUT` | Shared Jasmine CTest name and positive timeout in seconds. |
 | `TEST_SETUP` | Optional function adding engine-specific tests. It receives the explicit list of registered shared tests (including Jasmine), and runs even if missing Xvfb prevents shared registration; the module decides which additional tests need a display. |
 | `XVFB_LINUX` | Wrap the shared tests with Xvfb on Linux. Other registered test platforms run without that wrapper. |
+| `STARTUP_TRACE` | The frontend prints the `WebFront startup: window shown at <ms> ms` milestone on standard error when `WEBFRONT_STARTUP_TRACE=1` (see `WKWebView.hpp`). Only then are `<Frontend>StartupTime-cold` and `-warm` registered; a frontend without it (CEF, a third party) gets no start-up test and no failing standard tier. Requires `OPTION`. |
 | `ALWAYS_AVAILABLE` | Declare a frontend without an availability option. Defaults to `POLICY lenient`, rejects `POLICY strict`, and cannot supply engine or test fields. |
 
 The selectors, cache choices, diagnostics, dependency loading and CTest registration use this entry. The optional `SETUP` and `TEST_SETUP` functions are checked immediately after the enabled support module is loaded.
