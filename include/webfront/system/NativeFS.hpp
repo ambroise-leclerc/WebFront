@@ -5,6 +5,7 @@
 
 #include "FileSystem.hpp"
 #include "FontStacks.hpp"
+#include <chrono>
 #include <fstream>
 #include <iterator>
 #include <system_error>
@@ -45,7 +46,7 @@ public:
                 std::error_code   sizeError, timeError;
                 const auto        bytes   = std::filesystem::file_size(rootPath / path, sizeError);
                 const auto        written = std::filesystem::last_write_time(rootPath / path, timeError);
-                const std::string stamp = std::to_string(bytes) + ":" + std::to_string(written.time_since_epoch().count());
+                const std::string stamp = std::to_string(bytes) + ":" + std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(written.time_since_epoch()).count());
                 if (!sizeError && !timeError && bytes <= 1024 * 1024 && fonts::unchecked(full, stamp)) {
                     std::ifstream css(rootPath / path, std::ios::binary);
                     std::string   text(std::istreambuf_iterator<char>(css), {});
