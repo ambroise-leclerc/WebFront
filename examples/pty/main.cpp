@@ -1,5 +1,8 @@
 #include <webfront/PtyPage.hpp>
 #include <webfront/WebFront.hpp>
+#ifdef _WIN32
+    #include <webfront/system/WindowsCompat.hpp>
+#endif
 
 #include <cstdlib>
 #include <iostream>

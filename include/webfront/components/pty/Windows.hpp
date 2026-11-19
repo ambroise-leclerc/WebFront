@@ -2,16 +2,20 @@
 
 #include "../../automation/Credentials.hpp"
 #include "../../system/WindowsArguments.hpp"
+#include "../../system/WindowsCompat.hpp"
 #include "Options.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <filesystem>
+#include <map>
 #include <span>
 #include <system_error>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace webfront::pty::detail {
 
@@ -118,6 +122,8 @@ public:
     }
 
     std::size_t read(std::span<std::uint8_t> bytes) {
+        if (draining && console)
+            closeWhenJobIsEmpty();
         DWORD available = 0;
         DWORD count     = 0;
         if (!::PeekNamedPipe(output.value, nullptr, 0, nullptr, &available, nullptr)) {
@@ -136,12 +142,8 @@ public:
         return outputClosed;
     }
 
-    // Closing the console flushes its output. On older Windows it can block until the output pipe is drained.
     void beginDrain() {
-        closer  = std::jthread([close = closeConsole, handle = console] {
-            close(handle);
-        });
-        console = nullptr;
+        draining = true;
     }
 
     // The overlapped operation borrows the backend's own buffer, including across worker iterations.
@@ -214,6 +216,7 @@ public:
 private:
     PtyHandle    input, output, job, process, writeEvent;
     std::jthread closer;
+    bool         draining                         = false;
     bool         outputClosed                     = false;
     HANDLE       console                          = nullptr;
     HRESULT(WINAPI* resizeConsole)(HANDLE, COORD) = nullptr;
@@ -241,6 +244,19 @@ private:
         static_assert(sizeof(function) == sizeof(address));
         std::memcpy(&function, &address, sizeof(function));
         return function;
+    }
+
+    void closeWhenJobIsEmpty() {
+        JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting{};
+        if (!::QueryInformationJobObject(job.value, JobObjectBasicAccountingInformation, &accounting, sizeof(accounting), nullptr))
+            fail("query ConPTY job");
+        if (accounting.ActiveProcesses)
+            return;
+        // Older versions can block in ClosePseudoConsole while the output pipe still has bytes.
+        closer  = std::jthread([close = closeConsole, handle = console] {
+            close(handle);
+        });
+        console = nullptr;
     }
 
     static bool outputPipeClosed(DWORD error) {

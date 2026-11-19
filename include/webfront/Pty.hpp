@@ -236,7 +236,7 @@ private:
                 if (!received && !sent) {
 #ifdef _WIN32
                     std::unique_lock lock(mutex);
-                    if (!closing && (drainDeadline || !requestedSize))
+                    if (!closing && (drainDeadline || (!requestedSize && (count != 0 || input.size() == 0))))
                         workerChanged.wait_for(lock, drainDeadline || count ? 10ms : 40ms);
 #else
                     native.wait(count != 0, drainDeadline.has_value());
@@ -246,14 +246,17 @@ private:
         } catch (...) {
             error = std::current_exception();
         }
+        {
+            std::scoped_lock lock(mutex);
+            inputClosed = true;
+        }
         const int        code = native.finish();
         std::scoped_lock lock(mutex);
 #ifndef _WIN32
         native.closeWakePipe();
 #endif
-        inputClosed = true;
-        status      = code;
-        failure     = error;
+        status  = code;
+        failure = error;
         changed.notify_all();
     }
 };

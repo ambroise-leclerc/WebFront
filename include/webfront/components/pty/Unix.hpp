@@ -1,5 +1,9 @@
 #pragma once
 
+#if !defined(__linux__) && !defined(__APPLE__)
+    #error "WebFront Unix PTYs support Linux and macOS"
+#endif
+
 #include "Options.hpp"
 
 #include <array>
@@ -113,8 +117,8 @@ public:
 
         int     error = 0;
         ssize_t count;
-        // On systems without an atomic close-on-exec pipe, an unrelated concurrent fork
-        // can transiently inherit the writer. Bound the wait even if that process keeps it.
+        // Even a close-on-exec descriptor can be kept by a concurrent child that forks
+        // without exec. Bound the wait even if that process holds the writer.
         pollfd     reportReady{reportRead.get(), POLLIN, 0};
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
         do {
@@ -220,11 +224,13 @@ public:
         } while (result < 0 && errno == EINTR);
         if (result == 0) {
             const auto foreground = foregroundGroup();
-            signalSession(foreground, SIGHUP);
-            signalSession(foreground, SIGCONT);
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-            // The waitable leader reserves the session ID even if the tty has forgotten its group.
-            signalSession(foregroundGroup(), SIGKILL);
+            const bool hasMembers = signalSession(foreground, SIGHUP);
+            if (!info.si_pid || hasMembers) {
+                signalSession(foreground, SIGCONT);
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                // The waitable leader reserves the session ID even if the tty has forgotten its group.
+                signalSession(foregroundGroup(), SIGKILL);
+            }
             reap();
         }
         child = -1;
@@ -392,15 +398,34 @@ private:
         return group;
     }
 
-    void signalSession(pid_t foreground, int signal) const {
+    bool signalSession(pid_t foreground, int signal) const {
+        bool hasMembers = false;
         if (foreground > 0 && foreground != child)
-            ::kill(-foreground, signal);
+            hasMembers = ::kill(-foreground, signal) == 0 || errno != ESRCH;
         ::kill(-child, signal);
         auto signalMember = [&](pid_t pid) {
             if (pid <= 0 || pid == child || ::getsid(pid) != child)
                 return;
+#if defined(__linux__) && defined(SYS_pidfd_open) && defined(SYS_pidfd_send_signal)
+            PtyFd      reference{static_cast<int>(::syscall(SYS_pidfd_open, pid, 0u))};
+            const bool pidfdUnavailable = reference.get() < 0 && (errno == ENOSYS || errno == EINVAL);
+#endif
+            if (::getsid(pid) != child)
+                return;
+            hasMembers       = true;
             const auto group = ::getpgid(pid);
-            if (group > 0 && group != child && group != foreground)
+            if (group <= 0 || group == child || group == foreground)
+                return;
+#if defined(__linux__) && defined(SYS_pidfd_open) && defined(SYS_pidfd_send_signal)
+            if (reference.get() >= 0) {
+                ::syscall(SYS_pidfd_send_signal, reference.get(), signal, nullptr, 0u);
+                return;
+            }
+            if (!pidfdUnavailable)
+                return;
+#endif
+            // Platforms without pidfds can only recheck the process identity immediately before signalling.
+            if (::getsid(pid) == child && ::getpgid(pid) == group)
                 ::kill(pid, signal);
         };
 #if defined(__APPLE__)
@@ -408,12 +433,16 @@ private:
         try {
             const auto needed = ::proc_listpids(PROC_ALL_PIDS, 0, nullptr, 0);
             if (needed <= 0)
-                return;
+                return true;
             std::vector<pid_t> pids(static_cast<std::size_t>(needed) / sizeof(pid_t) + 64);
             const auto         bytes = ::proc_listpids(PROC_ALL_PIDS, 0, pids.data(), static_cast<int>(pids.size() * sizeof(pid_t)));
+            if (bytes <= 0 || static_cast<std::size_t>(bytes) == pids.size() * sizeof(pid_t))
+                hasMembers = true;
             for (int i = 0; i < bytes / static_cast<int>(sizeof(pid_t)); ++i)
                 signalMember(pids[static_cast<std::size_t>(i)]);
-        } catch (const std::bad_alloc&) {}
+        } catch (const std::bad_alloc&) {
+            return true;
+        }
 #else
         if (auto* processes = ::opendir("/proc")) {
             while (auto* entry = ::readdir(processes)) {
@@ -423,8 +452,11 @@ private:
                     signalMember(pid);
             }
             ::closedir(processes);
+        } else {
+            return true;
         }
 #endif
+        return hasMembers;
     }
 
     void reap() {

@@ -209,6 +209,19 @@ const Scenario ptyInterruptRead{"PTY blocking reads observe a stop request", [] 
                                 }};
 
 #ifdef _WIN32
+const Scenario ptyDescendantOutput{"ConPTY drains a descendant's output after the leader exits", [] {
+                                       Pty        terminal({
+                                                  .argv        = {probe(), "leave-child"},
+                                                  .directory   = {},
+                                                  .environment = {},
+                                                  .size        = {}
+                                       });
+                                       Transcript output;
+                                       output.until(terminal, "DESCENDANT_OUTPUT");
+                                       output.until(terminal, "");
+                                       require(output.exit == 42);
+                                   }};
+
 const Scenario ptyBatchShim{"PTY resolves Windows npm-style batch shims from the explicit PATH", [] {
                                 webfront::test::TemporaryDirectory directory;
                                 const auto                         root = directory.path();

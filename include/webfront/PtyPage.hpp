@@ -6,6 +6,7 @@
 #include "Task.hpp"
 
 #include <cmath>
+#include <future>
 #include <memory>
 #include <tuple>
 
@@ -31,11 +32,17 @@ void registerPtyPage(App& app, PtyOptions options, std::string name = "webfront.
         if (app.hasCppFunction(name + operation))
             throw std::invalid_argument("PTY page callback already registered: " + name + operation);
 
+    struct Launch {
+        std::shared_future<std::shared_ptr<Pty>> terminal;
+        std::uint32_t                            generation;
+    };
+
     struct Session {
-        PtyOptions           options;
-        std::unique_ptr<Pty> terminal{};
-        std::uint32_t        generation = 0;
-        Pty&                 get(std::uint32_t expected) {
+        PtyOptions              options;
+        std::shared_ptr<Pty>    terminal{};
+        std::shared_ptr<Launch> launching{};
+        std::uint32_t           generation = 0;
+        Pty&                    get(std::uint32_t expected) {
             if (!terminal || generation != expected)
                 throw std::logic_error("PTY page session is stale or closed");
             return *terminal;
@@ -43,18 +50,44 @@ void registerPtyPage(App& app, PtyOptions options, std::string name = "webfront.
     };
     auto state = std::make_shared<Session>(Session{std::move(options)});
     pty::detail::PageRegistration::addCleanup(app, [state] {
+        state->launching.reset();  // A launch outlives disconnects and is joined at application shutdown.
         state->terminal.reset();
     });
-    app.cppFunction(name + ".open", [state](bool restart) {
-        if (restart && state->terminal && !state->terminal->exitCode())
-            throw std::logic_error("PTY page session is still running");
-        if (restart || !state->terminal) {
+    app.cppFunction(name + ".open", [state](typename App::UI ui, bool restart) -> ResultTask<std::uint32_t> {
+        if (restart && (state->launching || (state->terminal && !state->terminal->exitCode())))
+            throw std::logic_error("PTY page session is still running or launching");
+        if (!state->launching) {
+            if (state->terminal && !restart)
+                co_return state->generation;
             if (state->generation == UINT32_MAX)
                 throw std::overflow_error("PTY page generation exhausted");
-            state->terminal = std::make_unique<Pty>(state->options);
-            ++state->generation;
+
+            // Only the constructor runs off the server thread. Concurrent attachments share its result.
+            auto launch        = std::make_shared<Launch>();
+            launch->generation = state->generation + 1;
+            launch->terminal   = std::async(std::launch::async, [options = state->options]() mutable {
+                                   return std::make_shared<Pty>(std::move(options));
+                               }).share();
+            state->launching   = std::move(launch);
         }
-        return state->generation;
+        auto launch = state->launching;
+        using namespace std::chrono_literals;
+        while (launch->terminal.wait_for(0ms) != std::future_status::ready)
+            co_await ui.resumeAfter(10ms);
+
+        try {
+            auto terminal = launch->terminal.get();
+            if (state->launching == launch) {
+                state->terminal   = std::move(terminal);
+                state->generation = launch->generation;
+                state->launching.reset();
+            }
+        } catch (...) {
+            if (state->launching == launch)
+                state->launching.reset();
+            throw;
+        }
+        co_return launch->generation;
     });
     using ReadResult = std::tuple<double, std::string, bool, bool, int>;
     app.cppFunction(name + ".read", [state](typename App::UI ui, std::uint32_t generation, double cursor) -> ResultTask<ReadResult> {

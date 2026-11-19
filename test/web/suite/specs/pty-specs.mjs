@@ -55,7 +55,13 @@ describe('Native PTY page adapter', () => {
     });
 
     it('drives a native shell, rejects an oversized input and replays after reattachment', async () => {
-        const generation = await call('open')(false);
+        const [generation, otherAttachment, reply] = await Promise.all([
+            call('open')(false),
+            call('open')(false),
+            webFront.cppFunction('returnFromCpp')('pty startup'),
+        ]);
+        expect(otherAttachment).toBe(generation);
+        expect(reply).toBe('cpp-result:pty startup');
         expect(await call('write')(generation, new Uint8Array(4 * 1024 * 1024))).toBeFalse();
         await expectAsync(call('open')(true)).toBeRejected();
         expect(await webFront.cppFunction('returnFromCpp')('pty')).toBe('cpp-result:pty');

@@ -48,6 +48,28 @@ int main(int argc, char** argv) {
 #endif
         return 0;
     }
+#ifdef _WIN32
+    if (mode == "delayed-output") {
+        std::this_thread::sleep_for(300ms);
+        std::cout << "DESCENDANT_OUTPUT\n" << std::flush;
+        return 0;
+    }
+    if (mode == "leave-child") {
+        std::array<wchar_t, MAX_PATH> executable{};
+        const auto                    count = ::GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
+        if (!count || count >= executable.size())
+            return 1;
+        auto         command = L'"' + std::wstring(executable.data(), count) + L'"' + L" delayed-output";
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION child{};
+        if (!::CreateProcessW(executable.data(), command.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startup, &child))
+            return 2;
+        ::CloseHandle(child.hThread);
+        ::CloseHandle(child.hProcess);
+        return 42;
+    }
+#endif
     if (mode == "interrupt") {
 #ifdef _WIN32
         // A runner can inherit the process-wide Ctrl+C ignore flag from its own launcher.
