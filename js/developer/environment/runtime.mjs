@@ -709,15 +709,20 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
         // The press comes before the browser moves the focus: whoever holds it now is the terminal to give it back to.
         if (page.activeElement === terminal.textarea) focusedTerminal.set(page, terminal);
     };
+    // This terminal is the one to give the focus back to: it held it last, it is on the page, and it has the window.
+    const answers = () => {
+        const last = focusedTerminal.get(page);
+        if (last && !last.element?.isConnected) focusedTerminal.delete(page);  // that terminal is gone: nobody answers this click
+        return last === terminal && element.isConnected && shownState() === State.terminal;
+    };
     const release = event => {
         const started = pressedOnPage;
         pressedOnPage = false;
-        if (!started || !ownsClick(event.target)) return;
-        const last = focusedTerminal.get(page);
-        if (last && !last.element?.isConnected) focusedTerminal.delete(page);  // that terminal is gone: nobody answers this click
-        if (last !== terminal || shownState() !== State.terminal) return;
+        if (!started || !ownsClick(event.target) || !answers()) return;
         setTimeout(() => {
-            // The click may have given the focus to a field of the page (a label does): it stays there.
+            // The click, or what it triggered, may have changed things since: an interface may own the window, another
+            // terminal may hold the focus, and a field of the page may have it (a label gives it to its field).
+            if (!answers()) return;
             const held = page.activeElement;
             if (held && held !== page.body && held !== page.documentElement && held !== terminal.textarea) return;
             if (!page.getSelection()?.toString()) terminal.focus();
