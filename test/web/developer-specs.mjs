@@ -1311,6 +1311,17 @@ try {
             await eventually(() => page.activeElement === textarea, 'A click on the page around the terminal must leave the terminal focused', {every: 10});
             await type('echo after-click\r');
             assert(lastRows(2)[0] === 'after-click', `Typing after a click outside the terminal must run: ${lastRows(3)}`);
+            // An older selection of the terminal does not keep the focus away: a click that selects nothing gives it back.
+            const click = target => ['mousedown', 'mouseup', 'click'].forEach(type => target.dispatchEvent(new MouseEvent(type, {bubbles: true, cancelable: true, button: 0})));
+            terminal.selectAll();
+            assert(terminal.hasSelection(), 'The terminal must hold a selection');
+            textarea.blur();
+            click(page.body);
+            await eventually(() => page.activeElement === textarea, 'A click on the page must give the focus back although the terminal still holds an older selection', {every: 10});
+            assert(terminal.hasSelection(), 'The click must leave the terminal\'s selection alone');
+            await type('echo after-selection\r');
+            assert(lastRows(2)[0] === 'after-selection', `Typing after a click that follows a selection must run: ${lastRows(3)}`);
+            terminal.clearSelection();
             // Two terminals in the page: a click gives the focus back to the one that had it, and to no other.
             const spare = page.createElement('div');
             spare.style.cssText = 'width:320px;height:120px';
@@ -1319,15 +1330,15 @@ try {
             try {
                 const settle = () => delay(50);  // the focus is given back after the click, in a task of its own
                 terminal.focus();
-                host.querySelector('.xterm-screen').dispatchEvent(new MouseEvent('mouseup', {bubbles: true, cancelable: true, button: 0}));
+                click(host.querySelector('.xterm-screen'));
                 await settle();
                 assert(page.activeElement === terminal.textarea, 'A click in a terminal must not give the focus to another terminal');
                 other.terminal.focus();
-                spare.querySelector('.xterm-screen').dispatchEvent(new MouseEvent('mouseup', {bubbles: true, cancelable: true, button: 0}));
+                click(spare.querySelector('.xterm-screen'));
                 await settle();
                 assert(page.activeElement === other.terminal.textarea, 'A click in the second terminal must keep it focused');
                 other.terminal.textarea.blur();
-                page.body.dispatchEvent(new MouseEvent('mouseup', {bubbles: true, cancelable: true, button: 0}));
+                click(page.body);
                 await eventually(() => page.activeElement === other.terminal.textarea, 'A click on the page must give the focus back to the terminal that had it', {every: 10});
             } finally {
                 other.terminal.dispose();

@@ -694,22 +694,28 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
     terminal.onData(data => editor.handle(data));
     // While the terminal has the window, the page around it (title, notice, blank areas) is not part of it: a click there
     // would move the focus to the body and the keys would go nowhere (#608). Once the click ends, the terminal that had
-    // the focus takes it back, unless the click selected text, landed on a control or in a terminal (xterm.js keeps its
-    // own focus), or an interface owns the window. A page may hold several terminals: only the last one focused answers.
+    // the focus takes it back, unless the press started on a control or in a terminal (xterm.js keeps its own focus and
+    // selection, an older one included), the click selected text of the page, or an interface owns the window. A page
+    // may hold several terminals: only the last one focused answers.
     const page = element.ownerDocument;
     terminal.textarea.addEventListener('focus', () => focusedTerminal.set(page, terminal));
-    const takeFocusBack = event => {
-        if (!element.isConnected) return page.removeEventListener('mouseup', takeFocusBack);
+    const ownsClick = target => !target.closest?.('.xterm,a,button,input,select,textarea,summary,iframe,[contenteditable],[tabindex]');
+    let pressedOnPage = false;
+    const press = event => {
+        if (!element.isConnected) { page.removeEventListener('mousedown', press, true); page.removeEventListener('mouseup', release); return; }
+        pressedOnPage = ownsClick(event.target);
+    };
+    const release = event => {
+        const started = pressedOnPage;
+        pressedOnPage = false;
+        if (!started || !ownsClick(event.target)) return;
         const last = focusedTerminal.get(page);
         if (last && !last.element?.isConnected) focusedTerminal.delete(page);  // that terminal is gone: nobody answers this click
-        if (last !== terminal) return;
-        if (workspace && workspace.state !== State.terminal) return;
-        if (event.target.closest?.('.xterm,a,button,input,select,textarea,summary,iframe,[contenteditable],[tabindex]')) return;
-        setTimeout(() => {
-            if (!terminal.hasSelection() && !page.getSelection()?.toString()) terminal.focus();
-        }, 0);
+        if (last !== terminal || (workspace && workspace.state !== State.terminal)) return;
+        setTimeout(() => { if (!page.getSelection()?.toString()) terminal.focus(); }, 0);
     };
-    page.addEventListener('mouseup', takeFocusBack);
+    page.addEventListener('mousedown', press, true);
+    page.addEventListener('mouseup', release);
     // Automation must be visible to the person using the terminal: say so once it is connected, grants and attach path included.
     onAutomationNotice(text => {
         write(`\r\x1b[K\x1b[33m${text}\x1b[0m\r\n`);
