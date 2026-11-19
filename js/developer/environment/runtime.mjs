@@ -17,7 +17,7 @@ import {parseTestOptions, specFiles, jasmineCore, runnerFiles, runInFrame, repor
 import {generateProvider, applicationPage} from './embed.mjs';
 import {typescriptPackage, parseCheckOptions, checkHost} from './typecheck.mjs';
 import {pinnedStarters} from './bootstrap.mjs';
-import {createWorkspace, isManaged, State} from './workspace.mjs';
+import {createWorkspace, isManaged, layoutState, State} from './workspace.mjs';
 import {connectAutomation as connectAgent, clipText, automationHelp, onAutomationNotice} from './automation.mjs';
 import {ls, cat, tree, mounts, fileCommandHelp, withheld, withheldReason} from './files.mjs';
 import {dependencyTree, why as whyInstalled, info as packageInfo} from './dependencies.mjs';
@@ -700,6 +700,8 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
     const page = element.ownerDocument;
     terminal.textarea.addEventListener('focus', () => focusedTerminal.set(page, terminal));
     const ownsClick = target => !target.closest?.('.xterm,a,button,input,select,textarea,label,summary,iframe,[contenteditable],[tabindex]');
+    // The workspace belongs to the first terminal mounted with the preview, but every terminal of the page answers to its state.
+    const shownState = () => workspace ? workspace.state : preview && isManaged(preview) ? layoutState(preview) : State.terminal;
     let pressedOnPage = false;
     const press = event => {
         if (!element.isConnected) { page.removeEventListener('mousedown', press, true); page.removeEventListener('mouseup', release); return; }
@@ -713,7 +715,7 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
         if (!started || !ownsClick(event.target)) return;
         const last = focusedTerminal.get(page);
         if (last && !last.element?.isConnected) focusedTerminal.delete(page);  // that terminal is gone: nobody answers this click
-        if (last !== terminal || (workspace && workspace.state !== State.terminal)) return;
+        if (last !== terminal || shownState() !== State.terminal) return;
         setTimeout(() => {
             // The click may have given the focus to a field of the page (a label does): it stays there.
             const held = page.activeElement;

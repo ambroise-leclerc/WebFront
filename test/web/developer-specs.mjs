@@ -1360,6 +1360,24 @@ try {
                 assert(page.activeElement === other.terminal.textarea, 'A click in the second terminal must keep it focused');
                 click(page.body);
                 await eventually(() => page.activeElement === other.terminal.textarea, 'A click on the page must give the focus back to the terminal that had it', {every: 10});
+                // The workspace belongs to the first terminal, yet the second one answers to its state: with an interface in the
+                // window, a click on the page does not take the keys away from it.
+                const layoutState = () => page.documentElement.getAttribute('data-webfront-workspace');
+                assert(layoutState() === 'terminal', `The page must lay the terminal out alone: ${layoutState()}`);
+                context.preview.dispatchEvent(new Event('webfront-preview-navigating'));
+                assert(layoutState() === 'floating', `A shown interface must float the terminal: ${layoutState()}`);
+                try {
+                    other.terminal.focus();
+                    assert(page.activeElement === other.terminal.textarea, 'The second terminal must hold the focus');
+                    click(page.body);
+                    await delay(100);
+                    assert(page.activeElement !== other.terminal.textarea && page.activeElement !== terminal.textarea,
+                        `No terminal must take the focus back while an interface is shown: ${page.activeElement?.className}`);
+                } finally {
+                    context.preview.hidden = false;
+                    context.preview.hidden = true;
+                    await eventually(() => layoutState() === 'terminal', 'The terminal must have the window again', {every: 10});
+                }
             } finally {
                 other.terminal.dispose();
                 spare.remove();
