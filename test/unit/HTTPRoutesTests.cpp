@@ -300,6 +300,17 @@ const Scenario routePosts{"A route that accepts POST reads a body bounded by Con
             require(calls == 0);
         });
     });
+    given("a handler that accepts without a body, or refuses the credentials", [&] {
+        auto other = server.addRoute("/webfront/services/status/", [](const RouteRequest& request) {
+            RouteReply reply;
+            reply.status        = request.query == "accepted" ? Response::accepted : Response::unauthorized;
+            reply.contentLength = 0;
+            return reply;
+        });
+        then("the status lines carry their reason phrases", [&] {
+            require(fixture.answer(get("/webfront/services/status/x?accepted")).starts_with("HTTP/1.1 202 Accepted\r\n"));
+        });
+    });
     given("a PUT", [&] {
         const auto response = fixture.answer(get("/webfront/services/rpc/x", "PUT"));
         then("it is refused with the methods of the route, POST included", [&] {

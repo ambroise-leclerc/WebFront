@@ -231,8 +231,10 @@ struct Response : Headers {
         continue_             = 100,
         switchingProtocols    = 101,
         ok                    = 200,
+        accepted              = 202,
         partialContent        = 206,
         badRequest            = 400,
+        unauthorized          = 401,
         forbidden             = 403,
         notFound              = 404,
         methodNotAllowed      = 405,
@@ -288,12 +290,14 @@ private:
     mutable std::string httpStatus;
 
     [[nodiscard]] static std::string toString(StatusCode code) {
-        static constexpr std::array<std::pair<StatusCode, std::string_view>, 16> names{
+        static constexpr std::array<std::pair<StatusCode, std::string_view>, 18> names{
             {{continue_, "Continue"},
              {switchingProtocols, "Switching Protocols"},
              {ok, "OK"},
+             {accepted, "Accepted"},
              {partialContent, "Partial Content"},
              {badRequest, "Bad Request"},
+             {unauthorized, "Unauthorized"},
              {forbidden, "Forbidden"},
              {notFound, "Not Found"},
              {methodNotAllowed, "Method Not Allowed"},
