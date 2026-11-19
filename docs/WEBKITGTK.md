@@ -175,7 +175,7 @@ When an application serves a document root (`NativeDebugFS`, the development pat
 file whose `font-family` declaration lists four or more families other than `serif`, `sans-serif`, `monospace`, `cursive`
 and `fantasy`, it writes one hint per file on standard error. The check (`include/webfront/system/FontStacks.hpp`) only
 counts families, because it cannot know which are installed: it ignores comments, `var()` and custom properties, reads
-nothing over 1 MiB and never fails a request. A production build serves embedded files and does not run it. `wf check`
+nothing over 1 MiB, checks a file again when its size or modification time changes (and not otherwise) and never fails a request. A production build serves embedded files and does not run it. `wf check`
 does not report font stacks: its checks type-check TypeScript, and a new check would change the environment's published
 archive.
 

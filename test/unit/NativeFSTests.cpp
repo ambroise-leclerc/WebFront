@@ -357,3 +357,25 @@ const Scenario nativeDebugFSFontStacksPerRoot{"NativeDebugFS checks a same-named
         });
     });
 }};
+// A stylesheet edited after its first check is checked again, and an unchanged one is not (#611).
+const Scenario nativeDebugFSFontStacksEdited{"NativeDebugFS checks an edited stylesheet again", [] {
+    given("a stylesheet without a long stack that is served once", [&] {
+        TemporaryTestEnvironment env;
+        env.createTextFile("live.css", "body { font-family: sans-serif; }");
+        std::ostringstream warnings;
+        fonts::warningOutput = &warnings;
+        DebugFS root(env.getTestDir());
+        require(root.open("live.css").has_value());
+        when("the developer adds a long stack and reloads twice", [&] {
+            env.createTextFile("live.css", "body { font-family: edited1, edited2, edited3, edited4, sans-serif; }");
+            require(root.open("live.css").has_value());
+            require(root.open("live.css").has_value());
+            fonts::warningOutput = nullptr;
+            const auto text = warnings.str();
+            then("the new stack is reported once", [&] {
+                require(text.find("edited1") != string::npos);
+                require(count(text.begin(), text.end(), '\n') == 1);
+            });
+        });
+    });
+}};

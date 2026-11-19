@@ -406,10 +406,9 @@ public:
         setReveal = std::move(hook);
     }
 
-    /// The CEF colour (ARGB) of a parsed background.
+    /// The CEF colour (ARGB) of a parsed background: opaque unless fully transparent (frontend::detail::cefBackground).
     static cef_color_t backgroundColor(const std::array<float, 4>& rgba) {
-        const auto byte = [](float v) { return static_cast<std::uint32_t>(v * 255.0f + 0.5f); };
-        return (byte(rgba[3]) << 24) | (byte(rgba[0]) << 16) | (byte(rgba[1]) << 8) | byte(rgba[2]);
+        return frontend::detail::cefBackground(rgba);
     }
 
     /// Shows the window, once.

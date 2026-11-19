@@ -6,7 +6,7 @@
 #   -DSCRATCH=<directory>               where the fresh profile directories are created
 #   -DTEMPERATURE=cold|warm             cold: first start with empty cache, data and config directories (so also an empty
 #                                       GStreamer registry); warm: the measured start follows an identical one
-#   -DLIMIT_MS=<number>                 the limit on the time from the application's construction to the page's answer
+#   -DLIMIT_MS=<number>                 the limit on the time from the start of the program (frontend initialization included) to the page's answer
 #
 # The limit is not the project's target (500 ms warm, 1 s cold, measured on a reference machine): it only catches a
 # regression of seconds on a loaded CI runner.
@@ -58,7 +58,7 @@ if(TEMPERATURE STREQUAL "warm")
     start_once("priming")  # fills the profile, the shader, font and plugin caches the measured start finds
 endif()
 start_once("${TEMPERATURE}")
-message(STATUS "${TEMPERATURE} start: window shown ${shown} ms after exec, page answered ${ready} ms after construction (limit ${LIMIT_MS} ms)")
+message(STATUS "${TEMPERATURE} start: window shown ${shown} ms after exec, page answered ${ready} ms after the program started (limit ${LIMIT_MS} ms)")
 if(ready GREATER LIMIT_MS)
     message(FATAL_ERROR "The ${TEMPERATURE} start took ${ready} ms, over the ${LIMIT_MS} ms limit")
 endif()

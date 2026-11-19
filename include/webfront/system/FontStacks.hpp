@@ -12,9 +12,9 @@
 #include <cctype>
 #include <cstddef>
 #include <iostream>
+#include <map>
 #include <mutex>
 #include <ostream>
-#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -131,25 +131,33 @@ inline std::mutex& seenMutex() {
     static std::mutex mutex;
     return mutex;
 }
-inline std::set<std::string>& seenNames() {
-    static std::set<std::string> seen;
+/// The version (a stamp such as modification time and size) of each stylesheet last checked, by name.
+inline std::map<std::string, std::string>& seenVersions() {
+    static std::map<std::string, std::string> seen;
     return seen;
 }
 }  // namespace detail
 
-/// Whether the stylesheet `name` has not been checked yet by warnLongStacks (lets a caller skip reading it again).
-inline bool unchecked(const std::string& name) {
+/// Whether the stylesheet `name` has not been checked yet at this `version`, a stamp that changes when the file does
+/// (lets a caller skip reading it again, and read it again once it is edited).
+inline bool unchecked(const std::string& name, const std::string& version) {
     std::scoped_lock lock{detail::seenMutex()};
-    return !detail::seenNames().contains(name);
+    const auto       found = detail::seenVersions().find(name);
+    return found == detail::seenVersions().end() || found->second != version;
 }
 
-/// Writes one warning for each long stack of the stylesheet `name`, once per name for the life of the process.
+/// Writes one warning for each long stack of the stylesheet `name` at `version`, once per name and version for the life
+/// of the process: an edited file (another version) is checked again, an unchanged one is not.
 /// @return the number of warnings written
-inline std::size_t warnLongStacks(const std::string& name, std::string_view css) {
+inline std::size_t warnLongStacks(const std::string& name, std::string_view css, const std::string& version = {}) {
     {
         std::scoped_lock lock{detail::seenMutex()};
-        if (!detail::seenNames().insert(name).second)
-            return 0;
+        auto [entry, inserted] = detail::seenVersions().try_emplace(name, version);
+        if (!inserted) {
+            if (entry->second == version)
+                return 0;
+            entry->second = version;
+        }
     }
     const auto stacks = longStacks(css);
     std::scoped_lock lock{detail::seenMutex()};

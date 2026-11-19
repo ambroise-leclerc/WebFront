@@ -34,20 +34,22 @@ public:
     }
 
     /// Opens like the raw file system and, for a stylesheet, prints a hint once when a `font-family` lists many families
-    /// (#611, FontStacks.hpp). The development path only: a stylesheet over 1 MiB is not read, and a stylesheet already
-    /// checked is not read again.
+    /// (#611, FontStacks.hpp). The development path only: a stylesheet over 1 MiB is not read, and one already checked is
+    /// read again only after its modification time or size changes.
     std::optional<File> open(std::filesystem::path path) {
         auto file = NativeRawFS::open(path);
-        // Keyed by the full path: two roots may each serve a style.css.
-        const auto full = (rootPath / path).generic_string();
-        if (file && path.extension() == ".css" && fonts::unchecked(full)) {
+        if (file && path.extension() == ".css") {
             try {
-                std::error_code size;
-                const auto      bytes = std::filesystem::file_size(rootPath / path, size);
-                if (!size && bytes <= 1024 * 1024) {
+                // Keyed by the full path: two roots may each serve a style.css.
+                const auto        full = (rootPath / path).generic_string();
+                std::error_code   sizeError, timeError;
+                const auto        bytes   = std::filesystem::file_size(rootPath / path, sizeError);
+                const auto        written = std::filesystem::last_write_time(rootPath / path, timeError);
+                const std::string version = std::to_string(bytes) + ":" + std::to_string(written.time_since_epoch().count());
+                if (!sizeError && !timeError && bytes <= 1024 * 1024 && fonts::unchecked(full, version)) {
                     std::ifstream css(rootPath / path, std::ios::binary);
                     std::string   text(std::istreambuf_iterator<char>(css), {});
-                    fonts::warnLongStacks(full, text);
+                    fonts::warnLongStacks(full, text, version);
                 }
             } catch (...) {  // a hint must never fail a request
             }

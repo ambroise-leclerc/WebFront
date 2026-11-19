@@ -680,10 +680,13 @@ int checkHostThread() {
     }
 }
 
-// How long the window takes to reach a working bridge: the page asks the host, which prints the time since the application's
-// construction (#611). The CTest case StartupTime-* runs it with fresh profile directories (cold) or after a first run (warm).
+// The program's start, taken before main so that the toolkit's initialization is part of what startup-time measures.
+const auto programStart = std::chrono::steady_clock::now();
+
+// How long the window takes to reach a working bridge: the page asks the host, which prints the time since the start of the
+// program, including the frontend's initialization (#611). The CTest case StartupTime-* runs it with fresh profile directories (cold) or after a first run (warm).
 int checkStartupTime() {
-    const auto begin = std::chrono::steady_clock::now();
+    const auto begin = programStart;
     App        app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
     lifecycleStage = LifecycleStage::startingInstrumented;
     HostSession<App> session;

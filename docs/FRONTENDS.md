@@ -71,7 +71,7 @@ them in `WebView2Options::window` and `WKWebViewOptions::window`. The title is f
 `document.title` is not implemented. `background` colours the view under the page and the window, and every embedded
 frontend shows its window when the first document has loaded or after one second (CEF and WKWebView at the document's load, WebKitGTK
 and WebView2 at their first frame), so that the window does not appear blank; CEF applies the colour to the browser
-and to its window, and `media` concerns WebKitGTK only.
+and to its window, as an opaque colour whatever non-zero alpha is given (CEF accepts only 0x00 or 0xFF; `#rrggbb00` leaves its default), and `media` concerns WebKitGTK only.
 
 ## Content policy
 
