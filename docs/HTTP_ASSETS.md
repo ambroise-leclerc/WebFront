@@ -48,6 +48,15 @@ header that could split the response or that the server owns (`Content-Length`, 
 500. The registration handle removes the route when destroyed; a request already running keeps its handler. The
 binding of a request to a connection (#469) is not part of this mechanism yet.
 
+`app.addRoute(prefix, handler, http::RouteOptions{.postBodyLimit = n})` also answers `POST` (#619), for a small request
+such as a JSON-RPC call: the body, announced by `Content-Length` and at most `n` bytes, is read whole before the handler
+runs and reaches it as `RouteRequest::body`. `Expect: 100-continue` gets `100 Continue` first. The server refuses, without
+calling the handler, a `POST` without `Content-Length` (411), with a `Transfer-Encoding` (501: no chunked bodies), with a
+malformed or contradictory length (400) or a longer body (413); a connection that ends before the announced length is
+closed without an answer. Such a route lists `POST` in the `Allow` header of its 405. There is still one request per
+connection, and no check of the origin of the request: a route that changes state verifies it, with a token or the
+`Origin` header.
+
 ## Byte ranges (#455)
 
 An unencoded file of known size, from any provider, is served by ranges (RFC 9110 §14) and says so with

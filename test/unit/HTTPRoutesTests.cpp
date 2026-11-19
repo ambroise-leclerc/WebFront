@@ -54,6 +54,16 @@ std::string get(std::string_view target, std::string_view method = "GET") {
     return std::string(method) + " " + std::string(target) + " HTTP/1.1\r\nHost: localhost\r\n\r\n";
 }
 
+/// A POST with the given header lines (each ending with CRLF) and the first bytes of its body.
+std::string post(std::string_view target, std::string_view headers, std::string_view body = {}) {
+    return "POST " + std::string(target) + " HTTP/1.1\r\nHost: localhost\r\n" + std::string(headers) + "\r\n" + std::string(body);
+}
+
+/// Waits until the server asks for the read after `count` others: the bytes sent so far have been taken.
+void awaitRead(int count) {
+    requireEventually([count] { return InjectableSocket::readCallCount() > count; }, 10s);
+}
+
 struct Fixture {
     Fixture() {
         InjectableSocket::reset();
@@ -213,6 +223,88 @@ const Scenario routePrecedes{"A route precedes the file providers and refuses ot
         then("it is refused with the methods the route serves, without calling the handler", [&] {
             require(response.starts_with("HTTP/1.1 405 Method Not Allowed\r\n"));
             require(contains(response, "Allow: GET, HEAD\r\n"));
+            require(calls == 0);
+        });
+    });
+}};
+
+const Scenario routePosts{"A route that accepts POST reads a body bounded by Content-Length (#619)", [] {
+    Fixture          fixture;
+    Router           server("127.0.0.1", "0");
+    std::atomic<int> calls{0};
+    std::string      seen;
+    auto             route = server.addRoute("/webfront/services/rpc/", [&](const RouteRequest& request) {
+        ++calls;
+        seen = std::string(request.body);
+        return text("echo:" + seen);
+    }, RouteOptions{.postBodyLimit = 64});
+    given("a body received with the headers", [&] {
+        const auto response = fixture.answer(post("/webfront/services/rpc/x", "Content-Length: 5\r\nContent-Type: application/json\r\n", "hello"));
+        then("the handler gets the whole body and answers", [&] {
+            require(response.starts_with("HTTP/1.1 200 OK\r\n"));
+            require(response.ends_with("echo:hello"));
+            require(seen == "hello");
+        });
+    });
+    given("a client that waits for 100 Continue, then sends the body in two parts", [&] {
+        send(post("/webfront/services/rpc/x", "Content-Length: 11\r\nExpect: 100-continue\r\n"));
+        awaitRead(1);
+        then("the server invites the body before the handler runs", [&] {
+            require(InjectableSocket::writtenText() == "HTTP/1.1 100 Continue\r\n\r\n");
+            require(calls == 0);
+        });
+        send("hello");
+        awaitRead(2);
+        send(" world");
+        requireEventually([] { return InjectableSocket::shutdownCount() > 0; }, 10s);
+        then("the handler gets both parts", [&] {
+            require(seen == "hello world");
+            require(InjectableSocket::writtenText().ends_with("echo:hello world"));
+        });
+    });
+    given("bytes beyond the announced length", [&] {
+        const auto response = fixture.answer(post("/webfront/services/rpc/x", "Content-Length: 2\r\n", "okGET / HTTP/1.1"));
+        then("only the announced body reaches the handler", [&] { require(seen == "ok"); });
+    });
+    given("a GET on the same route", [&] {
+        const auto response = fixture.answer(get("/webfront/services/rpc/x"));
+        then("it is served with an empty body", [&] {
+            require(response.ends_with("echo:"));
+            require(calls == 1);
+        });
+    });
+    for (const auto& [headers, status] : std::initializer_list<std::pair<std::string_view, std::string_view>>{
+             {"", "411 Length Required"},
+             {"Transfer-Encoding: chunked\r\n", "501 Not Implemented"},
+             {"Content-Length: 5\r\nTransfer-Encoding: chunked\r\n", "501 Not Implemented"},
+             {"Content-Length: 1x\r\n", "400 Bad Request"},
+             {"Content-Length: -1\r\n", "400 Bad Request"},
+             {"Content-Length: 99999999999999999999999\r\n", "400 Bad Request"},
+             {"Content-Length: 2\r\nContent-Length: 3\r\n", "400 Bad Request"},
+             {"Content-Length: 65\r\n", "413 Payload Too Large"}}) {
+        given("a POST with '", headers, "'", [&] {
+            const auto response = fixture.answer(post("/webfront/services/rpc/x", headers));
+            then("it is refused with ", status, " without reading a body or calling the handler", [&] {
+                require(response.starts_with("HTTP/1.1 " + std::string(status) + "\r\n"));
+                require(calls == 0);
+            });
+        });
+    }
+    given("a connection that ends before the announced length", [&] {
+        send(post("/webfront/services/rpc/x", "Content-Length: 10\r\n", "abc"));
+        awaitRead(1);
+        InjectableSocket::fail({});
+        requireEventually([] { return InjectableSocket::shutdownCount() > 0; }, 10s);
+        then("the connection is closed without an answer and the handler is not called", [&] {
+            require(InjectableSocket::writtenText().empty());
+            require(calls == 0);
+        });
+    });
+    given("a PUT", [&] {
+        const auto response = fixture.answer(get("/webfront/services/rpc/x", "PUT"));
+        then("it is refused with the methods of the route, POST included", [&] {
+            require(response.starts_with("HTTP/1.1 405 Method Not Allowed\r\n"));
+            require(contains(response, "Allow: GET, HEAD, POST\r\n"));
             require(calls == 0);
         });
     });

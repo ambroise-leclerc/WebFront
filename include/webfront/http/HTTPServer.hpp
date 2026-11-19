@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -133,6 +134,13 @@ struct Request : Headers {
         return false;
     }
 
+    /// Parses up to the end of the headers and returns where it stopped: the bytes after it start the body.
+    template<typename InputIterator>
+    InputIterator consume(InputIterator begin, InputIterator end) {
+        while (begin != end && !completed()) completeRequest(*begin++);
+        return begin;
+    }
+
     bool completed() const { return state == State::completed; }
 
 private:
@@ -220,6 +228,7 @@ private:
 
 struct Response : Headers {
     enum StatusCode : uint16_t {
+        continue_             = 100,
         switchingProtocols    = 101,
         ok                    = 200,
         partialContent        = 206,
@@ -228,6 +237,8 @@ struct Response : Headers {
         notFound              = 404,
         methodNotAllowed      = 405,
         notAcceptable         = 406,
+        lengthRequired        = 411,
+        payloadTooLarge       = 413,
         rangeNotSatisfiable   = 416,
         internalServerError   = 500,
         notImplemented        = 501,
@@ -277,8 +288,9 @@ private:
     mutable std::string httpStatus;
 
     [[nodiscard]] static std::string toString(StatusCode code) {
-        static constexpr std::array<std::pair<StatusCode, std::string_view>, 13> names{
-            {{switchingProtocols, "Switching Protocols"},
+        static constexpr std::array<std::pair<StatusCode, std::string_view>, 16> names{
+            {{continue_, "Continue"},
+             {switchingProtocols, "Switching Protocols"},
              {ok, "OK"},
              {partialContent, "Partial Content"},
              {badRequest, "Bad Request"},
@@ -286,6 +298,8 @@ private:
              {notFound, "Not Found"},
              {methodNotAllowed, "Method Not Allowed"},
              {notAcceptable, "Not Acceptable"},
+             {lengthRequired, "Length Required"},
+             {payloadTooLarge, "Payload Too Large"},
              {rangeNotSatisfiable, "Range Not Satisfiable"},
              {internalServerError, "Internal Server Error"},
              {notImplemented, "Not Implemented"},
@@ -304,6 +318,7 @@ struct RouteRequest {
     const Request&   request;
     std::string_view path;   ///< Percent-decoded, without the query; always starts with the route's prefix.
     std::string_view query;  ///< After the '?', undecoded; empty when there is none.
+    std::string_view body{}; ///< The body of a `POST` (see RouteOptions::postBodyLimit); empty for `GET` and `HEAD`.
 };
 
 /// What a route handler produces. The server adds `Content-Length` (from `contentLength`) and `Connection`;
@@ -319,9 +334,24 @@ struct RouteReply {
     std::function<std::size_t(std::span<char>)> body;
 };
 
-/// Answers `GET` and `HEAD` requests under a prefix. Runs on the server's worker thread, not on the I/O
-/// context: it may block (disk, remote storage) without delaying other connections. A throw answers 500.
+/// Answers `GET` and `HEAD` requests under a prefix, and `POST` when the route accepts it. Runs on the server's
+/// worker thread, not on the I/O context: it may block (disk, remote storage) without delaying other connections. A
+/// throw answers 500.
 using RouteHandler = std::function<RouteReply(const RouteRequest&)>;
+
+/// How a route is served beyond its prefix and handler.
+struct RouteOptions {
+    /// The path after the prefix carries a secret (a read token): the server never writes it to its logs.
+    bool secretPath = false;
+    /// Applied to the answers the server generates for this route (4xx, 500), which never pass through the handler.
+    std::function<void(RouteReply&)> harden{};
+    /// Set, the route also answers `POST` with a body of at most this many bytes, announced by `Content-Length` and
+    /// read whole before the handler runs. A request without `Content-Length` is refused with 411, one with a
+    /// `Transfer-Encoding` with 501 (no chunked bodies), a malformed length with 400, a longer body with 413; a
+    /// connection that ends before the announced length is closed without calling the handler. `Expect: 100-continue`
+    /// is answered with `100 Continue` before the body is read.
+    std::optional<std::size_t> postBodyLimit{};
+};
 
 /// The dynamic routes of a server. Prefixes never overlap, so at most one route matches a path.
 class RouteTable {
@@ -331,8 +361,10 @@ public:
         RouteHandler handler;
         /// The path after the prefix carries a secret (a read token): the server never writes it to its logs.
         bool         secretPath = false;
-        /// Applied to the answers the server generates for this route (405, 500), which never pass through the handler.
+        /// Applied to the answers the server generates for this route (4xx, 500), which never pass through the handler.
         std::function<void(RouteReply&)> harden;
+        /// See RouteOptions::postBodyLimit: unset, the route refuses `POST` with 405.
+        std::optional<std::size_t> postBodyLimit;
     };
 
 private:
@@ -382,12 +414,17 @@ public:
     /// @throws std::invalid_argument for a malformed prefix, an empty handler, or a prefix that contains
     ///         or is contained in a registered one.
     [[nodiscard]] Registration add(std::string prefix, RouteHandler handler, bool secretPath = false, std::function<void(RouteReply&)> harden = {}) {
+        return add(std::move(prefix), std::move(handler), RouteOptions{.secretPath = secretPath, .harden = std::move(harden), .postBodyLimit = {}});
+    }
+
+    /// The same, with the options of RouteOptions (`POST` accepted with a bounded body...).
+    [[nodiscard]] Registration add(std::string prefix, RouteHandler handler, RouteOptions options) {
         if (!handler) throw std::invalid_argument("A route needs a handler");
         if (!validPrefix(prefix)) throw std::invalid_argument("Invalid route prefix '" + prefix + "'");
         // The log redaction recognizes the services space only: a secret route elsewhere could not be masked reliably.
-        if (secretPath && !prefix.starts_with("/webfront/services/"))
+        if (options.secretPath && !prefix.starts_with("/webfront/services/"))
             throw std::invalid_argument("A secret route must live under /webfront/services/, not '" + prefix + "'");
-        auto entry = std::make_shared<Entry>(Entry{std::move(prefix), std::move(handler), secretPath, std::move(harden)});
+        auto entry = std::make_shared<Entry>(Entry{std::move(prefix), std::move(handler), options.secretPath, std::move(options.harden), options.postBodyLimit});
         std::lock_guard lock(state->mutex);
         for (const auto& other : state->entries)
             if (other->prefix.starts_with(entry->prefix) || entry->prefix.starts_with(other->prefix))
@@ -443,6 +480,23 @@ inline bool mentionsServices(std::string_view target) {
         text = std::move(decoded);
     }
     return true;  // still encoded after three layers: nothing is worth showing
+}
+
+/// What contentLength returns for a length that is not a decimal number, or for several different lengths.
+inline constexpr std::uint64_t malformedLength = std::numeric_limits<std::uint64_t>::max();
+
+/// The length announced by `Content-Length`: none without the header, malformedLength for a value that is not a decimal
+/// number (or overflows) and for several fields that disagree (RFC 9112 §6.3).
+inline std::optional<std::uint64_t> contentLength(const Request& request) {
+    std::optional<std::uint64_t> length;
+    for (const auto& value : request.getHeadersValues("Content-Length")) {
+        std::uint64_t parsed = 0;
+        const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), parsed);
+        if (value.empty() || error != std::errc{} || end != value.data() + value.size() || parsed == malformedLength) return malformedLength;
+        if (length && *length != parsed) return malformedLength;
+        length = parsed;
+    }
+    return length;
 }
 
 /// The path without empty and "." segments, so that "/a//b/./c" reaches the route of "/a/b/c" instead of falling
@@ -862,6 +916,11 @@ public:
         return routes.add(std::move(prefix), std::move(handler), secretPath, std::move(harden));
     }
 
+    /// The same, with the options of RouteOptions (`POST` accepted with a bounded body...).
+    [[nodiscard]] RouteTable::Registration addRoute(std::string prefix, RouteHandler handler, RouteOptions options) {
+        return routes.add(std::move(prefix), std::move(handler), std::move(options));
+    }
+
     /// Called, on the context's thread, with the socket of a connection upgraded to a WebSocket.
     void onUpgrade(std::function<void(typename Net::Socket&&)>&& handler) {
         upgradeHandler = std::move(handler);
@@ -968,8 +1027,10 @@ private:
     // Runs the handler on the worker, then streams its body in chunks of at most emissionBufferSize bytes,
     // each read on the worker and sent before the next is read (back-pressure). Closing the connection
     // fails the pending send and ends the response; the stop request of the server cancels the awaits.
-    networking::Task serveRoute(typename Net::Socket& socket, Request request, RouteMatch match) {
+    // `body` holds the bytes received after the headers: the start of the body of a POST.
+    networking::Task serveRoute(typename Net::Socket& socket, Request request, RouteMatch match, std::string body) {
         const bool head = request.method == Request::Method::Head;
+        const bool post = request.method == Request::Method::Post && match.route->postBodyLimit.has_value();
         RouteReply reply;
         Response   response;
         // The route's policy for the answers the server writes itself; the type and disposition stay those of the error page.
@@ -984,13 +1045,43 @@ private:
                 if (!sameHeader(name, "Content-Type") && !sameHeader(name, "Content-Disposition")) response.headers.emplace_back(name, value);
         };
         try {
-            if (!head && request.method != Request::Method::Get) {
+            std::optional<Response::StatusCode> refusal;
+            if (post) {
+                const auto length = routing::contentLength(request);
+                if (request.getHeaderValue("Transfer-Encoding")) refusal = Response::notImplemented;  // no chunked bodies
+                else if (!length) refusal = Response::lengthRequired;
+                else if (*length == routing::malformedLength) refusal = Response::badRequest;
+                else if (*length > *match.route->postBodyLimit) refusal = Response::payloadTooLarge;
+                else {
+                    if (body.size() < *length && request.headersContain("Expect", "100-continue")) {
+                        // The client waits for this interim answer before it sends the body (curl does beyond 1 KiB).
+                        std::vector<typename Net::ConstBuffer> proceed{Net::Buffer(std::string_view{"HTTP/1.1 100 Continue\r\n\r\n"})};
+                        co_await Net::Send(socket, proceed);
+                    }
+                    std::vector<char> chunk(Policy::receptionBufferSize);
+                    while (body.size() < *length) {
+                        const auto received = co_await Net::Receive(socket, Net::Buffer(chunk));
+                        if (received == 0) {  // the client ended the connection before the announced length
+                            socket.shutdown(Net::Socket::shutdown_both);
+                            co_return;
+                        }
+                        body.append(chunk.data(), received);
+                    }
+                    body.resize(*length);  // what follows would be another request: this server serves one per connection
+                }
+            } else {
+                body.clear();
+            }
+            if (!head && request.method != Request::Method::Get && !post) {
                 response = Response::getStatusResponse(Response::methodNotAllowed);
-                response.headers.emplace_back("Allow", "GET, HEAD");
+                response.headers.emplace_back("Allow", match.route->postBodyLimit ? "GET, HEAD, POST" : "GET, HEAD");
+                hardenError();
+            } else if (refusal) {
+                response = Response::getStatusResponse(*refusal);
                 hardenError();
             } else {
                 co_await networking::ex::continues_on(routeWorker.run([&] {
-                    reply = match.route->handler(RouteRequest{request, match.path, match.query});
+                    reply = match.route->handler(RouteRequest{request, match.path, match.query, body});
                     routing::validateReply(reply);
                 }), Net::Scheduler(socket));
                 response.statusCode = reply.status;
@@ -1029,10 +1120,13 @@ private:
         Response response;
         try {
             std::array<char, Policy::receptionBufferSize> buffer;
+            std::string rest;  // received after the headers: the start of a body
             while (!request.completed()) {
                 const auto received = co_await Net::Receive(socket, Net::Buffer(buffer));
                 if (received == 0) co_return;  // the client closed the connection
-                request.parseSomeData(buffer.data(), buffer.data() + received);
+                const char* end = buffer.data() + received;
+                const char* stop = request.consume(static_cast<const char*>(buffer.data()), end);
+                if (request.completed()) rest.assign(stop, end);
             }
             auto match = matchRoute(request);
             if (match && match->route->secretPath)
@@ -1042,7 +1136,7 @@ private:
             else
                 log::info("Received request {} on {}", request.getMethodName(), std::string_view(request.uri).substr(0, request.uri.find('?')));  // the query may quote a URL
             if (match) {
-                co_await serveRoute(socket, std::move(request), std::move(*match));
+                co_await serveRoute(socket, std::move(request), std::move(*match), std::move(rest));
                 co_return;
             }
             head = request.method == Request::Method::Head;

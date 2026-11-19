@@ -11,6 +11,7 @@ these entries stays in the GitHub releases and the Git history.
 ## Unreleased
 
 ### Added
+- Answer `POST` on a dynamic route that opts in with `http::RouteOptions::postBodyLimit`: the body, bounded by `Content-Length`, reaches the handler as `RouteRequest::body` (#619, `docs/HTTP_ASSETS.md`).
 - CEF supports `WindowOptions::background` and shows its window when the first document has loaded or after one second (#611, `docs/FRONTENDS.md`).
 - Print a hint on standard error when the development file system serves a stylesheet whose `font-family` lists four or more costly families (#611, `docs/WEBKITGTK.md`).
 - Run the start-up time of the native windows, cold and warm (cold is fully cold on Linux only), as `<Frontend>StartupTime-cold` and `-warm` (label `startup`) with generous limits, timed from the start of the program so that the frontend's initialization counts (#611, `docs/WEBKITGTK.md`).
