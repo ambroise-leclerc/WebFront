@@ -694,12 +694,12 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
     terminal.onData(data => editor.handle(data));
     // While the terminal has the window, the page around it (title, notice, blank areas) is not part of it: a click there
     // would move the focus to the body and the keys would go nowhere (#608). Once the click ends, the terminal that had
-    // the focus takes it back, unless the press started on a control or in a terminal (xterm.js keeps its own focus and
+    // the focus takes it back, unless the press started on a control, a label or in a terminal (xterm.js keeps its own focus and
     // selection, an older one included), the click selected text of the page, or an interface owns the window. A page
     // may hold several terminals: only the last one focused answers.
     const page = element.ownerDocument;
     terminal.textarea.addEventListener('focus', () => focusedTerminal.set(page, terminal));
-    const ownsClick = target => !target.closest?.('.xterm,a,button,input,select,textarea,summary,iframe,[contenteditable],[tabindex]');
+    const ownsClick = target => !target.closest?.('.xterm,a,button,input,select,textarea,label,summary,iframe,[contenteditable],[tabindex]');
     let pressedOnPage = false;
     const press = event => {
         if (!element.isConnected) { page.removeEventListener('mousedown', press, true); page.removeEventListener('mouseup', release); return; }
@@ -714,7 +714,12 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
         const last = focusedTerminal.get(page);
         if (last && !last.element?.isConnected) focusedTerminal.delete(page);  // that terminal is gone: nobody answers this click
         if (last !== terminal || (workspace && workspace.state !== State.terminal)) return;
-        setTimeout(() => { if (!page.getSelection()?.toString()) terminal.focus(); }, 0);
+        setTimeout(() => {
+            // The click may have given the focus to a field of the page (a label does): it stays there.
+            const held = page.activeElement;
+            if (held && held !== page.body && held !== page.documentElement && held !== terminal.textarea) return;
+            if (!page.getSelection()?.toString()) terminal.focus();
+        }, 0);
     };
     page.addEventListener('mousedown', press, true);
     page.addEventListener('mouseup', release);

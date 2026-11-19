@@ -1323,6 +1323,26 @@ try {
             await type('echo after-selection\r');
             assert(lastRows(2)[0] === 'after-selection', `Typing after a click that follows a selection must run: ${lastRows(3)}`);
             terminal.clearSelection();
+            // A label hands the focus to its field, and the terminal leaves it there.
+            const field = page.createElement('input'), label = page.createElement('label');
+            field.id = 'webfront-608-field';
+            label.htmlFor = field.id;
+            label.textContent = 'Name';
+            page.body.append(label, field);
+            try {
+                click(label);
+                await delay(50);
+                assert(page.activeElement === field, `A click on a label must leave the focus to its field: ${page.activeElement?.tagName}`);
+                // Whatever takes the click, the terminal does not take the focus from a field of the page.
+                field.focus();
+                click(page.body, {moveFocus: false});
+                await delay(50);
+                assert(page.activeElement === field, 'A click that leaves a field focused must not move the focus to the terminal');
+            } finally {
+                label.remove();
+                field.remove();
+                terminal.focus();
+            }
             // Two terminals in the page: a click gives the focus back to the one that had it, and to no other.
             const spare = page.createElement('div');
             spare.style.cssText = 'width:320px;height:120px';
