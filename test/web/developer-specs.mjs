@@ -1304,18 +1304,19 @@ try {
             const page = host.ownerDocument;
             const outside = page.body;
             assert(!host.contains(outside) && textarea.ownerDocument.activeElement === textarea, 'The terminal must have the focus before the click');
-            // A browser moves the focus to the body when a press lands outside any focusable element.
-            textarea.blur();
-            for (const type of ['mousedown', 'mouseup', 'click'])
-                outside.dispatchEvent(new MouseEvent(type, {bubbles: true, cancelable: true, button: 0}));
+            // A press outside any focusable element moves the focus to the body, after the press event.
+            const click = (target, {moveFocus = true} = {}) => {
+                target.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true, button: 0}));
+                if (moveFocus) page.activeElement?.blur();
+                for (const type of ['mouseup', 'click']) target.dispatchEvent(new MouseEvent(type, {bubbles: true, cancelable: true, button: 0}));
+            };
+            click(outside);
             await eventually(() => page.activeElement === textarea, 'A click on the page around the terminal must leave the terminal focused', {every: 10});
             await type('echo after-click\r');
             assert(lastRows(2)[0] === 'after-click', `Typing after a click outside the terminal must run: ${lastRows(3)}`);
             // An older selection of the terminal does not keep the focus away: a click that selects nothing gives it back.
-            const click = target => ['mousedown', 'mouseup', 'click'].forEach(type => target.dispatchEvent(new MouseEvent(type, {bubbles: true, cancelable: true, button: 0})));
             terminal.selectAll();
             assert(terminal.hasSelection(), 'The terminal must hold a selection');
-            textarea.blur();
             click(page.body);
             await eventually(() => page.activeElement === textarea, 'A click on the page must give the focus back although the terminal still holds an older selection', {every: 10});
             assert(terminal.hasSelection(), 'The click must leave the terminal\'s selection alone');
@@ -1330,14 +1331,13 @@ try {
             try {
                 const settle = () => delay(50);  // the focus is given back after the click, in a task of its own
                 terminal.focus();
-                click(host.querySelector('.xterm-screen'));
+                click(host.querySelector('.xterm-screen'), {moveFocus: false});
                 await settle();
                 assert(page.activeElement === terminal.textarea, 'A click in a terminal must not give the focus to another terminal');
                 other.terminal.focus();
-                click(spare.querySelector('.xterm-screen'));
+                click(spare.querySelector('.xterm-screen'), {moveFocus: false});
                 await settle();
                 assert(page.activeElement === other.terminal.textarea, 'A click in the second terminal must keep it focused');
-                other.terminal.textarea.blur();
                 click(page.body);
                 await eventually(() => page.activeElement === other.terminal.textarea, 'A click on the page must give the focus back to the terminal that had it', {every: 10});
             } finally {

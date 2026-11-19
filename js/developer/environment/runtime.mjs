@@ -704,6 +704,8 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
     const press = event => {
         if (!element.isConnected) { page.removeEventListener('mousedown', press, true); page.removeEventListener('mouseup', release); return; }
         pressedOnPage = ownsClick(event.target);
+        // The press comes before the browser moves the focus: whoever holds it now is the terminal to give it back to.
+        if (page.activeElement === terminal.textarea) focusedTerminal.set(page, terminal);
     };
     const release = event => {
         const started = pressedOnPage;
