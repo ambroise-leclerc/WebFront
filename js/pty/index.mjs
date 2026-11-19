@@ -1,15 +1,15 @@
 // Optional xterm.js adapter. The application supplies its own Terminal and FitAddon instances.
 export async function mount(element, {
-    terminal, fit, webFront = globalThis.webFront, name = 'webfront.pty',
+    terminal, fit, webFront = globalThis.webFront, name = 'webfront.pty', restart = false,
     onExit = () => {}, onError = error => console.error(error), onTruncated = () => {},
 }) {
-    const call = operation => webFront.cppFunction(name + '.' + operation);
+    await webFront.ready;
+    const generation = await webFront.cppFunction(name + '.open')(restart);
+    const call = operation => (...args) => webFront.cppFunction(name + '.' + operation)(generation, ...args);
     const read = call('read');
     const write = call('write');
     const resize = call('resize');
     const hangUp = call('hangUp');
-    await webFront.ready;
-    await call('open')();
 
     const limit = 64 * 1024;
     const encoder = new TextEncoder();
@@ -19,7 +19,6 @@ export async function mount(element, {
     let sizing = false;
     let sentSize;
     let disposed = false;
-    let timer;
     let cursor = 0;
 
     const sendInput = async () => {
@@ -99,7 +98,7 @@ export async function mount(element, {
                 dispose();
                 onExit(code);
             } else {
-                timer = setTimeout(poll, base64 ? 0 : 25);
+                void poll();
             }
         } catch (error) {
             if (disposed) return;
@@ -111,7 +110,6 @@ export async function mount(element, {
     const dispose = () => {
         if (disposed) return;
         disposed = true;
-        clearTimeout(timer);
         observer.disconnect();
         data.dispose();
         binary.dispose();

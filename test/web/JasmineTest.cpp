@@ -114,7 +114,10 @@ public:
         if (!mediaFile.empty()) filesystem::remove(mediaFile, ignored);
     }
 
-    void configureApplication(WebFrontConfig& config) { config.allowPtyPages = true; }
+    void configureApplication(WebFrontConfig& config) {
+        config.contentPolicy.allowMissingOrigin = false;
+        config.allowPtyPages = true;
+    }
 
     /// Registers the callbacks of the specs before the page opens; the rejecting WebSocket server starts after the CEF
     /// subprocesses have dispatched (driver main), in the browser process.

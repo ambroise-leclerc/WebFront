@@ -10,6 +10,8 @@
 #include <cstring>
 #include <span>
 #include <system_error>
+#include <thread>
+#include <utility>
 
 namespace webfront::pty::detail {
 
@@ -68,8 +70,10 @@ public:
             ::InitializeProcThreadAttributeList(nullptr, 1, 0, &size);
             std::vector<std::max_align_t> storage((size + sizeof(std::max_align_t) - 1) / sizeof(std::max_align_t));
             STARTUPINFOEXW                startup{};
-            startup.StartupInfo.cb  = sizeof(startup);
-            startup.lpAttributeList = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(storage.data());
+            startup.StartupInfo.cb = sizeof(startup);
+            // Null standard handles let ConPTY install its own console handles even if the host is redirected.
+            startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+            startup.lpAttributeList     = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(storage.data());
             if (!::InitializeProcThreadAttributeList(startup.lpAttributeList, 1, 0, &size))
                 fail("initialize ConPTY process attributes");
             struct DeleteAttributes {
@@ -116,11 +120,28 @@ public:
     std::size_t read(std::span<std::uint8_t> bytes) {
         DWORD available = 0;
         DWORD count     = 0;
-        if (::PeekNamedPipe(output.value, nullptr, 0, nullptr, &available, nullptr) && available) {
-            if (!::ReadFile(output.value, bytes.data(), std::min(available, static_cast<DWORD>(bytes.size())), &count, nullptr))
-                return 0;
+        if (!::PeekNamedPipe(output.value, nullptr, 0, nullptr, &available, nullptr)) {
+            if (!outputPipeClosed(::GetLastError()))
+                fail("read ConPTY output");
+            outputClosed = true;
+        } else if (available && !::ReadFile(output.value, bytes.data(), std::min(available, static_cast<DWORD>(bytes.size())), &count, nullptr)) {
+            if (!outputPipeClosed(::GetLastError()))
+                fail("read ConPTY output");
+            outputClosed = true;
         }
         return count;
+    }
+
+    bool atEnd() const {
+        return outputClosed;
+    }
+
+    // Closing the console flushes its output. On older Windows it can block until the output pipe is drained.
+    void beginDrain() {
+        closer  = std::jthread([close = closeConsole, handle = console] {
+            close(handle);
+        });
+        console = nullptr;
     }
 
     // The overlapped operation borrows the backend's own buffer, including across worker iterations.
@@ -181,6 +202,8 @@ public:
         }
         // Older versions of ConPTY wait for their final output during ClosePseudoConsole.
         output.reset();
+        if (closer.joinable())
+            closer.join();
         if (console)
             closeConsole(console);
         console = nullptr;
@@ -189,8 +212,10 @@ public:
     }
 
 private:
-    PtyHandle input, output, job, process, writeEvent;
-    HANDLE    console                             = nullptr;
+    PtyHandle    input, output, job, process, writeEvent;
+    std::jthread closer;
+    bool         outputClosed                     = false;
+    HANDLE       console                          = nullptr;
     HRESULT(WINAPI* resizeConsole)(HANDLE, COORD) = nullptr;
     void(WINAPI* closeConsole)(HANDLE)            = nullptr;
     OVERLAPPED                     pending{};
@@ -216,6 +241,10 @@ private:
         static_assert(sizeof(function) == sizeof(address));
         std::memcpy(&function, &address, sizeof(function));
         return function;
+    }
+
+    static bool outputPipeClosed(DWORD error) {
+        return error == ERROR_BROKEN_PIPE || error == ERROR_PIPE_NOT_CONNECTED || error == ERROR_NO_DATA;
     }
 
     static COORD dimensions(PtySize size) {
@@ -294,7 +323,9 @@ private:
             }
         }
         for (const auto& directory : directories) {
-            const auto      candidate = options.directory / directory / name;
+            auto candidate = options.directory / directory / name;
+            if (!candidate.is_absolute())
+                candidate = std::filesystem::absolute(candidate);
             std::error_code error;
             if (name.has_extension()) {
                 if (std::filesystem::is_regular_file(candidate, error))

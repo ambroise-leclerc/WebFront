@@ -5,9 +5,10 @@ export interface PtyPageOptions {
     terminal: Terminal;
     fit: FitAddon;
     name?: string;
+    restart?: boolean;
     webFront?: {
         ready: Promise<unknown>;
-        cppFunction(name: string): (...args: (number | Uint8Array)[]) => Promise<unknown>;
+        cppFunction(name: string): (...args: (boolean | number | Uint8Array)[]) => Promise<unknown>;
     };
     onExit?(code: number): void;
     onError?(error: unknown): void;

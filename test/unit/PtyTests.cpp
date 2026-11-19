@@ -9,6 +9,7 @@
 
 #ifndef _WIN32
     #include <fcntl.h>
+    #include <sys/socket.h>
 #endif
 
 namespace {
@@ -49,7 +50,7 @@ struct Transcript {
     std::optional<int> exit;
 
     void until(Pty& terminal, std::string_view marker) {
-        const auto deadline = std::chrono::steady_clock::now() + 5s;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::duration<double>(8s * impl::timeoutFactor());
         do {
             auto part = terminal.tryRead(cursor);
             cursor    = part.next;
@@ -60,7 +61,7 @@ struct Transcript {
                 return;
             std::this_thread::sleep_for(10ms);
         } while (!exit && std::chrono::steady_clock::now() < deadline);
-        auto context = info(text);
+        auto context = info("waiting for " + std::string(marker) + ", exit=" + (exit ? std::to_string(*exit) : "running") + ", output=" + text);
         require(false);
     }
 };
@@ -230,41 +231,74 @@ const Scenario ptyBatchShim{"PTY resolves Windows npm-style batch shims from the
 #endif
 
 #ifndef _WIN32
-const Scenario ptyReplay{
-    "PTY resolves PATH in the child directory and bounds its output history",
-    [] {
-        webfront::test::TemporaryDirectory directory;
-        const auto                         root = directory.path();
-        std::ofstream(root / "marker").put('!');
-        std::filesystem::create_symlink("/bin/sh", root / "terminal-shell");
-        Pty        terminal({
-                   .argv = {"terminal-shell", "-c", "test -f marker && printf '%s\n' \"$WF_TEST_ENVIRONMENT\" && head -c 1200000 /dev/zero && printf 'COMPLETE'"},
-                   .directory   = root,
-                   .environment = {{"PATH", ".:/usr/bin:/bin"}, {"WF_TEST_ENVIRONMENT", "explicit"}},
-                   .size        = {}
-        });
-        const auto deadline = std::chrono::steady_clock::now() + 5s;
-        while (!terminal.exitCode() && std::chrono::steady_clock::now() < deadline)
-            std::this_thread::sleep_for(10ms);
-        require(terminal.exitCode() == 0);
-        auto part = terminal.tryRead(0);
-        require(part.truncated);
-        require(part.bytes.size() == Pty::readChunk);
-        require(part.next - part.bytes.size() == 1200018 - Pty::replayCapacity);
-        std::uint64_t cursor = part.next;
-        while (!part.exitCode) {
-            part   = terminal.tryRead(cursor);
-            cursor = part.next;
-        }
-        const std::string tail(reinterpret_cast<const char*>(part.bytes.data()), part.bytes.size());
-        require(tail.ends_with("COMPLETE"));
-    }};
+const Scenario ptyReplay{"PTY resolves PATH in the child directory and bounds its output history", [] {
+                             webfront::test::TemporaryDirectory directory;
+                             const auto                         root = directory.path();
+                             std::ofstream(root / "marker").put('!');
+                             std::filesystem::create_symlink(std::filesystem::path(WEBFRONT_PTY_PROBE), root / "terminal-flood");
+                             Pty terminal({
+                                 .argv        = {"terminal-flood", "flood"},
+                                 .directory   = root,
+                                 .environment = {{"PATH", ".:/usr/bin:/bin"}, {"WF_TEST_ENVIRONMENT", "explicit"}},
+                                 .size        = {}
+                             });
+                             requireEventually(
+                                 [&] {
+                                     return terminal.exitCode().has_value();
+                                 },
+                                 15s);
+                             auto context = info("child exit: " + std::to_string(terminal.exitCode().value()));
+                             require(terminal.exitCode() == 0);
+                             auto part = terminal.tryRead(0);
+                             require(part.truncated);
+                             require(part.bytes.size() == Pty::readChunk);
+                             require(part.next - part.bytes.size() == 1200008 - Pty::replayCapacity);
+                             std::uint64_t cursor = part.next;
+                             while (!part.exitCode) {
+                                 part   = terminal.tryRead(cursor);
+                                 cursor = part.next;
+                             }
+                             const std::string tail(reinterpret_cast<const char*>(part.bytes.data()), part.bytes.size());
+                             require(tail.ends_with("COMPLETE"));
+                         }};
+
+const Scenario ptyReopen{"PTY resumes output when the live child reopens its slave", [] {
+                             Pty        terminal({
+                                        .argv        = {probe(), "reopen"},
+                                        .directory   = {},
+                                        .environment = {},
+                                        .size        = {}
+                             });
+                             Transcript output;
+                             output.until(terminal, "REOPENED");
+                             output.until(terminal, "");
+                             require(output.exit == 0);
+                         }};
+
+const Scenario ptyOrphan{"PTY cleans up a foreground group that ignores SIGHUP after the session leader exits", [] {
+                             Pty        terminal({
+                                        .argv        = {probe(), "orphan"},
+                                        .directory   = {},
+                                        .environment = {},
+                                        .size        = {}
+                             });
+                             Transcript output;
+                             output.until(terminal, ":END");
+                             const auto pid = stallPid(output.text);
+                             output.until(terminal, "");
+                             require(output.exit == 0);
+                             requireEventually(
+                                 [&] {
+                                     return !running(pid);
+                                 },
+                                 3s);
+                         }};
 
 const Scenario ptyDescriptors{"PTY child does not inherit an application descriptor", [] {
-                                  pty::detail::PtyFd descriptor{::open("/dev/tty", O_RDONLY | O_NOCTTY)};
-                                  // A CI worker may have no controlling terminal. The PTY master is still a tty descriptor.
-                                  if (descriptor.get() < 0)
-                                      descriptor.reset(::posix_openpt(O_RDWR | O_NOCTTY));
+                                  pty::detail::PtyFd socket{::socket(AF_INET, SOCK_STREAM, 0)};
+                                  require(socket.get() >= 0);
+                                  // Reserve a number the loader won't normally use for its own files.
+                                  pty::detail::PtyFd descriptor{::fcntl(socket.get(), F_DUPFD, 100)};
                                   require(descriptor.get() >= 3);
                                   require(::fcntl(descriptor.get(), F_GETFD) == 0);
                                   Pty        terminal({

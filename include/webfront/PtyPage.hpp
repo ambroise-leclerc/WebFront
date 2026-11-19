@@ -3,6 +3,7 @@
 
 #include "http/Encodings.hpp"
 #include "Pty.hpp"
+#include "Task.hpp"
 
 #include <cmath>
 #include <memory>
@@ -33,9 +34,10 @@ void registerPtyPage(App& app, PtyOptions options, std::string name = "webfront.
     struct Session {
         PtyOptions           options;
         std::unique_ptr<Pty> terminal{};
-        Pty&                 get() {
-            if (!terminal)
-                throw std::logic_error("PTY page session is not open");
+        std::uint32_t        generation = 0;
+        Pty&                 get(std::uint32_t expected) {
+            if (!terminal || generation != expected)
+                throw std::logic_error("PTY page session is stale or closed");
             return *terminal;
         }
     };
@@ -43,33 +45,48 @@ void registerPtyPage(App& app, PtyOptions options, std::string name = "webfront.
     pty::detail::PageRegistration::addCleanup(app, [state] {
         state->terminal.reset();
     });
-    app.cppFunction(name + ".open", [state] {
-        if (!state->terminal)
+    app.cppFunction(name + ".open", [state](bool restart) {
+        if (restart && state->terminal && !state->terminal->exitCode())
+            throw std::logic_error("PTY page session is still running");
+        if (restart || !state->terminal) {
+            if (state->generation == UINT32_MAX)
+                throw std::overflow_error("PTY page generation exhausted");
             state->terminal = std::make_unique<Pty>(state->options);
+            ++state->generation;
+        }
+        return state->generation;
     });
-    app.cppFunction(name + ".read", [state](double cursor) {
+    using ReadResult = std::tuple<double, std::string, bool, bool, int>;
+    app.cppFunction(name + ".read", [state](typename App::UI ui, std::uint32_t generation, double cursor) -> ResultTask<ReadResult> {
         if (!std::isfinite(cursor) || cursor < 0 || cursor > 9007199254740991.0 || std::trunc(cursor) != cursor)
             throw std::invalid_argument("Invalid PTY page cursor");
-        auto output = state->get().tryRead(static_cast<std::uint64_t>(cursor));
-        return std::tuple{static_cast<double>(output.next),
-                          base64::encode(std::move(output.bytes)),
-                          output.truncated,
-                          output.exitCode.has_value(),
-                          output.exitCode.value_or(0)};
+        using namespace std::chrono_literals;
+        const auto deadline = std::chrono::steady_clock::now() + 1s;
+        for (;;) {
+            auto output = state->get(generation).tryRead(static_cast<std::uint64_t>(cursor));
+            if (!output.bytes.empty() || output.exitCode || std::chrono::steady_clock::now() >= deadline)
+                co_return ReadResult{static_cast<double>(output.next),
+                                     base64::encode(std::move(output.bytes)),
+                                     output.truncated,
+                                     output.exitCode.has_value(),
+                                     output.exitCode.value_or(0)};
+            // Connection-owned timer. A browser reload stops this wait without blocking the server.
+            co_await ui.resumeAfter(40ms);
+        }
     });
-    app.cppFunction(name + ".write", [state](const std::vector<std::uint8_t>& bytes) {
-        return state->get().write(bytes);
+    app.cppFunction(name + ".write", [state](std::uint32_t generation, const std::vector<std::uint8_t>& bytes) {
+        return state->get(generation).write(bytes);
     });
-    app.cppFunction(name + ".resize", [state](double columns, double rows) {
+    app.cppFunction(name + ".resize", [state](std::uint32_t generation, double columns, double rows) {
         const auto dimension = [](double value) {
             if (!(value >= 1 && value <= 32767) || std::trunc(value) != value)
                 throw std::invalid_argument("Invalid PTY page dimension");
             return static_cast<std::uint16_t>(value);
         };
-        state->get().resize({dimension(columns), dimension(rows)});
+        state->get(generation).resize({dimension(columns), dimension(rows)});
     });
-    app.cppFunction(name + ".hangUp", [state] {
-        state->get().hangUp();
+    app.cppFunction(name + ".hangUp", [state](std::uint32_t generation) {
+        state->get(generation).hangUp();
     });
 }
 }  // namespace webfront

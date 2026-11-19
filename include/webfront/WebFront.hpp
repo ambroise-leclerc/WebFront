@@ -513,7 +513,7 @@ struct WebFrontConfig {
     /// from an address or a `Forwarded` header. `loopbackAttested` is refused at construction unless `address` is a
     /// loopback address; the other declarations are the integrator's word, which WebFront does not verify.
     RemoteFileTransport   remoteFileTransport = RemoteFileTransport::refused;
-    /// Allows the optional PtyPage component. Requires a literal loopback bind and the application's own browser Origin.
+    /// Allows the optional PtyPage component. Requires a literal loopback bind and a bridge policy limited to the application's Origin.
     bool                  allowPtyPages = false;
 };
 
@@ -609,13 +609,10 @@ inline const std::string& checkedAddress(const WebFrontConfig& config) {
 
 inline WebFrontConfig checkedPtyPageConfig(WebFrontConfig config) {
     if (config.allowPtyPages) {
-        if (!isLoopbackName(config.address))
-            throw std::invalid_argument("PTY pages require a literal loopback listening address");
-        if (config.address.contains(':'))
-            config.address = "::1";
-        config.contentPolicy.allowMissingOrigin = false;
-        config.contentPolicy.allowAnyBridgeOrigin = false;
-        config.contentPolicy.bridgeAllowedOrigins.clear();
+        if (!isLoopbackName(config.address) || (config.address.contains(':') && config.address != "::1"))
+            throw std::invalid_argument("PTY pages require a literal loopback listening address (127.x.y.z or ::1)");
+        if (config.contentPolicy.allowMissingOrigin || config.contentPolicy.allowAnyBridgeOrigin || !config.contentPolicy.bridgeAllowedOrigins.empty())
+            throw std::invalid_argument("PTY pages require a bridge policy limited to the application's own Origin");
     }
     return config;
 }

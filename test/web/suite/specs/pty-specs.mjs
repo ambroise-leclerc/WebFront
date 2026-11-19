@@ -36,7 +36,7 @@ describe('Native PTY page adapter', () => {
             ready: Promise.resolve(),
             cppFunction(name) {
                 if (!name.endsWith('.read')) return async () => {};
-                return async offset => [
+                return async (_generation, offset) => [
                     [1, '4g==', false, false, 0],
                     [2, 'gg==', false, false, 0],
                     [3, 'rA==', false, true, 42],
@@ -55,8 +55,9 @@ describe('Native PTY page adapter', () => {
     });
 
     it('drives a native shell, rejects an oversized input and replays after reattachment', async () => {
-        expect(await call('open')()).toBeUndefined();
-        expect(await call('write')(new Uint8Array(4 * 1024 * 1024))).toBeFalse();
+        const generation = await call('open')(false);
+        expect(await call('write')(generation, new Uint8Array(4 * 1024 * 1024))).toBeFalse();
+        await expectAsync(call('open')(true)).toBeRejected();
         expect(await webFront.cppFunction('returnFromCpp')('pty')).toBe('cpp-result:pty');
         const element = document.createElement('div');
         const terminal = xtermProbe();
@@ -78,6 +79,10 @@ describe('Native PTY page adapter', () => {
         try {
             expect(await replayExit.promise).toBe(42);
             expect(replay.text).toBe(terminal.text);
+            const restarted = await call('open')(true);
+            expect(restarted).not.toBe(generation);
+            await expectAsync(call('write')(generation, new Uint8Array([3]))).toBeRejected();
+            await call('hangUp')(restarted);
         } finally {
             reattached.dispose();
         }

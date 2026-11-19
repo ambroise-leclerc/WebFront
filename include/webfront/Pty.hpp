@@ -92,10 +92,10 @@ public:
         if (bytes.size() > inputCapacity)
             return false;
         std::scoped_lock lock(mutex);
-        if (closing || status || bytes.size() > inputCapacity - input.size())
+        if (closing || inputClosed || bytes.size() > inputCapacity - input.size())
             return false;
         input.append(bytes);
-        changed.notify_all();
+        wakeWorker();
         return true;
     }
 
@@ -103,16 +103,17 @@ public:
     void resize(PtySize size) {
         pty::detail::validateSize(size);
         std::scoped_lock lock(mutex);
-        if (closing || status)
+        if (closing || inputClosed)
             return;
         requestedSize = size;
-        changed.notify_all();
+        wakeWorker();
     }
 
     /// Interrupts pending reads and starts cleanup. Destruction joins the worker.
     void hangUp() {
         std::scoped_lock lock(mutex);
         closing = true;
+        wakeWorker();
         changed.notify_all();
     }
 
@@ -141,13 +142,17 @@ private:
     mutable std::condition_variable_any changed;
     pty::detail::ByteRing               input{inputCapacity};
     pty::detail::ByteRing               replay{replayCapacity};
-    std::uint64_t                       end     = 0;
-    bool                                closing = false;
+    std::uint64_t                       end         = 0;
+    bool                                closing     = false;
+    bool                                inputClosed = false;
     std::optional<PtySize>              requestedSize;
     std::optional<int>                  status;
     std::exception_ptr                  failure;
     pty::detail::NativePty              native;
-    std::jthread                        worker;
+#ifdef _WIN32
+    std::condition_variable workerChanged;
+#endif
+    std::jthread worker;
 
     Output snapshot(std::uint64_t cursor) const {
         if (cursor > end)
@@ -177,48 +182,73 @@ private:
         changed.notify_all();
     }
 
+    void wakeWorker() {
+#ifdef _WIN32
+        workerChanged.notify_one();
+#else
+        native.wake();
+#endif
+    }
+
     void run() {
         using namespace std::chrono_literals;
         std::exception_ptr                  error;
         std::array<std::uint8_t, readChunk> output{};
         std::array<std::uint8_t, 4096>      incoming{};
         try {
-            std::optional<std::chrono::steady_clock::time_point> childExited;
+            std::optional<std::chrono::steady_clock::time_point> drainDeadline;
             for (;;) {
+                if (!drainDeadline && native.exited()) {
+                    {
+                        std::scoped_lock lock(mutex);
+                        inputClosed = true;
+                    }
+                    native.beginDrain();
+                    drainDeadline = std::chrono::steady_clock::now() + 3s;
+                }
                 const auto received = native.read(output);
                 publish(std::span{output}.first(received));
+                if (drainDeadline && (native.atEnd() || std::chrono::steady_clock::now() >= *drainDeadline))
+                    break;
 
                 std::optional<PtySize> size;
-                std::size_t            count;
+                std::size_t            count = 0;
                 {
                     std::scoped_lock lock(mutex);
                     if (closing)
                         break;
-                    size  = std::exchange(requestedSize, std::nullopt);
-                    count = std::min(input.size(), incoming.size());
-                    if (count)
-                        input.copy(0, std::span{incoming}.first(count));
+                    if (!drainDeadline) {
+                        size  = std::exchange(requestedSize, std::nullopt);
+                        count = std::min(input.size(), incoming.size());
+                        if (count)
+                            input.copy(0, std::span{incoming}.first(count));
+                    }
                 }
-                if (!childExited && native.exited())
-                    childExited = std::chrono::steady_clock::now();
-                if (childExited && std::chrono::steady_clock::now() - *childExited >= (received ? 250ms : 50ms))
-                    break;
-
-                if (!childExited && size)
+                if (size)
                     native.resize(*size);
-                const auto       sent = !childExited && count ? native.write(std::span{incoming}.first(count)) : 0;
-                std::unique_lock lock(mutex);
-                input.consume(sent);
-                if (!received && !sent && !closing && !requestedSize)
-                    changed.wait_for(lock, 5ms);
+                const auto sent = count ? native.write(std::span{incoming}.first(count)) : 0;
+                {
+                    std::scoped_lock lock(mutex);
+                    input.consume(sent);
+                }
+                if (!received && !sent) {
+#ifdef _WIN32
+                    std::unique_lock lock(mutex);
+                    if (!closing && (drainDeadline || !requestedSize))
+                        workerChanged.wait_for(lock, drainDeadline || count ? 10ms : 40ms);
+#else
+                    native.wait(count != 0, drainDeadline.has_value());
+#endif
+                }
             }
         } catch (...) {
             error = std::current_exception();
         }
         const int        code = native.finish();
         std::scoped_lock lock(mutex);
-        status  = code;
-        failure = error;
+        inputClosed = true;
+        status      = code;
+        failure     = error;
         changed.notify_all();
     }
 };

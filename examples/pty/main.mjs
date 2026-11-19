@@ -13,13 +13,23 @@ status.setAttribute('aria-live', 'polite');
 document.body.replaceChildren(element, close, status);
 close.disabled = true;
 
-async function start() {
+let terminal;
+async function start(restart = false) {
+    close.disabled = true;
+    close.textContent = 'Hang up';
+    status.textContent = '';
+    terminal?.dispose();
     try {
-        const terminal = new Terminal({ cursorBlink: true });
+        terminal = new Terminal({ cursorBlink: true });
         const session = await mount(element, {
-            terminal, fit: new FitAddon(),
+            terminal, fit: new FitAddon(), restart,
             onError: error => { status.textContent = error.message; },
-            onExit: code => { close.disabled = true; status.textContent = ` Process exited (${code})`; },
+            onExit: code => {
+                close.disabled = false;
+                close.textContent = 'Start again';
+                close.onclick = () => { void start(true); };
+                status.textContent = ` Process exited (${code})`;
+            },
             onTruncated: () => { status.textContent = ' Showing the latest terminal output'; },
         });
         close.disabled = false;

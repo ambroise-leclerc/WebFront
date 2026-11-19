@@ -4,16 +4,21 @@
 
 #include <array>
 #include <cerrno>
+#include <charconv>
 #include <chrono>
 #include <climits>
 #include <csignal>
+#include <cstdlib>
+#include <cstring>
 #include <optional>
 #include <span>
 #include <system_error>
 #include <thread>
 #include <utility>
 
+#include <dirent.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
 #include <sys/ioctl.h>
 #include <sys/resource.h>
@@ -22,6 +27,7 @@
 #include <termios.h>
 #include <unistd.h>
 #if defined(__APPLE__)
+    #include <libproc.h>
     #include <sys/sysctl.h>
 #else
     #include <sys/syscall.h>
@@ -58,13 +64,14 @@ public:
         std::vector<std::string> environment;
         for (const auto& [key, value] : options.environment)
             environment.push_back(key + "=" + value);
-        const auto args       = pointers(options.argv);
-        const auto env        = pointers(environment);
-        const auto maximumFd  = descriptorLimit();
-        auto       dimensions = window(options.size);
+        const auto args      = pointers(options.argv);
+        const auto env       = pointers(environment);
+        const auto maximumFd = descriptorLimit();
+        makePipe(wakeRead, wakeWrite, true);
+        auto dimensions = window(options.size);
 
         master.reset(::posix_openpt(O_RDWR | O_NOCTTY | O_NONBLOCK | O_CLOEXEC));
-        if (master.get() < 0 || ::grantpt(master.get()) < 0 || ::unlockpt(master.get()) < 0)
+        if (master.get() < 0 || ::fcntl(master.get(), F_SETFL, O_NONBLOCK) < 0 || ::grantpt(master.get()) < 0 || ::unlockpt(master.get()) < 0)
             fail("open PTY master");
         std::array<char, PATH_MAX> slaveName{};
         if (const auto error = ::ptsname_r(master.get(), slaveName.data(), slaveName.size()); error)
@@ -74,18 +81,8 @@ public:
             fail("open and size PTY slave");
 
         // The close-on-exec pipe delivers setup errors and synchronizes with setsid/TIOCSCTTY.
-        std::array<int, 2> fds{};
-#if defined(__linux__)
-        if (::pipe2(fds.data(), O_CLOEXEC) < 0)
-#else
-        if (::pipe(fds.data()) < 0)
-#endif
-            fail("create PTY launch pipe");
-        PtyFd reportRead{fds[0]}, reportWrite{fds[1]};
-#if !defined(__linux__)
-        if (::fcntl(reportRead.get(), F_SETFD, FD_CLOEXEC) < 0 || ::fcntl(reportWrite.get(), F_SETFD, FD_CLOEXEC) < 0)
-            fail("protect PTY launch descriptors");
-#endif
+        PtyFd reportRead, reportWrite;
+        makePipe(reportRead, reportWrite, false);
         // Keep the error channel above stderr even when the host has closed some standard descriptors.
         const int report = ::fcntl(reportWrite.get(), F_DUPFD_CLOEXEC, 3);
         if (report < 0)
@@ -116,14 +113,26 @@ public:
 
         int     error = 0;
         ssize_t count;
+        // On systems without an atomic close-on-exec pipe, an unrelated concurrent fork
+        // can transiently inherit the writer. Bound the wait even if that process keeps it.
+        pollfd     reportReady{reportRead.get(), POLLIN, 0};
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
         do {
-            count = ::read(reportRead.get(), &error, sizeof(error));
-        } while (count < 0 && errno == EINTR);
+            count = ::poll(&reportReady, 1, 100);
+        } while ((count == 0 || (count < 0 && errno == EINTR)) && std::chrono::steady_clock::now() < deadline);
+        if (count > 0) {
+            do {
+                count = ::read(reportRead.get(), &error, sizeof(error));
+            } while (count < 0 && errno == EINTR);
+        } else if (count == 0) {
+            count = -1;
+            errno = ETIMEDOUT;
+        }
         if (count != 0) {
             if (count < 0)
                 error = errno;
             ::kill(child, SIGKILL);
-            reap();
+            finish();
             throw std::system_error(error, std::generic_category(), "start PTY child");
         }
     }
@@ -134,14 +143,41 @@ public:
 
     // All I/O after construction belongs to the worker thread.
     std::size_t read(std::span<std::uint8_t> bytes) {
-        if (eof)
-            return 0;
         const auto count = ::read(master.get(), bytes.data(), bytes.size());
-        if (count > 0)
-            return static_cast<std::size_t>(count);
-        if (count == 0 || (errno != EAGAIN && errno != EINTR))
-            eof = true;
-        return 0;
+        // EIO means no slave is open now. A live program can reopen it.
+        if (count < 0 && errno != EIO && errno != EAGAIN && errno != EINTR)
+            fail("read PTY output");
+        if (count >= 0 || errno != EINTR)
+            eof = count == 0 || (count < 0 && errno == EIO);
+        return count > 0 ? static_cast<std::size_t>(count) : 0;
+    }
+
+    bool atEnd() const {
+        return eof;
+    }
+    void beginDrain() const {}
+
+    void wake() const {
+        const char byte = 0;
+        while (::write(wakeWrite.get(), &byte, 1) < 0 && errno == EINTR) {}
+    }
+
+    void wait(bool writing, bool draining) const {
+        const short events = writing ? POLLIN | POLLOUT : POLLIN;
+        // A closed slave leaves POLLHUP continuously set. Retry periodically until it reopens
+        // or the leader exits. The timeout also detects exit while a descendant holds the slave.
+        pollfd fds[] = {
+            {         wakeRead.get(), POLLIN, 0},
+            {eof ? -1 : master.get(), events, 0}
+        };
+        const int ready = ::poll(fds, 2, eof || draining ? 50 : 250);
+        if (ready < 0 && errno != EINTR)
+            fail("wait for PTY activity");
+        if (ready > 0 && (fds[0].revents & POLLIN)) {
+            std::array<char, 256> bytes{};
+            // Bound each drain so concurrent writers cannot starve terminal I/O.
+            ::read(wakeRead.get(), bytes.data(), bytes.size());
+        }
     }
 
     std::size_t write(std::span<const std::uint8_t> bytes) {
@@ -176,18 +212,12 @@ public:
             result = ::waitid(P_PID, static_cast<id_t>(child), &info, WEXITED | WNOHANG | WNOWAIT);
         } while (result < 0 && errno == EINTR);
         if (result == 0) {
-            // A job-control shell can put its foreground job in a different process group.
             const auto foreground = foregroundGroup();
-            signalGroups(foreground, SIGHUP);
-            signalGroups(foreground, SIGCONT);
-            if (!info.si_pid || (foreground > 0 && foreground != child))
-                std::this_thread::sleep_for(std::chrono::milliseconds(200));
-
-            // The leader remains waitable, reserving its PID during group cleanup.
-            const auto currentForeground = foregroundGroup();
-            if (currentForeground > 0 && currentForeground != foreground && currentForeground != child)
-                ::kill(-currentForeground, SIGKILL);
-            signalGroups(foreground, SIGKILL);
+            signalSession(foreground, SIGHUP);
+            signalSession(foreground, SIGCONT);
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            // The waitable leader reserves the session ID even if the tty has forgotten its group.
+            signalSession(foregroundGroup(), SIGKILL);
             reap();
         }
         child = -1;
@@ -196,7 +226,7 @@ public:
     }
 
 private:
-    PtyFd master;
+    PtyFd master, wakeRead, wakeWrite;
     pid_t child    = -1;
     bool  eof      = false;
     int   exitCode = 255;
@@ -236,20 +266,81 @@ private:
         throw std::system_error(ENOENT, std::generic_category(), "resolve PTY executable: " + name);
     }
 
+    static void makePipe(PtyFd& readEnd, PtyFd& writeEnd, bool nonblocking) {
+        std::array<int, 2> fds{};
+#if defined(__linux__)
+        if (::pipe2(fds.data(), O_CLOEXEC | (nonblocking ? O_NONBLOCK : 0)) < 0)
+#else
+        if (::pipe(fds.data()) < 0)
+#endif
+            fail("create PTY pipe");
+        readEnd.reset(fds[0]);
+        writeEnd.reset(fds[1]);
+#if !defined(__linux__)
+        for (auto fd : fds)
+            if (::fcntl(fd, F_SETFD, FD_CLOEXEC) < 0 || (nonblocking && ::fcntl(fd, F_SETFL, O_NONBLOCK) < 0))
+                fail("configure PTY pipe");
+#endif
+    }
+
     static int descriptorLimit() {
-        rlimit limit{};
-        if (::getrlimit(RLIMIT_NOFILE, &limit) < 0)
-            fail("query descriptor limit");
 #if defined(__APPLE__)
         int         maximum = 0;
         std::size_t size    = sizeof(maximum);
         if (::sysctlbyname("kern.maxfilesperproc", &maximum, &size, nullptr, 0) < 0)
             fail("query macOS descriptor limit");
-        if (limit.rlim_max<INT_MAX&& static_cast<int>(limit.rlim_max)> maximum)
+        rlimit limit{};
+        if (::getrlimit(RLIMIT_NOFILE, &limit) < 0)
+            fail("query descriptor limit");
+        if ((limit.rlim_max < INT_MAX) && (static_cast<int>(limit.rlim_max) > maximum))
             maximum = static_cast<int>(limit.rlim_max);
         return maximum;
 #else
-        return limit.rlim_max < INT_MAX ? static_cast<int>(limit.rlim_max) : INT_MAX;
+        return 0;
+#endif
+    }
+
+    static bool closeDescriptors(int report, [[maybe_unused]] int maximumFd) {
+#if defined(__linux__)
+    #if defined(SYS_close_range)
+        if ((report == 3 || ::syscall(SYS_close_range, 3u, static_cast<unsigned>(report - 1), 0u) == 0)
+            && ::syscall(SYS_close_range, static_cast<unsigned>(report + 1), UINT_MAX, 0u) == 0)
+            return true;
+    #endif
+        // Use the kernel directory API directly. libc directory iteration can allocate after fork.
+        const int directory = ::open("/proc/self/fd", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        if (directory < 0)
+            return false;
+        // linux_dirent64: u64 inode, s64 offset, u16 length, u8 type, then the name.
+        std::array<char, 4096> entries{};
+        for (;;) {
+            const long size = ::syscall(SYS_getdents64, directory, entries.data(), entries.size());
+            if (size < 0 && errno == EINTR)
+                continue;
+            if (size <= 0) {
+                const int error = errno;
+                ::close(directory);
+                errno = error;
+                return size == 0;
+            }
+            for (long offset = 0; offset < size;) {
+                const char*   entry  = entries.data() + offset;
+                std::uint16_t length = 0;
+                std::memcpy(&length, entry + 16, sizeof(length));
+                int         fd   = 0;
+                const auto* name = entry + 19;
+                while (*name >= '0' && *name <= '9')
+                    fd = fd * 10 + *name++ - '0';
+                if (fd >= 3 && fd != report && fd != directory)
+                    ::close(fd);
+                offset += length;
+            }
+        }
+#else
+        for (int fd = 3; fd < maximumFd; ++fd)
+            if (fd != report)
+                ::close(fd);
+        return true;
 #endif
     }
 
@@ -260,24 +351,16 @@ private:
             for (int fd = 0; fd <= STDERR_FILENO; ++fd)
                 ::fcntl(fd, F_SETFD, 0);
 
-            bool closed = false;
-#if defined(SYS_close_range)
-            closed = (report == 3 || ::syscall(SYS_close_range, 3u, static_cast<unsigned>(report - 1), 0u) == 0)
-                     && ::syscall(SYS_close_range, static_cast<unsigned>(report + 1), UINT_MAX, 0u) == 0;
-#endif
-            if (!closed)
-                for (int fd = 3; fd < maximumFd; ++fd)
-                    if (fd != report)
-                        ::close(fd);
-
-            struct sigaction action{};
-            action.sa_handler = SIG_DFL;
-            (void)sigemptyset(&action.sa_mask);
-            for (int signal = 1; signal < NSIG; ++signal)
-                if (signal != SIGKILL && signal != SIGSTOP)
-                    ::sigaction(signal, &action, nullptr);
-            ::sigprocmask(SIG_SETMASK, &action.sa_mask, nullptr);
-            ::execve(program, args, env);
+            if (closeDescriptors(report, maximumFd)) {
+                struct sigaction action{};
+                action.sa_handler = SIG_DFL;
+                (void)sigemptyset(&action.sa_mask);
+                for (int signal = 1; signal < NSIG; ++signal)
+                    if (signal != SIGKILL && signal != SIGSTOP)
+                        ::sigaction(signal, &action, nullptr);
+                ::sigprocmask(SIG_SETMASK, &action.sa_mask, nullptr);
+                ::execve(program, args, env);
+            }
         }
         const auto error = errno;
         ssize_t    count;
@@ -302,10 +385,39 @@ private:
         return group;
     }
 
-    void signalGroups(pid_t foreground, int signal) const {
+    void signalSession(pid_t foreground, int signal) const {
         if (foreground > 0 && foreground != child)
             ::kill(-foreground, signal);
         ::kill(-child, signal);
+        auto signalMember = [&](pid_t pid) {
+            if (pid <= 0 || pid == child || ::getsid(pid) != child)
+                return;
+            const auto group = ::getpgid(pid);
+            if (group > 0 && group != child && group != foreground)
+                ::kill(pid, signal);
+        };
+#if defined(__APPLE__)
+        // Listing is best-effort if the OS cannot provide a process snapshot.
+        try {
+            const auto needed = ::proc_listpids(PROC_ALL_PIDS, 0, nullptr, 0);
+            if (needed <= 0)
+                return;
+            std::vector<pid_t> pids(static_cast<std::size_t>(needed) / sizeof(pid_t) + 64);
+            const auto         bytes = ::proc_listpids(PROC_ALL_PIDS, 0, pids.data(), static_cast<int>(pids.size() * sizeof(pid_t)));
+            for (int i = 0; i < bytes / static_cast<int>(sizeof(pid_t)); ++i)
+                signalMember(pids[static_cast<std::size_t>(i)]);
+        } catch (const std::bad_alloc&) {}
+#else
+        if (auto* processes = ::opendir("/proc")) {
+            while (auto* entry = ::readdir(processes)) {
+                pid_t pid               = 0;
+                const auto [end, error] = std::from_chars(entry->d_name, entry->d_name + std::strlen(entry->d_name), pid);
+                if (error == std::errc{} && *end == 0)
+                    signalMember(pid);
+            }
+            ::closedir(processes);
+        }
+#endif
     }
 
     void reap() {

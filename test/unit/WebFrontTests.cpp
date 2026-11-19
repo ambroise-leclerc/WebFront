@@ -48,16 +48,24 @@ const Scenario ptyPageAuthorization{"PTY page requires explicit opt-in, a loopba
         WebFront app{WebFrontConfig{.port = "0"}};
         requireThrows<std::logic_error>([&] { registerPtyPage(app, {}); });
         require(!app.hasCppFunction("webfront.pty.open"));
-        for (const auto* address : {"0.0.0.0", "::", "192.0.2.1", "localhost"}) {
+        for (const auto* address : {"0.0.0.0", "::", "192.0.2.1", "localhost", "0:0:0:0:0:0:0:1"}) {
             requireThrows<std::invalid_argument>([&] {
-                WebFront rejected{WebFrontConfig{.address = address, .port = "0", .allowPtyPages = true}};
+                WebFront rejected{WebFrontConfig{.address = address, .port = "0", .contentPolicy = {.allowMissingOrigin = false}, .allowPtyPages = true}};
             });
         }
     });
-    then("the upgrade handler refuses missing and foreign Origin even under a permissive input policy", [] {
+    then("configuration rejects a bridge policy that would allow missing or foreign origins", [] {
+        for (const auto& policy : {ContentPolicy{}, ContentPolicy{.allowAnyBridgeOrigin = true, .allowMissingOrigin = false},
+                                   ContentPolicy{.bridgeAllowedOrigins = {"http://foreign.example"}, .allowMissingOrigin = false}}) {
+            requireThrows<std::invalid_argument>([&] {
+                WebFront app{WebFrontConfig{.port = "0", .contentPolicy = policy, .allowPtyPages = true}};
+            });
+        }
+    });
+    then("the upgrade handler accepts the application's own Origin and refuses missing or foreign Origin", [] {
         using namespace webfront::http;
         const auto config = webfront::detail::checkedPtyPageConfig({
-            .contentPolicy = {.bridgeAllowedOrigins = {"http://foreign.example"}, .allowAnyBridgeOrigin = true},
+            .contentPolicy = {.allowMissingOrigin = false},
             .allowPtyPages = true
         });
         RequestHandler<networking::NetworkingMock, MockFileSystem<>> handler{
@@ -75,7 +83,9 @@ const Scenario ptyPageAuthorization{"PTY page requires explicit opt-in, a loopba
         require(upgrade("") == Response::forbidden);
         require(upgrade("Origin: http://foreign.example\r\n") == Response::forbidden);
         require(upgrade("Origin: http://127.0.0.1:9002\r\n") == Response::switchingProtocols);
-        require(webfront::detail::checkedPtyPageConfig({.address = "0:0:0:0:0:0:0:1", .allowPtyPages = true}).address == "::1");
+        require(webfront::detail::checkedPtyPageConfig({
+            .address = "::1", .contentPolicy = {.allowMissingOrigin = false}, .allowPtyPages = true
+        }).address == "::1");
     });
 }};
 

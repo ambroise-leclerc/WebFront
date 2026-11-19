@@ -26,7 +26,7 @@ int main(int argc, char** argv) {
     };
     if (const char* path = std::getenv("PATH"))
         shell.environment.emplace("PATH", path);
-    webfront::WebFront app({.documentRoot = argv[1], .allowPtyPages = true});
+    webfront::WebFront app({.documentRoot = argv[1], .contentPolicy = {.allowMissingOrigin = false}, .allowPtyPages = true});
     webfront::registerPtyPage(app, std::move(shell));
     app.show();
 }
