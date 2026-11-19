@@ -88,7 +88,8 @@ personnalisés des services ([ADR-020](ADR-020-services-systeme.md)) s'y ajouter
 `wf run services-package` écrivent une archive déterministe (`js/developer/scripts/package-archive.mjs`) et son
 SHA-512 ; le registre de test sert ces mêmes octets, et la suite installe puis importe l'archive. Aucun de ces
 paquets n'entre dans les ressources du cœur (`MinimalCoreAssets` inchangé) ; la publication reste une action de
-mainteneur distincte.
+mainteneur distincte. `@webfront/pty` (#613) suit le même modèle avec `wf run pty-package`.
+Son adaptateur reçoit les instances de xterm.js et de FitAddon de l’application.
 
 ## Prescriptions d’implémentation et de génération de code
 

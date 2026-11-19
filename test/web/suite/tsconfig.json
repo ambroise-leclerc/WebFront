@@ -16,6 +16,7 @@
   "files": [
     "types/react.tsx",
     "types/services.ts",
+    "types/pty.ts",
     "pages/life-react.tsx"
   ]
 }

@@ -1,4 +1,5 @@
 import './react-specs.mjs';
+import './pty-specs.mjs';
 import './host-loop-specs.mjs';
 import './services-specs.mjs';
 import './fallback-specs.mjs';

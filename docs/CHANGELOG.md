@@ -11,6 +11,7 @@ these entries stays in the GitHub releases and the Git history.
 ## Unreleased
 
 ### Added
+- Run application-selected programs in a native pseudoterminal with an optional xterm.js page adapter and replay across reloads (#613, `docs/PTY.md`).
 - Skip GStreamer's initialization, and its plugin scan, in WebKitGTK for an application whose pages never use audio or video, with `WindowOptions::media = false`; the default keeps media (#611, `docs/WEBKITGTK.md`).
 - WKWebView supports `WindowOptions::background`, translucent colours included, and `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WKWEBVIEW.md`).
 - WebView2 supports `WindowOptions::background` and `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WEBVIEW2.md`).
