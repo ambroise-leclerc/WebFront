@@ -13,7 +13,7 @@ these entries stays in the GitHub releases and the Git history.
 ### Added
 - CEF supports `WindowOptions::background` and shows its window when the first document has loaded or after one second (#611, `docs/FRONTENDS.md`).
 - Print a hint on standard error when the development file system serves a stylesheet whose `font-family` lists four or more costly families (#611, `docs/WEBKITGTK.md`).
-- Run the start-up time of the native windows, cold and warm, as `<Frontend>StartupTime-cold` and `-warm` (label `startup`) with generous limits (#611, `docs/WEBKITGTK.md`).
+- Run the start-up time of the native windows, cold and warm (cold is fully cold on Linux only), as `<Frontend>StartupTime-cold` and `-warm` (label `startup`) with generous limits (#611, `docs/WEBKITGTK.md`).
 - Run application-selected programs in a native pseudoterminal with an optional xterm.js page adapter and replay across reloads (#613, `docs/PTY.md`).
 - Skip GStreamer's initialization, and its plugin scan, in WebKitGTK for an application whose pages never use audio or video, with `WindowOptions::media = false`; the default keeps media (#611, `docs/WEBKITGTK.md`).
 - WKWebView supports `WindowOptions::background`, translucent colours included, and `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WKWEBVIEW.md`).

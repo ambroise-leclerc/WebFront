@@ -126,23 +126,38 @@ inline std::vector<LongStack> longStacks(std::string_view css) {
 /// Where the warnings go: std::cerr when null. Tests point it at a stream of their own.
 inline std::ostream* warningOutput = nullptr;
 
+namespace detail {
+inline std::mutex& seenMutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+inline std::set<std::string>& seenNames() {
+    static std::set<std::string> seen;
+    return seen;
+}
+}  // namespace detail
+
+/// Whether the stylesheet `name` has not been checked yet by warnLongStacks (lets a caller skip reading it again).
+inline bool unchecked(const std::string& name) {
+    std::scoped_lock lock{detail::seenMutex()};
+    return !detail::seenNames().contains(name);
+}
+
 /// Writes one warning for each long stack of the stylesheet `name`, once per name for the life of the process.
 /// @return the number of warnings written
 inline std::size_t warnLongStacks(const std::string& name, std::string_view css) {
-    static std::mutex            mutex;
-    static std::set<std::string> seen;
     {
-        std::scoped_lock lock{mutex};
-        if (!seen.insert(name).second)
+        std::scoped_lock lock{detail::seenMutex()};
+        if (!detail::seenNames().insert(name).second)
             return 0;
     }
     const auto stacks = longStacks(css);
-    std::scoped_lock lock{mutex};
+    std::scoped_lock lock{detail::seenMutex()};
     auto&            out = warningOutput ? *warningOutput : std::cerr;
     for (const auto& stack : stacks)
         out << "WebFront: " << name << ": font-family \"" << stack.stack << "\" lists " << stack.costly
-            << " families that WebKitGTK looks up in every installed font on the first layout (hundreds of milliseconds); "
-               "put an installed family first, or use sans-serif / monospace (docs/WEBKITGTK.md).\n";
+            << " families that WebKitGTK looks up in every installed font on the first layout (hundreds of milliseconds; "
+               "other engines are not affected this way); put an installed family first, or use sans-serif / monospace (docs/WEBKITGTK.md).\n";
     return stacks.size();
 }
 

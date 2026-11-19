@@ -694,10 +694,10 @@ int checkStartupTime() {
         try {
             answer = session.exchange();
             readyMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin).count();
-            if (!answer.empty())
-                app.requestClose();
+            app.requestClose();  // also on an empty answer: the check below reports it
         } catch (const std::exception& error) {
             answer = error.what();
+            app.requestClose();  // fail now instead of waiting for the script's timeout
         }
     });
     struct Join {

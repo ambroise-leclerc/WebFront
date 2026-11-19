@@ -7,6 +7,7 @@
 #include "FontStacks.hpp"
 #include <fstream>
 #include <iterator>
+#include <system_error>
 
 namespace webfront::fs {
 
@@ -33,15 +34,19 @@ public:
     }
 
     /// Opens like the raw file system and, for a stylesheet, prints a hint once when a `font-family` lists many families
-    /// (#611, FontStacks.hpp). The development path only: a stylesheet over 1 MiB is not read.
+    /// (#611, FontStacks.hpp). The development path only: a stylesheet over 1 MiB is not read, and a stylesheet already
+    /// checked is not read again.
     std::optional<File> open(std::filesystem::path path) {
         auto file = NativeRawFS::open(path);
-        if (file && path.extension() == ".css") {
+        if (file && path.extension() == ".css" && fonts::unchecked(path.generic_string())) {
             try {
-                std::ifstream css(rootPath / path, std::ios::binary);
-                std::string   text(std::istreambuf_iterator<char>(css), {});
-                if (text.size() <= 1024 * 1024)
+                std::error_code size;
+                const auto      bytes = std::filesystem::file_size(rootPath / path, size);
+                if (!size && bytes <= 1024 * 1024) {
+                    std::ifstream css(rootPath / path, std::ios::binary);
+                    std::string   text(std::istreambuf_iterator<char>(css), {});
                     fonts::warnLongStacks(path.generic_string(), text);
+                }
             } catch (...) {  // a hint must never fail a request
             }
         }
