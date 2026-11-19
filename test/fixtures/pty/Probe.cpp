@@ -49,6 +49,13 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (mode == "interrupt") {
+#ifdef _WIN32
+        // A runner can inherit the process-wide Ctrl+C ignore flag from its own launcher.
+        const auto input     = ::GetStdHandle(STD_INPUT_HANDLE);
+        DWORD      modeFlags = 0;
+        if (!::SetConsoleCtrlHandler(nullptr, FALSE) || !::GetConsoleMode(input, &modeFlags) || !::SetConsoleMode(input, modeFlags | ENABLE_PROCESSED_INPUT))
+            return 5;
+#endif
         std::cout << "INTERRUPT_READY\n" << std::flush;
         std::this_thread::sleep_for(30s);
         return 2;

@@ -10,6 +10,10 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+#ifdef _WIN32
+    // This executable opts its shell children into the Windows console's Ctrl+C processing.
+    ::SetConsoleCtrlHandler(nullptr, FALSE);
+#endif
     webfront::PtyOptions shell{
         .argv =
             {

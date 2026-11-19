@@ -162,6 +162,12 @@ public:
         while (::write(wakeWrite.get(), &byte, 1) < 0 && errno == EINTR) {}
     }
 
+    // The owner excludes concurrent wake() calls before retiring these descriptors.
+    void closeWakePipe() {
+        wakeWrite.reset();
+        wakeRead.reset();
+    }
+
     void wait(bool writing, bool draining) const {
         const short events = writing ? POLLIN | POLLOUT : POLLIN;
         // A closed slave leaves POLLHUP continuously set. Retry periodically until it reopens
@@ -176,7 +182,8 @@ public:
         if (ready > 0 && (fds[0].revents & POLLIN)) {
             std::array<char, 256> bytes{};
             // Bound each drain so concurrent writers cannot starve terminal I/O.
-            ::read(wakeRead.get(), bytes.data(), bytes.size());
+            if (::read(wakeRead.get(), bytes.data(), bytes.size()) < 0 && errno != EINTR && errno != EAGAIN)
+                fail("read PTY wake pipe");
         }
     }
 

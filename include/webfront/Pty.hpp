@@ -112,6 +112,8 @@ public:
     /// Interrupts pending reads and starts cleanup. Destruction joins the worker.
     void hangUp() {
         std::scoped_lock lock(mutex);
+        if (closing || status)
+            return;
         closing = true;
         wakeWorker();
         changed.notify_all();
@@ -246,6 +248,9 @@ private:
         }
         const int        code = native.finish();
         std::scoped_lock lock(mutex);
+#ifndef _WIN32
+        native.closeWakePipe();
+#endif
         inputClosed = true;
         status      = code;
         failure     = error;
