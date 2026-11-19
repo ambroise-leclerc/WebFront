@@ -70,12 +70,12 @@ describe('Native PTY page adapter', () => {
         const exit = completion();
         const session = await mount(element, {terminal, fit: {fit() {}}, onExit: exit.resolve, onError: exit.reject});
         try {
-            // Both cmd and sh accept these commands with carriage return in their native terminal.
-            terminal.send('echo WEBFRONT_PTY_OK\r');
+            // cmd expands the percent form and sh expands the dollar form. Neither
+            // input echo contains the value, and the PTY may paint it with cursor moves.
+            terminal.send('echo $WF_PTY_MARKER%WF_PTY_MARKER%\r');
             terminal.send('exit 42\r');
             expect(await exit.promise).toBe(42);
-            // ConPTY can move the cursor directly to the next prompt instead of emitting CRLF.
-            expect(terminal.text).toMatch(/\nWEBFRONT_PTY_OK(?=\r?\n|\x1b\[|$)/);
+            expect(terminal.text).toContain('WEBFRONT_PTY_OK');
         } finally {
             session.dispose();
         }

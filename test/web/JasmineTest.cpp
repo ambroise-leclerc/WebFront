@@ -132,7 +132,7 @@ public:
 #else
             .argv = {"sh", "-i"},
 #endif
-            .directory = {}, .environment = {}, .size = {}
+            .directory = {}, .environment = {{"WF_PTY_MARKER", "WEBFRONT_PTY_OK"}}, .size = {}
         });
         registerBitsetCallbacks();
         registerListCallbacks();
