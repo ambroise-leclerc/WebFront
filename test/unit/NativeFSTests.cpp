@@ -307,3 +307,99 @@ const Scenario temporaryTestEnvironmentDestructor{"TemporaryTestEnvironment dest
     auto warningFound = capturedCerr.str().find("Warning: Failed to clean up test directory") != string::npos;
     require((warningFound || capturedCerr.str().empty()));
 }};
+// A stylesheet whose font-family lists many families is reported once by the development file system (#611).
+const Scenario nativeDebugFSFontStacks{"NativeDebugFS warns once about costly font stacks in stylesheets", [] {
+    given("stylesheets in a document root", [&] {
+        TemporaryTestEnvironment env;
+        env.createTextFile("long-stack.css", "/* font-family: a, b, c, d, e */ body { font-family: system-ui, -apple-system, \"Segoe UI\", \"Inter\", sans-serif; }");
+        env.createTextFile("short-stack.css", "body { font-family: system-ui, sans-serif; } code { font-family: \"A, B\", monospace; }");
+        env.createTextFile("variable.css", "body { font-family: var(--a), x, y, z, w; --font-family: p, q, r, s, t; }");
+        env.createTextFile("quoted.css", ".a { font-family: \"font-family: a, b, c, d, e\"; }");
+        when("each is opened twice", [&] {
+            std::ostringstream warnings;
+            struct WarningOutputScope {  // restored even when a require() throws
+                explicit WarningOutputScope(std::ostream& out) { fonts::warningOutput = &out; }
+                ~WarningOutputScope() { fonts::warningOutput = nullptr; }
+            } const output{warnings};
+            DebugFS root(env.getTestDir());
+            for (int i = 0; i < 2; ++i)
+                for (const auto* name : {"long-stack.css", "short-stack.css", "variable.css", "quoted.css"})
+                    require(root.open(name).has_value());
+            const auto text = warnings.str();
+            then("only the long stack is reported, once, with its count", [&] {
+                require(text.find("long-stack.css") != string::npos);
+                require(text.find("lists 4 families") != string::npos);
+                require(text.find("short-stack.css") == string::npos);
+                require(text.find("variable.css") == string::npos);
+                require(text.find("quoted.css") == string::npos);
+                require(text.find("long-stack.css") == text.rfind("long-stack.css"));
+                require(count(text.begin(), text.end(), '\n') == 1);
+            });
+        });
+    });
+}};
+// Two document roots serving a stylesheet of the same name are each checked (#611).
+const Scenario nativeDebugFSFontStacksPerRoot{"NativeDebugFS checks a same-named stylesheet of each document root", [] {
+    given("two roots with a long font stack in style.css", [&] {
+        TemporaryTestEnvironment first;
+        TemporaryTestEnvironment second;
+        first.createTextFile("style.css", "body { font-family: aa1, bb1, cc1, dd1; }");
+        second.createTextFile("style.css", "body { font-family: aa2, bb2, cc2, dd2; }");
+        when("each root serves it", [&] {
+            std::ostringstream warnings;
+            fonts::warningOutput = &warnings;
+            DebugFS one(first.getTestDir());
+            DebugFS two(second.getTestDir());
+            require(one.open("style.css").has_value());
+            require(two.open("style.css").has_value());
+            fonts::warningOutput = nullptr;
+            const auto text = warnings.str();
+            then("both are reported", [&] {
+                require(text.find("aa1") != string::npos);
+                require(text.find("aa2") != string::npos);
+            });
+        });
+    });
+}};
+// A stylesheet edited after its first check is checked again, and an unchanged one is not (#611).
+const Scenario nativeDebugFSFontStacksEdited{"NativeDebugFS checks an edited stylesheet again", [] {
+    given("a stylesheet without a long stack that is served once", [&] {
+        TemporaryTestEnvironment env;
+        env.createTextFile("live.css", "body { font-family: sans-serif; }");
+        std::ostringstream warnings;
+        fonts::warningOutput = &warnings;
+        DebugFS root(env.getTestDir());
+        require(root.open("live.css").has_value());
+        when("the developer adds a long stack and reloads twice", [&] {
+            env.createTextFile("live.css", "body { font-family: edited1, edited2, edited3, edited4, sans-serif; }");
+            require(root.open("live.css").has_value());
+            require(root.open("live.css").has_value());
+            fonts::warningOutput = nullptr;
+            const auto text = warnings.str();
+            then("the new stack is reported once", [&] {
+                require(text.find("edited1") != string::npos);
+                require(count(text.begin(), text.end(), '\n') == 1);
+            });
+        });
+    });
+}};
+// Declarations are told from text, whatever the case of the property name (#611).
+const Scenario fontStacksParsing{"Font stack detection reads declarations, not quoted text, and ignores the property's case", [] {
+    given("a quoted string that looks like a declaration", [&] {
+        then("it is not reported", [&] {
+            check(fonts::longStacks("a::before { content: \"font-family: a,b,c,d\"; } b { content: 'x /* font-family: a,b,c,d */'; }").empty());
+        });
+    });
+    given("a property name in capitals", [&] {
+        const auto found = fonts::longStacks("body { FONT-FAMILY: a, b, c, d; } p { Font-Family : e, f, g, h }");
+        then("both are reported", [&] {
+            require(found.size() == 2);
+            check(found[0].costly == 4 && found[1].costly == 4);
+        });
+    });
+    given("a family whose quoted name contains a semicolon", [&] {
+        then("the value is not cut inside the quotes", [&] {
+            check(fonts::longStacks("x { font-family: \"A;B\", b, c, d; }").size() == 1);
+        });
+    });
+}};

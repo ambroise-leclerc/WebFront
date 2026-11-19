@@ -28,6 +28,11 @@ declaration order, which is what makes four processes started separately split t
 share a process: `test/unit/ScenarioIsolation.cpp` restores the process-wide state a scenario may change. Run directly,
 `tests` draws a random order and prints its seed, which `tests --rng-seed <seed>` replays.
 
+The `startup` label selects the cases `<Frontend>StartupTime-cold` and `-warm` (#611), which belong to the standard tier:
+`ctest -L startup` runs them alone, and they print the measured times with `-V`. "Cold" means fresh `HOME` and `XDG_*`
+directories (Linux: empty GStreamer registry and font cache) and, on Windows, fresh `LOCALAPPDATA` and `APPDATA`; on macOS the
+variables have little effect, so the cold case there only guarantees a new profile directory.
+
 ## Waiting for an asynchronous state
 
 A unit test waits for an observable state, never for a fixed pause. `requireEventually(condition)` ends the scenario when

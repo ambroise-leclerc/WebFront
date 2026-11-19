@@ -4,7 +4,10 @@
 #pragma once
 
 #include "FileSystem.hpp"
+#include "FontStacks.hpp"
 #include <fstream>
+#include <iterator>
+#include <system_error>
 
 namespace webfront::fs {
 
@@ -28,6 +31,33 @@ class NativeDebugFS : public detail::NativeRawFS {
 public:
     explicit NativeDebugFS(std::filesystem::path docRoot) {
         rootPath = docRoot;
+    }
+
+    /// Opens like the raw file system and, for a stylesheet, prints a hint once when a `font-family` lists many families
+    /// (#611, FontStacks.hpp). The development path only: a stylesheet over 1 MiB is not read, and one already checked is
+    /// read again only after its modification time or size changes.
+    std::optional<File> open(std::filesystem::path path) {
+        auto file = NativeRawFS::open(path);
+        if (file && path.extension() == ".css") {
+            try {
+                // Keyed by the full path: two roots may each serve a style.css.
+                const auto      full = (rootPath / path).generic_string();
+                std::error_code sizeError, timeError;
+                const auto      bytes   = std::filesystem::file_size(rootPath / path, sizeError);
+                const auto      written = std::filesystem::last_write_time(rootPath / path, timeError);
+                // The stamp keeps the file clock's own representation, and only after both reads succeeded.
+                if (sizeError || timeError || bytes > 1024 * 1024)
+                    return file;
+                const fonts::Stamp stamp{bytes, written};
+                if (fonts::unchecked(full, stamp)) {
+                    std::ifstream css(rootPath / path, std::ios::binary);
+                    std::string   text(std::istreambuf_iterator<char>(css), {});
+                    fonts::warnLongStacks(full, text, stamp);
+                }
+            } catch (...) {  // a hint must never fail a request
+            }
+        }
+        return file;
     }
 };
 

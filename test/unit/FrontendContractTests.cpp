@@ -311,6 +311,14 @@ const Scenario windowBackground{"The window background is a CSS hexadecimal colo
             check((*clear)[3] == 128.0f / 255.0f);
         });
     });
+    given("a translucent colour for CEF", [&] {
+        then("any non-zero alpha is opaque and only a zero alpha stays transparent, the two values CEF accepts", [&] {
+            check(frontend::detail::cefBackground(*frontend::detail::parseBackground("#101c1d80")) == 0xFF101C1Du);
+            check(frontend::detail::cefBackground(*frontend::detail::parseBackground("#101c1d01")) == 0xFF101C1Du);
+            check(frontend::detail::cefBackground(*frontend::detail::parseBackground("#101c1d")) == 0xFF101C1Du);
+            check(frontend::detail::cefBackground(*frontend::detail::parseBackground("#101c1d00")) == 0x00101C1Du);
+        });
+    });
     given("invalid or empty text", [&] {
         then("nothing is returned, so the toolkit's default stays", [&] {
             check(!frontend::detail::parseBackground(""));

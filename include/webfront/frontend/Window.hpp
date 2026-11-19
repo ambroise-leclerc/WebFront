@@ -21,7 +21,7 @@ namespace webfront {
  *
  * An empty title selects the executable's name. Sizes are in the toolkit's logical pixels; a
  * non-positive size selects the default. `background` is a CSS hexadecimal colour ("#rgb", "#rrggbb" or "#rrggbbaa") that WebKitGTK applies as the colour of the
- * view under the page; WebView2 applies it to its window and WKWebView to its view, and nothing guarantees the window's look before the first
+ * view under the page; WebView2 applies it to its window and WKWebView to its view, CEF to its browser and window (CEF accepts only an opaque or a fully transparent alpha: any non-zero alpha is opaque), and nothing guarantees the window's look before the first
  * frame. Empty keeps the toolkit's default and an invalid value is ignored. `media` is described below.
  */
 struct WindowOptions {
@@ -87,6 +87,14 @@ inline std::optional<std::array<float, 4>> parseBackground(std::string_view text
         rgba[i] = static_cast<float>(high * 16 + low) / 255.0f;
     }
     return rgba;
+}
+
+/// The CEF colour (ARGB) of a parsed background. CEF accepts only a fully opaque (0xFF) or fully transparent (0x00) alpha for
+/// a browser: any non-zero alpha is therefore opaque, as in WebView2, and only "#rrggbb00" stays transparent (CEF then uses
+/// its default background).
+inline std::uint32_t cefBackground(const std::array<float, 4>& rgba) {
+    const auto byte = [](float v) { return static_cast<std::uint32_t>(v * 255.0f + 0.5f); };
+    return (byte(rgba[3]) > 0 ? 0xFF000000u : 0u) | (byte(rgba[0]) << 16) | (byte(rgba[1]) << 8) | byte(rgba[2]);
 }
 
 /// The window's effective values: title from the application, else the executable's name, else "WebFront".

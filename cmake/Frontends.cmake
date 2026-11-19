@@ -9,7 +9,7 @@ macro(_webfront_load_frontends)
         get_property(WEBFRONT_FRONTEND_REGISTRY GLOBAL PROPERTY WEBFRONT_FRONTEND_REGISTRY)
     endif()
     foreach(_wf_entry IN LISTS WEBFRONT_FRONTEND_REGISTRY)
-        foreach(_wf_field OPTION POLICY DESCRIPTION SUPPORT SUPPORT_FILE SETUP TEST_SETUP TEST_NAME TEST_TIMEOUT PLATFORMS TEST_PLATFORMS XVFB_LINUX NATIVE)
+        foreach(_wf_field OPTION POLICY DESCRIPTION SUPPORT SUPPORT_FILE SETUP TEST_SETUP TEST_NAME TEST_TIMEOUT PLATFORMS TEST_PLATFORMS XVFB_LINUX NATIVE STARTUP_TRACE)
             get_property(WEBFRONT_FRONTEND_${_wf_entry}_${_wf_field} GLOBAL
                 PROPERTY WEBFRONT_FRONTEND_${_wf_entry}_${_wf_field})
         endforeach()
@@ -36,7 +36,7 @@ function(webfront_register_frontend name)
     if(NOT "${name}" MATCHES "^[A-Za-z_][A-Za-z0-9_]*$")
         message(FATAL_ERROR "Frontend name '${name}' must be a C++ identifier")
     endif()
-    cmake_parse_arguments(PARSE_ARGV 1 ARG "XVFB_LINUX;ALWAYS_AVAILABLE;NATIVE" "OPTION;POLICY;DESCRIPTION;SUPPORT;SETUP;TEST_SETUP;TEST_NAME;TEST_TIMEOUT" "PLATFORMS;TEST_PLATFORMS")
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "XVFB_LINUX;ALWAYS_AVAILABLE;NATIVE;STARTUP_TRACE" "OPTION;POLICY;DESCRIPTION;SUPPORT;SETUP;TEST_SETUP;TEST_NAME;TEST_TIMEOUT" "PLATFORMS;TEST_PLATFORMS")
     if(name IN_LIST WEBFRONT_FRONTEND_REGISTRY)
         message(FATAL_ERROR "Frontend '${name}' is already registered")
     endif()
@@ -98,11 +98,14 @@ function(webfront_register_frontend name)
         if(ARG_NATIVE)
             message(FATAL_ERROR "Frontend '${name}' cannot use NATIVE without OPTION")
         endif()
+        if(ARG_STARTUP_TRACE)
+            message(FATAL_ERROR "Frontend '${name}' cannot use STARTUP_TRACE without OPTION")
+        endif()
     endif()
     list(APPEND WEBFRONT_FRONTEND_REGISTRY "${name}")
     set_property(GLOBAL PROPERTY WEBFRONT_FRONTEND_REGISTRY "${WEBFRONT_FRONTEND_REGISTRY}")
     set(WEBFRONT_FRONTEND_REGISTRY "${WEBFRONT_FRONTEND_REGISTRY}" PARENT_SCOPE)
-    foreach(field OPTION POLICY DESCRIPTION SUPPORT SUPPORT_FILE SETUP TEST_SETUP TEST_NAME TEST_TIMEOUT PLATFORMS TEST_PLATFORMS XVFB_LINUX NATIVE)
+    foreach(field OPTION POLICY DESCRIPTION SUPPORT SUPPORT_FILE SETUP TEST_SETUP TEST_NAME TEST_TIMEOUT PLATFORMS TEST_PLATFORMS XVFB_LINUX NATIVE STARTUP_TRACE)
         set_property(GLOBAL PROPERTY WEBFRONT_FRONTEND_${name}_${field} "${ARG_${field}}")
         set(WEBFRONT_FRONTEND_${name}_${field} "${ARG_${field}}" PARENT_SCOPE)
     endforeach()
@@ -184,19 +187,19 @@ endfunction()
 
 webfront_register_frontend(DefaultBrowser ALWAYS_AVAILABLE)
 webfront_register_frontend(WebView2
-    NATIVE OPTION WEBFRONT_EMBED_WEBVIEW2 POLICY strict
+    NATIVE STARTUP_TRACE OPTION WEBFRONT_EMBED_WEBVIEW2 POLICY strict
     DESCRIPTION "Download the pinned WebView2 SDK and link its static loader (Windows only)"
     PLATFORMS Windows SUPPORT WebView2Support
     TEST_PLATFORMS Windows TEST_NAME WebFrontWebView2Integration TEST_TIMEOUT 90
     TEST_SETUP webfront_add_webview2_tests)
 webfront_register_frontend(WKWebView
-    NATIVE OPTION WEBFRONT_EMBED_WKWEBVIEW POLICY strict
+    NATIVE STARTUP_TRACE OPTION WEBFRONT_EMBED_WKWEBVIEW POLICY strict
     DESCRIPTION "Link the system Cocoa and WebKit frameworks for WKWebViewFrontend (macOS 13.3+ only)"
     PLATFORMS Darwin SUPPORT WKWebViewSupport
     TEST_PLATFORMS Darwin TEST_NAME WebFrontWKWebViewIntegration TEST_TIMEOUT 90
     TEST_SETUP webfront_add_wkwebview_tests)
 webfront_register_frontend(WebKitGTK
-    NATIVE OPTION WEBFRONT_EMBED_WEBKITGTK POLICY strict
+    NATIVE STARTUP_TRACE OPTION WEBFRONT_EMBED_WEBKITGTK POLICY strict
     DESCRIPTION "Enable the system WebKitGTK 6.0 embedded frontend (Linux only)"
     PLATFORMS Linux SUPPORT WebKitGTKSupport
     TEST_PLATFORMS Linux TEST_NAME WebFrontWebKitGTKIntegration TEST_TIMEOUT 90 XVFB_LINUX
@@ -448,6 +451,25 @@ function(webfront_add_browser_tests target frontend assets_directory lifecycle_t
             webfront_set_browser_test_properties("${lifecycle_name}" "${assets_directory}"
                 "${WEBFRONT_FRONTEND_${frontend}_TEST_TIMEOUT}")
         endforeach()
+        # Start-up time of the native windows, cold and warm (#611), only for a frontend that declared STARTUP_TRACE: the
+        # script reads the `WebFront startup: window shown at <ms> ms` milestone that WEBFRONT_STARTUP_TRACE=1 prints.
+        if(WEBFRONT_FRONTEND_${frontend}_STARTUP_TRACE)
+            foreach(temperature cold warm)
+                set(startup_name "${frontend}StartupTime-${temperature}")
+                set(startup_limit 10000)
+                if(temperature STREQUAL "warm")
+                    set(startup_limit 5000)
+                endif()
+                add_test(NAME ${startup_name} COMMAND "${CMAKE_COMMAND}"
+                    "-DPROGRAM=${lifecycle_command}" "-DWORK_DIRECTORY=${assets_directory}"
+                    "-DSCRATCH=${CMAKE_CURRENT_BINARY_DIR}/startup-${frontend}-${temperature}"
+                    -DTEMPERATURE=${temperature} -DLIMIT_MS=${startup_limit}
+                    -P "${PROJECT_SOURCE_DIR}/test/cmake/RunStartupTime.cmake")
+                list(APPEND shared_tests "${startup_name}")
+                webfront_set_browser_test_properties("${startup_name}" "${assets_directory}" 180)
+                set_property(TEST ${startup_name} APPEND PROPERTY LABELS startup)
+            endforeach()
+        endif()
         if(NOT ARG_SKIP_JASMINE)
             set(name "${WEBFRONT_FRONTEND_${frontend}_TEST_NAME}")
             add_test(NAME ${name} COMMAND ${command} ${ARG_ARGUMENTS})
