@@ -5,6 +5,7 @@
 #include <webfront/components/forms/Form.hpp>
 #include <webfront/system/FileSystem.hpp>
 #include <webfront/tooling/Logger.hpp>
+#include <webfront/PtyPage.hpp>
 #include <webfront/WebFront.hpp>
 
 #include "../driver/WfDriver.hpp"
@@ -113,6 +114,11 @@ public:
         if (!mediaFile.empty()) filesystem::remove(mediaFile, ignored);
     }
 
+    void configureApplication(WebFrontConfig& config) {
+        config.contentPolicy.allowMissingOrigin = false;
+        config.allowPtyPages = true;
+    }
+
     /// Registers the callbacks of the specs before the page opens; the rejecting WebSocket server starts after the CEF
     /// subprocesses have dispatched (driver main), in the browser process.
     void configure(TestWF& app) {
@@ -120,6 +126,14 @@ public:
         webFront = &app;
         rejectedWebSocket.emplace();
         registerCallbacks();
+        registerPtyPage(app, {
+#ifdef _WIN32
+            .argv = {"cmd.exe", "/d", "/q"},
+#else
+            .argv = {"sh", "-i"},
+#endif
+            .directory = {}, .environment = {{"WF_PTY_MARKER", "WEBFRONT_PTY_OK"}}, .size = {}
+        });
         registerBitsetCallbacks();
         registerListCallbacks();
         lifeReactSubscription = demo::installLifeReact(app);

@@ -17,6 +17,7 @@
     "site": "js/developer/scripts/site.mjs",
     "pin": "js/developer/scripts/pin.mjs",
     "react-package": "js/developer/scripts/react-package.mjs",
+    "pty-package": "js/developer/scripts/pty-package.mjs",
     "services-package": "js/developer/scripts/services-package.mjs",
     "test-registry": "test/web/registry/build.mjs"
   },
@@ -43,6 +44,7 @@
       "js/developer/webfront-packages.lock.json",
       ".webfront/developer/packages",
       "js/core",
+      "js/pty",
       "js/react",
       "js/services",
       "js/developer/environment",
@@ -61,6 +63,7 @@
       "build-developer-environment",
       "build-site",
       "build-registry",
+      "build-pty-package",
       "build-react-package",
       "build-services-package",
       "js/core/bootstrap/bootstrap.bundle.mjs",

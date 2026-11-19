@@ -410,13 +410,20 @@ def consumer(args):
                     assert owner.poll() is None, (root / "consumer.log").read_text()
                     assert time.monotonic() < deadline, "The application never published its endpoint"
                     time.sleep(0.05)
-                # Discoverable by an agent that was told nothing, without the capability.
-                listed = subprocess.run([args.agent, "--list", "--sessions-dir", str(sessions)],
-                                        capture_output=True, text=True, timeout=10)
-                assert listed.returncode == 0, listed.stderr
+                # The endpoint is published before the discovery record. Wait for the
+                # record as well, polling without the private attachment capability.
                 token = json.loads((endpoint / "endpoint.json").read_text())["token"]
-                assert token not in listed.stdout + listed.stderr
-                entries = json.loads(listed.stdout)["sessions"]
+                while True:
+                    listed = subprocess.run([args.agent, "--list", "--sessions-dir", str(sessions)],
+                                            capture_output=True, text=True, timeout=10)
+                    assert listed.returncode == 0, listed.stderr
+                    assert token not in listed.stdout + listed.stderr
+                    entries = json.loads(listed.stdout)["sessions"]
+                    if entries:
+                        break
+                    assert owner.poll() is None, (root / "consumer.log").read_text()
+                    assert time.monotonic() < deadline, f"The application never registered its session: {listed.stdout}"
+                    time.sleep(0.05)
                 assert len(entries) == 1 and entries[0]["state"] == "running", listed.stdout
                 assert sorted(entries[0]["allow"]) == sorted(["check", "build", "preview", "inspect", "interact", "call"]), entries
                 assert entries[0]["callbacks"] == ["consumer.render"], entries

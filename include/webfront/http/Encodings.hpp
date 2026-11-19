@@ -127,10 +127,10 @@ namespace detail {
                                     'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r',
                                     's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '/'};
 
-    std::string output((4 * (size + 2) / 3), '\0');
+    std::string output(4 * ((size + 2) / 3), '\0');
     auto coded = output.begin();
     size_t i = 0;
-    for (; i < size - 2; i += 3) {
+    for (; size - i >= 3; i += 3) {
         *coded++ = code[(input[i] >> 2) & 0x3Fu];
         *coded++ = code[((input[i] & 0x3u) << 4) | ((input[i + 1] & 0xF0u) >> 4)];
         *coded++ = code[((input[i + 1] & 0xFu) << 2) | ((input[i + 2] & 0xC0u) >> 6)];
@@ -148,8 +148,6 @@ namespace detail {
         }
         *coded++ = '=';
     }
-    if (coded != output.end()) output.erase(coded);
-
     return output;
 }
 } // namespace detail

@@ -46,6 +46,10 @@
 
 namespace webfront {
 
+namespace pty::detail {
+struct PageRegistration;
+}  // namespace pty::detail
+
 inline constexpr std::string_view version = "1.0.0";
 
 namespace testing {
@@ -509,6 +513,8 @@ struct WebFrontConfig {
     /// from an address or a `Forwarded` header. `loopbackAttested` is refused at construction unless `address` is a
     /// loopback address; the other declarations are the integrator's word, which WebFront does not verify.
     RemoteFileTransport   remoteFileTransport = RemoteFileTransport::refused;
+    /// Allows the optional PtyPage component. Requires a literal loopback bind and a bridge policy limited to the application's Origin.
+    bool                  allowPtyPages = false;
 };
 
 namespace detail {
@@ -601,6 +607,16 @@ inline const std::string& checkedAddress(const WebFrontConfig& config) {
     return config.address;
 }
 
+inline WebFrontConfig checkedPtyPageConfig(WebFrontConfig config) {
+    if (config.allowPtyPages) {
+        if (!isLoopbackName(config.address) || (config.address.contains(':') && config.address != "::1"))
+            throw std::invalid_argument("PTY pages require a literal loopback listening address (127.x.y.z or ::1)");
+        if (config.contentPolicy.allowMissingOrigin || config.contentPolicy.allowAnyBridgeOrigin || !config.contentPolicy.bridgeAllowedOrigins.empty())
+            throw std::invalid_argument("PTY pages require a bridge policy limited to the application's own Origin");
+    }
+    return config;
+}
+
 /// The read binding of a configuration, which is refused here, before anything is bound, if its declaration is false.
 inline std::shared_ptr<ReadBinding> makeReadBinding(const WebFrontConfig& config) {
     checkedAddress(config);
@@ -620,7 +636,11 @@ public:
     // Newcomer-friendly defaults: loopback address, port 9002, no local document root.
     BasicWF() : BasicWF(WebFrontConfig{}) {}
 
-    explicit BasicWF(WebFrontConfig config)
+    explicit BasicWF(WebFrontConfig config) : BasicWF(detail::checkedPtyPageConfig(std::move(config)), CheckedConfig{}) {}
+
+private:
+    struct CheckedConfig {};
+    BasicWF(WebFrontConfig config, CheckedConfig)
         : readBinding(detail::makeReadBinding(config)),
           httpServer((detail::ensureFrontendInitialized<Frontend>(), config.address), config.port, config.documentRoot, config.contentPolicy),
           httpAddress(config.address),
@@ -629,6 +649,7 @@ public:
           contentPolicy(std::move(config.contentPolicy)),
           windowOptions(std::move(config.window)),
           trustLoopbackClients(config.trustLoopbackClients),
+          ptyPagesAllowed(config.allowPtyPages),
           idsCounter(0) {
         // Links are created on the server thread, outside the lock: identifiers are only assigned here.
         httpServer.onUpgrade([this](typename Net::Socket&& socket) {
@@ -663,6 +684,9 @@ public:
         bindRoute = httpServer.addRoute(std::string(ReadBinding::bindPath), readBinding->exchangeHandler(), true);
     }
 
+public:
+    [[nodiscard]] bool allowsPtyPages() const noexcept { return ptyPagesAllowed; }
+
     // Preserved for source compatibility; binds all interfaces like it always has, unlike the
     // loopback-by-default WebFrontConfig constructor above.
     explicit BasicWF(std::string_view port, std::filesystem::path docRoot = ".")
@@ -680,6 +704,7 @@ public:
         // Coroutine cleanup may use its UI, so links stay alive through the join.
         httpServer.drainUntilJoined();
         releaseLinks();
+        closePtyPages();
     }
 
     /** @brief Stops and joins owned work before returning. Call outside server callbacks,
@@ -690,6 +715,7 @@ public:
         // Application coroutine cleanup may still use its UI: retain links until join.
         httpServer.drain();
         releaseLinks();
+        closePtyPages();
     }
 
     /** @brief Thread-safe while the application lives. Starts on the server thread.
@@ -1207,6 +1233,15 @@ private:
         }
     }
 
+    friend struct pty::detail::PageRegistration;
+    std::vector<std::function<void()>> ptyPageCleanups;
+
+    void closePtyPages() {
+        for (const auto& cleanup : ptyPageCleanups)
+            cleanup();
+        ptyPageCleanups.clear();
+    }
+
     void stopAndJoinServer() {
         stop();
         if (serverThread.joinable())
@@ -1383,6 +1418,7 @@ private:
     WindowOptions                                                            windowOptions;
     const std::string                                                        viewSecret = detail::newViewSecret();  // this launch's proof of an embedded view
     const bool                                                               trustLoopbackClients;
+    const bool                                                               ptyPagesAllowed;
     bool                                                                     developerEnvironment = false;
     std::atomic<bool>                                                        launched{false};  // start() was called
     std::atomic<std::thread::id>                                             showThread{};  // the thread inside this application's Frontend::open(), if any

@@ -22,6 +22,7 @@
     #include <cwchar>
 
     #include <windows.h>
+    #include "../system/WindowsArguments.hpp"
 #else
     #include <cerrno>
     #include <csignal>
@@ -117,40 +118,8 @@ inline void appendBounded(std::string& into, const char* data, std::size_t size,
 
 #ifdef _WIN32
 
-inline std::wstring toWide(const std::string& text) {
-    if (text.empty())
-        return {};
-    const int size = ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), nullptr, 0);
-    if (size <= 0)
-        throw std::invalid_argument("Text is not valid UTF-8");
-    std::wstring wide(static_cast<std::size_t>(size), L'\0');
-    ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), wide.data(), size);
-    return wide;
-}
-
-/// The CommandLineToArgvW / MSVCRT quoting: the program receives exactly the argument.
-inline std::wstring quoteWindowsArgument(const std::wstring& argument) {
-    if (!argument.empty() && argument.find_first_of(L" \t\n\v\"") == std::wstring::npos)
-        return argument;
-    std::wstring quoted = L"\"";
-    for (auto it = argument.begin();; ++it) {
-        std::size_t backslashes = 0;
-        while (it != argument.end() && *it == L'\\') {
-            ++it;
-            ++backslashes;
-        }
-        if (it == argument.end()) {
-            quoted.append(backslashes * 2, L'\\');
-            break;
-        }
-        if (*it == L'"')
-            quoted.append(backslashes * 2 + 1, L'\\');
-        else
-            quoted.append(backslashes, L'\\');
-        quoted.push_back(*it);
-    }
-    return quoted + L'"';
-}
+using webfront::system::detail::quoteWindowsArgument;
+using webfront::system::detail::toWide;
 
 struct WindowsHandle {
     HANDLE handle   = nullptr;

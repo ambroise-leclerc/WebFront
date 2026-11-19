@@ -644,7 +644,20 @@ const Scenario coroutineState{"A coroutine is the state machine of a sequential 
         {back,       "2"},
         {next,       "3"}
     };
+#if defined(_MSC_VER) && _MSC_VER >= 1952
+    // MSVC 19.52 rejects stdexec's when_all with two coroutine task senders.
+    // Exercise both coroutines on the server's shared scheduler instead.
+    ::stdnet::io_context context;
+    networking::TaskScope scope;
+    const auto scheduler = context.get_scheduler();
+    const bool wizardStarted = networking::Spawn(scope, scheduler, wizard(next, back, steps));
+    const bool clicksStarted = networking::Spawn(scope, scheduler, clicks(document.state, std::move(sequence)));
+    context.run();
+    scope.drain(context);
+    require(wizardStarted && clicksStarted);
+#else
     ex::sync_wait(ex::when_all(wizard(next, back, steps), clicks(document.state, std::move(sequence))));
+#endif
     require(steps == std::vector<std::string>{"name: 1", "back: 2", "done: 3"});
     require(document.state->waiters.empty());
 }};

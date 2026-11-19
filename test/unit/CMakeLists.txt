@@ -42,7 +42,7 @@ set_tests_properties(BddSelfTest BddDiscovery PROPERTIES TIMEOUT 30 LABELS fast)
 set(TESTS_LIST)
 list(APPEND TESTS_LIST WebKitGTKPolicyTests.cpp ContentPolicyTests.cpp HTTPServerTests.cpp HTTPEncodingTests.cpp GzipExecutorTests.cpp AcceptEncodingTests.cpp GzipTests.cpp ModuleHTTPServerTests.cpp HTTPRoutesTests.cpp HTTPRangeTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp MimeTypeTests.cpp)
 list(APPEND TESTS_LIST FormsTests.cpp ReactStoreTests.cpp DomDocumentTests.cpp DomBatchTests.cpp JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)
-list(APPEND TESTS_LIST FileSystemTests.cpp NativeFSTests.cpp DownloadsTests.cpp StorageTests.cpp NativeStorageTests.cpp)
+list(APPEND TESTS_LIST FileSystemTests.cpp NativeFSTests.cpp DownloadsTests.cpp StorageTests.cpp NativeStorageTests.cpp PtyTests.cpp)
 list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp SafePathTests.cpp UISubscribersTests.cpp)
 list(APPEND TESTS_LIST ReadBindingTests.cpp ViewAssociationTests.cpp BroadcastTests.cpp WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp)
 list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp AutomationTests.cpp AutomationChannelTests.cpp AutomationStdioTests.cpp AutomationDiscoveryTests.cpp JasmineConsumerTests.cpp HostTests.cpp LifeTests.cpp HostLoopTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp DeferredCallTests.cpp)
@@ -71,6 +71,11 @@ target_compile_features(host_probe PRIVATE cxx_std_23)
 target_link_libraries(host_probe PRIVATE WebFront_test_hardening WebFront_warnings)
 add_dependencies(tests host_probe)
 target_compile_definitions(tests PRIVATE WEBFRONT_HOST_PROBE="$<TARGET_FILE:host_probe>")
+
+add_executable(pty_probe ../fixtures/pty/Probe.cpp)
+target_link_libraries(pty_probe PRIVATE WebFront WebFront_test_hardening WebFront_warnings)
+add_dependencies(tests pty_probe)
+target_compile_definitions(tests PRIVATE WEBFRONT_PTY_PROBE="$<TARGET_FILE:pty_probe>")
 
 # The heavy units instantiate a full application, and compile four to a file in about half the time of four apart
 # (docs/BUILD_TIME_STUDY.md): that is the default. 0 keeps one object per test file, which the portability and

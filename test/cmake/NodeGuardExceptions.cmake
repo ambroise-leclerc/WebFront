@@ -31,6 +31,9 @@ set(NODE_GUARD_EXCEPTIONS
     "test/cmake/CheckRepositoryLayoutNegative.cmake|node-config|tracks such a directory in a scratch repository to prove that the layout guard rejects it"
     "docs/DEVELOPER_ENVIRONMENT.md|node-config|states which directories wf check never lists, the TypeScript layout among them"
     # Data of dependencies.
+    "examples/pty/webfront-packages.lock.json|node-command|the lock records xterm package metadata verbatim and no package scripts are run"
+    "examples/pty/webfront-packages.lock.json|npm-command|the lock records xterm package metadata verbatim and no package scripts are run"
+    "examples/pty/webfront-packages.lock.json|node-config|the lock records xterm package metadata verbatim and no package scripts are run"
     "js/developer/webfront-packages.lock.json|node-command|the lock records the package.json scripts of its dependencies verbatim, and nothing runs them"
     "js/developer/webfront-packages.lock.json|npm-command|the lock records the package.json scripts of its dependencies verbatim, and nothing runs them"
     "js/developer/webfront-packages.lock.json|node-config|the lock records the file lists of its dependencies verbatim"
