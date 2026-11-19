@@ -101,7 +101,9 @@ inline std::vector<LongStack> longStacks(std::string_view css) {
     }
     std::vector<LongStack> found;
     constexpr std::string_view property = "font-family";
-    for (std::size_t at = clean.find(property); at != std::string::npos; at = clean.find(property, at + 1)) {
+    std::size_t next = 0;  // where the search resumes: after an analysed declaration, whose quoted family may repeat the name
+    for (std::size_t at = clean.find(property); at != std::string::npos; at = clean.find(property, next)) {
+        next = at + 1;
         if (at > 0 && (std::isalnum(static_cast<unsigned char>(clean[at - 1])) || clean[at - 1] == '-'))
             continue;  // `--font-family` or `x-font-family`: a custom property, not the declaration
         auto colon = at + property.size();
@@ -110,6 +112,7 @@ inline std::vector<LongStack> longStacks(std::string_view css) {
         if (colon >= clean.size() || clean[colon] != ':')
             continue;
         const auto end   = clean.find_first_of(";}", colon + 1);
+        next             = end == std::string::npos ? clean.size() : end;
         const auto value = std::string(detail::trim(std::string_view(clean).substr(colon + 1, end == std::string::npos ? std::string::npos : end - colon - 1)));
         if (value.find("var(") != std::string::npos || detail::lower(value) == "inherit")
             continue;
@@ -138,25 +141,25 @@ inline std::map<std::string, std::string>& seenVersions() {
 }
 }  // namespace detail
 
-/// Whether the stylesheet `name` has not been checked yet at this `version`, a stamp that changes when the file does
+/// Whether the stylesheet `name` has not been checked yet at this `stamp`, a stamp that changes when the file does
 /// (lets a caller skip reading it again, and read it again once it is edited).
-inline bool unchecked(const std::string& name, const std::string& version) {
+inline bool unchecked(const std::string& name, const std::string& stamp) {
     std::scoped_lock lock{detail::seenMutex()};
     const auto       found = detail::seenVersions().find(name);
-    return found == detail::seenVersions().end() || found->second != version;
+    return found == detail::seenVersions().end() || found->second != stamp;
 }
 
-/// Writes one warning for each long stack of the stylesheet `name` at `version`, once per name and version for the life
-/// of the process: an edited file (another version) is checked again, an unchanged one is not.
+/// Writes one warning for each long stack of the stylesheet `name` at `stamp`, once per name and stamp for the life
+/// of the process: an edited file (another stamp) is checked again, an unchanged one is not.
 /// @return the number of warnings written
-inline std::size_t warnLongStacks(const std::string& name, std::string_view css, const std::string& version = {}) {
+inline std::size_t warnLongStacks(const std::string& name, std::string_view css, const std::string& stamp = {}) {
     {
         std::scoped_lock lock{detail::seenMutex()};
-        auto [entry, inserted] = detail::seenVersions().try_emplace(name, version);
+        auto [entry, inserted] = detail::seenVersions().try_emplace(name, stamp);
         if (!inserted) {
-            if (entry->second == version)
+            if (entry->second == stamp)
                 return 0;
-            entry->second = version;
+            entry->second = stamp;
         }
     }
     const auto stacks = longStacks(css);

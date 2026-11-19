@@ -31,7 +31,10 @@ set(environment
     "XDG_DATA_HOME=${SCRATCH}/data"
     "XDG_CONFIG_HOME=${SCRATCH}/config")
 if(WIN32)
-    list(APPEND environment "LOCALAPPDATA=${SCRATCH}/data" "APPDATA=${SCRATCH}/config")
+    # WebView2 takes its profile from the known-folder API, which LOCALAPPDATA does not redirect: name it explicitly.
+    # The priming and the measured start of the warm case share the path.
+    list(APPEND environment "LOCALAPPDATA=${SCRATCH}/data" "APPDATA=${SCRATCH}/config"
+        "WEBVIEW2_USER_DATA_FOLDER=${SCRATCH}/profile")
 endif()
 
 function(start_once label)
