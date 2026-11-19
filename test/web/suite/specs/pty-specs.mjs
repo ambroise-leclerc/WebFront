@@ -68,7 +68,8 @@ describe('Native PTY page adapter', () => {
             terminal.send('echo WEBFRONT_PTY_OK\r');
             terminal.send('exit 42\r');
             expect(await exit.promise).toBe(42);
-            expect(terminal.text).toMatch(/\nWEBFRONT_PTY_OK(?:\r?\n|$)/);
+            // ConPTY can move the cursor directly to the next prompt instead of emitting CRLF.
+            expect(terminal.text).toMatch(/\nWEBFRONT_PTY_OK(?=\r?\n|\x1b\[|$)/);
         } finally {
             session.dispose();
         }
