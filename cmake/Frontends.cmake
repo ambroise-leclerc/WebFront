@@ -458,7 +458,7 @@ function(webfront_add_browser_tests target frontend assets_directory lifecycle_t
                 endif()
                 add_test(NAME ${startup_name} COMMAND "${CMAKE_COMMAND}"
                     "-DPROGRAM=${lifecycle_command}" "-DWORK_DIRECTORY=${assets_directory}"
-                    "-DSCRATCH=${CMAKE_CURRENT_BINARY_DIR}/startup-${temperature}"
+                    "-DSCRATCH=${CMAKE_CURRENT_BINARY_DIR}/startup-${frontend}-${temperature}"
                     -DTEMPERATURE=${temperature} -DLIMIT_MS=${startup_limit}
                     -P "${PROJECT_SOURCE_DIR}/test/cmake/RunStartupTime.cmake")
                 list(APPEND shared_tests "${startup_name}")

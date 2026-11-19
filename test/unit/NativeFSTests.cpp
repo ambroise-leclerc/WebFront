@@ -334,3 +334,26 @@ const Scenario nativeDebugFSFontStacks{"NativeDebugFS warns once about costly fo
         });
     });
 }};
+// Two document roots serving a stylesheet of the same name are each checked (#611).
+const Scenario nativeDebugFSFontStacksPerRoot{"NativeDebugFS checks a same-named stylesheet of each document root", [] {
+    given("two roots with a long font stack in style.css", [&] {
+        TemporaryTestEnvironment first;
+        TemporaryTestEnvironment second;
+        first.createTextFile("style.css", "body { font-family: aa1, bb1, cc1, dd1; }");
+        second.createTextFile("style.css", "body { font-family: aa2, bb2, cc2, dd2; }");
+        when("each root serves it", [&] {
+            std::ostringstream warnings;
+            fonts::warningOutput = &warnings;
+            DebugFS one(first.getTestDir());
+            DebugFS two(second.getTestDir());
+            require(one.open("style.css").has_value());
+            require(two.open("style.css").has_value());
+            fonts::warningOutput = nullptr;
+            const auto text = warnings.str();
+            then("both are reported", [&] {
+                require(text.find("aa1") != string::npos);
+                require(text.find("aa2") != string::npos);
+            });
+        });
+    });
+}};

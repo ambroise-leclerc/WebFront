@@ -38,14 +38,16 @@ public:
     /// checked is not read again.
     std::optional<File> open(std::filesystem::path path) {
         auto file = NativeRawFS::open(path);
-        if (file && path.extension() == ".css" && fonts::unchecked(path.generic_string())) {
+        // Keyed by the full path: two roots may each serve a style.css.
+        const auto full = (rootPath / path).generic_string();
+        if (file && path.extension() == ".css" && fonts::unchecked(full)) {
             try {
                 std::error_code size;
                 const auto      bytes = std::filesystem::file_size(rootPath / path, size);
                 if (!size && bytes <= 1024 * 1024) {
                     std::ifstream css(rootPath / path, std::ios::binary);
                     std::string   text(std::istreambuf_iterator<char>(css), {});
-                    fonts::warnLongStacks(path.generic_string(), text);
+                    fonts::warnLongStacks(full, text);
                 }
             } catch (...) {  // a hint must never fail a request
             }
