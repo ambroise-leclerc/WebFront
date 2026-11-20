@@ -168,6 +168,21 @@ jobs:
           fi
           echo "Configuration checks: $configuration"
           echo "WEBFRONT_CONFIGURATION=$configuration" >> "$GITHUB_ENV"
+      # The MSVC code analysis (/analyze, about 22 % of a Windows build) belongs to the full tier, so a warning of the analyzer
+      # in Windows-only code went unseen in pull requests into develop until the release pull request (#628). A pull request into
+      # develop that changes Windows code (the PTY, the Windows frontends, any file named for Windows) runs it too. A cached
+      # build replays the compiler's diagnostics, so the cache never hides a warning; the tier did.
+      - name: Decide whether the MSVC analysis runs
+        shell: bash
+        run: |
+          analysis=$FULL_TIER
+          if [ "$FULL_TIER" != true ] && [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            if git diff --name-only HEAD^1 HEAD | grep -iE '^(include/webfront/components/pty/|include/webfront/frontend/WebView2|cmake/WebView2|cmake/CompilerWarnings|\.github/workflows/BuildAndTest\.yml)|windows|win32' > /dev/null; then
+              analysis=true
+            fi
+          fi
+          echo "MSVC analysis: $analysis"
+          echo "WEBFRONT_MSVC_ANALYSIS=$analysis" >> "$GITHUB_ENV"
       # No step of a build or of its tests needs a JavaScript runtime or package manager: the runner has none from here on.
       - uses: ./.github/actions/remove-node
       - uses: ./.github/actions/setup-cmake
@@ -216,7 +231,8 @@ jobs:
           -DWEBFRONT_TEST_UNITY_BATCH=4
           -DWEBFRONT_TEST_UNIT_SHARDS=4
           -DWEBFRONT_TEST_REPRODUCIBILITY=${{ env.WEBFRONT_REPRODUCIBILITY }}
-          ${{ env.FULL_TIER == 'true' && '-DWEBFRONT_MSVC_ANALYZE=ON -DWEBFRONT_BUILD_EXAMPLES=ON' || '-DWEBFRONT_MSVC_ANALYZE=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF' }}
+          ${{ env.FULL_TIER == 'true' && '-DWEBFRONT_BUILD_EXAMPLES=ON' || '-DWEBFRONT_BUILD_EXAMPLES=OFF' }}
+          -DWEBFRONT_MSVC_ANALYZE=${{ env.WEBFRONT_MSVC_ANALYSIS == 'true' && 'ON' || 'OFF' }}
           ${{ matrix.options }}
       - name: Build
         run: cmake --build build --config ${{ matrix.build_type }} --parallel 4 ${{ runner.os == 'Windows' && '-- -k 0' || '' }}

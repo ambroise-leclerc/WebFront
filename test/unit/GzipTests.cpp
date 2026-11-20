@@ -378,7 +378,7 @@ const Scenario gzipBuffered{"Gzip buffered reads preserve logical byte offsets a
                     std::uint32_t expected = 0;
                     for (unsigned bit = 0; bit < width; ++bit) {
                         const auto offset = alignment + bit;
-                        expected         |= ((static_cast<unsigned char>(bytes[offset / 8]) >> (offset % 8)) & 1u) << bit;
+                        expected         |= ((static_cast<unsigned>(static_cast<unsigned char>(bytes[offset / 8])) >> (offset % 8)) & 1u) << bit;
                     }
                     auto scope = info("alignment ", alignment, ", width ", width);
                     require(reader.bits(width) == expected);

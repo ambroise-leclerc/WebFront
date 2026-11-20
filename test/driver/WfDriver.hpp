@@ -112,6 +112,13 @@ struct UsageError : std::invalid_argument {
     using std::invalid_argument::invalid_argument;
 };
 
+/// What main checks on the file system before an engine that needs a display starts: a missing project is a usage error,
+/// whatever the display (#628). parse() itself reads arguments only, so that it can be tested without a directory.
+inline void requireProject(const Options& options) {
+    if (!std::filesystem::is_directory(options.project))
+        throw UsageError("Project directory not found: " + options.project.string());
+}
+
 inline Options parse(int argc, char** argv) {
     Options                        options;
     const std::vector<std::string> arguments(argv + 1, argv + argc);
@@ -503,7 +510,10 @@ int run(const Options& options, Setup&& setup = {}) {
 template <typename Frontend, typename Setup = PlainSetup>
 int main(int argc, char** argv, std::string_view program, Setup&& setup = {}) {
     try {
-        // CEF child processes must dispatch before interpreting application arguments or creating files.
+        // A usage error needs no display: the arguments are checked before an engine that requires one starts (#628). CEF child
+        // processes must instead dispatch before interpreting application arguments or creating files.
+        if constexpr (!std::is_same_v<Frontend, frontend::CEFFrontend>)
+            requireProject(parse(argc, argv));
         webfront::detail::ensureFrontendInitialized<Frontend>();
         [[maybe_unused]] const auto requestLog = logRequests();
 #if defined(WEBFRONT_EMBED_CEF) && defined(__linux__)

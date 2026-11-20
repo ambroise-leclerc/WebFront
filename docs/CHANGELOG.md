@@ -10,6 +10,17 @@ these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
+## [1.1.1] - 2026-11-20
+
+WebFront 1.1.1 ships with developer environment 1.0.1. It repairs the desktop CI jobs that the 1.1.0 release exposed (a Windows
+code-analysis error in the PTY, a macOS socket option error) and removes the GCC 13 warnings. No breaking change.
+
+### Added
+- Run the MSVC code analysis in a pull request into `develop` that changes Windows code, and list the reruns each job needed before going green with `FlakeReport.py --days` (#628, `docs/TEST_TIERS.md`, `docs/TEST_PERFORMANCE.md`).
+
+### Fixed
+- Pass the compiler analysis on the Windows pseudoterminal when it cannot prove the attribute list non-null (C6387), stop a unit test from opening the developer's real browser (the directory of its replacement opener was removed before the shell found it), and keep an accepted connection whose `TCP_NODELAY` the system refuses, as macOS does after a reset (#628).
+
 ## [1.1.0] - 2026-11-20
 
 WebFront 1.1 ships with developer environment 1.0.1. It adds POST routes with a bounded body, application-selected programs
@@ -259,7 +270,8 @@ Coroutines and the opt-in developer environment. One **breaking** change to the 
 
 - Fail decoding when a bridge integer is out of the requested C++ range, instead of invoking undefined behavior.
 
-[Unreleased]: https://github.com/ambroise-leclerc/WebFront/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/ambroise-leclerc/WebFront/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/ambroise-leclerc/WebFront/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/ambroise-leclerc/WebFront/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ambroise-leclerc/WebFront/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/ambroise-leclerc/WebFront/compare/v0.8.0...v0.9.0
