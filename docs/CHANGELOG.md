@@ -28,7 +28,7 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Fixed
 - Accept HTTP request headers with optional spaces or tabs after the colon, tabs in values, and empty values (#621).
-- Read an obsolete line fold in a request header as one space (RFC 9112 §5.2), not as the two lines glued together: a `Content-Length` folded as `1` and `0` was read as `10` (#619).
+- Read an obsolete line fold in a request header as one space (RFC 9112, section 5.2), not as the two lines glued together: a `Content-Length` folded as `1` and `0` was read as `10` (#619).
 - Keep the input focus of the developer terminal after a click on the page around it (title, notice, blank areas) while the terminal has the window, selection and controls excepted (#608).
 - Remove the white flash of an embedded view between the developer environment's bootstrap page and the project's page, by giving the window the environment's dark colour (`#141821`) when the application sets none; on macOS the view then no longer paints its own white behind it (#611, `docs/WKWEBVIEW.md`).
 - Select detected GPU architectures supported by nvcc by default for the host-loop CUDA renderer (`docs/HOST_LOOP_EXAMPLE.md`).
