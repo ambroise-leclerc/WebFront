@@ -507,9 +507,20 @@ inline bool noteDevelopmentPath() {
 /// empty ("0" asks for a free port, so any number of instances can run side by side), "9002" otherwise. A value that is not a
 /// port number throws std::invalid_argument.
 [[nodiscard]] inline std::string defaultPort() {
-    if (const char* value = std::getenv("WEBFRONT_PORT"); value != nullptr && *value != '\0')
-        return validatedPort(value, "WEBFRONT_PORT");
-    return "9002";
+    std::string value;
+#ifdef _WIN32
+    // std::getenv is deprecated for MSVC (C4996, an error with /WX); _dupenv_s copies the value.
+    char*  buffer = nullptr;
+    size_t length = 0;
+    if (_dupenv_s(&buffer, &length, "WEBFRONT_PORT") == 0 && buffer != nullptr) {
+        value = buffer;
+        std::free(buffer);
+    }
+#else
+    if (const char* found = std::getenv("WEBFRONT_PORT"))
+        value = found;
+#endif
+    return value.empty() ? std::string("9002") : validatedPort(value, "WEBFRONT_PORT");
 }
 
 /**
