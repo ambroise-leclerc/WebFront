@@ -95,7 +95,11 @@ A pull request into `develop` builds the library, the tests and the test applica
 off and without the examples (`WEBFRONT_MSVC_ANALYZE=OFF`, `WEBFRONT_BUILD_EXAMPLES=OFF`): about 22 % and 190 s of compiler
 time on Windows (docs/BUILD_TIME_STUDY.md). The advanced checks below turn both on again, so a warning that only the analysis
 reports, or an example that no longer compiles, is found by the weekly run, by the pull request into `master` or by a manual
-dispatch with `repeat_desktop_tests`, not by a pull request into `develop`.
+dispatch with `repeat_desktop_tests`, not by a pull request into `develop`. One exception, since a C6387 of the PTY reached
+the release pull request unseen (#628): a pull request into `develop` that changes Windows code (`components/pty/`, the
+WebView2 frontend, a file whose path contains `windows` or `win32`, the warning options or the workflow) runs the analysis too.
+The compiler cache is not a cause: sccache replays the diagnostics of a cached object, so a cached build reports what a clean
+one does.
 
 The proofs that the self-built environment is reproducible and equal to the checked-in bundles (`SelfBuildRepeat`,
 `SelfBuildReproducible`, `SelfBuildRefresh`, `SelfBuildRefreshMatchesSources`) build it twice more, about 45 s on a hosted

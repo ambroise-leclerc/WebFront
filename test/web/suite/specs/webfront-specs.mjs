@@ -623,6 +623,10 @@ describe('HTTP byte ranges', () => {
         try {
             before = (await waits.step('mediaRanges baseline', () => webFront.cppFunction('mediaRanges')())).split('\n').length;
             await waits.event(video, 'loadedmetadata', () => { video.src = url; });
+            // WKWebView on a loaded macOS runner has reported a duration of 0 at loadedmetadata (#628): the duration is known
+            // once durationchange has reported it, not before.
+            if (!(video.duration > 19)) await waits.event(video, 'durationchange', () => {}, 'durationchange (known duration)',
+                () => video.duration > 19);
             expect(video.duration).toBeGreaterThan(19);
             // WebKit can still be finishing its initial positioning at loadedmetadata. Wait for actual data and
             // accept only a seeked at the requested position, not a queued event belonging to that initial load.

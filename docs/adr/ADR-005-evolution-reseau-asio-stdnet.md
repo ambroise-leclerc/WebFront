@@ -56,11 +56,11 @@ et WebSocket sont des `networking::Task` qui attendent les senders du provider.
 Que `TCPStdnet::Accept` active `stdnet::ip::tcp_no_delay(true)` avant de livrer
 chaque socket acceptée au serveur HTTP. L’option reste active après l’upgrade
 WebSocket : un message envoyé par un callback ne doit pas retenir son
-`functionReturn` en attendant un ACK retardé. Le réglage utilise la surcharge
-avec exception de `set_option` dans le sender d’acceptation. La propagation de cette
-erreur, la libération de la socket et la poursuite de la boucle suivent les mécanismes
-existants de stdnet, du sender et du serveur ; ce chemin de configuration en échec
-n’est pas couvert par un test de régression dédié.
+`functionReturn` en attendant un ACK retardé. Le réglage est une optimisation de latence : un échec de `set_option` (macOS répond
+`EINVAL` pour une connexion que le pair a déjà réinitialisée) n'est pas un échec
+d'acceptation. La socket est livrée quand même et sa première lecture ou écriture
+signale la connexion fermée (#628) ; ce chemin n'est pas couvert par un test de
+régression dédié, faute de moyen déterministe de provoquer l'erreur.
 Les mocks ne transportant aucun paquet peuvent ignorer cette option ; aucune
 opération supplémentaire n’est imposée au contrat des providers.
 

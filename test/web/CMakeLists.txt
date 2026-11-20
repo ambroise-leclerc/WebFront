@@ -429,10 +429,12 @@ if(_browser_tests_available)
             ENVIRONMENT "${CMAKE_CURRENT_BINARY_DIR}/wf-driver-work/absent.tgz")
         webfront_add_driver_test(WfDriverIncompatibleApi 70 "list" OUTPUT "api version 2, this application supports 1" FORGE "1:2")
         webfront_add_driver_test(WfDriverIncompatibleProtocol 70 "list" OUTPUT "protocol version 2, this application supports 1" FORGE "2:1")
+        # Usage errors are reported before an engine starts (#628): these two cases run without Xvfb, so that they do not
+        # depend on a display server starting.
         webfront_add_web_step(WfDriverUsage PROPERTIES PASS_REGULAR_EXPRESSION "A wf command is required"
-            COMMAND ${_developer_xvfb_prefix} $<TARGET_FILE:webfront-wf> --project "${_wf_project}")
+            COMMAND $<TARGET_FILE:webfront-wf> --project "${_wf_project}")
         webfront_add_web_step(WfDriverBadTimeout PROPERTIES PASS_REGULAR_EXPRESSION "--timeout expects whole seconds"
-            COMMAND ${_developer_xvfb_prefix} $<TARGET_FILE:webfront-wf> --project "${_wf_project}" --timeout abc -- list)
+            COMMAND $<TARGET_FILE:webfront-wf> --project "${_wf_project}" --timeout abc -- list)
 
         # The developer journey (#316), from the environment built from the sources and the local registry, on one project in an
         # empty directory: wf create, init, install, check, test, build, embed; the embedded application is then compiled

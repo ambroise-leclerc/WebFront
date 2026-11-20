@@ -3,7 +3,8 @@ import io
 import json
 import unittest
 from unittest.mock import patch
-from FlakeReport import attempts_to_read, failed_cases, main
+import datetime
+from FlakeReport import attempts_to_read, failed_cases, main, within_days
 
 
 class FlakeReportTests(unittest.TestCase):
@@ -29,6 +30,8 @@ class FlakeReportTests(unittest.TestCase):
         self.assertEqual(attempts_to_read({"conclusion": "failure", "attempt": 1}), [1])
         self.assertEqual(attempts_to_read({"conclusion": "success", "attempt": 1}), [])
         self.assertEqual(attempts_to_read({"conclusion": "failure"}), [1])
+        self.assertEqual(attempts_to_read({"conclusion": "timed_out", "attempt": 1}), [1])
+        self.assertEqual(attempts_to_read({"conclusion": "timed_out", "attempt": 2}), [1, 2])
 
     def test_a_log_without_ctest_has_no_case(self):
         self.assertEqual(failed_cases('ninja: build stopped: subcommand failed.\n'), [])
@@ -58,6 +61,73 @@ class FlakeReportTests(unittest.TestCase):
             self.assertIn(f'Windows Failed (develop, run 123, attempt {attempt} of 3)', output.getvalue())
         self.assertIn('  2  IntermittentCase', output.getvalue())
         self.assertNotIn('Failed jobs without a failed CTest case', output.getvalue())
+        self.assertIn('Reruns needed before green, per job', output.getvalue())
+        self.assertIn('  2  Windows', output.getvalue())
+
+    def test_a_job_that_timed_out_and_passed_once_run_again_counts_as_a_rerun(self):
+        run = {"databaseId": 7, "conclusion": "success", "headBranch": "develop", "attempt": 2}
+
+        def github(*arguments):
+            if arguments[:2] == ('run', 'list'):
+                return json.dumps([run])
+            if arguments[0] == 'api':
+                return json.dumps({"jobs": [{"id": 8, "name": "Windows", "conclusion": "timed_out", "steps": []},
+                                            {"id": 9, "name": "Linux", "conclusion": "success", "steps": []}]})
+            return 'no CTest here'
+
+        output = io.StringIO()
+        with patch('FlakeReport.gh', side_effect=github), patch('sys.argv', ['FlakeReport.py']), contextlib.redirect_stdout(output):
+            self.assertEqual(main(), 0)
+        self.assertIn('  1  Windows', output.getvalue())
+        self.assertNotIn('Linux', output.getvalue().split('Reruns needed')[1])
+
+    def test_a_listing_that_hits_its_limit_says_so_and_a_window_is_asked_of_github(self):
+        runs = [{"databaseId": n, "conclusion": "success", "headBranch": "develop", "attempt": 1} for n in range(3)]
+        listings = []
+
+        def github(*arguments):
+            if arguments[:2] == ('run', 'list'):
+                listings.append(arguments)
+                return json.dumps(runs)
+            self.fail(f'Unexpected GitHub command: {arguments}')
+
+        output = io.StringIO()
+        with patch('FlakeReport.gh', side_effect=github), patch('sys.argv', ['FlakeReport.py', '--days', '7', '--limit', '3']), \
+                contextlib.redirect_stdout(output):
+            self.assertEqual(main(), 0)
+        self.assertIn('WARNING: the listing hit its limit of 3 runs', output.getvalue())
+        self.assertIn('--created', listings[0])
+        self.assertTrue(listings[0][listings[0].index('--created') + 1].startswith('>='))
+
+        output = io.StringIO()
+        with patch('FlakeReport.gh', side_effect=github), patch('sys.argv', ['FlakeReport.py', '--days', '7']), \
+                contextlib.redirect_stdout(output):
+            self.assertEqual(main(), 0)
+        self.assertNotIn('WARNING', output.getvalue())
+        self.assertEqual(listings[1][listings[1].index('--limit') + 1], '1000')
+
+    def test_a_run_that_timed_out_is_read_and_counted_as_failed(self):
+        run = {"databaseId": 11, "conclusion": "timed_out", "headBranch": "develop", "attempt": 1}
+
+        def github(*arguments):
+            if arguments[:2] == ('run', 'list'):
+                return json.dumps([run])
+            if arguments[0] == 'api':
+                return json.dumps({"jobs": [{"id": 12, "name": "Windows", "conclusion": "timed_out", "steps": []}]})
+            return 'Test #1: SlowCase ........***Timeout  60.00 sec'
+
+        output = io.StringIO()
+        with patch('FlakeReport.gh', side_effect=github), patch('sys.argv', ['FlakeReport.py']), contextlib.redirect_stdout(output):
+            self.assertEqual(main(), 0)
+        self.assertIn('1 completed runs of BuildAndTest.yml, 1 failed', output.getvalue())
+        self.assertIn('  1  SlowCase', output.getvalue())
+
+    def test_runs_older_than_the_window_are_left_out(self):
+        now = datetime.datetime(2026, 11, 20, tzinfo=datetime.timezone.utc)
+        self.assertTrue(within_days({"createdAt": "2026-11-14T00:00:00Z"}, 7, now))
+        self.assertFalse(within_days({"createdAt": "2026-11-12T00:00:00Z"}, 7, now))
+        self.assertTrue(within_days({"createdAt": "2020-01-01T00:00:00Z"}, None, now))
+        self.assertTrue(within_days({}, 7, now))
 
 
 if __name__ == '__main__':

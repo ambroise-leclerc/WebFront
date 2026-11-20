@@ -180,7 +180,11 @@ Read the failures of recent workflow runs, including earlier attempts of a run t
 
 ```sh
 python3 test/tools/FlakeReport.py --limit 100
+python3 test/tools/FlakeReport.py --days 7
 ```
+
+`--days` keeps the runs of the last N days (GitHub applies the window; up to 1000 runs are listed, and the report warns when that limit, or `--limit`, cut the window short). The report ends with the reruns each job needed before going green (the failed
+attempts of runs that finally passed): run it weekly and compare the counts to measure reliability (#628).
 
 This read-only tool requires authenticated `gh`. Correlate the case, platform and revision before treating a failure as
 intermittent. Repeat the complete fixture graph with `RunTestSuite.cmake` as above; repeating an individual stateful

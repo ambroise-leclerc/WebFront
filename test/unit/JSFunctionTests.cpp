@@ -132,7 +132,7 @@ const Scenario jsFunctionScenario{"JsFunction", [] {
         });
 
         when("print is called with a string too long for a message", [&] {
-            encodedBuffer.assign({0xEE});
+            encodedBuffer.assign(1, 0xEE);
             then("the call throws before anything is sent", [&] {
                 requireThrows<std::length_error>([&] { print(std::string(http::defaultMaxMessageSize, 'x')); });
                 require(encodedBuffer == std::vector<uint8_t>{0xEE});

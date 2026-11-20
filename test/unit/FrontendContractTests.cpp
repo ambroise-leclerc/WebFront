@@ -1300,10 +1300,13 @@ const Scenario systemBrowserLoopUp{"The system browser's loop is up while its op
             fs::create_directories(directory);
             for (const char* name : {"xdg-open", "open"}) {
                 std::ofstream script(directory / name);
-                script << "#!/bin/sh\nsleep 3\n";
+                // The marker tells the test that the shell found this opener. The shell's PATH is this directory alone (below),
+                // so that, even if it looks the command up after the directory is gone, it finds nothing: it can never fall
+                // through to the developer's real browser (#628). Absolute path: sleep is not on that PATH.
+                script << "#!/bin/sh\n: > \"$0.started\"\nexec /bin/sleep 3\n";
                 fs::permissions(directory / name, fs::perms::owner_all);
             }
-            const std::string path = directory.string() + ":" + (std::getenv("PATH") ? std::getenv("PATH") : "");
+            const std::string path = directory.string();
             const std::string saved = std::getenv("PATH") ? std::getenv("PATH") : "";
             ::setenv("PATH", path.c_str(), 1);
             using Browser = frontend::BrowserWithUILoopFrontend;
@@ -1322,11 +1325,17 @@ const Scenario systemBrowserLoopUp{"The system browser's loop is up while its op
             Browser::open("9002", "index.html");
             const auto elapsed = std::chrono::steady_clock::now() - start;
             host.join();
+            const bool openerStarted = waitUntil([&] {
+                return fs::exists(directory / "xdg-open.started") || fs::exists(directory / "open.started");
+            });
             ::setenv("PATH", saved.c_str(), 1);
             fs::remove_all(directory);
             then("the loop ran and ended at the request, not after the opener (#567)", [&] {
                 check(closed);
                 check(elapsed < 2500ms);
+            });
+            then("the replaced opener ran, not a browser of the machine (#628)", [&] {
+                check(openerStarted);
             });
         }
     });

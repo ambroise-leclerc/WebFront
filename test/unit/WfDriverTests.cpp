@@ -18,6 +18,19 @@ webfront::testdriver::Options parseDriver(std::initializer_list<std::string> ext
 }
 }  // namespace
 
+const Scenario usageBeforeEngine{"A missing project directory is a usage error that main reports before an engine starts", [] {
+    given("an options structure naming a directory that does not exist, and one naming a directory that does", [&] {
+        webfront::testdriver::Options missing = parseDriver({"list"});
+        missing.project                       = std::filesystem::temp_directory_path() / "webfront-no-such-project-628";
+        webfront::testdriver::Options present = parseDriver({"list"});
+        present.project                       = std::filesystem::temp_directory_path();
+        then("only the missing one is refused, with a usage error", [&] {
+            requireThrows<webfront::testdriver::UsageError>([&] { webfront::testdriver::requireProject(missing); });
+            requireNothrow([&] { webfront::testdriver::requireProject(present); });
+        });
+    });
+}};
+
 const Scenario browserTest{"Browser test diagnostics retain HTTP failures without filling the transcript with bridge traffic", [] {
     std::ostringstream output;
     auto*              previous = std::clog.rdbuf(output.rdbuf());
