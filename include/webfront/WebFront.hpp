@@ -736,6 +736,13 @@ public:
         return httpServer.addRoute(std::move(prefix), std::move(handler));
     }
 
+    /** @brief The same, with the options of http::RouteOptions: `postBodyLimit` makes the route answer `POST` too, with a
+     * body bounded by `Content-Length` and given to the handler whole (RouteRequest::body). See docs/HTTP_ASSETS.md.
+     */
+    [[nodiscard]] http::RouteTable::Registration addRoute(std::string prefix, http::RouteHandler handler, http::RouteOptions options) {
+        return httpServer.addRoute(std::move(prefix), std::move(handler), std::move(options));
+    }
+
     /** @brief Registers a route whose URLs are read grants (UI::grantRead): `handler` is called only for a request that
      * presents a valid token and, unless the grant is transferable, the cookie of the client of the connection that owns
      * the grant (ADR-020, rule 4). Every answer is neutralized: `no-store`, `no-referrer`, `nosniff`, a sandboxing

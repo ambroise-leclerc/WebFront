@@ -11,6 +11,7 @@ these entries stays in the GitHub releases and the Git history.
 ## Unreleased
 
 ### Added
+- Answer `POST` on a dynamic route that opts in with `http::RouteOptions::postBodyLimit`: the body, bounded by `Content-Length`, reaches the handler as `RouteRequest::body`; `Response::accepted` (202) and `Response::unauthorized` (401) have their reason phrases (#619, `docs/HTTP_ASSETS.md`).
 - CEF supports `WindowOptions::background` and shows its window when the first document has loaded or after one second (#611, `docs/FRONTENDS.md`).
 - Print a hint on standard error when the development file system serves a stylesheet whose `font-family` lists four or more costly families (#611, `docs/WEBKITGTK.md`).
 - Run the start-up time of the native windows, cold and warm (cold is fully cold on Linux only), as `<Frontend>StartupTime-cold` and `-warm` (label `startup`) with generous limits, timed from the start of the program so that the frontend's initialization counts (#611, `docs/WEBKITGTK.md`).
@@ -27,6 +28,7 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Fixed
 - Accept HTTP request headers with optional spaces or tabs after the colon, tabs in values, and empty values (#621).
+- Read an obsolete line fold in a request header as one space (RFC 9112, section 5.2), not as the two lines glued together: a `Content-Length` folded as `1` and `0` was read as `10` (#619).
 - Keep the input focus of the developer terminal after a click on the page around it (title, notice, blank areas) while the terminal has the window, selection and controls excepted (#608).
 - Remove the white flash of an embedded view between the developer environment's bootstrap page and the project's page, by giving the window the environment's dark colour (`#141821`) when the application sets none; on macOS the view then no longer paints its own white behind it (#611, `docs/WKWEBVIEW.md`).
 - Select detected GPU architectures supported by nvcc by default for the host-loop CUDA renderer (`docs/HOST_LOOP_EXAMPLE.md`).
