@@ -21,6 +21,8 @@ import subprocess
 import sys
 import time
 
+# GitHub ends a run with `timed_out` as well as `failure`; both are failures to read.
+FAILED = ("failure", "timed_out")
 MAX_WINDOW_RUNS = 1000  # what `gh run list` returns at most
 
 # "644/687 Test #615: DeveloperBrowserIntegration-jasmine .....***Failed   18.97 sec", after the log's own prefix.
@@ -54,7 +56,7 @@ def gh(*arguments):
 def attempts_to_read(run):
     """The attempts of a run that can hold a failed job: all the earlier ones, and the last one when it failed."""
     last = run.get("attempt") or 1
-    return [attempt for attempt in range(1, last + 1) if attempt < last or run["conclusion"] == "failure"]
+    return [attempt for attempt in range(1, last + 1) if attempt < last or run["conclusion"] in FAILED]
 
 
 def within_days(run, days, now=None):
@@ -68,7 +70,7 @@ def within_days(run, days, now=None):
 
 def failed_jobs(run, attempt):
     path = f"repos/{{owner}}/{{repo}}/actions/runs/{run['databaseId']}/attempts/{attempt}/jobs?per_page=100"
-    return [job for job in json.loads(gh("api", path))["jobs"] if job["conclusion"] in ("failure", "timed_out")]
+    return [job for job in json.loads(gh("api", path))["jobs"] if job["conclusion"] in FAILED]
 
 
 def main():
@@ -90,7 +92,7 @@ def main():
         listing += ["--branch", arguments.branch]
     runs = json.loads(gh(*listing))
     truncated = len(runs) >= limit
-    completed = [run for run in runs if run["conclusion"] in ("success", "failure") and within_days(run, arguments.days)]
+    completed = [run for run in runs if run["conclusion"] in ("success", *FAILED) and within_days(run, arguments.days)]
     for run in completed:
         # `gh run list` has no attempt field: the run itself says how many times it ran.
         if "attempt" not in run:
@@ -114,7 +116,7 @@ def main():
                 for name, kind in found:
                     cases[name].append(f"{job['name']} {kind} ({where})")
 
-    failures = sum(1 for run in completed if run["conclusion"] == "failure")
+    failures = sum(1 for run in completed if run["conclusion"] in FAILED)
     print(f"{len(completed)} completed runs of {arguments.workflow}, {failures} failed, {rerun} passed once run again")
     if truncated:
         window = f"the last {arguments.days:g} days" if arguments.days else "the period"

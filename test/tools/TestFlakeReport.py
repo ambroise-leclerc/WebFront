@@ -30,6 +30,8 @@ class FlakeReportTests(unittest.TestCase):
         self.assertEqual(attempts_to_read({"conclusion": "failure", "attempt": 1}), [1])
         self.assertEqual(attempts_to_read({"conclusion": "success", "attempt": 1}), [])
         self.assertEqual(attempts_to_read({"conclusion": "failure"}), [1])
+        self.assertEqual(attempts_to_read({"conclusion": "timed_out", "attempt": 1}), [1])
+        self.assertEqual(attempts_to_read({"conclusion": "timed_out", "attempt": 2}), [1, 2])
 
     def test_a_log_without_ctest_has_no_case(self):
         self.assertEqual(failed_cases('ninja: build stopped: subcommand failed.\n'), [])
@@ -103,6 +105,22 @@ class FlakeReportTests(unittest.TestCase):
             self.assertEqual(main(), 0)
         self.assertNotIn('WARNING', output.getvalue())
         self.assertEqual(listings[1][listings[1].index('--limit') + 1], '1000')
+
+    def test_a_run_that_timed_out_is_read_and_counted_as_failed(self):
+        run = {"databaseId": 11, "conclusion": "timed_out", "headBranch": "develop", "attempt": 1}
+
+        def github(*arguments):
+            if arguments[:2] == ('run', 'list'):
+                return json.dumps([run])
+            if arguments[0] == 'api':
+                return json.dumps({"jobs": [{"id": 12, "name": "Windows", "conclusion": "timed_out", "steps": []}]})
+            return 'Test #1: SlowCase ........***Timeout  60.00 sec'
+
+        output = io.StringIO()
+        with patch('FlakeReport.gh', side_effect=github), patch('sys.argv', ['FlakeReport.py']), contextlib.redirect_stdout(output):
+            self.assertEqual(main(), 0)
+        self.assertIn('1 completed runs of BuildAndTest.yml, 1 failed', output.getvalue())
+        self.assertIn('  1  SlowCase', output.getvalue())
 
     def test_runs_older_than_the_window_are_left_out(self):
         now = datetime.datetime(2026, 11, 20, tzinfo=datetime.timezone.utc)
