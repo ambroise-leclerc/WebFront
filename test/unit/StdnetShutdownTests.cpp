@@ -22,6 +22,7 @@
 #include <string>
 #include <thread>
 #include <memory>
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -381,7 +382,36 @@ void setPortVariable(const char* value) {
 #endif
 }
 
+// Restores WEBFRONT_PORT as the process had it (present or absent) when a scenario ends, even through an exception.
+struct PortVariableGuard {
+    std::optional<std::string> saved;
+    PortVariableGuard() {
+#ifdef _WIN32
+        char*  buffer = nullptr;
+        size_t length = 0;
+        if (_dupenv_s(&buffer, &length, "WEBFRONT_PORT") == 0 && buffer != nullptr) {
+            saved = buffer;
+            std::free(buffer);
+        }
+#else
+        if (const char* value = std::getenv("WEBFRONT_PORT"))
+            saved = value;
+#endif
+    }
+    ~PortVariableGuard() {
+#ifdef _WIN32
+        _putenv_s("WEBFRONT_PORT", saved ? saved->c_str() : "");  // an empty value removes the variable on Windows
+#else
+        if (saved)
+            setenv("WEBFRONT_PORT", saved->c_str(), 1);
+        else
+            unsetenv("WEBFRONT_PORT");
+#endif
+    }
+};
+
 const Scenario defaultPortFromEnvironment{"The default port follows WEBFRONT_PORT", [] {
+    const PortVariableGuard portGuard;
     given("WEBFRONT_PORT set to 0", [&] {
         setPortVariable("0");
         then("a configuration asks for an ephemeral port and two applications coexist", [&] {
@@ -399,6 +429,7 @@ const Scenario defaultPortFromEnvironment{"The default port follows WEBFRONT_POR
 }};
 
 const Scenario portValidation{"A port is a number from 0 to 65535", [] {
+    const PortVariableGuard portGuard;
     given("values the resolver would accept", [&] {
         then("only canonical port numbers pass", [&] {
             require(validatedPort("0", "t") == "0");
@@ -420,6 +451,7 @@ const Scenario portValidation{"A port is a number from 0 to 65535", [] {
 }};
 
 const Scenario portOption{"The examples take --port", [] {
+    const PortVariableGuard portGuard;
     given("--port <n> and --port=<n> among other arguments", [&] {
         setPortVariable("");
         char  program[] = "app", flag[] = "--port", value[] = "0", other[] = "project", joined[] = "--port=0";
