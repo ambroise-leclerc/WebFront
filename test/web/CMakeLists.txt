@@ -1,4 +1,5 @@
 add_executable(webtest JasmineTest.cpp)
+target_compile_definitions(webtest PRIVATE WEBFRONT_TEST_MEDIA_FILE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/media/seek.webm")
 target_link_libraries(webtest PRIVATE WebFront_test_hardening WebFront WebFront_warnings WebFront_options)
 # The host of the host-loop example, on the CPU renderer and, where a toolkit was found, on the CUDA one.
 target_link_libraries(webtest PRIVATE WebFront_boing)

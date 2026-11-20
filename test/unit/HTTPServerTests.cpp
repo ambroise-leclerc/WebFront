@@ -261,6 +261,42 @@ const Scenario requestParsing{"Request parsing", [] {
     });
 }};
 
+const Scenario headerWhitespace{"HTTP header values accept optional whitespace and empty values", [] {
+    given("headers split across individual receives", [] {
+        const std::string input = "GET / HTTP/1.1\r\nContent-Length:5\r\nX-Tab:\t \talpha\tbeta \t\r\nX-Empty:\r\nX-Blank: \t\r\n\r\n";
+        Request request;
+        for (const char& byte : input) request.parseSomeData(&byte, &byte + 1);
+        require(request.completed());
+        require(request.getHeaderValue("Content-Length") == "5");
+        require(request.getHeaderValue("X-Tab") == "alpha\tbeta \t");
+        require(request.getHeaderValue("X-Empty") == "");
+        require(request.getHeaderValue("X-Blank") == "");
+    });
+    given("forbidden control characters in a field value", [] {
+        for (const char control : {'\0', '\1', '\n', '\x7f'}) {
+            std::string input = "GET / HTTP/1.1\r\nX-Test: value";
+            input += control;
+            input += "more\r\n\r\n";
+            Request request;
+            requireThrows<BadRequestException>([&] { request.parseSomeData(input.begin(), input.end()); });
+        }
+        const std::string input = "GET / HTTP/1.1\r\nX-Test: value\rmore\r\n\r\n";
+        Request request;
+        requireThrows<BadRequestException>([&] { request.parseSomeData(input.begin(), input.end()); });
+    });
+    given("a forbidden control character before a field value", [] {
+        for (const std::string prefix : {"X-Test:", "X-Test: "}) {
+            for (const char control : {'\0', '\1', '\n', '\x7f'}) {
+                std::string input = "GET / HTTP/1.1\r\n" + prefix;
+                input += control;
+                input += "value\r\n\r\n";
+                Request request;
+                requireThrows<BadRequestException>([&] { request.parseSomeData(input.begin(), input.end()); });
+            }
+        }
+    });
+}};
+
 const Scenario asynchronousRequest{"Asynchronous Request parsing", [] {
     given("A HTTP HEAD request received asynchronously", [&] {
         string chunk1{"HEAD /file.txt HTTP/1.1\r\nUser-Agent:"};
