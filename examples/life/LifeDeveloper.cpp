@@ -1,16 +1,19 @@
 #include "Life.hpp"
 #include "LifeFrontend.hpp"
 #include "LifeDeveloperOptions.hpp"
+#include "../PortOption.hpp"
 #include <webfront/WebFront.hpp>
 
 #include <iostream>
 
 int main(int argc, char** argv) {
+    if (!webfront::demo::applyPortOption(argc, argv))
+        return 2;
     const auto options = webfront::demo::parseLifeDeveloperOptions(argc, argv);
     if (!options) {
-        std::cerr << "Usage: WebFrontLifeDeveloper [<project> [<environment-tarball-url> <sha512-integrity>]]\n"
+        std::cerr << "Usage: WebFrontLifeDeveloper [--port <n>] [<project> [<environment-tarball-url> <sha512-integrity>]]\n"
                      "Without arguments the project is ./"
-                  << webfront::demo::LifeDeveloperOptions::defaultProject << ", created when missing.\n";
+                  << webfront::demo::LifeDeveloperOptions::defaultProject << ", created when missing; the port is --port or WEBFRONT_PORT (0: a free port).\n";
         return 2;
     }
     try {

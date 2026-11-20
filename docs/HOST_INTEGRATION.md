@@ -160,10 +160,14 @@ host.request_stop();                          // the user closed the window firs
 ## Several instances at once
 
 A configuration that does not set `WebFrontConfig::port` listens on `9002`, or on the port in the environment variable
-`WEBFRONT_PORT`. `WEBFRONT_PORT=0` asks the system for a free port: any number of instances, of one application or of
-several, then start side by side, and the frontend and `port()` receive the bound port. The browser keeps one origin, hence
-one storage, per port, so an application that keeps state in the browser fixes its port. A port already in use makes the
-constructor throw a `std::system_error` that names the address, the port and the cause.
+`WEBFRONT_PORT`, a number from 0 to 65535 (anything else throws `std::invalid_argument`). `WEBFRONT_PORT=0` asks the system
+for a free port: any number of instances, of one application or of several, then start side by side, and the frontend and
+`port()` receive the port really bound. The examples (except `HelloWorld`, whose listing is the README's) also take
+`--port <n>` or `--port=<n>`. The browser keeps `localStorage` and the other origin-bound storage per port, so an
+application that keeps such state fixes its port; cookies are not isolated by port (a cookie is shared by every port of a
+host), so state or authentication kept in a cookie must not assume a port of its own, as the read binding's cookie names
+already do. A port already in use makes the constructor throw a `std::system_error` that names the address, the port and the
+cause.
 
 ## Concurrency and lifetime, in short
 

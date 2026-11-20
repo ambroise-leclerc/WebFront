@@ -4,6 +4,7 @@
 #include <webfront/networking/TCPNetworkingStdnet.hpp>
 #include <webfront/system/DefaultFS.hpp>
 #include <webfront/WebFront.hpp>
+#include "../../examples/PortOption.hpp"
 
 #ifdef _WIN32
     #include <webfront/system/WindowsCompat.hpp>
@@ -394,5 +395,51 @@ const Scenario defaultPortFromEnvironment{"The default port follows WEBFRONT_POR
         setPortVariable("");
         then("the historical 9002 remains", [&] { require(defaultPort() == "9002"); });
         setPortVariable("");
+    });
+}};
+
+const Scenario portValidation{"A port is a number from 0 to 65535", [] {
+    given("values the resolver would accept", [&] {
+        then("only canonical port numbers pass", [&] {
+            require(validatedPort("0", "t") == "0");
+            require(validatedPort("9002", "t") == "9002");
+            require(validatedPort("65535", "t") == "65535");
+            for (const char* bad : {"", "00", "65536", "http", "-1", "+80", "80 ", "080", "123456"})
+                requireThrows<std::invalid_argument>([&] { (void)validatedPort(bad, "WEBFRONT_PORT"); }, contains("WEBFRONT_PORT"));
+        });
+        then("an invalid WEBFRONT_PORT makes the default configuration fail", [&] {
+            setPortVariable("http");
+            requireThrows<std::invalid_argument>([&] { (void)defaultPort(); }, contains("'http'"));
+            setPortVariable("");
+        });
+    });
+    given("a server asked for port 00", [&] {
+        http::Server<Stdnet, fs::DefaultFS> server("127.0.0.1", "00");
+        then("it announces the port really bound", [&] { require(server.port() != "00" && server.port() != "0"); });
+    });
+}};
+
+const Scenario portOption{"The examples take --port", [] {
+    given("--port <n> and --port=<n> among other arguments", [&] {
+        setPortVariable("");
+        char  program[] = "app", flag[] = "--port", value[] = "0", other[] = "project", joined[] = "--port=0";
+        char* argv[]    = {program, other, flag, value, joined, nullptr};
+        int   argc      = 5;
+        then("they set the default port and leave the other arguments", [&] {
+            require(demo::applyPortOption(argc, argv));
+            require(argc == 2 && std::string(argv[1]) == "project" && argv[2] == nullptr);
+            require(defaultPort() == "0");
+            setPortVariable("");
+        });
+    });
+    given("an invalid or missing value", [&] {
+        char  program[] = "app", flag[] = "--port", bad[] = "65536";
+        char* withBad[] = {program, flag, bad, nullptr};
+        char* missing[] = {program, flag, nullptr};
+        int   badCount = 3, missingCount = 2;
+        then("the option is refused", [&] {
+            require(!demo::applyPortOption(badCount, withBad));
+            require(!demo::applyPortOption(missingCount, missing));
+        });
     });
 }};

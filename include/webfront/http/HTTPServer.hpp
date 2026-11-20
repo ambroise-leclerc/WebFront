@@ -1014,9 +1014,7 @@ private:
             throw std::system_error(error.code(), "WebFront cannot listen on " + std::string(address) + ":" + std::string(requestedPort) + ": " + error.code().message()
                 + (error.code() == std::errc::address_in_use ? " (another instance may use this port; set WEBFRONT_PORT=0 or WebFrontConfig::port to \"0\" for a free port)" : ""));
         }
-        // Only the literal "0" asks for an OS-assigned port; any other value is already the port.
-        if (requestedPort != "0")
-            return std::string(requestedPort);
+        // The port really bound, whatever the request said: the resolver also accepts "00", "65536" or a service name.
         if constexpr (requires { acceptor.local_endpoint().port(); })
             return std::to_string(acceptor.local_endpoint().port());
         else
