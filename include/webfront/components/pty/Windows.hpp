@@ -73,25 +73,27 @@ public:
             SIZE_T size = 0;
             ::InitializeProcThreadAttributeList(nullptr, 1, 0, &size);
             std::vector<std::max_align_t> storage((size + sizeof(std::max_align_t) - 1) / sizeof(std::max_align_t));
-            if (storage.empty())
+            // The analyzer follows data() of the vector to a null pointer: test the pointer itself, not the size (C6387).
+            const auto attributes = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(storage.data());
+            if (attributes == nullptr)
                 fail("size ConPTY process attributes");
             STARTUPINFOEXW startup{};
             startup.StartupInfo.cb = sizeof(startup);
             // Null standard handles let ConPTY install its own console handles even if the host is redirected.
             startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-            startup.lpAttributeList     = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(storage.data());
-            if (!::InitializeProcThreadAttributeList(startup.lpAttributeList, 1, 0, &size))
+            startup.lpAttributeList     = attributes;
+            if (!::InitializeProcThreadAttributeList(attributes, 1, 0, &size))
                 fail("initialize ConPTY process attributes");
             struct DeleteAttributes {
                 LPPROC_THREAD_ATTRIBUTE_LIST attributes;
                 ~DeleteAttributes() {
                     ::DeleteProcThreadAttributeList(attributes);
                 }
-            } cleanup{startup.lpAttributeList};
+            } cleanup{attributes};
 
             // ProcThreadAttributeValue(22, FALSE, TRUE, FALSE), also with older SDK headers.
             constexpr DWORD_PTR pseudoConsoleAttribute = 0x00020016;
-            if (!::UpdateProcThreadAttribute(startup.lpAttributeList, 0, pseudoConsoleAttribute, console, sizeof(console), nullptr, nullptr))
+            if (!::UpdateProcThreadAttribute(attributes, 0, pseudoConsoleAttribute, console, sizeof(console), nullptr, nullptr))
                 fail("attach ConPTY process attributes");
 
             PROCESS_INFORMATION info{};

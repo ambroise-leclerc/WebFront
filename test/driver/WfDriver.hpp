@@ -157,6 +157,9 @@ inline Options parse(int argc, char** argv) {
     }
     if (options.project.empty())
         throw UsageError("--project is required");
+    // Before the engine starts: a missing project is a usage error, whatever the display (#628).
+    if (!std::filesystem::is_directory(options.project))
+        throw UsageError("Project directory not found: " + options.project.string());
     if (!options.manifestDirectory.empty()) {
         try {
             fs::safeRelativePath(options.manifestDirectory);

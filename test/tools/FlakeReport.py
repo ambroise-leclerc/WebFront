@@ -66,7 +66,7 @@ def within_days(run, days, now=None):
 
 def failed_jobs(run, attempt):
     path = f"repos/{{owner}}/{{repo}}/actions/runs/{run['databaseId']}/attempts/{attempt}/jobs?per_page=100"
-    return [job for job in json.loads(gh("api", path))["jobs"] if job["conclusion"] == "failure"]
+    return [job for job in json.loads(gh("api", path))["jobs"] if job["conclusion"] in ("failure", "timed_out")]
 
 
 def main():
@@ -78,11 +78,15 @@ def main():
     arguments = parser.parse_args()
 
     listing = ["run", "list", "--workflow", arguments.workflow, "--limit", str(arguments.limit),
-               "--json", "databaseId,conclusion,headBranch,event,attempt,createdAt"]
+               "--json", "databaseId,conclusion,headBranch,event,createdAt"]
     if arguments.branch:
         listing += ["--branch", arguments.branch]
     runs = json.loads(gh(*listing))
     completed = [run for run in runs if run["conclusion"] in ("success", "failure") and within_days(run, arguments.days)]
+    for run in completed:
+        # `gh run list` has no attempt field: the run itself says how many times it ran.
+        if "attempt" not in run:
+            run["attempt"] = int(gh("api", f"repos/{{owner}}/{{repo}}/actions/runs/{run['databaseId']}", "--jq", ".run_attempt"))
     cases = collections.defaultdict(list)
     other = collections.Counter()
     rerun = 0

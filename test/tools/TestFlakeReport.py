@@ -62,6 +62,23 @@ class FlakeReportTests(unittest.TestCase):
         self.assertIn('Reruns needed before green, per job', output.getvalue())
         self.assertIn('  2  Windows', output.getvalue())
 
+    def test_a_job_that_timed_out_and_passed_once_run_again_counts_as_a_rerun(self):
+        run = {"databaseId": 7, "conclusion": "success", "headBranch": "develop", "attempt": 2}
+
+        def github(*arguments):
+            if arguments[:2] == ('run', 'list'):
+                return json.dumps([run])
+            if arguments[0] == 'api':
+                return json.dumps({"jobs": [{"id": 8, "name": "Windows", "conclusion": "timed_out", "steps": []},
+                                            {"id": 9, "name": "Linux", "conclusion": "success", "steps": []}]})
+            return 'no CTest here'
+
+        output = io.StringIO()
+        with patch('FlakeReport.gh', side_effect=github), patch('sys.argv', ['FlakeReport.py']), contextlib.redirect_stdout(output):
+            self.assertEqual(main(), 0)
+        self.assertIn('  1  Windows', output.getvalue())
+        self.assertNotIn('Linux', output.getvalue().split('Reruns needed')[1])
+
     def test_runs_older_than_the_window_are_left_out(self):
         now = datetime.datetime(2026, 11, 20, tzinfo=datetime.timezone.utc)
         self.assertTrue(within_days({"createdAt": "2026-11-14T00:00:00Z"}, 7, now))

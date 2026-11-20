@@ -177,7 +177,7 @@ jobs:
         run: |
           analysis=$FULL_TIER
           if [ "$FULL_TIER" != true ] && [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            if git diff --name-only HEAD^1 HEAD | grep -qiE '^(include/webfront/components/pty/|include/webfront/frontend/WebView2|cmake/WebView2|cmake/CompilerWarnings|\.github/workflows/BuildAndTest\.yml)|windows|win32'; then
+            if git diff --name-only HEAD^1 HEAD | grep -iE '^(include/webfront/components/pty/|include/webfront/frontend/WebView2|cmake/WebView2|cmake/CompilerWarnings|\.github/workflows/BuildAndTest\.yml)|windows|win32' > /dev/null; then
               analysis=true
             fi
           fi
