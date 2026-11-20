@@ -286,6 +286,7 @@ const Scenario routePosts{"A route that accepts POST reads a body bounded by Con
              {"Content-Length: ,2\r\n", "400 Bad Request"},
              {"Content-Length: 2 2\r\n", "400 Bad Request"},
              {"Content-Length: \r\n", "400 Bad Request"},
+             {"Content-Length:\r\n", "400 Bad Request"},
              {"Content-Length: 65\r\n", "413 Payload Too Large"}}) {
         given("a POST with '", headers, "'", [&] {
             const auto response = fixture.answer(post("/webfront/services/rpc/x", headers));
@@ -296,7 +297,7 @@ const Scenario routePosts{"A route that accepts POST reads a body bounded by Con
         });
     }
     for (const auto& headers : std::initializer_list<std::string_view>{
-             "Content-Length:  2\r\n", "Content-Length: 2  \r\n", "Content-Length: 2, 2\r\n", "Content-Length: 2,2\r\n",
+             "Content-Length:  2\r\n", "Content-Length: 2  \r\n", "Content-Length: 2, 2\r\n", "Content-Length: 2,2\r\n", "Content-Length:2\r\n", "Content-Length:\t2\t\r\n", "Content-Length: 2,\t2\r\n",
              "Content-Length: 2\r\nContent-Length: 2\r\n", "Content-Length: 2, 2\r\nContent-Length: 2\r\n"}) {
         given("a POST with the valid length '", headers, "'", [&] {
             const auto response = fixture.answer(post("/webfront/services/rpc/x", headers, "ok"));
