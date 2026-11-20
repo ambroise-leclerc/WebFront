@@ -284,6 +284,17 @@ const Scenario headerWhitespace{"HTTP header values accept optional whitespace a
         Request request;
         requireThrows<BadRequestException>([&] { request.parseSomeData(input.begin(), input.end()); });
     });
+    given("a forbidden control character before a field value", [] {
+        for (const std::string prefix : {"X-Test:", "X-Test: "}) {
+            for (const char control : {'\0', '\1', '\n', '\x7f'}) {
+                std::string input = "GET / HTTP/1.1\r\n" + prefix;
+                input += control;
+                input += "value\r\n\r\n";
+                Request request;
+                requireThrows<BadRequestException>([&] { request.parseSomeData(input.begin(), input.end()); });
+            }
+        }
+    });
 }};
 
 const Scenario asynchronousRequest{"Asynchronous Request parsing", [] {
