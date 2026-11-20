@@ -10,6 +10,11 @@ these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
+## [1.1.0] - 2026-11-20
+
+WebFront 1.1 ships with developer environment 1.0.1. It adds POST routes with a bounded body, application-selected programs
+in a native pseudoterminal, and a faster, less flashy start of the native windows. No breaking change.
+
 ### Added
 - Answer `POST` on a dynamic route that opts in with `http::RouteOptions::postBodyLimit`: the body, bounded by `Content-Length`, reaches the handler as `RouteRequest::body`; `Response::accepted` (202) and `Response::unauthorized` (401) have their reason phrases (#619, `docs/HTTP_ASSETS.md`).
 - CEF supports `WindowOptions::background` and shows its window when the first document has loaded or after one second (#611, `docs/FRONTENDS.md`).
@@ -254,7 +259,8 @@ Coroutines and the opt-in developer environment. One **breaking** change to the 
 
 - Fail decoding when a bridge integer is out of the requested C++ range, instead of invoking undefined behavior.
 
-[Unreleased]: https://github.com/ambroise-leclerc/WebFront/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/ambroise-leclerc/WebFront/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/ambroise-leclerc/WebFront/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ambroise-leclerc/WebFront/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/ambroise-leclerc/WebFront/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/ambroise-leclerc/WebFront/compare/v0.7.0...v0.8.0
