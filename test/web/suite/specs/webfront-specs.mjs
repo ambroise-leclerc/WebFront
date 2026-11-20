@@ -565,8 +565,8 @@ describe('Dynamic HTTP routes', () => {
 
 // Byte ranges of a native file served by a route (#455): fetch with Range, and a <video> that seeks.
 describe('HTTP byte ranges', () => {
-    const url = '/webfront/services/test-media/sound.wav';
-    const total = 44 + 8000 * 20;
+    const url = '/webfront/services/test-media/seek.webm';
+    const total = 5741; // fixtures/media/seek.webm, a 20-second video with no audio track.
 
     const bytesOf = async response => new Uint8Array(await response.arrayBuffer());
 
@@ -614,6 +614,8 @@ describe('HTTP byte ranges', () => {
         const video = document.createElement('video');
         video.preload = 'auto';
         video.muted = true;
+        video.playsInline = true;
+        document.body.append(video);
         const waits = webFrontTestAsync.steps(webFrontTestAsync.timeoutMs, () =>
             `readyState=${video.readyState}, networkState=${video.networkState}, currentTime=${video.currentTime}, ` +
             `duration=${video.duration}, paused=${video.paused}, seeking=${video.seeking}`);
@@ -625,11 +627,15 @@ describe('HTTP byte ranges', () => {
             // WebKit can still be finishing its initial positioning at loadedmetadata. Wait for actual data and
             // accept only a seeked at the requested position, not a queued event belonging to that initial load.
             if (video.readyState < 2) await waits.event(video, 'loadeddata', () => {});
+            expect(video.videoWidth).toBe(32);
+            expect(video.videoHeight).toBe(32);
             const middle = video.duration / 2;
             await waits.event(video, 'seeked', () => { video.currentTime = middle; }, 'seeked (middle)',
                 () => !video.seeking && Math.abs(video.currentTime - middle) < 1);
             expect(video.currentTime).toBeGreaterThan(9);
-            await waits.event(video, 'timeupdate', () => video.play());
+            // A queued timeupdate from seeking does not demonstrate resumed playback.
+            await waits.event(video, 'timeupdate', () => video.play(), 'playback after seek',
+                () => video.currentTime > middle + 0.05);
             video.pause();
             await waits.event(video, 'seeked', () => { video.currentTime = 2; }, 'seeked (back to 2s)',
                 () => !video.seeking && Math.abs(video.currentTime - 2) < 1);
@@ -644,6 +650,7 @@ describe('HTTP byte ranges', () => {
         } finally {
             video.removeAttribute('src');
             video.load();
+            video.remove();
         }
         // Only the requests of the video count (the explicit fetches above are before the baseline). What a media
         // engine asks is its own business: WebKit probes with a range then buffers the whole resource, GStreamer
