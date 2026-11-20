@@ -6,7 +6,6 @@
 #include "FileSystem.hpp"
 #include "FontStacks.hpp"
 #include <fstream>
-#include <iterator>
 #include <system_error>
 
 namespace webfront::fs {
@@ -51,7 +50,13 @@ public:
                 const fonts::Stamp stamp{bytes, written};
                 if (fonts::unchecked(full, stamp)) {
                     std::ifstream css(rootPath / path, std::ios::binary);
-                    std::string   text(std::istreambuf_iterator<char>(css), {});
+                    if (!css.is_open())
+                        return file;
+                    // Keep the diagnostic read within the checked size even if the file grows. A counted read also
+                    // avoids GCC 13's null-dereference false positive in an inlined istreambuf_iterator.
+                    std::string text(static_cast<std::size_t>(bytes), '\0');
+                    css.read(text.data(), static_cast<std::streamsize>(text.size()));
+                    text.resize(static_cast<std::size_t>(css.gcount()));
                     fonts::warnLongStacks(full, text, stamp);
                 }
             } catch (...) {  // a hint must never fail a request
