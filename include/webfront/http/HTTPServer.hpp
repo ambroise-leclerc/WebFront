@@ -7,6 +7,7 @@
 #include "../networking/BasicNetworking.hpp"
 #include "../networking/Tasks.hpp"
 #include "../system/FileSystem.hpp"
+#include "../system/WindowsCompat.hpp"
 #include "../Task.hpp"
 #include "../tooling/HexDump.hpp"
 #include "AcceptEncoding.hpp"
@@ -1006,7 +1007,17 @@ private:
         try {
             const auto endpoint = Net::Resolve(address, requestedPort);
             acceptor.open(endpoint.protocol());
-            acceptor.set_option(typename Net::Acceptor::reuse_address(true));
+#ifdef _WIN32
+            // SO_REUSEADDR lets Winsock bind a second socket to a port in use and then deals the connections out unpredictably, so
+            // two applications would answer each other's requests. SO_EXCLUSIVEADDRUSE makes the second bind fail instead.
+            if constexpr (requires { acceptor.native_handle(); }) {
+                const BOOL exclusive = TRUE;
+                if (::setsockopt(static_cast<SOCKET>(acceptor.native_handle()), SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&exclusive), sizeof exclusive) != 0)
+                    throw std::system_error(::WSAGetLastError(), std::system_category(), "SO_EXCLUSIVEADDRUSE");
+            }
+#else
+            acceptor.set_option(typename Net::Acceptor::reuse_address(true));  // rebinding after a restart; POSIX still refuses a port in use
+#endif
             acceptor.bind(endpoint);
             acceptor.listen();
         } catch (const std::system_error& error) {
