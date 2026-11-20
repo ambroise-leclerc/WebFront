@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <iostream>
-#include <regex>
 #include <string_view>
 
 using namespace webfront::bdd;
@@ -29,8 +28,17 @@ const Scenario indexFileSystemProvides{"IndexFileSystem provides basic files for
                 while (auto readSize = indexFile->read(buffer)) html.append(buffer.data(), readSize);
 
                 require(html.starts_with("<!DOCTYPE html>"));
-                require(regex_search(html, regex("<script[^>]*src=\"WebFront.js\"[^>]*>")));
-                require(regex_search(html, regex("<script[^>]*src=\"webfront-fallback.mjs\"[^>]*>")));
+                // A script element that names the source: no std::regex, whose GCC 13 header reports a false
+                // -Wmaybe-uninitialized when it is instantiated (#628).
+                const auto hasScript = [&](string_view source) {
+                    for (auto tag = html.find("<script"); tag != string::npos; tag = html.find("<script", tag + 1)) {
+                        const auto end = html.find('>', tag);
+                        if (end != string::npos && string_view(html).substr(tag, end - tag).find(source) != string_view::npos) return true;
+                    }
+                    return false;
+                };
+                require(hasScript("src=\"WebFront.js\""));
+                require(hasScript("src=\"webfront-fallback.mjs\""));
             });
         });
 

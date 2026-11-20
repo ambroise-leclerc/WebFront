@@ -73,7 +73,9 @@ public:
             SIZE_T size = 0;
             ::InitializeProcThreadAttributeList(nullptr, 1, 0, &size);
             std::vector<std::max_align_t> storage((size + sizeof(std::max_align_t) - 1) / sizeof(std::max_align_t));
-            STARTUPINFOEXW                startup{};
+            if (storage.empty())
+                fail("size ConPTY process attributes");
+            STARTUPINFOEXW startup{};
             startup.StartupInfo.cb = sizeof(startup);
             // Null standard handles let ConPTY install its own console handles even if the host is redirected.
             startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;

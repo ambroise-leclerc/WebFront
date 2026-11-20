@@ -82,6 +82,13 @@ function(set_project_warnings project_name)
     list(APPEND GCC_WARNINGS -Wno-error=stringop-overflow)
   endif()
 
+  # GCC 13 reports -Wmismatched-new-delete (81 times in the tests) for the coroutine frame of every stdexec::task: the frame is
+  # allocated through std::allocator<__memblock> and freed by the promise's operator delete, both stdexec's, and the warning is
+  # raised in our coroutine bodies once they are inlined. It is a false positive of that compiler (#628); GCC 14 and later keep it.
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 14)
+    list(APPEND GCC_WARNINGS -Wno-mismatched-new-delete)
+  endif()
+
   # Vérifier si -Wdangling-reference est supporté (GCC 13+ ou certaines versions de GCC 12)
   include(CheckCXXCompilerFlag)
   check_cxx_compiler_flag("-Wdangling-reference" COMPILER_SUPPORTS_DANGLING_REF)

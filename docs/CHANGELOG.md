@@ -10,6 +10,12 @@ these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
+### Added
+- Run the MSVC code analysis in a pull request into `develop` that changes Windows code, and list the reruns each job needed before going green with `FlakeReport.py --days` (#628, `docs/TEST_TIERS.md`, `docs/TEST_PERFORMANCE.md`).
+
+### Fixed
+- Pass the compiler analysis on the Windows pseudoterminal when it cannot prove the attribute list non-null (C6387), and keep an accepted connection whose `TCP_NODELAY` the system refuses, as macOS does after a reset (#628).
+
 ## [1.1.0] - 2026-11-20
 
 WebFront 1.1 ships with developer environment 1.0.1. It adds POST routes with a bounded body, application-selected programs

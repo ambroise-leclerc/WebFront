@@ -503,7 +503,10 @@ int run(const Options& options, Setup&& setup = {}) {
 template <typename Frontend, typename Setup = PlainSetup>
 int main(int argc, char** argv, std::string_view program, Setup&& setup = {}) {
     try {
-        // CEF child processes must dispatch before interpreting application arguments or creating files.
+        // A usage error needs no display: the arguments are checked before an engine that requires one starts (#628). CEF child
+        // processes must instead dispatch before interpreting application arguments or creating files.
+        if constexpr (!std::is_same_v<Frontend, frontend::CEFFrontend>)
+            static_cast<void>(parse(argc, argv));
         webfront::detail::ensureFrontendInitialized<Frontend>();
         [[maybe_unused]] const auto requestLog = logRequests();
 #if defined(WEBFRONT_EMBED_CEF) && defined(__linux__)

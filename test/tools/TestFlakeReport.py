@@ -3,7 +3,8 @@ import io
 import json
 import unittest
 from unittest.mock import patch
-from FlakeReport import attempts_to_read, failed_cases, main
+import datetime
+from FlakeReport import attempts_to_read, failed_cases, main, within_days
 
 
 class FlakeReportTests(unittest.TestCase):
@@ -58,6 +59,15 @@ class FlakeReportTests(unittest.TestCase):
             self.assertIn(f'Windows Failed (develop, run 123, attempt {attempt} of 3)', output.getvalue())
         self.assertIn('  2  IntermittentCase', output.getvalue())
         self.assertNotIn('Failed jobs without a failed CTest case', output.getvalue())
+        self.assertIn('Reruns needed before green, per job', output.getvalue())
+        self.assertIn('  2  Windows', output.getvalue())
+
+    def test_runs_older_than_the_window_are_left_out(self):
+        now = datetime.datetime(2026, 11, 20, tzinfo=datetime.timezone.utc)
+        self.assertTrue(within_days({"createdAt": "2026-11-14T00:00:00Z"}, 7, now))
+        self.assertFalse(within_days({"createdAt": "2026-11-12T00:00:00Z"}, 7, now))
+        self.assertTrue(within_days({"createdAt": "2020-01-01T00:00:00Z"}, None, now))
+        self.assertTrue(within_days({}, 7, now))
 
 
 if __name__ == '__main__':
