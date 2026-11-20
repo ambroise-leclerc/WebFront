@@ -263,7 +263,7 @@ const Scenario routePosts{"A route that accepts POST reads a body bounded by Con
         });
     });
     given("bytes beyond the announced length", [&] {
-        const auto response = fixture.answer(post("/webfront/services/rpc/x", "Content-Length: 2\r\n", "okGET / HTTP/1.1"));
+        fixture.answer(post("/webfront/services/rpc/x", "Content-Length: 2\r\n", "okGET / HTTP/1.1"));
         then("only the announced body reaches the handler", [&] { require(seen == "ok"); });
     });
     given("a GET on the same route", [&] {
@@ -290,6 +290,17 @@ const Scenario routePosts{"A route that accepts POST reads a body bounded by Con
             });
         });
     }
+    // Where no body has to be invited, `100 Continue` is never written, even when the client asked for it.
+    for (const auto& [request, why] : std::initializer_list<std::pair<std::string, std::string_view>>{
+             {post("/webfront/services/rpc/x", "Content-Length: 2\r\nExpect: 100-continue\r\n", "ok"), "the body came with the headers"},
+             {post("/webfront/services/rpc/x", "Content-Length: 65\r\nExpect: 100-continue\r\n"), "the body is too long"},
+             {post("/webfront/services/rpc/x", "Content-Length: 2\r\nExpect: x-100-continue-y\r\n", "ok"), "the value only contains the token"},
+             {"POST /webfront/services/rpc/x HTTP/1.0\r\nContent-Length: 2\r\nExpect: 100-continue\r\n\r\nok", "the client speaks HTTP/1.0"}}) {
+        given("an Expect header when ", why, [&] {
+            const auto response = fixture.answer(request);
+            then("no interim answer is written", [&] { require(!contains(response, "100 Continue")); });
+        });
+    }
     given("a connection that ends before the announced length", [&] {
         send(post("/webfront/services/rpc/x", "Content-Length: 10\r\n", "abc"));
         awaitRead(1);
@@ -300,15 +311,26 @@ const Scenario routePosts{"A route that accepts POST reads a body bounded by Con
             require(calls == 0);
         });
     });
-    given("a handler that accepts without a body, or refuses the credentials", [&] {
+    given("a handler that accepts without a body", [&] {
         auto other = server.addRoute("/webfront/services/status/", [](const RouteRequest& request) {
             RouteReply reply;
             reply.status        = request.query == "accepted" ? Response::accepted : Response::unauthorized;
             reply.contentLength = 0;
             return reply;
         });
-        then("the status lines carry their reason phrases", [&] {
+        then("the status line carries the reason phrase", [&] {
             require(fixture.answer(get("/webfront/services/status/x?accepted")).starts_with("HTTP/1.1 202 Accepted\r\n"));
+        });
+    });
+    given("a handler that refuses the credentials", [&] {
+        auto other = server.addRoute("/webfront/services/status/", [](const RouteRequest&) {
+            RouteReply reply;
+            reply.status        = Response::unauthorized;
+            reply.contentLength = 0;
+            return reply;
+        });
+        then("the status line carries the reason phrase", [&] {
+            require(fixture.answer(get("/webfront/services/status/x")).starts_with("HTTP/1.1 401 Unauthorized\r\n"));
         });
     });
     given("a PUT", [&] {

@@ -53,9 +53,14 @@ such as a JSON-RPC call: the body, announced by `Content-Length` and at most `n`
 runs and reaches it as `RouteRequest::body`. `Expect: 100-continue` gets `100 Continue` first. The server refuses, without
 calling the handler, a `POST` without `Content-Length` (411), with a `Transfer-Encoding` (501: no chunked bodies), with a
 malformed or contradictory length (400) or a longer body (413); a connection that ends before the announced length is
-closed without an answer. Such a route lists `POST` in the `Allow` header of its 405. There is still one request per
-connection, and no check of the origin of the request: a route that changes state verifies it, with a token or the
-`Origin` header.
+closed without an answer. `100 Continue` goes only to an HTTP/1.1 client that sends exactly `Expect: 100-continue`, and
+not when the body is already there or the request is refused. Such a route lists `POST` in the `Allow` header of its 405.
+There is still one request per connection, and no check of the origin of the request: a route that changes state verifies
+it, with a token or the `Origin` header.
+
+Limits: the server has no timeout on reading the headers or the body, so a slow client holds its connection and the
+bytes received so far (at most `n`); size `n` for the smallest request the route needs. A refusal sent while the client
+is still sending its body can reach it as a connection reset instead of the status, since the unread body is not drained.
 
 ## Byte ranges (#455)
 

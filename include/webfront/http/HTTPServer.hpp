@@ -503,6 +503,20 @@ inline std::optional<std::uint64_t> contentLength(const Request& request) {
     return length;
 }
 
+/// Whether the client waits for `100 Continue` before it sends the body: `Expect: 100-continue` (RFC 9110 §10.1.1, a
+/// token compared without case, not a substring), from an HTTP/1.1 or later client, as an interim answer is never sent to 1.0.
+inline bool expectsContinue(const Request& request) {
+    if (request.httpVersionMajor < 1 || (request.httpVersionMajor == 1 && request.httpVersionMinor < 1)) return false;
+    constexpr std::string_view token = "100-continue";
+    for (const auto& value : request.getHeadersValues("Expect")) {
+        std::string_view text = value;
+        while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) text.remove_prefix(1);
+        while (!text.empty() && (text.back() == ' ' || text.back() == '\t')) text.remove_suffix(1);
+        if (text.size() == token.size() && std::equal(text.begin(), text.end(), token.begin(), [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == b; })) return true;
+    }
+    return false;
+}
+
 /// The path without empty and "." segments, so that "/a//b/./c" reaches the route of "/a/b/c" instead of falling
 /// through to the file providers, which would resolve it to the same file. A trailing slash is kept.
 inline std::string collapseSegments(std::string path) {
@@ -1057,7 +1071,7 @@ private:
                 else if (*length == routing::malformedLength) refusal = Response::badRequest;
                 else if (*length > *match.route->postBodyLimit) refusal = Response::payloadTooLarge;
                 else {
-                    if (body.size() < *length && request.headersContain("Expect", "100-continue")) {
+                    if (body.size() < *length && routing::expectsContinue(request)) {
                         // The client waits for this interim answer before it sends the body (curl does beyond 1 KiB).
                         std::vector<typename Net::ConstBuffer> proceed{Net::Buffer(std::string_view{"HTTP/1.1 100 Continue\r\n\r\n"})};
                         co_await Net::Send(socket, proceed);
