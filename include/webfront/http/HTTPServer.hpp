@@ -213,9 +213,12 @@ private:
             case headerName: if (input == ':') { state = spaceBeforeHeaderValue; break; }
                                   else if (!isChar(input) || isCtrl(input) || isSpecial(input)) throw BadRequestException();
                                   else { headers.back().name.push_back(input); break; }
-            case spaceBeforeHeaderValue: setState(input != ' ', headerValue); break;
+            case spaceBeforeHeaderValue: if (input == ' ' || input == '\t') break;
+                                             else if (input == '\r') { state = newline2; break; }
+                                             else if (isCtrl(input)) throw BadRequestException();
+                                             else { headers.back().value.push_back(input); state = headerValue; break; }
             case headerValue: if (input == '\r') { state = newline2; break; }
-                                   else if (isCtrl(input)) throw BadRequestException();
+                                   else if (isCtrl(input) && input != '\t') throw BadRequestException();
                                    else { headers.back().value.push_back(input); break; }
             case newline2: setState(input != '\n', headerLineStart); break;
             case newline3: if (input == '\n') { state = completed; return true; } else throw BadRequestException();

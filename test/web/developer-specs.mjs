@@ -1298,6 +1298,99 @@ try {
         const lastRows = count => rows().slice(cursorRow() - count + 1, cursorRow() + 1);
         await type('echo hello\r');
         assert(JSON.stringify(lastRows(3)) === JSON.stringify(['> echo hello', 'hello', '> ']), `A C++ command must run from the terminal: ${lastRows(3)}`);
+        // A click on the page around the terminal (its title, a notice, a blank area) keeps the input focus (#608).
+        {
+            const textarea = host.querySelector('.xterm-helper-textarea');
+            const page = host.ownerDocument;
+            const outside = page.body;
+            assert(!host.contains(outside) && textarea.ownerDocument.activeElement === textarea, 'The terminal must have the focus before the click');
+            // A press outside any focusable element moves the focus to the body, after the press event.
+            const click = (target, {moveFocus = true} = {}) => {
+                target.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true, button: 0}));
+                if (moveFocus) page.activeElement?.blur();
+                for (const type of ['mouseup', 'click']) target.dispatchEvent(new MouseEvent(type, {bubbles: true, cancelable: true, button: 0}));
+            };
+            click(outside);
+            await eventually(() => page.activeElement === textarea, 'A click on the page around the terminal must leave the terminal focused', {every: 10});
+            await type('echo after-click\r');
+            assert(lastRows(2)[0] === 'after-click', `Typing after a click outside the terminal must run: ${lastRows(3)}`);
+            // An older selection of the terminal does not keep the focus away: a click that selects nothing gives it back.
+            terminal.selectAll();
+            assert(terminal.hasSelection(), 'The terminal must hold a selection');
+            click(page.body);
+            await eventually(() => page.activeElement === textarea, 'A click on the page must give the focus back although the terminal still holds an older selection', {every: 10});
+            assert(terminal.hasSelection(), 'The click must leave the terminal\'s selection alone');
+            await type('echo after-selection\r');
+            assert(lastRows(2)[0] === 'after-selection', `Typing after a click that follows a selection must run: ${lastRows(3)}`);
+            terminal.clearSelection();
+            // A label hands the focus to its field, and the terminal leaves it there.
+            const field = page.createElement('input'), label = page.createElement('label');
+            field.id = 'webfront-608-field';
+            label.htmlFor = field.id;
+            label.textContent = 'Name';
+            page.body.append(label, field);
+            try {
+                click(label);
+                await delay(50);
+                assert(page.activeElement === field, `A click on a label must leave the focus to its field: ${page.activeElement?.tagName}`);
+                // Whatever takes the click, the terminal does not take the focus from a field of the page.
+                field.focus();
+                click(page.body, {moveFocus: false});
+                await delay(50);
+                assert(page.activeElement === field, 'A click that leaves a field focused must not move the focus to the terminal');
+            } finally {
+                label.remove();
+                field.remove();
+                terminal.focus();
+            }
+            // Two terminals in the page: a click gives the focus back to the one that had it, and to no other.
+            const spare = page.createElement('div');
+            spare.style.cssText = 'width:320px;height:120px';
+            page.body.append(spare);
+            const other = await runtime.mount({bridge: terminalBridge, config, terminal: spare, preview: context.preview, onExit: () => {}, fitToElement: false});
+            try {
+                const settle = () => delay(50);  // the focus is given back after the click, in a task of its own
+                terminal.focus();
+                click(host.querySelector('.xterm-screen'), {moveFocus: false});
+                await settle();
+                assert(page.activeElement === terminal.textarea, 'A click in a terminal must not give the focus to another terminal');
+                other.terminal.focus();
+                click(spare.querySelector('.xterm-screen'), {moveFocus: false});
+                await settle();
+                assert(page.activeElement === other.terminal.textarea, 'A click in the second terminal must keep it focused');
+                click(page.body);
+                await eventually(() => page.activeElement === other.terminal.textarea, 'A click on the page must give the focus back to the terminal that had it', {every: 10});
+                // The workspace belongs to the first terminal, yet the second one answers to its state.
+                const layoutState = () => page.documentElement.getAttribute('data-webfront-workspace');
+                assert(layoutState() === 'terminal', `The page must lay the terminal out alone: ${layoutState()}`);
+                try {
+                    // The state changes after the click ends, before the focus is given back: the window now floats, and the
+                    // terminal that owns it takes the keys, not the second one.
+                    other.terminal.focus();
+                    click(page.body);
+                    context.preview.dispatchEvent(new Event('webfront-preview-navigating'));
+                    assert(layoutState() === 'floating', `A shown interface must float the terminal: ${layoutState()}`);
+                    await delay(100);
+                    assert(page.activeElement !== other.terminal.textarea,
+                        'The second terminal must not take the focus back once an interface has the window');
+                    // With the interface already shown, a click on the page does not give the focus to any terminal.
+                    other.terminal.focus();
+                    assert(page.activeElement === other.terminal.textarea, 'The second terminal must hold the focus');
+                    click(page.body);
+                    await delay(100);
+                    assert(page.activeElement !== other.terminal.textarea && page.activeElement !== terminal.textarea,
+                        `No terminal must take the focus back while an interface is shown: ${page.activeElement?.className}`);
+                } finally {
+                    context.preview.hidden = false;
+                    context.preview.hidden = true;
+                    await eventually(() => layoutState() === 'terminal', 'The terminal must have the window again', {every: 10});
+                }
+            } finally {
+                other.terminal.dispose();
+                spare.remove();
+                terminal.focus();
+            }
+        }
         // Initial dev errors must finish the session command, without requiring Ctrl+C (#560).
         for (const [manifest, message] of [[null, 'No webfront.project.json: run wf init'],
             [{format: 1, name: 'empty', version: '0.1.0'}, 'Usage: wf dev <entry.tsx>']]) {

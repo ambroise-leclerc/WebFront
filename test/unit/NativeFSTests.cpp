@@ -315,6 +315,7 @@ const Scenario nativeDebugFSFontStacks{"NativeDebugFS warns once about costly fo
         env.createTextFile("short-stack.css", "body { font-family: system-ui, sans-serif; } code { font-family: \"A, B\", monospace; }");
         env.createTextFile("variable.css", "body { font-family: var(--a), x, y, z, w; --font-family: p, q, r, s, t; }");
         env.createTextFile("quoted.css", ".a { font-family: \"font-family: a, b, c, d, e\"; }");
+        env.createTextFile("empty.css", "");
         when("each is opened twice", [&] {
             std::ostringstream warnings;
             struct WarningOutputScope {  // restored even when a require() throws
@@ -323,8 +324,10 @@ const Scenario nativeDebugFSFontStacks{"NativeDebugFS warns once about costly fo
             } const output{warnings};
             DebugFS root(env.getTestDir());
             for (int i = 0; i < 2; ++i)
-                for (const auto* name : {"long-stack.css", "short-stack.css", "variable.css", "quoted.css"})
+                for (const auto* name : {"long-stack.css", "short-stack.css", "variable.css", "quoted.css", "empty.css"})
                     require(root.open(name).has_value());
+            checkFileRead(root, "empty.css", "");
+            checkFileRead(root, "short-stack.css", "body { font-family: system-ui, sans-serif; } code { font-family: \"A, B\", monospace; }");
             const auto text = warnings.str();
             then("only the long stack is reported, once, with its count", [&] {
                 require(text.find("long-stack.css") != string::npos);

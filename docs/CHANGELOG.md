@@ -27,6 +27,8 @@ these entries stays in the GitHub releases and the Git history.
 - Show the WebKitGTK window when the page reports its first frame, or when a one-second timer fires, even if the page has not painted, instead of at once; the embedded pages, the starter and the examples use the cheap `sans-serif` and `monospace` font stacks (#611, `docs/WEBKITGTK.md`).
 
 ### Fixed
+- Accept HTTP request headers with optional spaces or tabs after the colon, tabs in values, and empty values (#621).
+- Keep the input focus of the developer terminal after a click on the page around it (title, notice, blank areas) while the terminal has the window, selection and controls excepted (#608).
 - Remove the white flash of an embedded view between the developer environment's bootstrap page and the project's page, by giving the window the environment's dark colour (`#141821`) when the application sets none; on macOS the view then no longer paints its own white behind it (#611, `docs/WKWEBVIEW.md`).
 - Select detected GPU architectures supported by nvcc by default for the host-loop CUDA renderer (`docs/HOST_LOOP_EXAMPLE.md`).
 
