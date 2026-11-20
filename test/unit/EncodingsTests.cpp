@@ -140,6 +140,10 @@ const Scenario webSocketSec{"WebSocket Sec Key coding", [] {
 }};
 
 const Scenario base64Encoding{"Base64 encoding", [] {
+    require(base64::encode(std::string{}) == "");
+    require(base64::encode(std::string{"f"}) == "Zg==");
+    require(base64::encode(std::string{"fo"}) == "Zm8=");
+    require(base64::encode(std::string{"foo"}) == "Zm9v");
     require(base64::encodeInNetworkOrder(crypto::sha1("The quick brown fox jumps over the lazy dog")) ==
             "L9ThxnotKPzthJ7hu3bnORuT6xI=");
     require(base64::encodeInNetworkOrder(crypto::sha1("The quick brown fox jumps over the lazy cog")) ==

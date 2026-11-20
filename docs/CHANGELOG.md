@@ -10,6 +10,34 @@ these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
+## [1.1.0] - 2026-11-20
+
+WebFront 1.1 ships with developer environment 1.0.1. It adds POST routes with a bounded body, application-selected programs
+in a native pseudoterminal, and a faster, less flashy start of the native windows. No breaking change.
+
+### Added
+- Answer `POST` on a dynamic route that opts in with `http::RouteOptions::postBodyLimit`: the body, bounded by `Content-Length`, reaches the handler as `RouteRequest::body`; `Response::accepted` (202) and `Response::unauthorized` (401) have their reason phrases (#619, `docs/HTTP_ASSETS.md`).
+- CEF supports `WindowOptions::background` and shows its window when the first document has loaded or after one second (#611, `docs/FRONTENDS.md`).
+- Print a hint on standard error when the development file system serves a stylesheet whose `font-family` lists four or more costly families (#611, `docs/WEBKITGTK.md`).
+- Run the start-up time of the native windows, cold and warm (cold is fully cold on Linux only), as `<Frontend>StartupTime-cold` and `-warm` (label `startup`) with generous limits, timed from the start of the program so that the frontend's initialization counts (#611, `docs/WEBKITGTK.md`).
+- Run application-selected programs in a native pseudoterminal with an optional xterm.js page adapter and replay across reloads (#613, `docs/PTY.md`).
+- Skip GStreamer's initialization, and its plugin scan, in WebKitGTK for an application whose pages never use audio or video, with `WindowOptions::media = false`; the default keeps media (#611, `docs/WEBKITGTK.md`).
+- WKWebView supports `WindowOptions::background`, translucent colours included, and `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WKWEBVIEW.md`).
+- WebView2 supports `WindowOptions::background` and `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WEBVIEW2.md`).
+- Choose the colour of the WebKitGTK view under the page with `WindowOptions::background` (WebKitGTK; the other embedded frontends are listed here), and read the start-up milestones of a WebKitGTK view with `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WEBKITGTK.md`).
+
+### Changed
+- Reveal the WKWebView window when the document has loaded or after one second (#611, `docs/WKWEBVIEW.md`).
+- Reveal the WebView2 window after the first frame or one second (#611, `docs/WEBVIEW2.md`).
+- Show the WebKitGTK window when the page reports its first frame, or when a one-second timer fires, even if the page has not painted, instead of at once; the embedded pages, the starter and the examples use the cheap `sans-serif` and `monospace` font stacks (#611, `docs/WEBKITGTK.md`).
+
+### Fixed
+- Accept HTTP request headers with optional spaces or tabs after the colon, tabs in values, and empty values (#621).
+- Read an obsolete line fold in a request header as one space (RFC 9112, section 5.2), not as the two lines glued together: a `Content-Length` folded as `1` and `0` was read as `10` (#619).
+- Keep the input focus of the developer terminal after a click on the page around it (title, notice, blank areas) while the terminal has the window, selection and controls excepted (#608).
+- Remove the white flash of an embedded view between the developer environment's bootstrap page and the project's page, by giving the window the environment's dark colour (`#141821`) when the application sets none; on macOS the view then no longer paints its own white behind it (#611, `docs/WKWEBVIEW.md`).
+- Select detected GPU architectures supported by nvcc by default for the host-loop CUDA renderer (`docs/HOST_LOOP_EXAMPLE.md`).
+
 ## [1.0.0] - 2026-11-17
 
 WebFront 1.0 ships with developer environment 1.0.0. This release adds host-loop integration, developer tools and
@@ -231,7 +259,8 @@ Coroutines and the opt-in developer environment. One **breaking** change to the 
 
 - Fail decoding when a bridge integer is out of the requested C++ range, instead of invoking undefined behavior.
 
-[Unreleased]: https://github.com/ambroise-leclerc/WebFront/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/ambroise-leclerc/WebFront/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/ambroise-leclerc/WebFront/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ambroise-leclerc/WebFront/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/ambroise-leclerc/WebFront/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/ambroise-leclerc/WebFront/compare/v0.7.0...v0.8.0

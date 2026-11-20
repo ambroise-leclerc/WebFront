@@ -1,0 +1,8 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>First frame</title>
+<script>
+    if (location.search === "?no-frame")
+        window.requestAnimationFrame = () => 0;
+</script>
+<p>First frame lifecycle test</p>

@@ -5,6 +5,7 @@
 #include <webfront/components/forms/Form.hpp>
 #include <webfront/system/FileSystem.hpp>
 #include <webfront/tooling/Logger.hpp>
+#include <webfront/PtyPage.hpp>
 #include <webfront/WebFront.hpp>
 
 #include "../driver/WfDriver.hpp"
@@ -113,6 +114,11 @@ public:
         if (!mediaFile.empty()) filesystem::remove(mediaFile, ignored);
     }
 
+    void configureApplication(WebFrontConfig& config) {
+        config.contentPolicy.allowMissingOrigin = false;
+        config.allowPtyPages = true;
+    }
+
     /// Registers the callbacks of the specs before the page opens; the rejecting WebSocket server starts after the CEF
     /// subprocesses have dispatched (driver main), in the browser process.
     void configure(TestWF& app) {
@@ -120,6 +126,14 @@ public:
         webFront = &app;
         rejectedWebSocket.emplace();
         registerCallbacks();
+        registerPtyPage(app, {
+#ifdef _WIN32
+            .argv = {"cmd.exe", "/d", "/q"},
+#else
+            .argv = {"sh", "-i"},
+#endif
+            .directory = {}, .environment = {{"WF_PTY_MARKER", "WEBFRONT_PTY_OK"}}, .size = {}
+        });
         registerBitsetCallbacks();
         registerListCallbacks();
         lifeReactSubscription = demo::installLifeReact(app);
@@ -524,19 +538,10 @@ private:
         }
     }
 
-    /// A 20 second PCM sound in a native file, served by ranges (#455): a <video> element plays it and seeks in it.
+    /// A 20 second video without audio, served by ranges (#455); playback needs no runner audio device.
     void registerMediaRoute(TestWF& app) {
-        constexpr uint32_t rate = 8000, seconds = 20, dataSize = rate * seconds;
-        string wav = "RIFF";
-        auto   little = [&wav](uint32_t value, int bytes) { for (int index = 0; index < bytes; ++index) wav.push_back(static_cast<char>((value >> (8 * index)) & 0xff)); };
-        little(36 + dataSize, 4);
-        wav += "WAVEfmt ";
-        little(16, 4); little(1, 2); little(1, 2); little(rate, 4); little(rate, 4); little(1, 2); little(8, 2);
-        wav += "data";
-        little(dataSize, 4);
-        for (uint32_t index = 0; index < dataSize; ++index) wav.push_back(static_cast<char>(128 + (index % 80 < 40 ? 20 : -20)));
-        mediaFile = filesystem::temp_directory_path() / ("webfront-range-" + to_string(random_device{}()) + ".wav");
-        ofstream(mediaFile, ios::binary) << wav;
+        mediaFile = filesystem::temp_directory_path() / ("webfront-range-" + to_string(random_device{}()) + ".webm");
+        filesystem::copy_file(WEBFRONT_TEST_MEDIA_FILE, mediaFile);
         mediaRoute = app.addRoute("/webfront/services/test-media/", [this](const http::RouteRequest& request) {
             {
                 lock_guard lock(mediaMutex);
@@ -544,7 +549,7 @@ private:
             }
             fs::File file{ifstream(mediaFile, ios::binary)};
             file.setEntityTag("\"test-media-1\"");  // the content is written once, so its version never changes
-            auto reply = http::fileReply(request.request, std::move(file), "audio/wav");
+            auto reply = http::fileReply(request.request, std::move(file), "video/webm");
             reply.headers.emplace_back("Cache-Control", "no-store");
             return reply;
         });

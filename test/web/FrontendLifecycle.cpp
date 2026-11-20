@@ -680,6 +680,51 @@ int checkHostThread() {
     }
 }
 
+// The program's start, taken before main so that the toolkit's initialization is part of what startup-time measures.
+const auto programStart = std::chrono::steady_clock::now();
+
+// How long the window takes to reach a working bridge: the page asks the host, which prints the time since the start of the
+// program, including the frontend's initialization (#611). The CTest case StartupTime-* runs it with fresh profile directories (cold) or after a first run (warm).
+int checkStartupTime() {
+    const auto begin = programStart;
+    App        app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    lifecycleStage = LifecycleStage::startingInstrumented;
+    HostSession<App> session;
+    session.setup(app);
+    std::string answer;
+    long long   readyMilliseconds = -1;
+    std::thread host([&] {
+        try {
+            answer = session.exchange();
+            readyMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin).count();
+            // The answer can come before the first frame: the window is shown at the first frame or, at the latest, one second
+            // after the load, so the close waits for that milestone to be traced (RunStartupTime.cmake requires it).
+            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+            app.requestClose();  // also on an empty answer: the check below reports it
+        } catch (const std::exception& error) {
+            answer = error.what();
+            app.requestClose();  // fail now instead of waiting for the script's timeout
+        }
+    });
+    struct Join {
+        HostSession<App>& session;
+        std::thread&      thread;
+        ~Join() {
+            session.abandon();
+            thread.join();
+        }
+    };
+    {
+        Join join{session, host};
+        app.show("host-close.html");
+        lifecycleStage = LifecycleStage::windowClosed;
+    }
+    if (answer != "host-from-page")
+        throw std::runtime_error("The page did not answer the host: '" + answer + "'");
+    std::cout << "startup-time: ready " << readyMilliseconds << " ms" << std::endl;
+    return 0;
+}
+
 int run(std::string_view mode) {
     std::map<std::string_view, int (*)()> cases;
     cases.emplace(
@@ -717,6 +762,7 @@ int run(std::string_view mode) {
     cases.emplace("native-window", checkNativeWindow);
     cases.emplace("second-open", checkSecondOpen);
     cases.emplace("host-close", checkHostClose);
+    cases.emplace("startup-time", checkStartupTime);
     cases.emplace("host-thread", +[] { return checkHostThread<App>(); });
     cases.emplace("view-association", checkViewAssociation);
     cases.emplace("stage-report", checkStageReport);

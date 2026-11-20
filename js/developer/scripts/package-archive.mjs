@@ -1,5 +1,5 @@
 // The deterministic npm archive of a package kept in js/<directory>: its package.json and the files it declares. Shared by
-// wf run react-package, wf run services-package and the test registry, so that all of them write the same bytes.
+// the optional package scripts and the test registry, so that all of them write the same bytes.
 import {tar, storedGzip} from '../tools/archive.mjs';
 import {sriOf} from '../tools/distribution.mjs';
 

@@ -68,6 +68,9 @@ struct WKWebViewOptions {
 
 #if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
     #include <bit>
+    #include <chrono>
+    #include <cstdio>
+    #include <cstdlib>
     #include <exception>
     #include <functional>
     #include <future>
@@ -83,6 +86,9 @@ struct WKWebViewOptions {
     #include <objc/message.h>
     #include <objc/runtime.h>
     #include <pthread.h>
+    #include <sys/sysctl.h>
+    #include <sys/time.h>
+    #include <unistd.h>
 
 namespace webfront::frontend::detail::wkwebview {
 
@@ -327,6 +333,17 @@ struct Session {
     /// What the answers of a system panel hold instead of `this`: AppKit may deliver one after the session is gone.
     std::shared_ptr<Session*>            alive = std::make_shared<Session*>(this);
     id                                   app = nullptr, window = nullptr, view = nullptr, delegate = nullptr, timer = nullptr;
+    /// The window is shown nearly transparent and made opaque at the page's first frame, or when this timer expires.
+    id                                   presentTimer = nullptr;
+    bool                                 presented = false, presentedByFrame = false;
+    /// Test hook: false does not show the window when the document finishes loading, so only the delay can.
+    bool                                 revealOnLoad = true;
+    /// Seconds before the window is shown even if the document has not loaded. A test lengthens it so that a slow
+    /// first launch of the web content process cannot make the delay win against the load it observes.
+    double                               presentDelay = 1.0;
+    /// Test hook: called on the main thread when the window has been made opaque.
+    std::function<void()>                windowShown;
+    const std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
     id                                   previousDelegate = nullptr, previousMenu = nullptr;
     long                                 previousActivationPolicy = 0;
     bool                                 installed = false, running = false, closed = false, loaded = false;
@@ -344,6 +361,10 @@ struct Session {
         if (timer) {
             send<void>(timer, "invalidate");
             send<void>(timer, "release");
+        }
+        if (presentTimer) {
+            send<void>(presentTimer, "invalidate");
+            send<void>(presentTimer, "release");
         }
         if (view) {
             send<void>(view, "setNavigationDelegate:", static_cast<id>(nullptr));
@@ -375,6 +396,46 @@ struct Session {
             attach(delegate, nullptr);
             send<void>(delegate, "release");
         }
+    }
+
+    /// Milliseconds since the process was executed, so the trace covers the loading of the frameworks too.
+    static long long millisecondsSinceExec() noexcept {
+        int         mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, static_cast<int>(getpid())};
+        kinfo_proc  info{};
+        std::size_t size = sizeof(info);
+        if (sysctl(mib, 4, &info, &size, nullptr, 0) != 0)
+            return -1;
+        const timeval started = info.kp_proc.p_un.__p_starttime;
+        timeval       now{};
+        gettimeofday(&now, nullptr);
+        return static_cast<long long>(now.tv_sec - started.tv_sec) * 1000 + (now.tv_usec - started.tv_usec) / 1000;
+    }
+    /// WEBFRONT_STARTUP_TRACE=1 reports the milestones of the view's start on standard error.
+    void trace(const char* milestone) const noexcept {
+        static const bool enabled = [] {
+            const auto* value = std::getenv("WEBFRONT_STARTUP_TRACE");
+            return value && *value && std::string_view{value} != "0";
+        }();
+        if (enabled)
+            std::fprintf(stderr, "WebFront startup: %s at %lld ms (session %lld ms)\n", milestone, millisecondsSinceExec(),
+                         static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - created).count()));
+    }
+    /// Makes the window opaque, once: at the page's first frame, or when the delay has expired.
+    void presentWindow(bool byFrame) {
+        if (presented || closed || !window)
+            return;
+        presented        = true;
+        presentedByFrame = byFrame;
+        if (presentTimer) {
+            send<void>(presentTimer, "invalidate");
+            send<void>(presentTimer, "release");
+            presentTimer = nullptr;
+        }
+        if (options.visible)
+            send<void>(window, "setAlphaValue:", 1.0);
+        trace("window shown");
+        if (windowShown)
+            windowShown();
     }
 
     /// Dismisses the panels attached to the window: their completion handlers run, so WebKit gets its answers.
@@ -525,13 +586,35 @@ struct Session {
         if (!window)
             throw std::runtime_error("WKWebView: cannot create window (a WindowServer session is required)");
         send<void>(window, "setReleasedWhenClosed:", static_cast<BOOL>(false));
+        if (const auto color = frontend::detail::parseBackground(windowOptions.background)) {
+            const auto native = send(type("NSColor"), "colorWithSRGBRed:green:blue:alpha:", static_cast<CGFloat>((*color)[0]), static_cast<CGFloat>((*color)[1]),
+                                     static_cast<CGFloat>((*color)[2]), static_cast<CGFloat>((*color)[3]));
+            send<void>(window, "setBackgroundColor:", native);
+            // A translucent colour is only seen through if the window is not opaque: without this AppKit fills the window as
+            // if the alpha were 1. Opaque colours keep the default opaque window, which is cheaper to composite.
+            if ((*color)[3] < 1.0f)
+                send<void>(window, "setOpaque:", static_cast<BOOL>(false));
+            if (send<BOOL>(view, "respondsToSelector:", sel_registerName("setUnderPageBackgroundColor:")))  // macOS 12
+                send<void>(view, "setUnderPageBackgroundColor:", native);  // behind the page, e.g. when scrolling past its edge
+            // The view paints its own white behind a page that does not paint: stop it, so the window's colour shows through
+            // before the load and behind a transparent page. WebKit offers no public API for it: the `drawsBackground` key is
+            // set only when this runtime answers to its setter, never by calling an unknown key.
+            if (send<BOOL>(view, "respondsToSelector:", sel_registerName("_setDrawsBackground:"))
+                || send<BOOL>(view, "respondsToSelector:", sel_registerName("setDrawsBackground:"))) {
+                Object key(text("drawsBackground"));
+                send<void>(view, "setValue:forKey:", send(type("NSNumber"), "numberWithBool:", static_cast<BOOL>(false)), key.get());
+            }
+        }
         send<void>(window, "setDelegate:", delegate);
         Object title(text(windowOptions.title));
         send<void>(window, "setTitle:", title.get());
         send<void>(window, "setContentView:", view);
         send<BOOL>(window, "makeFirstResponder:", view);
         send<void>(window, "center");
+        trace("view created");
         if (options.visible) {
+            // Nearly transparent, not hidden: an occluded window would suspend the page's animation frames.
+            send<void>(window, "setAlphaValue:", 0.01);
             send<void>(window, "makeKeyAndOrderFront:", static_cast<id>(nullptr));
             send<void>(app, "activateIgnoringOtherApps:", static_cast<BOOL>(true));
         }
@@ -546,6 +629,20 @@ struct Session {
                           static_cast<id>(nullptr),
                           static_cast<BOOL>(false)),
                      "retain");
+        if (options.visible) {
+            presentTimer = send(send(type("NSTimer"),
+                                     "timerWithTimeInterval:target:selector:userInfo:repeats:",
+                                     presentDelay,
+                                     delegate,
+                                     sel_registerName("webfrontPresent:"),
+                                     static_cast<id>(nullptr),
+                                     static_cast<BOOL>(false)),
+                                "retain");
+            // Common modes: the delay also runs while the system tracks a window move or resize.
+            Object mode(text("kCFRunLoopCommonModes"));
+            send<void>(send(type("NSRunLoop"), "currentRunLoop"), "addTimer:forMode:", presentTimer, mode.get());
+        }
+        trace("load started");
         Object urlText(text(url));
         auto   nativeUrl = send(type("NSURL"), "URLWithString:", urlText.get());
         if (!nativeUrl)
@@ -871,6 +968,15 @@ inline void startupTimedOut(id self, SEL, id) {
         s->fail("initial navigation timed out after " + std::to_string(s->options.startupTimeout.count()) + " milliseconds");
 }
 
+inline void presentDelayExpired(id self, SEL, id) {
+    if (auto s = session(self)) {
+        s->trace("present delay expired");
+        s->guard([&] {
+            s->presentWindow(false);
+        });
+    }
+}
+
 inline void navigationFinished(id self, SEL, id, id) {
     if (auto s = session(self)) {
         if (!s->receivedResponse) {
@@ -880,6 +986,12 @@ inline void navigationFinished(id self, SEL, id, id) {
         } else {
             s->loaded = true;
             send<void>(s->timer, "invalidate");
+            if (s->revealOnLoad) {
+                s->trace("document loaded");
+                s->guard([&] {
+                    s->presentWindow(true);
+                });
+            }
         }
     }
 }
@@ -909,6 +1021,7 @@ inline void addApplicationMethods(Class cls) {
     addMethod(cls, "applicationShouldTerminate:", applicationShouldTerminate, "Q@:@");
     addMethod(cls, "applicationShouldTerminateAfterLastWindowClosed:", terminateAfterLastWindow, "B@:@");
     addMethod(cls, "webfrontTimeout:", startupTimedOut, "v@:@");
+    addMethod(cls, "webfrontPresent:", presentDelayExpired, "v@:@");
 }
 
 inline void addNavigationMethods(Class cls) {

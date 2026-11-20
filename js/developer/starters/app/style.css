@@ -1,4 +1,4 @@
-:root { color-scheme: light dark; font: 16px/1.5 system-ui, sans-serif; }
+:root { color-scheme: light dark; font: 16px/1.5 sans-serif; }
 body { margin: 0; }
 #root { max-width: 32rem; margin: 3rem auto; padding: 0 1rem; display: grid; gap: .75rem; }
 h1 { margin: 0; font-size: 1.5rem; }

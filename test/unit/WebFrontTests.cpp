@@ -6,6 +6,7 @@
 #include <webfront/networking/NetworkingMock.hpp>
 #include <webfront/tooling/Logger.hpp>
 #include <webfront/WebFront.hpp>
+#include <webfront/PtyPage.hpp>
 
 #include <algorithm>
 #include <array>
@@ -39,6 +40,52 @@ using namespace webfront;
 const Scenario publicVersion{"The public version matches the version detected by CMake", {"version"}, [] {
     then("consumers and CMake observe the same version", [&] {
         require(webfront::version == cmakeProjectVersion);
+    });
+}};
+
+const Scenario ptyPageAuthorization{"PTY page requires explicit opt-in, a loopback bind and the application Origin", [] {
+    then("registration is refused by default and opt-in rejects wildcard and non-loopback binds", [] {
+        WebFront app{WebFrontConfig{.port = "0"}};
+        requireThrows<std::logic_error>([&] { registerPtyPage(app, {}); });
+        require(!app.hasCppFunction("webfront.pty.open"));
+        for (const auto* address : {"0.0.0.0", "::", "192.0.2.1", "localhost", "0:0:0:0:0:0:0:1"}) {
+            requireThrows<std::invalid_argument>([&] {
+                WebFront rejected{WebFrontConfig{.address = address, .port = "0", .contentPolicy = {.allowMissingOrigin = false}, .allowPtyPages = true}};
+            });
+        }
+    });
+    then("configuration rejects a bridge policy that would allow missing or foreign origins", [] {
+        for (const auto& policy : {ContentPolicy{}, ContentPolicy{.allowAnyBridgeOrigin = true, .allowMissingOrigin = false},
+                                   ContentPolicy{.bridgeAllowedOrigins = {"http://foreign.example"}, .allowMissingOrigin = false}}) {
+            requireThrows<std::invalid_argument>([&] {
+                WebFront app{WebFrontConfig{.port = "0", .contentPolicy = policy, .allowPtyPages = true}};
+            });
+        }
+    });
+    then("the upgrade handler accepts the application's own Origin and refuses missing or foreign Origin", [] {
+        using namespace webfront::http;
+        const auto config = webfront::detail::checkedPtyPageConfig({
+            .contentPolicy = {.allowMissingOrigin = false},
+            .allowPtyPages = true
+        });
+        RequestHandler<networking::NetworkingMock, MockFileSystem<>> handler{
+            ".", webfront::detail::BoundContentPolicy{"http://127.0.0.1:9002/", config.contentPolicy}
+        };
+        const auto upgrade = [&](std::string_view origin) {
+            std::string input = "GET / HTTP/1.1\r\nHost: 127.0.0.1:9002\r\nUpgrade: websocket\r\n"
+                                "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n";
+            input += origin;
+            input += "\r\n";
+            Request request;
+            require(request.parseSomeData(input.begin(), input.end()));
+            return handler.handleRequest(request).statusCode;
+        };
+        require(upgrade("") == Response::forbidden);
+        require(upgrade("Origin: http://foreign.example\r\n") == Response::forbidden);
+        require(upgrade("Origin: http://127.0.0.1:9002\r\n") == Response::switchingProtocols);
+        require(webfront::detail::checkedPtyPageConfig({
+            .address = "::1", .contentPolicy = {.allowMissingOrigin = false}, .allowPtyPages = true
+        }).address == "::1");
     });
 }};
 

@@ -52,6 +52,15 @@ working CUDA compiler, and the example is complete without one. `ON` makes a mis
 `.cu` unit compiled at C++17, and `CMAKE_CUDA_HOST_COMPILER` names another host compiler when nvcc refuses the default
 one. At run time the engine is offered only when a device answers.
 
+On a fresh native build, CMake selects installed NVIDIA GPUs that `nvcc` supports and embeds native code for them. This
+avoids depending on the driver's PTX compiler, which may be older than the toolkit. If detection is unavailable, CMake
+keeps the compiler's default. Explicit `CMAKE_CUDA_ARCHITECTURES` and `CUDAARCHS` choices take precedence; select all
+target architectures for a distribution or cross-build. A previous build retains its cached choice: remove that cache
+entry to redetect the local GPU. If the redetection fails (`nvidia-smi` unavailable), CMake keeps no architecture in an
+already configured build directory: give `CMAKE_CUDA_ARCHITECTURES` explicitly or start from a fresh build directory
+before generating `WebFront_boing_cuda`. With a Visual Studio generator, rebuild `WebFront_boing_cuda` after changing it, since
+MSBuild may otherwise retain the previous CUDA object.
+
 **The window.** With the platform's native engine in the build (WebKitGTK on Linux, autodetected), the example opens
 a native window; otherwise, or with `--browser`, it opens the system browser. On a Jetson Orin (L4T R39.2.1,
 Ubuntu 24.04) the native window opens with no change to the system: no AppArmor profile, no sysctl, no package.

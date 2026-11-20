@@ -2,6 +2,7 @@
 
 #include "../ContentPolicy.hpp"
 
+#include <array>
 #include <chrono>
 #include <exception>
 #include <filesystem>
@@ -10,6 +11,8 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #if defined(__linux__)
     #include <cerrno>
@@ -97,6 +100,36 @@ struct FailureState {
 enum class SandboxMode { development, distribution };
 
 #if defined(__linux__)
+
+// These variables can point the host toolkit or its children at libraries and modules
+// from a different runtime. Inspect names only in diagnostics; values may be private.
+inline bool containsSnapPath(std::string_view value, std::string_view separators = {}) {
+    while (!value.empty()) {
+        const auto end = value.find_first_of(separators);
+        const auto part = value.substr(0, end);
+        if (part.starts_with("/snap/") || part.starts_with("/var/lib/snapd/snap/"))
+            return true;
+        if (end == std::string_view::npos)
+            break;
+        value.remove_prefix(end + 1);
+    }
+    return false;
+}
+
+inline bool inheritedSnapToolkitPaths() {
+    struct Variable {
+        const char* name;
+        std::string_view separators;
+    };
+    constexpr std::array variables = {Variable{"LD_LIBRARY_PATH", ":;"}, Variable{"LD_PRELOAD", ": "},
+                                       Variable{"GIO_MODULE_DIR", ""}, Variable{"GTK_PATH", ":"},
+                                       Variable{"GTK_EXE_PREFIX", ""}, Variable{"GTK_IM_MODULE_FILE", ""},
+                                       Variable{"GSETTINGS_SCHEMA_DIR", ""}, Variable{"LOCPATH", ":"}};
+    for (const auto& [name, separators] : variables)
+        if (const auto* value = std::getenv(name); value && containsSnapPath(value, separators))
+            return true;
+    return false;
+}
 
 // Development is the default, independently of optimization level. A distribution binary requires the sandbox;
 // an inherited environment variable cannot weaken its build policy.
@@ -277,6 +310,38 @@ public:
             setenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", previous->c_str(), 1);
         else
             unsetenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS");
+    }
+};
+
+/// Sets environment variables for the lifetime of the object and restores them, so the application's own environment is
+/// unchanged once the child processes WebKit launches in the meantime have inherited the values.
+class ScopedEnvironment {
+    struct Entry {
+        std::string                name;
+        std::optional<std::string> previous;
+    };
+    std::vector<Entry> entries;
+
+public:
+    ScopedEnvironment() = default;
+    ScopedEnvironment(const ScopedEnvironment&)            = delete;
+    ScopedEnvironment& operator=(const ScopedEnvironment&) = delete;
+    ScopedEnvironment(ScopedEnvironment&& other) noexcept : entries(std::exchange(other.entries, {})) { }
+    void set(const char* name, const std::string& value) {
+        Entry entry{name, std::nullopt};
+        if (const auto* current = std::getenv(name))
+            entry.previous = current;
+        if (setenv(name, value.c_str(), 1) != 0)
+            throw std::runtime_error(std::string("WebKitGTK: cannot set ") + name);
+        entries.push_back(std::move(entry));
+    }
+    ~ScopedEnvironment() {
+        for (auto entry = entries.rbegin(); entry != entries.rend(); ++entry) {
+            if (entry->previous)
+                setenv(entry->name.c_str(), entry->previous->c_str(), 1);
+            else
+                unsetenv(entry->name.c_str());
+        }
     }
 };
 

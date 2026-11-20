@@ -1,4 +1,5 @@
 #include "../driver/TestFrontend.hpp"
+#include <webfront/system/NativeFS.hpp>
 #include <webfront/WebFront.hpp>
 
 #include <filesystem>
@@ -219,6 +220,21 @@ void settings() {
         require(utf8(send(send(send(session.app, "mainMenu"), "itemAtIndex:", 1L), "title")) == "Edit", "Edit menu has no visible title");
     }
 }
+// A translucent background colour makes the window non-opaque, so what is behind it shows through; an opaque one does not.
+void translucentBackground() {
+    Object pool(send(type("NSAutoreleasePool"), "new"));
+    for (const auto& [colour, translucent] : {std::pair<const char*, bool>{"#12345680", true}, {"#123456", false}, {"#123456ff", false}}) {
+        Session session("http://127.0.0.1:9002/", {.window = {.background = colour}, .visible = webfront::testdriver::visibleWindows});
+        session.create();
+        require(static_cast<bool>(send<BOOL>(session.window, "isOpaque")) != translucent,
+                translucent ? "A translucent background left the window opaque" : "An opaque background made the window translucent");
+        const auto converted = send(send(session.window, "backgroundColor"), "colorUsingColorSpace:", send(type("NSColorSpace"), "sRGBColorSpace"));
+        require(converted != nullptr, "The window has no colour in the sRGB space");
+        const auto alpha = send<double>(converted, "alphaComponent");
+        require(translucent ? (alpha > 0.49 && alpha < 0.51) : alpha == 1.0, "The window's colour does not carry the requested alpha");
+    }
+}
+
 void hiddenScheduling() {
     Object  pool(send(type("NSAutoreleasePool"), "new"));
     Object configuration(send(type("WKWebViewConfiguration"), "new"));
@@ -595,6 +611,44 @@ void navigationDiagnostic() {
         },
         "initial navigation failed");
 }
+
+// The window is nearly transparent until the initial document has loaded; without that signal the delay shows it.
+void loadRevealPresentation(bool delayOnly) {
+    Object pool(send(type("NSAutoreleasePool"), "new"));
+    webfront::http::Server<webfront::NetProvider, webfront::fs::NativeDebugFS> server("127.0.0.1", "9002", std::filesystem::current_path());
+    std::jthread worker([&](std::stop_token stop) {
+        std::stop_callback cleanup(stop, [&] { server.stop(); });
+        server.run();
+    });
+    Session session("http://127.0.0.1:9002/first-frame.html",
+                    {.window = {.background = "#123456"}, .visible = true});
+    session.revealOnLoad = !delayOnly;
+    session.presentDelay = delayOnly ? 1.0 : 60.0;  // the load, not the delay, must show the window
+    session.create();
+    require(send<double>(session.window, "alphaValue") < 0.5, "The window was not nearly transparent before the load");
+    {
+        Object key(text("drawsBackground"));
+        require(!send<BOOL>(send(session.view, "valueForKey:", key.get()), "boolValue"), "The view still paints its own background");
+    }
+    double shownAlpha = 0;
+    session.windowShown = [&] {
+        shownAlpha = send<double>(session.window, "alphaValue");
+        session.close();
+    };
+    session.start();
+    session.run();
+    require(shownAlpha == 1.0, "The window was not made opaque");
+    require(session.presentedByFrame != delayOnly, delayOnly ? "The load revealed the window although it was disabled" : "The window waited for the delay instead of the document load");
+    // The displayed pixels are not read: cacheDisplayInRect renders neither the window's fill nor the web content (it reads black),
+    // and capturing the screen needs a permission the CI does not have. The state that produces them is checked instead: the
+    // window's colour, and the view no longer painting its own background (above).
+    const auto color = send(send(session.window, "backgroundColor"), "colorUsingColorSpace:", send(type("NSColorSpace"), "sRGBColorSpace"));
+    require(color != nullptr, "The window has no colour in the sRGB space");
+    const auto near = [](double value, double expected) { return value > expected - 0.01 && value < expected + 0.01; };
+    require(near(send<double>(color, "redComponent"), 0x12 / 255.0) && near(send<double>(color, "greenComponent"), 0x34 / 255.0)
+                && near(send<double>(color, "blueComponent"), 0x56 / 255.0),
+            "The window does not have the configured background colour");
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -609,6 +663,7 @@ int main(int argc, char** argv) {
             {      "redirect-policy",       redirectPolicy},
             {             "settings",             settings},
             {    "hidden-scheduling",     hiddenScheduling},
+            {"translucent-background", translucentBackground},
             {"navigation-diagnostic", navigationDiagnostic},
             {     "missing-response",      missingResponse},
             { "committed-navigation",  committedNavigation},
@@ -623,7 +678,9 @@ int main(int argc, char** argv) {
             {   "close-with-save-panel",   closeWithSavePanel},
             {       "script-dialogs",       scriptDialogs},
             { "close-with-script-dialog", closeWithScriptDialog},
-            { "sandboxed-script-dialog", sandboxedScriptDialog}
+            { "sandboxed-script-dialog", sandboxedScriptDialog},
+            {          "load-reveal",          [] { loadRevealPresentation(false); }},
+            {        "present-timeout",        [] { loadRevealPresentation(true); }}
         };
         cases.at(argc == 2 ? argv[1] : "")();
         return 0;

@@ -268,7 +268,79 @@ WindowOptions windowReceivedBy(WebFrontConfig config) {
     app.stop();
     return WindowRecorder::received;
 }
+
+WindowOptions windowReceivedByDeveloperApp(WebFrontConfig config) {
+    using Base = BasicWF<ContractNet, MockFileSystem<>, http::DefaultBuffersPolicy, WindowRecorder>;
+    struct DeveloperLike : Base {
+        using Base::Base;
+        void enable() {
+            useDeveloperEnvironment();
+        }
+    };
+    WindowRecorder::received = {.title = "unset", .width = -1, .height = -1};
+    DeveloperLike app(std::move(config));
+    app.enable();
+    app.show();
+    app.stop();
+    return WindowRecorder::received;
+}
 }  // namespace
+
+const Scenario developerBackground{"The developer environment gives its own dark colour to a window that has none", [] {
+    given("a developer application without a window colour", [&] {
+        then("the view does not flash its toolkit's white between the bootstrap and the project's page", [&] {
+            check(windowReceivedByDeveloperApp({}).background == "#141821");
+        });
+    });
+    given("a developer application with a window colour", [&] {
+        then("the application's colour is kept", [&] {
+            check(windowReceivedByDeveloperApp({.window = {.background = "#ffffff"}}).background == "#ffffff");
+        });
+    });
+}};
+
+const Scenario windowBackground{"The window background is a CSS hexadecimal colour that is never guessed", [] {
+    given("valid colours", [&] {
+        then("short, long and translucent forms are read", [&] {
+            const auto white = frontend::detail::parseBackground("#fff");
+            const auto navy  = frontend::detail::parseBackground("#101c1d");
+            const auto clear = frontend::detail::parseBackground("#00000080");
+            require(white && navy && clear);
+            check((*white)[0] == 1.0f && (*white)[3] == 1.0f);
+            check((*navy)[0] == 16.0f / 255.0f && (*navy)[1] == 28.0f / 255.0f && (*navy)[2] == 29.0f / 255.0f && (*navy)[3] == 1.0f);
+            check((*clear)[3] == 128.0f / 255.0f);
+        });
+    });
+    given("a translucent colour for CEF", [&] {
+        then("any non-zero alpha is opaque and only a zero alpha stays transparent, the two values CEF accepts", [&] {
+            check(frontend::detail::cefBackground(*frontend::detail::parseBackground("#101c1d80")) == 0xFF101C1Du);
+            check(frontend::detail::cefBackground(*frontend::detail::parseBackground("#101c1d01")) == 0xFF101C1Du);
+            check(frontend::detail::cefBackground(*frontend::detail::parseBackground("#101c1d")) == 0xFF101C1Du);
+            check(frontend::detail::cefBackground(*frontend::detail::parseBackground("#101c1d00")) == 0x00101C1Du);
+        });
+    });
+    given("invalid or empty text", [&] {
+        then("nothing is returned, so the toolkit's default stays", [&] {
+            check(!frontend::detail::parseBackground(""));
+            check(!frontend::detail::parseBackground("red"));
+            check(!frontend::detail::parseBackground("#12"));
+            check(!frontend::detail::parseBackground("#12345"));
+            check(!frontend::detail::parseBackground("#ggg"));
+        });
+    });
+    given("a default configuration", [&] {
+        then("the page keeps its media; an application without media opts out to skip GStreamer's initialization", [&] {
+            check(WindowOptions{}.media);
+            check(!windowReceivedBy({.window = {.media = false}}).media);
+        });
+    });
+    given("a configuration with a background", [&] {
+        const auto window = windowReceivedBy({.window = {.background = "#101c1d"}});
+        then("the frontend receives it unchanged", [&] {
+            check(window.background == "#101c1d");
+        });
+    });
+}};
 
 const Scenario applicationChooses{"The application chooses the title and the size of the embedded window", [] {
     given("a configuration with a window title and size", [&] {

@@ -61,6 +61,34 @@ On WSLg, preserve its supplied display variables and runtime directory. Native
 Wayland and WSLg require manual verification on those desktops; automated coverage
 uses X11/Xvfb. No WSL-specific library environment changes are applied.
 
+### Snap-hosted editor terminals
+
+A terminal inherited from a Snap-packaged editor can expose Snap library or GTK
+module paths to a host application. This has been observed with VSCodium: the
+system WebKit network process loaded Snap's `libpthread.so.0` and failed with a
+`GLIBC_PRIVATE` symbol error. The particular variable responsible has not been
+isolated; other Snap-hosted editors, including VS Code, may pass similar paths,
+but have not been verified. WebFront warns when the common variables below contain
+`/snap/` or `/var/lib/snapd/snap/` paths outside verified Snap confinement. This
+heuristic does not prove a failure or cover every possible path and does not alter
+the environment. The warning uses the WebFront logger and can be filtered by the
+application.
+
+If this failure occurs, start the host application with a clean environment for
+these variables, replacing the executable path as needed:
+
+```bash
+env -u LD_LIBRARY_PATH -u LD_PRELOAD \
+    -u GIO_MODULE_DIR -u GTK_PATH -u GTK_EXE_PREFIX \
+    -u GTK_IM_MODULE_FILE -u GSETTINGS_SCHEMA_DIR -u LOCPATH \
+    ./examples/WebFrontLifeDeveloper
+```
+
+This removes all values of those variables for the application and its children,
+including legitimate custom configuration. Adjust the launcher if it needs any of
+them. WebFront cannot safely remove them globally: the host application and other
+threads may depend on them, and WebKit may launch child processes later.
+
 Persistent data lives in `$XDG_DATA_HOME/webfront/<executable>-<path-hash>` and caches
 in `$XDG_CACHE_HOME/webfront/<executable>-<path-hash>`. Absolute XDG paths are honored;
 otherwise absolute `$HOME/.local/share` and `$HOME/.cache` are used. The stable hash
@@ -96,6 +124,76 @@ Adapter-specific CTest names use `WebKitGTKAdapter-<case>`; the
 unit tests cover the policy decision table, null error diagnostics, preserving
 the first failure when a timeout or callback reports a later error, and the
 sandbox launcher check described below.
+
+## Startup and first display
+
+The window is mapped at once, but almost transparent, and becomes opaque when the page reports its first frame (two
+animation frames after `DOMContentLoaded`). If no frame is reported, a one-second timer shows it anyway, even when the
+server has sent nothing yet, so a window may still appear empty (in the colour of `background`, if any) when the load is
+slow; GLib can also run the timer late when other events keep the main loop busy. Without a compositing manager the
+opacity is ignored and the window appears immediately, as before. The navigation timeout and its diagnostics are
+unchanged. `WindowOptions::background` (`"#rgb"`, `"#rrggbb"` or `"#rrggbbaa"`) is the colour of the view under the page,
+so a dark interface does not flash white once the window is shown; only WebKitGTK applies it so far.
+`WebKitGTKStartupTime-cold` and `-warm` (label `startup`, in the standard tier) start the lifecycle program's `startup-time`
+scenario with the trace enabled and fail when the page needs more than 10 s (cold: fresh `HOME` and `XDG_*` directories,
+hence an empty GStreamer registry and font cache) or 5 s (warm: the same directories after a first start) to answer the host.
+The time runs from the start of the program, and each case also requires the window's `window shown` milestone (the close waits 1.5 s for it) and applies the limit to it. The limits only catch a regression of seconds on a loaded runner; they do not qualify the 500 ms and 1 s targets.
+`WEBFRONT_STARTUP_TRACE=1` prints the view's milestones (session creation, view created, load started, first frame,
+window shown) on standard error, in milliseconds since the process was executed; only the first frame notification of
+the session is a milestone (a late one is marked as such), a reload is not. A close request (`requestClose()`) made
+before the window is shown still ends the session.
+
+### Skipping GStreamer
+
+WebKitGTK initializes GStreamer in the page's process shortly after a page loads, even if it never uses media, and scans
+every plugin when the registry is cold (the first launch of a user, and after each update of the system's plugins): up to
+1.7 s during which the WebSocket handshake and the frames of the page are blocked. Disabling the media settings of the
+view does not prevent it, and WebFront cannot know in advance whether a page will use media. An application whose pages
+never use `<audio>`, `<video>` or Web Audio therefore opts out with `WebFrontConfig::window.media = false`: WebKit's
+processes are launched with an empty `GST_PLUGIN_SYSTEM_PATH_1_0` and `GST_PLUGIN_PATH_1_0` and a registry of the
+application's profile (`no-media-registry.bin`, so that the user's own registry is never rewritten). The variables are set from the creation of the view, which makes
+WebKit launch a spare web process, until the page reports that its load started (or the one-second delay expires), then
+restored. WebKitGTK offers no per-process environment, so **the variables are process-wide during that window**, a few
+hundred milliseconds at the start of the session: a thread that initializes GStreamer in the application during it
+reads the empty plugin directory and keeps that configuration after the restoration, and a process the application
+starts during it inherits the variables. An application that starts GStreamer or child processes from other threads
+at startup must keep `media = true` or wait for its page before doing so. A web process launched later in the session
+(a process swap) runs without the restriction: it initializes GStreamer as usual, only slower. **A page that does use media
+after the opt-out terminates its web process** (WebKitGTK cannot create its media elements without the plugins, and the
+session fails with "web process terminated"), which is why the default is `true`. Other frontends ignore the option.
+
+The cost of the first layout depends on the fonts of the page: fontconfig walks every installed font for each family it
+cannot find or that is a CSS generic such as `system-ui` or `ui-monospace`, for each weight and style. A page that
+lists several absent families (`"Segoe UI"`, `Inter`, `"JetBrains Mono"`, `Menlo`) can spend hundreds of milliseconds
+before its first paint on a machine with thousands of fonts (hundreds of milliseconds measured on Ubuntu 26.04 with
+WebKitGTK 2.52 and 2 333 installed fonts, for the stacks of one application). Even a generic or an installed family is
+looked up once per variant, so a short stack does not make the first family free: it avoids the lookups of every family
+that follows it. Keep stacks to a generic (`sans-serif`, `monospace`) or to a family you know to be installed, with no
+absent families after it; the embedded pages, the starter and the examples do.
+
+When an application serves a document root (`NativeDebugFS`, the development path), the first time it serves a `.css`
+file whose `font-family` declaration lists four or more families other than `serif`, `sans-serif`, `monospace`, `cursive`
+and `fantasy`, it writes one hint per file on standard error. The check (`include/webfront/system/FontStacks.hpp`) only
+counts families, because it cannot know which are installed: it ignores comments, `var()` and custom properties, reads
+nothing over 1 MiB, checks a file again when its size or modification time changes (and not otherwise) and never fails a request. A production build serves embedded files and does not run it. `wf check`
+does not report font stacks: its checks type-check TypeScript, and a new check would change the environment's published
+archive.
+
+### Critical path and prewarming (analysis)
+
+This is reasoning from the code and the traces of the issue, not a measurement; the reference machine has not been
+used to qualify it. The sequence of a start is: `Frontend::initialize()` (toolkit and GPU initialization, about 90 ms in
+the issue's trace), then the server's bind and listen in the constructor of the application, then at `show()` the
+network session, the context (which launches a spare web process), the view and the load. The server answers no
+request before `show()` starts its thread, and the load is requested only when the view exists, so listening before
+`Frontend::initialize()` would move nothing on the path to the first request: it was not done. What can overlap is the
+launch of the web and network processes with the application's own start, which the creation of the context at
+construction would allow. It is not done because the context and the view take values known only at `show()` (the content
+policy, the view's secret and origin, the window options, and `media`, which sets the environment of the processes at
+creation); a context created earlier would have to be thrown away when any of them differs, and WebKitGTK has no
+per-process environment (see above). A change would need the reference machine to show a gain on the first request
+and a rule for what happens when the options differ, and the same question for WebView2 and WKWebView, whose web
+content starts with the view.
 
 ## Development and distribution
 

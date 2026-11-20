@@ -6,12 +6,12 @@
 # add_test() calls that CTest includes. Each case runs `<target> --exact <title>`; a skipped scenario exits with 4.
 
 if(CMAKE_SCRIPT_MODE_FILE)
-    # Script mode: EXECUTABLE, OUTPUT, PREFIX and PROPERTIES (its ';' encoded as '|') come from -D.
+    # Keep properties in a generated file: passing shell metacharacters through a Windows post-build command is unreliable.
     execute_process(COMMAND "${EXECUTABLE}" --list OUTPUT_VARIABLE titles ERROR_VARIABLE errors RESULT_VARIABLE result)
     if(NOT result EQUAL 0)
         message(FATAL_ERROR "${EXECUTABLE} --list failed (${result}): ${errors}")
     endif()
-    string(REPLACE "|" ";" properties "${PROPERTIES}")
+    include("${PROPERTIES_FILE}")
     set(quoted_properties)
     foreach(property IN LISTS properties)
         string(APPEND quoted_properties " [==[${property}]==]")
@@ -41,8 +41,9 @@ set(_BDD_DISCOVER_SCRIPT "${CMAKE_CURRENT_LIST_FILE}")
 
 function(bdd_discover_tests target)
     cmake_parse_arguments(PARSE_ARGV 1 arg "" "TEST_PREFIX" "PROPERTIES")
-    string(REPLACE ";" "|" properties "${arg_PROPERTIES}")
     set(base "${CMAKE_CURRENT_BINARY_DIR}/${target}")
+    set(properties_file "${base}_properties-$<CONFIG>.cmake")
+    file(GENERATE OUTPUT "${properties_file}" CONTENT "set(properties [==[${arg_PROPERTIES}]==])\n")
     get_property(multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
     if(multi_config)
         set(output "${base}_tests-$<CONFIG>.cmake")
@@ -58,7 +59,7 @@ function(bdd_discover_tests target)
     endif()
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND "${CMAKE_COMMAND}" "-DEXECUTABLE=$<TARGET_FILE:${target}>" "-DOUTPUT=${output}" "-DPREFIX=${arg_TEST_PREFIX}"
-                "-DPROPERTIES=${properties}" -P "${_BDD_DISCOVER_SCRIPT}"
+                "-DPROPERTIES_FILE=${properties_file}" -P "${_BDD_DISCOVER_SCRIPT}"
         VERBATIM)
     file(WRITE "${base}_include.cmake" "${include_content}")
     set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES "${base}_include.cmake")

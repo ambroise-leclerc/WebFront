@@ -32,13 +32,13 @@ inline constexpr std::string_view page = R"js(
     const root = add(document.body, "div", {id: "host-loop"});
     add(root, "style", {textContent: `
         #host-loop { position: fixed; inset: 0; margin: 0; padding: 0; overflow: hidden; background: #0b0d12; color: #f2f4f8;
-                     font: 14px/1.4 system-ui, sans-serif; text-align: left; }
+                     font: 14px/1.4 sans-serif; text-align: left; }
         #host-loop canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
         #host-loop .panel { position: absolute; margin: 0; background: rgba(14, 16, 22, .72); border: 1px solid rgba(255, 255, 255, .16);
                             border-radius: 14px; }
         #host-loop .controls { left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; gap: 8px; align-items: center;
                                padding: 8px; white-space: nowrap; }
-        #host-loop .stats { left: 20px; top: 20px; max-width: calc(100% - 230px); padding: 10px 14px; font: 11px/1.5 ui-monospace, monospace;
+        #host-loop .stats { left: 20px; top: 20px; max-width: calc(100% - 230px); padding: 10px 14px; font: 11px/1.5 monospace;
                             white-space: pre-wrap; }
         #host-loop .status { left: 50%; bottom: 84px; transform: translateX(-50%); padding: 8px 14px; color: #ffd27d; }
         #host-loop .status:empty { padding: 0; border: 0; }
@@ -52,7 +52,7 @@ inline constexpr std::string_view page = R"js(
         #host-loop [name=stop] { background: rgba(255, 96, 96, .22); }
         #host-loop [name=cuda] { right: 20px; top: 20px; padding: 10px 16px; border-radius: 14px; text-align: right; background: rgba(14, 16, 22, .72);
                                  border: 2px solid rgba(255, 255, 255, .25); color: #9aa3b2; }
-        #host-loop [name=cuda] b { display: block; font: 800 26px/1 system-ui, sans-serif; letter-spacing: 2px; }
+        #host-loop [name=cuda] b { display: block; font: 800 26px/1 sans-serif; letter-spacing: 2px; }
         #host-loop [name=cuda] span { font-size: 12px; }
         #host-loop [name=cuda].on { background: #76b900; border-color: #b6f03c; color: #0b1400; }
         #host-loop [name=cuda]:disabled { cursor: not-allowed; opacity: .6; }

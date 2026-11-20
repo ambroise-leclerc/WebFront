@@ -19,6 +19,22 @@ using namespace webfront;
 using namespace webfront::frontend::detail::webkitgtk;
 }  // namespace
 
+#if defined(__linux__)
+const Scenario webKitGTKSnapPaths{"WebKitGTK detects inherited Snap toolkit paths", [] {
+    then("recognizes path lists without mistaking unrelated paths for Snap", [] {
+        check(containsSnapPath("/snap/core20/current/lib"));
+        check(containsSnapPath("/usr/lib:/var/lib/snapd/snap/core/current/lib", ":;"));
+        check(containsSnapPath("/usr/lib;/snap/core/current/lib", ":;"));
+        check(containsSnapPath("/usr/lib/a.so /snap/core/current/lib/a.so", ": "));
+        check(!containsSnapPath("/home/user/cache /snap/test/immodules.cache"));
+        check(!containsSnapPath("/home/user/cache /snap/test/modules", ":"));
+        check(!containsSnapPath("/usr/lib:/home/user/snap/app", ":"));
+        check(!containsSnapPath("/snapshots/lib:/snap", ":"));
+        check(!containsSnapPath(""));
+    });
+}};
+#endif
+
 const Scenario webKitGTKApplies{"WebKitGTK applies navigation policy without toolkit objects", [] {
     const detail::BoundContentPolicy policy;
     struct Case {

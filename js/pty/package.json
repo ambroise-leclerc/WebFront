@@ -1,0 +1,20 @@
+{
+  "name": "@webfront/pty",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "index.mjs",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.mjs",
+      "default": "./index.mjs"
+    }
+  },
+  "peerDependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0"
+  },
+  "license": "(Apache-2.0 OR CECILL-B)",
+  "files": ["index.mjs", "index.d.ts", "README.md", "LICENSE"]
+}

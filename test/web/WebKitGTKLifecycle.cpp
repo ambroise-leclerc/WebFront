@@ -5,6 +5,10 @@
 #include <chrono>
 #include <cstdlib>
 #include <dlfcn.h>
+#include <cctype>
+#include <sstream>
+#include <iterator>
+#include <memory>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -158,7 +162,10 @@ struct NativeClosingFrontend : Frontend {
         open("127.0.0.1", port, page, {});
     }
     static void open(std::string_view address, std::string_view port, std::string_view page, const webfront::ContentPolicy& policy) {
-        gtk::Session session(webfront::detail::BoundContentPolicy{webfront::frontend::detail::applicationUrl(address, port, ""), policy});
+        open(address, port, page, policy, webfront::WindowOptions{});
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view page, const webfront::ContentPolicy& policy, const webfront::WindowOptions& window) {
+                gtk::Session session(webfront::detail::BoundContentPolicy{webfront::frontend::detail::applicationUrl(address, port, ""), policy}, window);
         session.create();
         CloseDuringLoop probe(session);
         session.run(webfront::frontend::detail::applicationUrl(address, port, page));
@@ -180,7 +187,10 @@ struct ScenarioFrontend : Frontend {
         open("127.0.0.1", port, page, {});
     }
     static void open(std::string_view address, std::string_view port, std::string_view page, const webfront::ContentPolicy& policy) {
-        gtk::Session session(webfront::detail::BoundContentPolicy{webfront::frontend::detail::applicationUrl(address, port, ""), policy});
+        open(address, port, page, policy, webfront::WindowOptions{});
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view page, const webfront::ContentPolicy& policy, const webfront::WindowOptions& window) {
+        gtk::Session session(webfront::detail::BoundContentPolicy{webfront::frontend::detail::applicationUrl(address, port, ""), policy}, window);
         session.create();
         configure(session);
         struct Poll {
@@ -496,6 +506,115 @@ void windowTitle() {
         throw std::runtime_error("Unexpected default window title: " + defaultTitle);
 }
 
+/// The environment of a process of ours, or empty when it cannot be read.
+std::string environmentOf(int pid) {
+    std::ifstream file("/proc/" + std::to_string(pid) + "/environ", std::ios::binary);
+    return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+}
+
+/// The first child of this process named like `name` (comm is cut at 15 characters), or 0.
+int childNamed(std::string_view name) {
+    for (const auto& entry : std::filesystem::directory_iterator("/proc")) {
+        const auto text = entry.path().filename().string();
+        if (text.empty() || !std::isdigit(static_cast<unsigned char>(text[0])))
+            continue;
+        std::ifstream stat(entry.path() / "stat");
+        std::string   line;
+        std::getline(stat, line);
+        const auto open = line.find('('), close = line.rfind(')');
+        if (open == std::string::npos || close == std::string::npos)
+            continue;
+        int parent = 0;
+        std::istringstream rest(line.substr(close + 4));
+        rest >> parent;
+        if (parent == getpid() && line.substr(open + 1, close - open - 1).starts_with(name.substr(0, 15)))
+            return std::stoi(text);
+    }
+    return 0;
+}
+
+/// Without media, only WebKit's processes lose the GStreamer plugins: the application's environment, and so any other
+/// process it starts during the session, keeps its own values.
+void mediaOptOutIsScoped() {
+    setenv("GST_PLUGIN_SYSTEM_PATH_1_0", "/webfront-sentinel", 1);
+    bool shown = false, checked = false;
+    std::string failure;
+    bool exposedAtStart = false;
+    ScenarioFrontend::configure = [&](gtk::Session& session) {
+        // The documented window: process-wide until the load starts, so the opt-out is visible to the application here.
+        const auto during = std::getenv("GST_PLUGIN_SYSTEM_PATH_1_0");
+        exposedAtStart    = during && std::string_view(during) == session.mediaPlugins.string();
+        session.windowShown = [&] {
+            shown = true;
+        };
+    };
+    ScenarioFrontend::finished = [&](gtk::Session&) {
+        if (!shown)
+            return false;
+        const auto own = std::getenv("GST_PLUGIN_SYSTEM_PATH_1_0");
+        if (!own || std::string_view(own) != "/webfront-sentinel")
+            failure = "The application's environment was left changed during the session";
+        // An unrelated child, started now, inherits the application's value.
+        std::unique_ptr<FILE, int (*)(FILE*)> pipe(popen("printenv GST_PLUGIN_SYSTEM_PATH_1_0", "r"), pclose);
+        char                                  buffer[128]{};
+        if (pipe && fgets(buffer, sizeof buffer, pipe.get()); std::string_view(buffer).find("/webfront-sentinel") == std::string_view::npos)
+            failure = "An unrelated child did not inherit the application's environment: " + std::string(buffer);
+        // WebKit's web process got the restriction.
+        if (const auto web = childNamed("WebKitWebProces"); web == 0)
+            failure = "No web process was found";
+        else if (environmentOf(web).find("no-media-plugins") == std::string::npos)
+            failure = "The web process did not receive the media opt-out; GST in its environment: " + [&] {
+                std::string found;
+                const auto  env = environmentOf(web);
+                for (std::size_t at = 0; at < env.size();) {
+                    const auto end = env.find('\0', at);
+                    const auto item = env.substr(at, end == std::string::npos ? std::string::npos : end - at);
+                    if (item.starts_with("GST_"))
+                        found += item + " ";
+                    if (end == std::string::npos)
+                        break;
+                    at = end + 1;
+                }
+                return found.empty() ? std::string("none (") + std::to_string(env.size()) + " bytes)" : found;
+            }();
+        checked = true;
+        return true;
+    };
+    ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path(), .window = {.media = false}});
+    app.show("first-frame.html");
+    const auto after = std::getenv("GST_PLUGIN_SYSTEM_PATH_1_0");
+    const bool restored = after && std::string_view(after) == "/webfront-sentinel";
+    unsetenv("GST_PLUGIN_SYSTEM_PATH_1_0");
+    if (!restored)
+        throw std::runtime_error("The application's environment was not restored when the session ended");
+    if (!exposedAtStart)
+        throw std::runtime_error("The opt-out was not in effect while WebKit's processes were launched");
+    if (!checked)
+        throw std::runtime_error("The environment check never ran");
+    if (!failure.empty())
+        throw std::runtime_error(failure);
+}
+
+/// The window becomes opaque at the page's first frame; a page that never reports one is shown by the delay.
+void firstFramePresentation(bool noFrame) {
+    bool shown = false, byFrame = false;
+    ScenarioFrontend::configure = [&](gtk::Session& session) {
+        session.windowShown = [&] {
+            shown   = true;
+            byFrame = session.shownByFrame;
+        };
+    };
+    ScenarioFrontend::finished = [&](gtk::Session&) {
+        return shown;
+    };
+    ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path(), .window = {.background = "#123456", .media = false}});  // no media: the web process runs without GStreamer plugins
+    app.show(noFrame ? "first-frame.html?no-frame" : "first-frame.html");
+    if (!shown)
+        throw std::runtime_error("The window was never shown");
+    if (byFrame == noFrame)
+        throw std::runtime_error(noFrame ? "A suppressed first frame was reported" : "The window waited for the delay instead of the first frame");
+}
+
 void preRunFailure() {
     // No GTK display or window is needed to preserve an error recorded by configure().
     gtk::Session session(webfront::detail::BoundContentPolicy{});
@@ -539,7 +658,10 @@ void run(std::string_view mode) {
         {       "choose-file",          chooseOne},
         {     "cancel-choose",       chooseCancel},
         {    "script-dialogs",       scriptDialogs},
-        {"close-with-script-dialog", closeWithScriptDialog}
+        {"close-with-script-dialog", closeWithScriptDialog},
+        {    "media-scoped",         mediaOptOutIsScoped},
+        {        "first-frame",        [] { firstFramePresentation(false); }},
+        {      "present-timeout",      [] { firstFramePresentation(true); }}
     };
     const auto selected = cases.find(mode);
     if (selected == cases.end())

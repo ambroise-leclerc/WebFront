@@ -27,6 +27,7 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   system browser, `app.requestClose()` from another thread, or `webfront::UIThread` where the frontend
   accepts a secondary thread (WebView2); a host loop cannot share the main thread with an embedded
   window. See [host integration](HOST_INTEGRATION.md).
+- **Native pseudoterminals (opt-in).** `webfront::Pty` uses a Unix PTY on Linux and macOS or ConPTY on Windows 10 version 1809 and later. The page adapter requires a loopback bind and the application’s own browser origin. See the [PTY guide and standalone example](PTY.md).
 - **Developer environment.** `NativeApp::bootstrap("developer")` loads the verified, pinned
   environment selected by `DeveloperReleaseData.hpp`. Its terminal provides `wf init`, `create`,
   `install`, `restore`, `run`, `exec`, `check`, `test`, `build`, `dev`, `preview`, `embed`, `list`, `why`, `info` and `help`, beside the terminal's own read-only `ls`, `cat`, `tree` and `mounts` (ADR-023). The manifest and lock describe
@@ -40,7 +41,7 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   Native-engine deployment remains application work. The [README walkthrough](../README.md)
   covers the console, developer and embedded Game of Life stages; Hello World and the host loop
   (`examples/host-loop/`, a Boing Ball ray-traced by the host on the CPU or with optional CUDA; see
-  [the host-loop example](HOST_LOOP_EXAMPLE.md) for its measurements and limits) are the other public examples.
+  [the host-loop example](HOST_LOOP_EXAMPLE.md) for its measurements and limits) are also in the default build.
 - **Developer automation (opt-in).** `webfront-agent` provides local stdio MCP and a JSON CLI
   for an explicitly launched developer window. Native grants select check/build/test/preview,
   bounded inspection and semantic actions. [Automation](AUTOMATION.md) documents provisioning,

@@ -202,9 +202,14 @@ ${floating} .webfront-terminal-bar{display:flex}
 :root[${attribute}=terminal] .webfront-terminal-toggle,:root[${attribute}=terminal] .webfront-interface{display:none}
 `;
 
-const managed = new WeakSet();
+const layouts = new WeakMap();
 /** Whether a workspace already lays out this preview frame: a page has one, whatever the terminals mounted in it. */
-export const isManaged = frame => managed.has(frame);
+export const isManaged = frame => layouts.has(frame);
+/**
+ * The state of the workspace that lays out this preview frame, for every terminal of the page and not only the one that
+ * created it; `undefined` while the workspace is being created (it does not know yet whether an interface exists).
+ */
+export const layoutState = frame => layouts.get(frame)?.workspace?.state;
 
 /**
  * Lays the page out around the terminal's `element` and the preview `frame`, which starts hidden. Call it before the
@@ -213,7 +218,8 @@ export const isManaged = frame => managed.has(frame);
  * the `status` shown on the tab and command(running) to say that a command runs, toggle(), open({focus}) and close(), `button` and `panel`, the `shortcut` in use ("F9") and placeSaved().
  */
 export async function createWorkspace({bridge, element, frame}) {
-    managed.add(frame);
+    const layout = {workspace: null};
+    layouts.set(frame, layout);
     const page = element.ownerDocument, view = page.defaultView, root = page.documentElement;
     const [interfaceExists, remembered, shortcut] = await Promise.all([hasInterface(bridge), readPlace(bridge), readShortcut(bridge)]);
     const keys = shortcutText(shortcut);
@@ -379,7 +385,7 @@ export async function createWorkspace({bridge, element, frame}) {
     view.addEventListener('resize', render);
 
     render();
-    return {
+    const workspace = {
         get state() { return state; },
         get status() { return tabStatus(session); },
         /** Tells whether a command runs in the terminal. */
@@ -398,4 +404,6 @@ export async function createWorkspace({bridge, element, frame}) {
         close: () => apply('close'),
         placeSaved: () => store.saved(),
     };
+    layout.workspace = workspace;
+    return workspace;
 }

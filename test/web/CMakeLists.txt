@@ -1,4 +1,5 @@
 add_executable(webtest JasmineTest.cpp)
+target_compile_definitions(webtest PRIVATE WEBFRONT_TEST_MEDIA_FILE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/media/seek.webm")
 target_link_libraries(webtest PRIVATE WebFront_test_hardening WebFront WebFront_warnings WebFront_options)
 # The host of the host-loop example, on the CPU renderer and, where a toolkit was found, on the CUDA one.
 target_link_libraries(webtest PRIVATE WebFront_boing)
@@ -527,9 +528,8 @@ if(_browser_tests_available)
             REQUIRES SelfBuildProject TestRegistry PROVIDES SelfBuildInstalled)
         webfront_add_self_build_test(SelfBuild 0 "run|build|build-distribution" OUTPUT "Script build completed"
             REQUIRES SelfBuildInstalled PROVIDES SelfBuilt)
-        # The optional packages, @webfront/react and @webfront/services (#461): from their own sources to the exact archive that
-        # the registry serves.
-        foreach(_package "ReactAdapter|react|React|React adapter:" "Services|services|Services|Services package:")
+        # The registry serves the same bytes as each optional package script.
+        foreach(_package "ReactAdapter|react|React|React adapter:" "Services|services|Services|Services package:" "Pty|pty|PTY|PTY package:")
             string(REPLACE "|" ";" _package "${_package}")
             list(GET _package 0 _name)
             list(GET _package 1 _directory)
