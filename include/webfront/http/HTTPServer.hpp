@@ -38,6 +38,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -1002,11 +1003,17 @@ private:
     std::function<void(typename Net::Socket&&)> upgradeHandler;
 
     std::string bind(std::string_view address, std::string_view requestedPort) {
-        const auto endpoint = Net::Resolve(address, requestedPort);
-        acceptor.open(endpoint.protocol());
-        acceptor.set_option(typename Net::Acceptor::reuse_address(true));
-        acceptor.bind(endpoint);
-        acceptor.listen();
+        try {
+            const auto endpoint = Net::Resolve(address, requestedPort);
+            acceptor.open(endpoint.protocol());
+            acceptor.set_option(typename Net::Acceptor::reuse_address(true));
+            acceptor.bind(endpoint);
+            acceptor.listen();
+        } catch (const std::system_error& error) {
+            // Name the address and port: the bare "bind: Address already in use" does not say which server failed.
+            throw std::system_error(error.code(), "WebFront cannot listen on " + std::string(address) + ":" + std::string(requestedPort) + ": " + error.code().message()
+                + (error.code() == std::errc::address_in_use ? " (another instance may use this port; set WEBFRONT_PORT=0 or WebFrontConfig::port to \"0\" for a free port)" : ""));
+        }
         // Only the literal "0" asks for an OS-assigned port; any other value is already the port.
         if (requestedPort != "0")
             return std::string(requestedPort);

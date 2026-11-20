@@ -157,6 +157,14 @@ host.request_stop();                          // the user closed the window firs
 - Stop the host thread before `shutdown()` or the destruction of the application: no call into WebFront may still
   be running then.
 
+## Several instances at once
+
+A configuration that does not set `WebFrontConfig::port` listens on `9002`, or on the port in the environment variable
+`WEBFRONT_PORT`. `WEBFRONT_PORT=0` asks the system for a free port: any number of instances, of one application or of
+several, then start side by side, and the frontend and `port()` receive the bound port. The browser keeps one origin, hence
+one storage, per port, so an application that keeps state in the browser fixes its port. A port already in use makes the
+constructor throw a `std::system_error` that names the address, the port and the cause.
+
 ## Concurrency and lifetime, in short
 
 - Callbacks, handlers and task bodies run on the server thread, one at a time. They must not wait for that thread:

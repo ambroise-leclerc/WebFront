@@ -487,6 +487,14 @@ inline bool noteDevelopmentPath() {
 }
 }  // namespace detail
 
+/// The port of a configuration that does not choose one: the environment variable WEBFRONT_PORT when it is set and not
+/// empty ("0" asks for a free port, so any number of instances can run side by side), "9002" otherwise.
+[[nodiscard]] inline std::string defaultPort() {
+    if (const char* value = std::getenv("WEBFRONT_PORT"); value != nullptr && *value != '\0')
+        return value;
+    return "9002";
+}
+
 /**
  * @brief Configuration for the newcomer-friendly default construction of BasicWF.
  *
@@ -498,8 +506,8 @@ inline bool noteDevelopmentPath() {
  */
 struct WebFrontConfig {
     std::string           address{"127.0.0.1"};
-    /// "0" requests an ephemeral port with TCPStdnet. The frontend receives the bound port.
-    std::string           port{"9002"};
+    /// "0" requests an ephemeral port with TCPStdnet. The frontend receives the bound port. Defaults to defaultPort().
+    std::string           port{defaultPort()};
     std::filesystem::path documentRoot{};
     ContentPolicy         contentPolicy{};
     /// Initial window of the embedded frontends; the title defaults to the executable's name.

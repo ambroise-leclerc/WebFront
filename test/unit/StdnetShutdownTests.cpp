@@ -12,6 +12,7 @@
 #endif
 
 #include <array>
+#include <cstdlib>
 #include <atomic>
 #include <future>
 #include <chrono>
@@ -19,6 +20,9 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <memory>
+#include <set>
+#include <vector>
 
 using namespace webfront::bdd;
 
@@ -337,5 +341,58 @@ const Scenario drainingPumps{"Draining pumps cancelled tasks while a route handl
         release();  // never leave the test hanging if the drain waited for the cleanup it was to run
         drained.wait();
         then("the drain ran the cleanup which released the handler", [&] { require(finished); });
+    });
+}};
+
+const Scenario simultaneousInstances{"Servers side by side on ephemeral ports", [] {
+    given("a server that holds a port", [&] {
+        http::Server<Stdnet, fs::DefaultFS> first("127.0.0.1", "0");
+        then("a second server on port \"0\" gets another port", [&] {
+            http::Server<Stdnet, fs::DefaultFS> second("127.0.0.1", "0");
+            require(first.port() != second.port());
+            require(second.port() != "0");
+        });
+        then("a server asking for the same port reports the address, the port and the cause", [&] {
+            const std::string port{first.port()};
+            requireThrows<std::system_error>([&] { http::Server<Stdnet, fs::DefaultFS> clash("127.0.0.1", port); },
+                                             contains("127.0.0.1:" + port));
+            requireThrows<std::system_error>([&] { http::Server<Stdnet, fs::DefaultFS> clash("127.0.0.1", port); }, contains("WEBFRONT_PORT=0"));
+        });
+    });
+    given("many servers without a configured port", [&] {
+        std::vector<std::unique_ptr<http::Server<Stdnet, fs::DefaultFS>>> servers;
+        for (int i = 0; i < 40; ++i)
+            servers.push_back(std::make_unique<http::Server<Stdnet, fs::DefaultFS>>("127.0.0.1", "0"));
+        then("each one listens on its own port", [&] {
+            std::set<std::string> ports;
+            for (const auto& server : servers)
+                ports.insert(std::string(server->port()));
+            require(ports.size() == servers.size());
+        });
+    });
+}};
+
+void setPortVariable(const char* value) {
+#ifdef _WIN32
+    _putenv_s("WEBFRONT_PORT", value);  // an empty value removes the variable on Windows, which defaultPort() treats alike
+#else
+    setenv("WEBFRONT_PORT", value, 1);
+#endif
+}
+
+const Scenario defaultPortFromEnvironment{"The default port follows WEBFRONT_PORT", [] {
+    given("WEBFRONT_PORT set to 0", [&] {
+        setPortVariable("0");
+        then("a configuration asks for an ephemeral port and two applications coexist", [&] {
+            require(WebFrontConfig{}.port == "0");
+            BasicWF<Stdnet, fs::DefaultFS> a{WebFrontConfig{}}, b{WebFrontConfig{}};
+            require(a.port() != b.port());
+        });
+        setPortVariable("");
+    });
+    given("WEBFRONT_PORT unset or empty", [&] {
+        setPortVariable("");
+        then("the historical 9002 remains", [&] { require(defaultPort() == "9002"); });
+        setPortVariable("");
     });
 }};

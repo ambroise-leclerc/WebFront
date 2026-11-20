@@ -11,6 +11,7 @@ these entries stays in the GitHub releases and the Git history.
 ## Unreleased
 
 ### Added
+- Start several applications side by side: the default port follows `WEBFRONT_PORT` (`0` asks for a free port, `9002` remains the default), so every example takes a port without a new option, and a failed bind names the address, the port and the cause (#617, `docs/HOST_INTEGRATION.md`).
 - Run the MSVC code analysis in a pull request into `develop` that changes Windows code, and list the reruns each job needed before going green with `FlakeReport.py --days` (#628, `docs/TEST_TIERS.md`, `docs/TEST_PERFORMANCE.md`).
 
 ### Fixed
