@@ -79,6 +79,31 @@ class FlakeReportTests(unittest.TestCase):
         self.assertIn('  1  Windows', output.getvalue())
         self.assertNotIn('Linux', output.getvalue().split('Reruns needed')[1])
 
+    def test_a_listing_that_hits_its_limit_says_so_and_a_window_is_asked_of_github(self):
+        runs = [{"databaseId": n, "conclusion": "success", "headBranch": "develop", "attempt": 1} for n in range(3)]
+        listings = []
+
+        def github(*arguments):
+            if arguments[:2] == ('run', 'list'):
+                listings.append(arguments)
+                return json.dumps(runs)
+            self.fail(f'Unexpected GitHub command: {arguments}')
+
+        output = io.StringIO()
+        with patch('FlakeReport.gh', side_effect=github), patch('sys.argv', ['FlakeReport.py', '--days', '7', '--limit', '3']), \
+                contextlib.redirect_stdout(output):
+            self.assertEqual(main(), 0)
+        self.assertIn('WARNING: the listing hit its limit of 3 runs', output.getvalue())
+        self.assertIn('--created', listings[0])
+        self.assertTrue(listings[0][listings[0].index('--created') + 1].startswith('>='))
+
+        output = io.StringIO()
+        with patch('FlakeReport.gh', side_effect=github), patch('sys.argv', ['FlakeReport.py', '--days', '7']), \
+                contextlib.redirect_stdout(output):
+            self.assertEqual(main(), 0)
+        self.assertNotIn('WARNING', output.getvalue())
+        self.assertEqual(listings[1][listings[1].index('--limit') + 1], '1000')
+
     def test_runs_older_than_the_window_are_left_out(self):
         now = datetime.datetime(2026, 11, 20, tzinfo=datetime.timezone.utc)
         self.assertTrue(within_days({"createdAt": "2026-11-14T00:00:00Z"}, 7, now))

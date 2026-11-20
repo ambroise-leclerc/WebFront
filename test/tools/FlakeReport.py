@@ -7,7 +7,7 @@ intermittent failure; one that fails everywhere on a branch is more likely a reg
 of a run is read: a job that failed and passed once run again is exactly an intermittent failure.
 
     python3 test/tools/FlakeReport.py --limit 60
-    python3 test/tools/FlakeReport.py --days 7 --limit 200
+    python3 test/tools/FlakeReport.py --days 7
 
 The report ends with the reruns each job needed before it went green: the failed attempts of a job in runs that finally
 passed, so that reliability can be measured from one week to the next (#628).
@@ -20,6 +20,8 @@ import datetime
 import subprocess
 import sys
 import time
+
+MAX_WINDOW_RUNS = 1000  # what `gh run list` returns at most
 
 # "644/687 Test #615: DeveloperBrowserIntegration-jasmine .....***Failed   18.97 sec", after the log's own prefix.
 # A repeated case (`--repeat until-fail:5`) has no "644/687" before its first attempts.
@@ -72,16 +74,22 @@ def failed_jobs(run, attempt):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--workflow", default="BuildAndTest.yml")
-    parser.add_argument("--limit", type=int, default=60, help="how many of the latest runs to read")
+    parser.add_argument("--limit", type=int, help="how many of the latest runs to read (60; with --days, every run of the window up to 1000)")
     parser.add_argument("--days", type=float, help="only the runs of the last N days")
     parser.add_argument("--branch", help="only the runs of this branch")
     arguments = parser.parse_args()
 
-    listing = ["run", "list", "--workflow", arguments.workflow, "--limit", str(arguments.limit),
+    limit = arguments.limit or (MAX_WINDOW_RUNS if arguments.days else 60)
+    listing = ["run", "list", "--workflow", arguments.workflow, "--limit", str(limit),
                "--json", "databaseId,conclusion,headBranch,event,createdAt"]
+    if arguments.days:
+        # The server applies the window, so that the limit only truncates a window with more runs than the limit.
+        since = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=arguments.days)
+        listing += ["--created", f">={since:%Y-%m-%dT%H:%M:%SZ}"]
     if arguments.branch:
         listing += ["--branch", arguments.branch]
     runs = json.loads(gh(*listing))
+    truncated = len(runs) >= limit
     completed = [run for run in runs if run["conclusion"] in ("success", "failure") and within_days(run, arguments.days)]
     for run in completed:
         # `gh run list` has no attempt field: the run itself says how many times it ran.
@@ -108,6 +116,10 @@ def main():
 
     failures = sum(1 for run in completed if run["conclusion"] == "failure")
     print(f"{len(completed)} completed runs of {arguments.workflow}, {failures} failed, {rerun} passed once run again")
+    if truncated:
+        window = f"the last {arguments.days:g} days" if arguments.days else "the period"
+        print(f"WARNING: the listing hit its limit of {limit} runs: the oldest runs of {window} are missing and the counts below "
+              "are incomplete. Raise --limit" + ("." if arguments.days else " or narrow the window with --days."))
     for name, occurrences in sorted(cases.items(), key=lambda item: (-len(item[1]), item[0])):
         print(f"\n{len(occurrences):3d}  {name}")
         for occurrence in occurrences:
