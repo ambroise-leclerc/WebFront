@@ -53,7 +53,8 @@ such as a JSON-RPC call: the body, announced by `Content-Length` and at most `n`
 runs and reaches it as `RouteRequest::body`. `Expect: 100-continue` gets `100 Continue` first. The server refuses, without
 calling the handler, a `POST` without `Content-Length` (411), with a `Transfer-Encoding` (501: no chunked bodies), with a
 malformed or contradictory length (400; spaces around the value and a list of equal lengths such as `5, 5` are accepted) or a longer body (413); a connection that ends before the announced length is
-closed without an answer. `100 Continue` goes only to an HTTP/1.1 client that sends exactly `Expect: 100-continue`, and
+closed without an answer. `100 Continue` goes only to an HTTP/1.1 client whose `Expect` lists `100-continue` (alone or among other
+comma-separated tokens, compared without case), and
 not when the body is already there or the request is refused. Such a route lists `POST` in the `Allow` header of its 405.
 There is still one request per connection, and no check of the origin of the request: a route that changes state verifies
 it, with a token or the `Origin` header.
