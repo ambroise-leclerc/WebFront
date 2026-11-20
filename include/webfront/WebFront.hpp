@@ -50,7 +50,7 @@ namespace pty::detail {
 struct PageRegistration;
 }  // namespace pty::detail
 
-inline constexpr std::string_view version = "1.0.0";
+inline constexpr std::string_view version = "1.1.0";
 
 namespace testing {
 /// Test-only access to the connection identifiers of an application; not part of the API.
