@@ -281,12 +281,28 @@ const Scenario routePosts{"A route that accepts POST reads a body bounded by Con
              {"Content-Length: -1\r\n", "400 Bad Request"},
              {"Content-Length: 99999999999999999999999\r\n", "400 Bad Request"},
              {"Content-Length: 2\r\nContent-Length: 3\r\n", "400 Bad Request"},
+             {"Content-Length: 2, 3\r\n", "400 Bad Request"},
+             {"Content-Length: 2,\r\n", "400 Bad Request"},
+             {"Content-Length: ,2\r\n", "400 Bad Request"},
+             {"Content-Length: 2 2\r\n", "400 Bad Request"},
+             {"Content-Length: \r\n", "400 Bad Request"},
              {"Content-Length: 65\r\n", "413 Payload Too Large"}}) {
         given("a POST with '", headers, "'", [&] {
             const auto response = fixture.answer(post("/webfront/services/rpc/x", headers));
             then("it is refused with ", status, " without reading a body or calling the handler", [&] {
                 require(response.starts_with("HTTP/1.1 " + std::string(status) + "\r\n"));
                 require(calls == 0);
+            });
+        });
+    }
+    for (const auto& headers : std::initializer_list<std::string_view>{
+             "Content-Length:  2\r\n", "Content-Length: 2  \r\n", "Content-Length: 2, 2\r\n", "Content-Length: 2,2\r\n",
+             "Content-Length: 2\r\nContent-Length: 2\r\n", "Content-Length: 2, 2\r\nContent-Length: 2\r\n"}) {
+        given("a POST with the valid length '", headers, "'", [&] {
+            const auto response = fixture.answer(post("/webfront/services/rpc/x", headers, "ok"));
+            then("the body reaches the handler", [&] {
+                require(response.starts_with("HTTP/1.1 200 OK\r\n"));
+                require(seen == "ok");
             });
         });
     }
@@ -331,6 +347,18 @@ const Scenario routePosts{"A route that accepts POST reads a body bounded by Con
         });
         then("the status line carries the reason phrase", [&] {
             require(fixture.answer(get("/webfront/services/status/x")).starts_with("HTTP/1.1 401 Unauthorized\r\n"));
+        });
+    });
+    given("a route whose limit is zero", [&] {
+        auto zero = server.addRoute("/webfront/services/zero/", [&](const RouteRequest& request) { return text("empty:" + std::string(request.body)); }, RouteOptions{.postBodyLimit = 0});
+        then("an empty body is served and any other refused", [&] {
+            require(fixture.answer(post("/webfront/services/zero/x", "Content-Length: 0\r\n")).ends_with("empty:"));
+        });
+    });
+    given("a route whose limit is zero and a body of one byte", [&] {
+        auto zero = server.addRoute("/webfront/services/zero/", [&](const RouteRequest&) { return text("never"); }, RouteOptions{.postBodyLimit = 0});
+        then("it is refused with 413", [&] {
+            require(fixture.answer(post("/webfront/services/zero/x", "Content-Length: 1\r\n", "a")).starts_with("HTTP/1.1 413 Payload Too Large\r\n"));
         });
     });
     given("a PUT", [&] {

@@ -33,6 +33,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <ranges>
 #include <regex>
 #include <span>
 #include <stdexcept>
@@ -489,18 +490,45 @@ inline bool mentionsServices(std::string_view target) {
 /// What contentLength returns for a length that is not a decimal number, or for several different lengths.
 inline constexpr std::uint64_t malformedLength = std::numeric_limits<std::uint64_t>::max();
 
+/// The fields called `name` (case-insensitive), in order, by reference: no list is built, no value is copied.
+inline auto fieldsNamed(const Request& request, std::string_view name) {
+    return request.headers | std::views::filter([name](const auto& header) {
+               return std::ranges::equal(header.name, name, [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); });
+           });
+}
+
+/// The text without the optional whitespace (spaces and tabs) around it (RFC 9110 §5.6.3).
+inline std::string_view trimmed(std::string_view text) {
+    while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) text.remove_prefix(1);
+    while (!text.empty() && (text.back() == ' ' || text.back() == '\t')) text.remove_suffix(1);
+    return text;
+}
+
 /// The length announced by `Content-Length`: none without the header, malformedLength for a value that is not a decimal
-/// number (or overflows) and for several fields that disagree (RFC 9112 §6.3).
+/// number (or overflows) and for several lengths that disagree (RFC 9112 §6.3). Whitespace around a value is ignored,
+/// and a list of equal values, `5, 5` (also what repeated fields amount to), is the one length they all give.
 inline std::optional<std::uint64_t> contentLength(const Request& request) {
     std::optional<std::uint64_t> length;
-    for (const auto& value : request.getHeadersValues("Content-Length")) {
-        std::uint64_t parsed = 0;
-        const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), parsed);
-        if (value.empty() || error != std::errc{} || end != value.data() + value.size() || parsed == malformedLength) return malformedLength;
-        if (length && *length != parsed) return malformedLength;
-        length = parsed;
+    for (const auto& field : fieldsNamed(request, "Content-Length")) {
+        std::string_view rest = field.value;
+        for (bool more = true; more;) {
+            const auto comma = rest.find(',');
+            more             = comma != std::string_view::npos;
+            const auto value = trimmed(rest.substr(0, comma));
+            if (more) rest.remove_prefix(comma + 1);
+            std::uint64_t parsed = 0;
+            const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), parsed);
+            if (value.empty() || error != std::errc{} || end != value.data() + value.size() || parsed == malformedLength) return malformedLength;
+            if (length && *length != parsed) return malformedLength;
+            length = parsed;
+        }
     }
     return length;
+}
+
+/// Whether the field `name` is present, whatever its value.
+inline bool hasField(const Request& request, std::string_view name) {
+    return !std::ranges::empty(fieldsNamed(request, name));
 }
 
 /// Whether the client waits for `100 Continue` before it sends the body: `Expect: 100-continue` (RFC 9110 §10.1.1, a
@@ -508,11 +536,9 @@ inline std::optional<std::uint64_t> contentLength(const Request& request) {
 inline bool expectsContinue(const Request& request) {
     if (request.httpVersionMajor < 1 || (request.httpVersionMajor == 1 && request.httpVersionMinor < 1)) return false;
     constexpr std::string_view token = "100-continue";
-    for (const auto& value : request.getHeadersValues("Expect")) {
-        std::string_view text = value;
-        while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) text.remove_prefix(1);
-        while (!text.empty() && (text.back() == ' ' || text.back() == '\t')) text.remove_suffix(1);
-        if (text.size() == token.size() && std::equal(text.begin(), text.end(), token.begin(), [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == b; })) return true;
+    for (const auto& field : fieldsNamed(request, "Expect")) {
+        const auto text = trimmed(field.value);
+        if (std::ranges::equal(text, token, [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == b; })) return true;
     }
     return false;
 }
@@ -1045,8 +1071,9 @@ private:
     // Runs the handler on the worker, then streams its body in chunks of at most emissionBufferSize bytes,
     // each read on the worker and sent before the next is read (back-pressure). Closing the connection
     // fails the pending send and ends the response; the stop request of the server cancels the awaits.
-    // `body` holds the bytes received after the headers: the start of the body of a POST.
-    networking::Task serveRoute(typename Net::Socket& socket, Request request, RouteMatch match, std::string body) {
+    // `received` views the bytes that followed the headers in `buffer`, the reception buffer of serve(), which outlives this
+    // call: nothing is copied unless a POST needs the rest of its body, and then only the bytes the body owns.
+    networking::Task serveRoute(typename Net::Socket& socket, Request request, RouteMatch match, std::string_view received, std::span<char> buffer) {
         const bool head = request.method == Request::Method::Head;
         const bool post = request.method == Request::Method::Post && match.route->postBodyLimit.has_value();
         RouteReply reply;
@@ -1064,31 +1091,38 @@ private:
         };
         try {
             std::optional<Response::StatusCode> refusal;
+            std::string                         body;  // only when it did not come with the headers
+            std::string_view                    view;
             if (post) {
                 const auto length = routing::contentLength(request);
-                if (request.getHeaderValue("Transfer-Encoding")) refusal = Response::notImplemented;  // no chunked bodies
+                if (routing::hasField(request, "Transfer-Encoding")) refusal = Response::notImplemented;  // no chunked bodies
                 else if (!length) refusal = Response::lengthRequired;
                 else if (*length == routing::malformedLength) refusal = Response::badRequest;
                 else if (*length > *match.route->postBodyLimit) refusal = Response::payloadTooLarge;
                 else {
-                    if (body.size() < *length && routing::expectsContinue(request)) {
+                    if (received.size() < *length && routing::expectsContinue(request)) {
                         // The client waits for this interim answer before it sends the body (curl does beyond 1 KiB).
-                        std::vector<typename Net::ConstBuffer> proceed{Net::Buffer(std::string_view{"HTTP/1.1 100 Continue\r\n\r\n"})};
+                        const std::array<typename Net::ConstBuffer, 1> proceed{Net::Buffer(std::string_view{"HTTP/1.1 100 Continue\r\n\r\n"})};
                         co_await Net::Send(socket, proceed);
                     }
-                    std::vector<char> chunk(Policy::receptionBufferSize);
-                    while (body.size() < *length) {
-                        const auto received = co_await Net::Receive(socket, Net::Buffer(chunk));
-                        if (received == 0) {  // the client ended the connection before the announced length
-                            socket.shutdown(Net::Socket::shutdown_both);
-                            co_return;
+                    if (received.size() >= *length) {
+                        view = received.substr(0, *length);  // the body came with the headers; what follows would be another request
+                    } else {
+                        // A single allocation for a small body; a large one grows with what the client really sends.
+                        body.reserve(std::min<std::size_t>(*length, buffer.size()));
+                        body.assign(received);
+                        while (body.size() < *length) {
+                            const auto wanted = std::min<std::size_t>(*length - body.size(), buffer.size());
+                            const auto count  = co_await Net::Receive(socket, Net::Buffer(buffer.data(), wanted));
+                            if (count == 0) {  // the client ended the connection before the announced length
+                                socket.shutdown(Net::Socket::shutdown_both);
+                                co_return;
+                            }
+                            body.append(buffer.data(), count);
                         }
-                        body.append(chunk.data(), received);
+                        view = body;
                     }
-                    body.resize(*length);  // what follows would be another request: this server serves one per connection
                 }
-            } else {
-                body.clear();
             }
             if (!head && request.method != Request::Method::Get && !post) {
                 response = Response::getStatusResponse(Response::methodNotAllowed);
@@ -1099,7 +1133,7 @@ private:
                 hardenError();
             } else {
                 co_await networking::ex::continues_on(routeWorker.run([&] {
-                    reply = match.route->handler(RouteRequest{request, match.path, match.query, body});
+                    reply = match.route->handler(RouteRequest{request, match.path, match.query, view});
                     routing::validateReply(reply);
                 }), Net::Scheduler(socket));
                 response.statusCode = reply.status;
@@ -1138,13 +1172,13 @@ private:
         Response response;
         try {
             std::array<char, Policy::receptionBufferSize> buffer;
-            std::string rest;  // received after the headers: the start of a body
+            std::string_view rest;  // received after the headers, still in `buffer`: the start of a body
             while (!request.completed()) {
                 const auto received = co_await Net::Receive(socket, Net::Buffer(buffer));
                 if (received == 0) co_return;  // the client closed the connection
                 const char* end = buffer.data() + received;
                 const char* stop = request.consume(static_cast<const char*>(buffer.data()), end);
-                if (request.completed()) rest.assign(stop, end);
+                if (request.completed()) rest = std::string_view(stop, end);
             }
             auto match = matchRoute(request);
             if (match && match->route->secretPath)
@@ -1154,7 +1188,7 @@ private:
             else
                 log::info("Received request {} on {}", request.getMethodName(), std::string_view(request.uri).substr(0, request.uri.find('?')));  // the query may quote a URL
             if (match) {
-                co_await serveRoute(socket, std::move(request), std::move(*match), std::move(rest));
+                co_await serveRoute(socket, std::move(request), std::move(*match), rest, buffer);
                 co_return;
             }
             head = request.method == Request::Method::Head;
