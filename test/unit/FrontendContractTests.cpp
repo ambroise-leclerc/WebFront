@@ -1300,12 +1300,13 @@ const Scenario systemBrowserLoopUp{"The system browser's loop is up while its op
             fs::create_directories(directory);
             for (const char* name : {"xdg-open", "open"}) {
                 std::ofstream script(directory / name);
-                // The marker tells the test that the shell found this opener: the directory must not disappear before that, or
-                // the shell falls through to the next PATH entry and opens the developer's real browser (#628).
-                script << "#!/bin/sh\n: > \"$0.started\"\nsleep 3\n";
+                // The marker tells the test that the shell found this opener. The shell's PATH is this directory alone (below),
+                // so that, even if it looks the command up after the directory is gone, it finds nothing: it can never fall
+                // through to the developer's real browser (#628). Absolute path: sleep is not on that PATH.
+                script << "#!/bin/sh\n: > \"$0.started\"\nexec /bin/sleep 3\n";
                 fs::permissions(directory / name, fs::perms::owner_all);
             }
-            const std::string path = directory.string() + ":" + (std::getenv("PATH") ? std::getenv("PATH") : "");
+            const std::string path = directory.string();
             const std::string saved = std::getenv("PATH") ? std::getenv("PATH") : "";
             ::setenv("PATH", path.c_str(), 1);
             using Browser = frontend::BrowserWithUILoopFrontend;
