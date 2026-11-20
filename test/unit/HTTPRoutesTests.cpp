@@ -362,6 +362,42 @@ const Scenario routePosts{"A route that accepts POST reads a body bounded by Con
             require(fixture.answer(post("/webfront/services/zero/x", "Content-Length: 1\r\n", "a")).starts_with("HTTP/1.1 413 Payload Too Large\r\n"));
         });
     });
+    given("a Content-Length folded on two lines", [&] {
+        const auto response = fixture.answer(post("/webfront/services/rpc/x", "Content-Length: 1\r\n 0\r\n", "x"));
+        then("the fold is a space, not a concatenated number: the length is refused", [&] {
+            require(response.starts_with("HTTP/1.1 400 Bad Request\r\n"));
+            require(calls == 0);
+        });
+    });
+    given("a header folded on two lines", [&] {
+        auto note = server.addRoute("/webfront/services/note/", [](const RouteRequest& request) {
+            return text(request.request.getHeaderValue("X-Note").value_or("none"));
+        });
+        then("the handler sees one space where the line was folded", [&] {
+            require(fixture.answer("GET /webfront/services/note/x HTTP/1.1\r\nHost: localhost\r\nX-Note: a\r\n   b\r\n\r\n").ends_with("a b"));
+        });
+    });
+    given("an answer that streams from the view of a body received apart from the headers", [&] {
+        auto keep = server.addRoute("/webfront/services/keep/", [](const RouteRequest& request) {
+            RouteReply reply;
+            reply.headers.emplace_back("Content-Type", "text/plain");
+            reply.headers.emplace_back("Cache-Control", "no-store");
+            reply.contentLength = request.body.size();
+            reply.body          = [view = request.body, position = std::size_t{0}](std::span<char> out) mutable {
+                const auto count = std::min(out.size(), view.size() - position);
+                std::copy_n(view.data() + position, count, out.data());
+                position += count;
+                return count;
+            };
+            return reply;
+        }, RouteOptions{.postBodyLimit = 64});
+        const std::string large(40, 'x');  // beyond the small string buffer: the body is on the heap
+        send(post("/webfront/services/keep/x", "Content-Length: 40\r\n"));
+        awaitRead(1);
+        send(large);
+        requireEventually([] { return InjectableSocket::shutdownCount() > 0; }, 10s);
+        then("the body is still alive while the answer is sent", [&] { require(InjectableSocket::writtenText().ends_with(large)); });
+    });
     given("a PUT", [&] {
         const auto response = fixture.answer(get("/webfront/services/rpc/x", "PUT"));
         then("it is refused with the methods of the route, POST included", [&] {

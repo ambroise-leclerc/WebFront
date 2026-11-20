@@ -209,7 +209,7 @@ private:
             case headerLws:if (input == '\r') { state = newline2; break; }
                                  else if (input == ' ' || input == '\t') break;
                                  else if (isCtrl(input)) throw BadRequestException();
-                                 else { state = headerValue; headers.back().value.push_back(input); break; }
+                                 else { state = headerValue; headers.back().value.push_back(' '); headers.back().value.push_back(input); break; }  // an obsolete line fold becomes one space (RFC 9112 §5.2), not a concatenation
             case headerName: if (input == ':') { state = spaceBeforeHeaderValue; break; }
                                   else if (!isChar(input) || isCtrl(input) || isSpecial(input)) throw BadRequestException();
                                   else { headers.back().name.push_back(input); break; }
@@ -1092,10 +1092,12 @@ private:
             for (auto& [name, value] : policy.headers)
                 if (!sameHeader(name, "Content-Type") && !sameHeader(name, "Content-Disposition")) response.headers.emplace_back(name, value);
         };
+        // The body of a POST outlives the handler: its answer may stream from the view it was given. `body` holds it only
+        // when it did not come with the headers (then `view` is in the reception buffer of serve()); both live as long as this call.
+        std::string      body;
+        std::string_view view;
         try {
             std::optional<Response::StatusCode> refusal;
-            std::string                         body;  // only when it did not come with the headers
-            std::string_view                    view;
             if (post) {
                 const auto length = routing::contentLength(request);
                 if (routing::hasField(request, "Transfer-Encoding")) refusal = Response::notImplemented;  // no chunked bodies
