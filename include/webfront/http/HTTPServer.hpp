@@ -534,14 +534,21 @@ inline bool hasField(const Request& request, std::string_view name) {
     return !std::ranges::empty(fieldsNamed(request, name));
 }
 
-/// Whether the client waits for `100 Continue` before it sends the body: `Expect: 100-continue` (RFC 9110 §10.1.1, a
-/// token compared without case, not a substring), from an HTTP/1.1 or later client, as an interim answer is never sent to 1.0.
+/// Whether the client waits for `100 Continue` before it sends the body: `Expect` lists `100-continue` (RFC 9110 §10.1.1:
+/// a comma-separated list, each element a token compared without case, not a substring), from an HTTP/1.1 or later
+/// client, as an interim answer is never sent to 1.0.
 inline bool expectsContinue(const Request& request) {
     if (request.httpVersionMajor < 1 || (request.httpVersionMajor == 1 && request.httpVersionMinor < 1)) return false;
     constexpr std::string_view token = "100-continue";
     for (const auto& field : fieldsNamed(request, "Expect")) {
-        const auto text = trimmed(field.value);
-        if (std::ranges::equal(text, token, [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == b; })) return true;
+        std::string_view rest = field.value;
+        for (bool more = true; more;) {
+            const auto comma = rest.find(',');
+            more             = comma != std::string_view::npos;
+            const auto text  = trimmed(rest.substr(0, comma));
+            if (more) rest.remove_prefix(comma + 1);
+            if (std::ranges::equal(text, token, [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == b; })) return true;
+        }
     }
     return false;
 }

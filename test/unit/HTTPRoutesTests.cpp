@@ -262,6 +262,19 @@ const Scenario routePosts{"A route that accepts POST reads a body bounded by Con
             require(InjectableSocket::writtenText().ends_with("echo:hello world"));
         });
     });
+    for (const auto& expect : std::initializer_list<std::string_view>{"100-continue, 100-continue", "100-continue,100-continue", "x, 100-Continue", "100-CONTINUE ,x"}) {
+        given("a client that waits for 100 Continue with 'Expect: ", expect, "'", [&] {
+            send(post("/webfront/services/rpc/x", "Content-Length: 2\r\nExpect: " + std::string(expect) + "\r\n"));
+            awaitRead(1);
+            then("the server invites the body", [&] {
+                require(InjectableSocket::writtenText() == "HTTP/1.1 100 Continue\r\n\r\n");
+                require(calls == 0);
+            });
+            send("ok");
+            requireEventually([] { return InjectableSocket::shutdownCount() > 0; }, 10s);
+            then("the handler then gets the body", [&] { require(seen == "ok"); });
+        });
+    }
     given("bytes beyond the announced length", [&] {
         fixture.answer(post("/webfront/services/rpc/x", "Content-Length: 2\r\n", "okGET / HTTP/1.1"));
         then("only the announced body reaches the handler", [&] { require(seen == "ok"); });
