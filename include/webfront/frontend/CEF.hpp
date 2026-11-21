@@ -148,7 +148,7 @@ inline void configurePlatformPaths(CefSettings& settings [[maybe_unused]]) {
     std::filesystem::path framework_path = detail::macOSFrameworkPath(exe_path);
     std::filesystem::path resources_path = framework_path / kResourcesDir;
     // One live process per profile: Chromium would hand a second instance over to the first (ProfileLease.hpp).
-    std::filesystem::path cache_path     = frontend::leaseProfileDirectory(exe_dir / kCEFCacheDir);
+    std::filesystem::path cache_path     = frontend::leaseProfileDirectory(exe_dir / kCEFCacheDir / exe_path.filename());
 
     // Convert to absolute paths
     framework_path = std::filesystem::absolute(framework_path);
@@ -175,7 +175,7 @@ inline void configurePlatformPaths(CefSettings& settings [[maybe_unused]]) {
     std::filesystem::path locales_path   = resources_path / kLocalesDir;
     std::filesystem::path exe_path       = current_exe;
     // One live process per profile: Chromium would hand a second instance over to the first (ProfileLease.hpp).
-    std::filesystem::path cache_path     = frontend::leaseProfileDirectory(exe_dir / kCEFCacheDir);
+    std::filesystem::path cache_path     = frontend::leaseProfileDirectory(exe_dir / kCEFCacheDir / exe_path.filename());
 
     // Convert to absolute paths
     resources_path = std::filesystem::absolute(resources_path);
