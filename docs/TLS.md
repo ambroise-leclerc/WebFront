@@ -33,6 +33,8 @@ accept whitespace around the PEM blocks. Extra text such as `Bag Attributes`
 and separate `EC PARAMETERS` blocks are refused. To generate a single SEC1
 block, use `openssl ecparam -name prime256v1 -genkey -noout -out privkey.pem`.
 Give the application account read access to the key.
+WebFront checks the structure of each certificate and that the leaf matches the
+private key, but not validity dates or the chain's trust: the browser does.
 After the certificate manager has written both renewed files, call
 `credentials->reload(fullchain, privkey)` from the application's renewal hook.
 It checks that the leaf and key match before publishing them to new handshakes.
@@ -70,7 +72,10 @@ accepted socket is closed immediately. Established connections release their
 slot. The two X25519 operations and the CertificateVerify signature run on
 the I/O thread. A sustained rate of incoming handshakes can saturate that
 thread and cause denial of service, including for established HTTP/WSS
-connections. WebFront writes a warning to standard error when the integrated
+connections. The limit of 16 bounds the work in progress, not an attacker's
+reach: sixteen idle connections keep every slot for up to ten seconds and can be
+renewed, so it is not a defence against denial of service. Put a rate limiter or
+a firewall in front of an exposed listener. WebFront writes a warning to standard error when the integrated
 listener is configured outside loopback. Enable
 `log::Debug` with a log sink to see handshake failure reasons and error codes.
 

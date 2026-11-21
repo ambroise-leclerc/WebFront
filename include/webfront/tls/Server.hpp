@@ -96,7 +96,8 @@ public:
             }
         } catch (const Error& error) {
             failure = error.alert;
-        } catch (const std::system_error&) {
+        } catch (...) {
+            // A transport error, or an exception such as bad_alloc: the stream state is unknown, so no alert is attempted.
             state.control.transportLost();
             throw;
         }
@@ -304,12 +305,26 @@ private:
         }
     }
 
+    // MSVC refuses (C4737) one coroutine holding the whole flight, so the handshake runs in three stages.
     static Task negotiate(Socket& socket, std::shared_ptr<const detail::Identity> identity) {
         using namespace detail;
-        auto&  state = *socket.connection;
-        Sha256 transcript;
-        auto   message = co_await readHandshake(socket, 65536, false, true);
-        auto   hello   = parseHello(message, false);
+        Sha256         transcript;
+        Bytes          message;
+        ClientHello    hello;
+        Secret<>       shared{}, clientHandshake{};
+        Digest         afterFinished{};
+        co_await receiveHello(socket, transcript, message, hello, shared);
+        co_await sendFlight(socket, transcript, *identity, hello.alpn, shared, clientHandshake, afterFinished);
+        co_await receiveFinished(socket, clientHandshake, afterFinished);
+    }
+
+    // From the first ClientHello to the ServerHello, including a HelloRetryRequest. Fills the X25519 shared secret.
+    static Task receiveHello(Socket& socket, detail::Sha256& transcript, detail::Bytes& message, detail::ClientHello& hello,
+                             detail::Secret<>& shared) {
+        using namespace detail;
+        auto& state = *socket.connection;
+        message     = co_await readHandshake(socket, 65536, false, true);
+        hello       = parseHello(message, false);
         if (hello.earlyData)
             state.earlyBytes = 64 * 1024;
         bool                          retry = hello.share.empty();
@@ -329,7 +344,7 @@ private:
         }
         transcript.update(message);
         Digest   random{}, publicKey{};
-        Secret<> scalar{}, shared{};
+        Secret<> scalar{};
         entropy(random);
         entropy(scalar);
         publicKey = x25519(scalar, Digest{9});
@@ -339,19 +354,25 @@ private:
         co_await writeHandshake(socket, transcript, serverHello(hello.session, random, publicKey));
         if (!retry && !hello.session.empty())
             co_await writeRecord(socket, changeCipherSpec, ccs);
+    }
 
+    // EncryptedExtensions to server Finished, then the application keys.
+    static Task sendFlight(Socket& socket, detail::Sha256& transcript, const detail::Identity& identity, bool alpn, const detail::Secret<>& shared,
+                           detail::Secret<>& client, detail::Digest& afterFinished) {
+        using namespace detail;
+        auto&          state = *socket.connection;
         const auto     empty = hash();
         const Secret<> early{hmac(zeros, {zeros})};
         const Secret<> derived{expandLabel(early, "derived", empty)};
         const Secret<> secret{hmac(derived, {shared})};
         const auto     afterHello = transcript.digest();
-        const Secret<> client{expandLabel(secret, "c hs traffic", afterHello)};
+        client                    = {expandLabel(secret, "c hs traffic", afterHello)};
         const Secret<> server{expandLabel(secret, "s hs traffic", afterHello)};
         state.read.install(client);
         state.write.install(server);
         state.writeEncrypted = true;
         Bytes extensions;
-        if (hello.alpn) {
+        if (alpn) {
             Bytes protocol;
             vector(protocol, bytes("http/1.1"), 1);
             Bytes protocols;
@@ -361,7 +382,7 @@ private:
         Bytes encryptedExtensions;
         vector(encryptedExtensions, extensions, 2);
         co_await writeHandshake(socket, transcript, handshake(8, encryptedExtensions));
-        co_await writeHandshake(socket, transcript, identity->certificateMessage);
+        co_await writeHandshake(socket, transcript, identity.certificateMessage);
 
         Bytes input(64, 0x20);
         append(input, bytes("TLS 1.3, server CertificateVerify"));
@@ -369,18 +390,22 @@ private:
         append(input, transcript.digest());
         Bytes verify;
         put(verify, signatureScheme, 2);
-        vector(verify, sign(identity->key, hash(input)), 2);
+        vector(verify, sign(identity.key, hash(input)), 2);
         co_await writeHandshake(socket, transcript, handshake(15, verify));
         const Secret<> serverFinished{expandLabel(server, "finished")};
         co_await writeHandshake(socket, transcript, handshake(20, hmac(serverFinished, {transcript.digest()})));
 
         const Secret<> masterSalt{expandLabel(secret, "derived", empty)};
         const Secret<> master{hmac(masterSalt, {zeros})};
-        const auto     afterFinished = transcript.digest();
-        state.readSecret             = {expandLabel(master, "c ap traffic", afterFinished)};
-        state.writeSecret            = {expandLabel(master, "s ap traffic", afterFinished)};
+        afterFinished     = transcript.digest();
+        state.readSecret  = {expandLabel(master, "c ap traffic", afterFinished)};
+        state.writeSecret = {expandLabel(master, "s ap traffic", afterFinished)};
         state.write.install(state.writeSecret);
+    }
 
+    static Task receiveFinished(Socket& socket, const detail::Secret<>& client, const detail::Digest& afterFinished) {
+        using namespace detail;
+        auto&      state    = *socket.connection;
         const auto finished = co_await readHandshake(socket, 36, true);
         Reader     reader{finished};
         if (reader.number(1) != 20)
