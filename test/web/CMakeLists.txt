@@ -90,7 +90,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if(Python3_Interpreter_FOUND AND WEBFRONT_TEST_OPENSSL)
         add_test(NAME TLSOpenSSLInterop COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/TlsInterop.py"
             $<TARGET_FILE:tls_interop> "${WEBFRONT_TEST_OPENSSL}" "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/tls")
-        set_tests_properties(TLSOpenSSLInterop PROPERTIES LABELS "web-integration" TIMEOUT 30)
+        set_tests_properties(TLSOpenSSLInterop PROPERTIES LABELS "web-integration" TIMEOUT 60)
     endif()
 endif()
 

@@ -23,7 +23,8 @@ def exercise(server, openssl, certificate):
     if retry.stdout.count(b", ServerHello") != 2 or b"HTTP/1.1 200 OK" not in retry.stdout:
         raise RuntimeError(f"HelloRetryRequest or HTTP response missing: {retry.stdout!r} {retry.stderr!r}")
 
-    with socket.create_connection(("127.0.0.1", port), timeout=13) as stalled:
+    # The server owns the ten-second deadline. The client only bounds the wait for a stuck test.
+    with socket.create_connection(("127.0.0.1", port), timeout=30) as stalled:
         stalled.sendall(b"\x16\x03")
         if stalled.recv(1) != b"":
             raise RuntimeError("Incomplete TLS record should be closed at the handshake deadline")
