@@ -80,14 +80,14 @@ endforeach()
 add_test(NAME FrontendLifecycleStageValues COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
     -P "${PROJECT_SOURCE_DIR}/test/cmake/CheckLifecycleStageValues.cmake")
 set_tests_properties(FrontendLifecycleStageValues PROPERTIES TIMEOUT 10 LABELS fast)
-# OpenSSL is a test peer only. The server target links the header-only provider.
+# Build the optional provider on every desktop. The independent OpenSSL peer runs on Linux.
+add_executable(tls_interop TlsInterop.cpp)
+target_link_libraries(tls_interop PRIVATE WebFront WebFront_test_hardening WebFront_warnings WebFront_options)
+add_dependencies(webtest tls_interop)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Python3 QUIET COMPONENTS Interpreter)
     find_program(WEBFRONT_TEST_OPENSSL openssl)
     if(Python3_Interpreter_FOUND AND WEBFRONT_TEST_OPENSSL)
-        add_executable(tls_interop TlsInterop.cpp)
-        target_link_libraries(tls_interop PRIVATE WebFront WebFront_test_hardening WebFront_warnings WebFront_options)
-        add_dependencies(webtest tls_interop)
         add_test(NAME TLSOpenSSLInterop COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/TlsInterop.py"
             $<TARGET_FILE:tls_interop> "${WEBFRONT_TEST_OPENSSL}" "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/tls")
         set_tests_properties(TLSOpenSSLInterop PROPERTIES LABELS "web-integration" TIMEOUT 30)
