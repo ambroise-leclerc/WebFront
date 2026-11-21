@@ -193,21 +193,22 @@ struct Traffic {
         record[3]             = static_cast<Byte>((size + 17) >> 8);
         record[4]             = static_cast<Byte>(size + 17);
         record[5 + size]      = type;
-        auto ctx              = context();
-        auto payload          = record.data() + 5;
-        mono::crypto_aead_write(&ctx, payload, payload + size + 1, record.data(), 5, payload, size + 1);
-        mono::crypto_wipe(&ctx, sizeof(ctx));
+        const auto nonce      = nextNonce();
+        auto       payload    = std::span(record).subspan(5, size + 1);
+        chachaXor(key, nonce, payload);
+        std::ranges::copy(polyTag(key, nonce, View(record).first(5), payload), record.data() + 6 + size);
     }
 
     Byte open(View header, Bytes& payload) {
         if (payload.size() < 17)
             throw Error("short ciphertext");
-        auto       ctx      = context();
-        const auto size     = payload.size() - 16;
-        const auto mismatch = mono::crypto_aead_read(&ctx, payload.data(), payload.data() + size, header.data(), header.size(), payload.data(), size);
-        mono::crypto_wipe(&ctx, sizeof(ctx));
-        if (mismatch)
+        const auto nonce       = nextNonce();
+        const auto size        = payload.size() - 16;
+        const auto ciphertext  = std::span(payload).first(size);
+        const auto expectedTag = polyTag(key, nonce, header, ciphertext);
+        if (!equalSecret(expectedTag, View(payload).subspan(size)))
             throw Error("invalid authentication tag", 20);
+        chachaXor(key, nonce, ciphertext);
         payload.resize(size);
         while (!payload.empty() && payload.back() == 0)
             payload.pop_back();
@@ -221,16 +222,14 @@ struct Traffic {
     }
 
 private:
-    mono::crypto_aead_ctx context() {
+    Nonce nextNonce() {
         if (sequence == UINT64_MAX)
             throw Error("record sequence exhausted", 80);
         auto nonce = iv;
         for (unsigned i = 0; i != 8; ++i)
             nonce[11 - i] ^= static_cast<Byte>(sequence >> (8 * i));
         ++sequence;
-        mono::crypto_aead_ctx ctx;
-        mono::crypto_aead_init_ietf(&ctx, key.data(), nonce.data());
-        return ctx;
+        return nonce;
     }
     Secret<>             key{};
     std::array<Byte, 12> iv{};

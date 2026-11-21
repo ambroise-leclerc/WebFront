@@ -1,7 +1,7 @@
 #pragma once
 #include "../../automation/Platform.hpp"
-#include "Monocypher.hpp"
-#include "P256.hpp"
+#include "ChaChaPoly.hpp"
+#include "Curves.hpp"
 
 #include <algorithm>
 #include <array>
@@ -13,10 +13,8 @@
 #include <vector>
 
 namespace webfront::tls::detail {
-using Byte   = std::uint8_t;
-using Bytes  = std::vector<Byte>;
-using View   = std::span<const Byte>;
-using Digest = std::array<Byte, 32>;
+using Bytes = std::vector<Byte>;
+using View  = std::span<const Byte>;
 
 inline View bytes(std::string_view string) {
     return {reinterpret_cast<const Byte*>(string.data()), string.size()};
@@ -59,7 +57,7 @@ struct Sha256 {
     }
 
     ~Sha256() {
-        mono::crypto_wipe(this, sizeof(*this));
+        wipe(this, sizeof(*this));
     }
 
 private:
@@ -97,7 +95,7 @@ private:
         const std::array final{a, b, c, d, e, f, g, h};
         for (unsigned i = 0; i != state.size(); ++i)
             state[i] += final[i];
-        mono::crypto_wipe(words.data(), sizeof(words));
+        wipe(words.data(), sizeof(words));
     }
 
     std::array<std::uint32_t, 8> state{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
@@ -129,8 +127,8 @@ inline Digest hmac(View key, std::initializer_list<View> chunks) {
     outer.update(pad);
     auto digest = inner.digest();
     outer.update(digest);
-    mono::crypto_wipe(pad.data(), pad.size());
-    mono::crypto_wipe(digest.data(), digest.size());
+    wipe(pad.data(), pad.size());
+    wipe(digest.data(), digest.size());
     return outer.digest();
 }
 
@@ -158,54 +156,42 @@ inline void entropy(std::span<Byte> out) {
 template <std::size_t Size = 32>
 struct Secret : std::array<Byte, Size> {
     ~Secret() {
-        mono::crypto_wipe(this->data(), Size);
+        wipe(this->data(), Size);
     }
 };
 
-inline Bytes sign(View key, View messageHash) {
-    using namespace p256;
-    std::uint32_t d[8]{}, k[8]{}, x[8]{}, y[8]{}, z[8]{};
-    struct Wipe {
-        std::initializer_list<std::uint32_t*> buffers;
-        ~Wipe() {
-            for (auto buffer : buffers)
-                zeroize(buffer, 32);
+inline Bytes sign(std::span<const Byte, 32> key, const Digest& messageHash) {
+    using F     = P256Order;
+    auto scalar = decode(key);
+    struct Erase {
+        Integer& value;
+        ~Erase() {
+            wipe(value.data(), sizeof(value));
         }
-    } wipe{
-        {d, k, x, y, z}
-    };
-    if (scalar_from_bytes(d, key.data()) != 0)
+    } erase{scalar};
+    if (!F::validScalar(scalar))
         throw std::invalid_argument("TLS: invalid P-256 scalar");
-    u256_from_bytes(z, messageHash.data());
-    ecdsa_m256_mod_n(z);
-    Digest reduced;
-    u256_to_bytes(reduced.data(), z);
-    Secret<> v, mac{};
+    scalar             = F::enter(scalar);
+    const auto reduced = encode(F::reduce(decode(messageHash)));
+    const auto z       = F::enter(decode(reduced));
+    Secret<>   v, mac{};
     v.fill(1);
     const std::array<Byte, 1> zero{0}, one{1};
     mac = {hmac(mac, {v, zero, key, reduced})};
     v   = {hmac(mac, {v})};
     mac = {hmac(mac, {v, one, key, reduced})};
     v   = {hmac(mac, {v})};
-    m256_prep(d, &p256_n);
-    m256_prep(z, &p256_n);
     for (;;) {
-        v = {hmac(mac, {v})};
-        if (scalar_from_bytes(k, v.data()) == 0) {
-            scalar_mult(x, y, p256_gx, p256_gy, k);
-            m256_done(x, &p256_p);
-            ecdsa_m256_mod_n(x);
-            Digest r, s;
-            u256_to_bytes(r.data(), x);
-            m256_prep(x, &p256_n);
-            m256_prep(k, &p256_n);
-            m256_inv(k, k, &p256_n);
-            m256_mul(y, x, d, &p256_n);
-            m256_add(y, y, z, &p256_n);
-            m256_mul(y, y, k, &p256_n);
-            m256_to_bytes(s.data(), y, &p256_n);
-            if (u256_diff0(x) && u256_diff0(y)) {
-                Bytes signature{0x30, 0};
+        v       = {hmac(mac, {v})};
+        auto  k = decode(v);
+        Erase eraseNonce{k};
+        if (F::validScalar(k)) {
+            const auto x   = F::reduce(p256Base(k)[0]);
+            const auto sum = F::add(z, F::multiply(F::enter(x), scalar));
+            const auto y   = F::leave(F::multiply(F::invert(F::enter(k)), sum));
+            if (nonzero(x) && nonzero(y)) {
+                const auto r = encode(x), s = encode(y);
+                Bytes      signature{0x30, 0};
                 for (View value : {View(r), View(s)}) {
                     while (value.size() > 1 && value.front() == 0)
                         value = value.subspan(1);

@@ -299,9 +299,9 @@ private:
         Secret<> scalar{}, shared{};
         entropy(random);
         entropy(scalar);
-        mono::crypto_x25519_public_key(publicKey.data(), scalar.data());
-        mono::crypto_x25519(shared.data(), scalar.data(), hello.share.data());
-        if (!mono::crypto_verify32(shared.data(), zeros.data()))
+        publicKey = x25519(scalar, Digest{9});
+        shared    = {x25519(scalar, hello.share.first<32>())};
+        if (equalSecret(shared, zeros))
             throw Error("invalid X25519 shared secret", 47);
         co_await writeHandshake(socket, transcript, serverHello(hello.session, random, publicKey));
         if (!retry && !hello.session.empty())
@@ -356,7 +356,7 @@ private:
         reader.end();
         const Secret<> clientFinished{expandLabel(client, "finished")};
         const auto     expected = hmac(clientFinished, {afterFinished});
-        if (verification.size() != 32 || mono::crypto_verify32(expected.data(), verification.data()))
+        if (!equalSecret(expected, verification))
             throw Error("invalid client Finished", 51);
         state.read.install(state.readSecret);
         state.input.clear();

@@ -133,10 +133,10 @@ inline std::shared_ptr<const Identity> loadIdentity(const std::filesystem::path&
         std::string& key;
         Bytes&       der;
         ~Wipe() {
-            mono::crypto_wipe(key.data(), key.size());
-            mono::crypto_wipe(der.data(), der.size());
+            wipe(key.data(), key.size());
+            wipe(der.data(), der.size());
         }
-    } wipe{key, der};
+    } erase{key, der};
     readPemFile(chainPath, chain);
     readPemFile(keyPath, key);
     std::string_view chainPem = chain, keyPem = key;
@@ -147,16 +147,16 @@ inline std::shared_ptr<const Identity> loadIdentity(const std::filesystem::path&
         throw Error("extra PEM key material");
     auto identity = std::make_shared<Identity>();
     identity->key = privateKey(der, pkcs8);
-    std::uint32_t scalar[8]{}, x[8]{}, y[8]{};
-    const auto    valid = p256::scalar_from_bytes(scalar, identity->key.data());
-    if (!valid)
-        p256::scalar_mult(x, y, p256::p256_gx, p256::p256_gy, scalar);
-    p256::zeroize(scalar, sizeof(scalar));
-    if (valid)
+    auto scalar   = decode(identity->key);
+    if (!P256Order::validScalar(scalar)) {
+        wipe(scalar.data(), sizeof(scalar));
         throw Error("invalid private key scalar");
+    }
+    const auto [x, y] = p256Base(scalar);
+    wipe(scalar.data(), sizeof(scalar));
     std::array<Byte, 64> point;
-    p256::m256_to_bytes(point.data(), x, &p256::p256_p);
-    p256::m256_to_bytes(point.data() + 32, y, &p256::p256_p);
+    std::ranges::copy(encode(x), point.begin());
+    std::ranges::copy(encode(y), point.begin() + 32);
     auto leaf = pem(chainPem, "CERTIFICATE");
     if (!std::ranges::equal(certificateKey(leaf), point))
         throw Error("certificate and private key do not match");

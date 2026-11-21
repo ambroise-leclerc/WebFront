@@ -41,30 +41,32 @@ const Scenario tlsPrimitives("TLS cryptographic vectors", {"fast"}, [] {
         require(std::ranges::equal(View(second).first(10), View(expected).subspan(32)));
     });
     then("X25519 matches RFC 7748 section 6.1", [] {
-        const auto  scalar = tlsHex("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
-        const auto  peer   = tlsHex("de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f");
-        tls::Digest output;
-        tls::mono::crypto_x25519_public_key(output.data(), scalar.data());
+        const auto scalar = tlsHex("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
+        const auto peer   = tlsHex("de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f");
+        const auto secret = View(scalar).first<32>();
+        auto       output = tls::x25519(secret, tls::Digest{9});
         require(std::ranges::equal(output, tlsHex("8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a")));
-        tls::mono::crypto_x25519(output.data(), scalar.data(), peer.data());
+        output = tls::x25519(secret, View(peer).first<32>());
         require(std::ranges::equal(output, tlsHex("4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742")));
     });
     then("the P-256 signature matches RFC 6979 A.2.5", [] {
         const auto scalar = tlsHex("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721");
-        require(tls::sign(scalar, tls::hash(tls::bytes("sample")))
+        require(tls::sign(View(scalar).first<32>(), tls::hash(tls::bytes("sample")))
                 == tlsHex("3046022100efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea84eaf3716"
                           "022100f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8"));
     });
     then("ChaCha20-Poly1305 matches RFC 8439 section 2.8.2", [] {
-        const auto key     = tlsHex("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f");
-        const auto nonce   = tlsHex("070000004041424344454647");
-        const auto aad     = tlsHex("50515253c0c1c2c3c4c5c6c7");
-        const auto message = tls::bytes("Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.");
-        Bytes      ciphertext(message.size());
-        std::array<tls::Byte, 16>  tag;
-        tls::mono::crypto_aead_ctx context;
-        tls::mono::crypto_aead_init_ietf(&context, key.data(), nonce.data());
-        tls::mono::crypto_aead_write(&context, ciphertext.data(), tag.data(), aad.data(), aad.size(), message.data(), message.size());
+        const auto  key     = tlsHex("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f");
+        const auto  nonce   = tlsHex("070000004041424344454647");
+        const auto  aad     = tlsHex("50515253c0c1c2c3c4c5c6c7");
+        const auto  message = tls::bytes("Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.");
+        tls::Digest secret;
+        tls::Nonce  iv;
+        std::ranges::copy(key, secret.begin());
+        std::ranges::copy(nonce, iv.begin());
+        Bytes ciphertext(message.begin(), message.end());
+        tls::chachaXor(secret, iv, ciphertext);
+        const auto tag = tls::polyTag(secret, iv, aad, ciphertext);
         require(ciphertext
                 == tlsHex("d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63dbea45e8ca9671282fafb69da92728b"
                           "1a71de0a9e060b2905d6a5b67ecd3b3692ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc"
@@ -80,8 +82,7 @@ const Scenario tlsHandshakeTrace("TLS 1.3 handshake against RFC 8448", {"fast"},
     given("the client and server hellos from section 3", [&] {
         const auto  parsed = tls::parseHello(hello, false);
         const auto  scalar = tlsHex("b1580eeadf6dd589b8ef4f2d5652578cc810e9980191ec8d058308cea216a21e");
-        tls::Digest shared;
-        tls::mono::crypto_x25519(shared.data(), scalar.data(), parsed.share.data());
+        const auto  shared = tls::x25519(View(scalar).first<32>(), parsed.share.first<32>());
         tls::Sha256 transcript;
         transcript.update(hello);
         transcript.update(server);

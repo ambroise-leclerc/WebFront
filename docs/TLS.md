@@ -52,9 +52,8 @@ the component's scope and qualification.
 
 On Linux x86-64 with GCC 16.1, a minimal app with one bridge callback built at
 `-Os -DNDEBUG -ffunction-sections -fdata-sections -Wl,--gc-sections` gained
-47.8 KiB of `.text` and 5.3 KiB of `.rodata` when the TCP provider was
-replaced by the TLS provider. The TLS headers total about 2,900 lines,
-including source notices and comments in the two vendored primitive subsets.
+43.6 KiB of `.text` and 5.0 KiB of `.rodata` when the TCP provider was
+replaced by the TLS provider. The TLS headers total about 1,500 lines, including the in-tree primitives and comments.
 
 In the same binaries, 200 open loopback WebSockets increased Linux
 `smaps_rollup` private dirty memory by about 3.6 KiB more per idle connection
