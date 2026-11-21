@@ -97,7 +97,7 @@ this contract when using `tls::WebFront`.
 
 ## Constant-time regression
 
-On Linux with Valgrind and its development headers installed, the optional
+On Linux with GCC or Clang, Valgrind and its development headers installed, the optional
 `TLSConstantTime` CTest case marks the private inputs to `p256Base` and `x25519`
 undefined and checks compiler-generated branches and addresses with Memcheck.
 The probe passed locally on x86-64 with GCC 16.1 and Clang 21 at `-Os` and `-O3`.

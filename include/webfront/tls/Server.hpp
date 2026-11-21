@@ -205,7 +205,7 @@ private:
         for (;;) {
             std::array<Byte, 5> header;
             co_await readExact(socket, header);
-            const auto [type, size] = parseRecord(header, encrypted || state.earlyBytes != 0, initial);
+            const auto [type, size] = parseRecord(header, encrypted || state.earlyBytes != 0);
             if (size > state.input.capacity())
                 state.input.reserve(size);
             state.input.resize(size);
@@ -233,8 +233,10 @@ private:
                     continue;
                 }
             }
-            if (!encrypted && (type == handshakeRecord || type == alert))
+            if (!encrypted && (type == handshakeRecord || type == alert)) {
+                state.earlyBytes = 0;  // rejected early data can only precede a ClientHello
                 co_return type;
+            }
             throw Error("unexpected record type", 10);
         }
     }

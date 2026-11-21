@@ -125,6 +125,8 @@ inline ClientHello parseHello(View message, bool retry) {
         throw Error("TLS 1.3 required", 70);
     if (!containsExtension(13))
         throw Error("missing signature_algorithms", 109);
+    if (!containsExtension(51))
+        throw Error("missing key_share", 109);
     if (!offeredSuite || !signature || !supportedGroup)
         throw Error("no common cipher suite, signature or group", 40);
     const bool hasPsk = containsExtension(41);
@@ -178,13 +180,14 @@ struct RecordHeader {
     unsigned size;
 };
 
-inline RecordHeader parseRecord(View header, bool encrypted, bool initial = false) {
+inline RecordHeader parseRecord(View header, bool encrypted) {
     Reader     input{header};
     const auto type          = static_cast<Byte>(input.number(1));
     const auto recordVersion = input.number(2);
     const auto size          = input.number(2);
     input.end();
-    if (recordVersion != 0x0303 && !(initial && recordVersion == 0x0301 && type == handshakeRecord))
+    // TLSPlaintext's legacy_record_version is ignored (RFC 8446, section 5.1); only protected records carry the fixed value.
+    if (type == applicationData && recordVersion != 0x0303)
         throw Error("invalid record version", 70);
     if (size > (encrypted && type == applicationData ? maxCiphertext : maxPlaintext))
         throw Error("oversized record", 22);
@@ -282,6 +285,8 @@ struct RecordControl {
         if (type == alert && input.size() == 2) {
             // TLS 1.3 uses the description; user_canceled (90) can precede close_notify.
             if (input[1] == 90) {
+                if (updateSize != 0)
+                    throw Error("alert interrupted a KeyUpdate", 10);
                 if (++skipped > 32)
                     throw Error("too many consecutive control or empty records", 10);
                 return false;
