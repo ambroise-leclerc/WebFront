@@ -190,6 +190,15 @@ const Scenario tlsRefusals("TLS rejects invalid framing and negotiation", {"fast
             }
         }
     });
+    then("an exhausted record sequence fails as a transport error before wrapping", [] {
+        require(tls::recordNonce({}, UINT64_MAX - 1).back() == 0xfe);
+        try {
+            tls::recordNonce({}, UINT64_MAX);
+            require(false);
+        } catch (const std::system_error& error) {
+            require(error.code() == std::errc::value_too_large);
+        }
+    });
 });
 }  // namespace
 

@@ -819,5 +819,6 @@ const Scenario secureListenerWarning{"An integrated TLS listener outside loopbac
         detail::makeReadBinding(WebFrontConfig{.address = "0.0.0.0"}, true);
         require(output.str().contains("TLS listener outside loopback"));
         require(output.str().contains("bursts can delay established connections"));
+        require(output.str().contains("denial of service"));
     });
 }};

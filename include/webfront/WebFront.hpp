@@ -688,7 +688,7 @@ inline std::shared_ptr<ReadBinding> makeReadBinding(const WebFrontConfig& config
     checkedAddress(config);
     if (secure && !isLoopbackName(config.address))
         std::cerr << "WebFront: TLS listener outside loopback. Handshake cryptography runs on the I/O thread, "
-                     "and bursts can delay established connections. See docs/TLS.md.\n";
+                     "and bursts can delay established connections or cause denial of service. See docs/TLS.md.\n";
     return std::make_shared<ReadBinding>(ReadBinding::Options{.remote = config.remoteFileTransport, .secure = secure});
 }
 }  // namespace detail

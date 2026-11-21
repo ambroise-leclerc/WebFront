@@ -7,6 +7,7 @@ import ssl
 import struct
 import subprocess
 import sys
+from contextlib import ExitStack
 from pathlib import Path
 
 
@@ -42,6 +43,24 @@ def exercise(server, openssl, certificate):
         if error.reason != "TLSV1_ALERT_NO_APPLICATION_PROTOCOL":
             raise
     context.set_alpn_protocols(["http/1.1"])
+
+    with ExitStack() as pending:
+        waiting = [pending.enter_context(socket.create_connection(("127.0.0.1", port), timeout=3))
+                   for _ in range(16)]
+        with socket.create_connection(("127.0.0.1", port), timeout=3) as excess:
+            if excess.recv(1) != b"":
+                raise RuntimeError("A connection beyond the handshake limit should close immediately")
+        if select.select(waiting, [], [], 0)[0]:
+            raise RuntimeError("All 16 handshake slots should be available after the earlier timeout")
+        waiting[0].shutdown(socket.SHUT_WR)
+        if waiting[0].recv(1) != b"":
+            raise RuntimeError("The disconnected peer should release its handshake slot")
+        for _ in range(2):
+            with connect() as peer:
+                peer.sendall(request)
+                with peer.makefile("rb") as response:
+                    if response.readline().rstrip() != b"HTTP/1.1 200 OK":
+                        raise RuntimeError("An admitted handshake should release its slot and serve HTTP")
 
     # A WebSocket Close must be answered before the authenticated TLS EOF.
     with connect() as peer:

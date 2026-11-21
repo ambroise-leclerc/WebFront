@@ -36,6 +36,10 @@ public:
     struct Acceptor : TCP::Acceptor {
         using TCP::Acceptor::Acceptor;
         std::shared_ptr<Credentials> credentials;
+
+    private:
+        friend class Server;
+        mutable std::size_t pendingHandshakes = 0;  // Accessed on the acceptor's I/O thread.
     };
 
     struct Socket : TCP::Socket {
@@ -55,6 +59,14 @@ public:
     // Both senders complete on the I/O context. The winner cancels and joins the other.
     static Task Handshake(Socket& socket, const Acceptor& acceptor) {
         using namespace std::chrono_literals;
+        constexpr std::size_t maxPendingHandshakes = 16;
+        if (acceptor.pendingHandshakes >= maxPendingHandshakes)
+            throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again), "TLS handshake limit reached");
+        ++acceptor.pendingHandshakes;
+        struct Slot {
+            std::size_t& pending;
+            ~Slot() { --pending; }
+        } slot{acceptor.pendingHandshakes};
         auto deadline = networking::ex::then(TCP::ResumeAfter(socket, 10s), [] {
             throw std::system_error(std::make_error_code(std::errc::timed_out));
         });

@@ -30,8 +30,9 @@ Use an ECDSA P-256 leaf certificate whose SAN covers the DNS name users visit.
 Supply the PEM chain in leaf-first order and an unencrypted PEM private key
 as a single `PRIVATE KEY` (PKCS#8) or `EC PRIVATE KEY` (SEC1) block. The files
 accept whitespace around the PEM blocks. Extra text such as `Bag Attributes`
-and separate `EC PARAMETERS` blocks are refused. Give the application account
-read access to the key.
+and separate `EC PARAMETERS` blocks are refused. To generate a single SEC1
+block, use `openssl ecparam -name prime256v1 -genkey -noout -out privkey.pem`.
+Give the application account read access to the key.
 After the certificate manager has written both renewed files, call
 `credentials->reload(fullchain, privkey)` from the application's renewal hook.
 It checks that the leaf and key match before publishing them to new handshakes.
@@ -63,11 +64,14 @@ span records, with one message at a time. The server supports the ClientHello,
 optional second ClientHello and Finished sequence described in the
 [decision record](adr/ADR-024-tls-integre.md).
 
-The TLS handshake has a ten-second deadline from accept through Finished.
-The two X25519 operations and the CertificateVerify signature run on the I/O
-thread. Other connections wait during that work, so bursts of handshakes can
-delay established HTTP/WSS connections. WebFront writes a warning to standard
-error when the integrated listener is configured outside loopback. Enable
+Each listener admits up to 16 concurrent TLS handshakes, with a ten-second
+deadline from accept through Finished. When all slots are occupied, a newly
+accepted socket is closed immediately. Established connections release their
+slot. The two X25519 operations and the CertificateVerify signature run on
+the I/O thread. A sustained rate of incoming handshakes can saturate that
+thread and cause denial of service, including for established HTTP/WSS
+connections. WebFront writes a warning to standard error when the integrated
+listener is configured outside loopback. Enable
 `log::Debug` with a log sink to see handshake failure reasons and error codes.
 
 On orderly WSS closure initiated by the peer, WebFront answers the WebSocket
@@ -81,6 +85,10 @@ failed write can also prevent the alert from being sent.
 
 A peer's `KeyUpdate(update_requested)` is answered before the next
 application data record. The response stays pending while the server is idle.
+
+When using `tls::Server` directly, run handshakes for each acceptor on its I/O
+thread and serialize `Send` calls on each socket. HTTP and WebSocket enforce
+this contract when using `tls::WebFront`.
 
 ## Constant-time regression
 

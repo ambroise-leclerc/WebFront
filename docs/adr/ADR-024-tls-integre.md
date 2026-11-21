@@ -11,8 +11,11 @@ Le cœur HTTP garde son fournisseur TCP. Un port TLS sert exclusivement HTTPS et
 Le profil initial utilise X25519 (avec HelloRetryRequest), ChaCha20-Poly1305, SHA-256 et ECDSA P-256
 avec nonce RFC 6979. AES-GCM reste conditionné à une implémentation à temps constant raisonnable.
 La reprise par tickets ajouterait une politique de rotation, une durée de vie et un second chemin de handshake.
-Le premier profil fait un handshake complet à chaque connexion. Le délai est de dix secondes. Le serveur
-écarte jusqu'à 64 Kio de données anticipées refusées pendant la négociation.
+Le premier profil fait un handshake complet à chaque connexion. Chaque écoute admet jusqu'à 16 négociations
+simultanées et ferme immédiatement les connexions excédentaires. Chaque négociation a un délai de dix secondes.
+Le serveur écarte jusqu'à 64 Kio de données anticipées refusées pendant la négociation. La cryptographie s'exécute
+sur le thread d'E/S. Un débit soutenu de nouvelles négociations peut saturer ce thread et causer un déni de service
+pour les connexions établies. Un déploiement exposé à Internet s'appuie sur un proxy avec contrôle d'admission.
 
 L'application fournit une chaîne PEM et une clé P-256 via la configuration. Le rechargement explicite
 publie une paire complète après validation. Les handshakes en cours conservent leur instantané.

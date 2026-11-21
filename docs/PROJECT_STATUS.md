@@ -160,7 +160,8 @@ are retained for investigation; diagnostics alone do not establish a correction.
   Manifest permissions bound only the scripts' `context` API. Only browser packages install;
   installation scripts and native add-ons do not run. The [content policy](CONTENT_POLICY.md)
   restricts browser origins and navigation. The optional [TLS listener](TLS.md) adds HTTPS and WSS
-  with TLS 1.3 and ChaCha20-Poly1305. Client authentication remains an application responsibility.
+  with TLS 1.3 and ChaCha20-Poly1305. Each listener admits 16 concurrent handshakes on the I/O thread.
+  Client authentication remains an application responsibility.
 - `fs::NativeStorage` confines writable storage to a declared root while resolving each path, but
   on POSIX it cannot prevent the effective user or the superuser from moving a directory out of the
   root during an operation: it detects such a move before a commit and after each operation, at

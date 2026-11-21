@@ -193,6 +193,14 @@ inline RecordHeader parseRecord(View header, bool encrypted, bool initial = fals
     return {type, size};
 }
 
+inline Nonce recordNonce(Nonce nonce, std::uint64_t sequence) {
+    if (sequence == UINT64_MAX)
+        throw std::system_error(std::make_error_code(std::errc::value_too_large), "TLS record sequence exhausted");
+    for (unsigned i = 0; i != 8; ++i)
+        nonce[11 - i] ^= static_cast<Byte>(sequence >> (8 * i));
+    return nonce;
+}
+
 struct Traffic {
     void install(View secret) {
         key = {expandLabel(secret, "key")};
@@ -211,7 +219,7 @@ struct Traffic {
         record[3]             = static_cast<Byte>((size + 17) >> 8);
         record[4]             = static_cast<Byte>(size + 17);
         record[5 + size]      = type;
-        const auto nonce      = recordNonce();
+        const auto nonce      = recordNonce(iv, sequence);
         ++sequence;
         auto payload = std::span(record).subspan(5, size + 1);
         chachaXor(key, nonce, payload);
@@ -221,7 +229,7 @@ struct Traffic {
     Byte open(View header, Bytes& payload) {
         if (payload.size() < 17)
             throw Error("short ciphertext");
-        const auto nonce       = recordNonce();
+        const auto nonce       = recordNonce(iv, sequence);
         const auto size        = payload.size() - 16;
         const auto ciphertext  = std::span(payload).first(size);
         const auto expectedTag = polyTag(key, nonce, header, ciphertext);
@@ -242,14 +250,6 @@ struct Traffic {
     }
 
 private:
-    Nonce recordNonce() const {
-        if (sequence == UINT64_MAX)
-            throw Error("record sequence exhausted", 80);
-        auto nonce = iv;
-        for (unsigned i = 0; i != 8; ++i)
-            nonce[11 - i] ^= static_cast<Byte>(sequence >> (8 * i));
-        return nonce;
-    }
     Secret<>             key{};
     std::array<Byte, 12> iv{};
     std::uint64_t        sequence = 0;
