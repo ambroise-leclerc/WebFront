@@ -5,6 +5,13 @@
 #include "detail/Protocol.hpp"
 #include <cassert>
 
+#ifdef _MSC_VER
+// C4737: MSVC cannot always turn the awaits of the handshake coroutines into tail calls. It costs stack depth, not correctness,
+// and /WX would otherwise break every consumer of this header.
+#pragma warning(push)
+#pragma warning(disable : 4737)
+#endif
+
 namespace webfront::tls {
 /// TCP-style stream provider. Handshake, reads and writes run on the same server I/O context.
 class Server : public networking::TCPStdnet {
@@ -422,3 +429,7 @@ private:
     }
 };
 }  // namespace webfront::tls
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
