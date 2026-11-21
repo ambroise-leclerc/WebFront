@@ -66,6 +66,7 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-021](ADR-021-publication-de-l-environnement-developpeur.md) | Simplifying the publication of the developer environment: automate the release, keep pinned hashes, no dedicated server | Accepted (domain delivered; phase 1 to implement) | 2026-11-02 | 1.0 — 2026-11-02 |
 | [ADR-022](ADR-022-profils-et-niveaux-de-support.md) | Compiler profiles, GCC 13 S2 minimum, exit clause and LTS build tools | Accepted | 2026-11-11 | 1.1 — 2026-11-11 |
 | [ADR-023](ADR-023-espace-de-noms-des-commandes-du-terminal.md) | Terminal command names: `wf` stays the prefix of project commands, read-only file commands (`ls`, `cat`, `tree`, `mounts`), file command names reserved ahead, dependency graph with `wf list --tree`, `wf why`, `wf info` | Accepted | 2026-11-14 | 1.0 — 2026-11-14 |
+| [ADR-024](ADR-024-tls-integre.md) | Optional integrated TLS 1.3 server | Proposed | 2026-11-21 | 1.0 |
 
 Numbering follows the reading topics; milestones and individual file histories provide
 the chronology, which does not follow the numerical order.

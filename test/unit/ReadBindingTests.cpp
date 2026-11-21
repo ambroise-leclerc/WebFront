@@ -16,6 +16,7 @@
 #include <list>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <utility>
@@ -27,6 +28,8 @@ using namespace webfront;
 using namespace std::chrono_literals;
 
 namespace {
+
+static_assert(requires { ReadBinding({}); });
 
 constexpr std::string_view readPrefix = "/webfront/services/files/";
 
@@ -73,8 +76,8 @@ struct Fixture {
     std::string                 lastRest;
     std::any                    lastContext;
 
-    explicit Fixture(RemoteFileTransport transport = RemoteFileTransport::refused)
-        : binding(transport, [this] { return time; }) {
+    explicit Fixture(RemoteFileTransport transport = RemoteFileTransport::refused, bool secure = false)
+        : binding(ReadBinding::Options{.remote = transport, .secure = secure}, [this] { return time; }) {
         read = binding.readHandler("route-a", std::string(readPrefix), [this](const http::RouteRequest&, const ReadGrant& grant) {
             lastRest    = std::string(grant.rest);
             lastContext = grant.context;
@@ -364,6 +367,20 @@ const Scenario connectionNot{"A connection that is not the view of an embedded f
             });
         });
     }
+    given("a connection to the integrated TLS listener", [&] {
+        Fixture fixture{RemoteFileTransport::refused, true};
+        const auto cookies = headers(fixture.bind(1, false), "Set-Cookie");
+        then("its binding uses a Secure cookie and the default still refuses reads", [&] {
+            require(cookies.front().contains("; Secure"));
+            requireThrows<ReadRefused>([&] { fixture.url(1); });
+        });
+        then("an explicit HTTPS declaration authorizes reads with the binding cookie", [&] {
+            Fixture authorized{RemoteFileTransport::httpsByDeployment, true};
+            const auto bound = headers(authorized.bind(2, false), "Set-Cookie").front();
+            require(bound.contains("; Secure"));
+            require(call(authorized.read, authorized.url(2), cookiePair(bound)).status == http::Response::ok);
+        });
+    });
     given("a request through a local proxy that forges the forwarding headers, with the default declaration", [&] {
         Fixture fixture;
         fixture.bind(1, false);
@@ -783,5 +800,25 @@ const Scenario droppingGrant{"Dropping a grant never runs its context's destruct
     when("the application shuts down", [&] {
         (void)fixture.url(1, "a", {.context = reentrant()});
         fixture.binding.shutdown();
+    });
+}};
+
+
+const Scenario secureListenerWarning{"An integrated TLS listener outside loopback warns without a log sink", [] {
+    std::ostringstream output;
+    struct Restore {
+        std::streambuf* previous;
+        ~Restore() { std::cerr.rdbuf(previous); }
+    } restore{std::cerr.rdbuf(output.rdbuf())};
+    then("loopback and the TCP provider stay quiet", [&] {
+        detail::makeReadBinding(WebFrontConfig{}, true);
+        detail::makeReadBinding(WebFrontConfig{.address = "0.0.0.0"}, false);
+        require(output.str().empty());
+    });
+    then("wildcard TLS reports the synchronous work on standard error", [&] {
+        detail::makeReadBinding(WebFrontConfig{.address = "0.0.0.0"}, true);
+        require(output.str().contains("TLS listener outside loopback"));
+        require(output.str().contains("bursts can delay established connections"));
+        require(output.str().contains("denial of service"));
     });
 }};

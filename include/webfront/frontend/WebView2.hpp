@@ -973,7 +973,7 @@ inline void open(std::string_view address,
                  std::string_view file,
                  const WebView2Options& options,
                  const std::function<void(Session&)>& prepare = {}) {
-    auto contentPolicy = webfront::detail::BoundContentPolicy{frontend::detail::applicationUrl(address, port, ""), options.contentPolicy};
+    auto contentPolicy = webfront::detail::BoundContentPolicy{frontend::detail::applicationUrl(address, port, "", options.launch.origin), options.contentPolicy};
     // One window per process: a second open() on the interface thread is refused before it creates anything.
     if (uiExecutorHostOf<WebView2Frontend>().executor().available())
         throw std::logic_error("WebView2Frontend: open() is already running; a process opens one window at a time");
@@ -987,7 +987,7 @@ inline void open(std::string_view address,
     auto session       = std::make_shared<Session>(options.startupTimeout);
     session->contentPolicy = std::move(contentPolicy);
     session->viewLaunch    = options.launch;
-    session->url       = applicationUrl(address, port, file);
+    session->url       = utf16(frontend::detail::applicationUrl(address, port, file, options.launch.origin));
     if (prepare)
         prepare(*session);
     const auto profile = options.userDataFolder.empty() ? userDataFolder() : std::filesystem::absolute(options.userDataFolder);

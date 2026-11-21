@@ -49,13 +49,13 @@ inline std::string newViewSecret() {
     return mismatch == 0;
 }
 
-/// The application origin prepared for injection: lowercase, without the default port 80. The script below lets the
+/// The application origin prepared for injection: lowercase, without the default port. The script below lets the
 /// browser's URL parser finish serialization, including compression of IPv6 and its embedded IPv4 notation.
-[[nodiscard]] inline std::string browserOrigin(std::string_view address, std::string_view port) {
-    auto origin = applicationOrigin(address, port);
+[[nodiscard]] inline std::string browserOrigin(std::string_view address, std::string_view port, bool secure = false) {
+    auto origin = applicationOrigin(address, port, secure);
     std::ranges::transform(origin, origin.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    if (origin.ends_with(":80"))
-        origin.resize(origin.size() - 3);
+    if (port == (secure ? "443" : "80"))
+        origin.resize(origin.size() - port.size() - 1);
     return origin;
 }
 

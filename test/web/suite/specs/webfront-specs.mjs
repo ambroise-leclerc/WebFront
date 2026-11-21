@@ -499,6 +499,7 @@ describe('WebFront browser integration', () => {
 
     it('resolves webFront.ready once the bridge has linked', async () => {
         await expectAsync(webFront.ready).toBeResolved();
+        expect(window.location.protocol).toBe(await webFront.cppFunction('expectedProtocol')());
     });
 
     it('rejects a bridge whose initial connection fails', async () => {

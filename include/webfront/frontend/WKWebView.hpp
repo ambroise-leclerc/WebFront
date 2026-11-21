@@ -1190,7 +1190,7 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
         }
     } openingScope;
     Object  pool(send(type("NSAutoreleasePool"), "new"));
-    Session window(applicationUrl(address, port, file), options);
+    Session window(applicationUrl(address, port, file, options.launch.origin), options);
     window.create();
     window.start();
     // The AppKit loop drains the main queue: a wake is a block on it. Closing completes pending operations stopped,
