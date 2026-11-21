@@ -7,8 +7,62 @@ import ssl
 import struct
 import subprocess
 import sys
+import threading
 from contextlib import ExitStack
 from pathlib import Path
+
+
+COMPATIBILITY_RECORD = bytes.fromhex("140303000101")  # change_cipher_spec, RFC 8446 appendix D.4
+
+
+def read_exactly(source, count):
+    data = b""
+    while len(data) < count:
+        chunk = source.recv(count - len(data))
+        if not chunk:
+            break
+        data += chunk
+    return data
+
+
+def repeat_compatibility_records(port, copies):
+    """Listen on a port and relay to the server, repeating each plaintext client record's compatibility record.
+
+    A conforming client may send change_cipher_spec at any time between its first ClientHello and its Finished,
+    around a HelloRetryRequest included. The relay adds `copies` after every plaintext record, until the first
+    protected record."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+
+    def serve():
+        with listener, listener.accept()[0] as client, socket.create_connection(("127.0.0.1", port), timeout=10) as server:
+            def backward():
+                try:
+                    while chunk := server.recv(4096):
+                        client.sendall(chunk)
+                    client.shutdown(socket.SHUT_WR)
+                except OSError:
+                    pass
+            threading.Thread(target=backward, daemon=True).start()
+            injecting = True
+            try:
+                while header := read_exactly(client, 5):
+                    if len(header) < 5:
+                        break
+                    record = header + read_exactly(client, struct.unpack(">H", header[3:])[0])
+                    server.sendall(record)
+                    if header[0] == 0x17:
+                        injecting = False
+                    elif injecting:
+                        server.sendall(COMPATIBILITY_RECORD * copies)
+                server.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    return listener.getsockname()[1], thread
 
 
 def exercise(server, openssl, certificate):
@@ -22,6 +76,16 @@ def exercise(server, openssl, certificate):
     )
     if retry.stdout.count(b", ServerHello") != 2 or b"HTTP/1.1 200 OK" not in retry.stdout:
         raise RuntimeError(f"HelloRetryRequest or HTTP response missing: {retry.stdout!r} {retry.stderr!r}")
+
+    relay, relayed = repeat_compatibility_records(port, 3)
+    repeated = subprocess.run(
+        [openssl, "s_client", "-connect", f"127.0.0.1:{relay}", "-tls1_3", "-groups", "P-256:X25519",
+         "-CAfile", str(certificate), "-verify_return_error", "-verify_ip", "127.0.0.1", "-quiet", "-msg"],
+        input=request, capture_output=True, check=True, timeout=10,
+    )
+    relayed.join(timeout=5)
+    if repeated.stdout.count(b", ServerHello") != 2 or b"HTTP/1.1 200 OK" not in repeated.stdout:
+        raise RuntimeError(f"Repeated compatibility records were not dropped: {repeated.stdout!r} {repeated.stderr!r}")
 
     # The server owns the ten-second deadline. The client only bounds the wait for a stuck test.
     with socket.create_connection(("127.0.0.1", port), timeout=30) as stalled:

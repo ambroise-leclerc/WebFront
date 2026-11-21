@@ -31,7 +31,6 @@ class Server : public networking::TCPStdnet {
         std::size_t           earlyBytes = 0;
         std::size_t           offset     = 0;
         detail::RecordControl control;
-        bool                  compat         = false;
         bool                  writeEncrypted = false;
         bool                  established    = false;
     };
@@ -216,10 +215,11 @@ private:
                 state.input.reserve(size);
             state.input.resize(size);
             co_await readExact(socket, state.input);
-            if (type == changeCipherSpec && !state.established && !initial && !state.compat && state.input == Bytes{1}) {
-                state.compat = true;
+            // RFC 8446, appendix D.4: a client may send this compatibility record at any time after its first ClientHello and
+            // before its Finished (around a HelloRetryRequest too), and the server drops each one. The handshake deadline and
+            // the record limits bound them.
+            if (type == changeCipherSpec && !state.established && !initial && state.input == Bytes{1})
                 continue;
-            }
             if (type == applicationData) {
                 if (encrypted) {
                     try {
