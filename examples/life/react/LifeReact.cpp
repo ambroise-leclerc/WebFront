@@ -2,14 +2,17 @@
 
 #include "../LifeDeveloperOptions.hpp"
 #include "../LifeFrontend.hpp"
+#include "../../PortOption.hpp"
 
 #include <exception>
 #include <filesystem>
 #include <iostream>
 
 int main(int argc, char** argv) {
+    if (!webfront::demo::applyPortOption(argc, argv))
+        return 2;
     if (argc > 2 || (argc == 2 && *argv[1] == '\0')) {
-        std::cerr << "Usage: WebFrontLifeReact [<project directory>]\n"
+        std::cerr << "Usage: WebFrontLifeReact [--port <n>] [<project directory>]\n"
                      "Without argument the project is ./"
                   << webfront::demo::LifeDeveloperOptions::defaultProject << ", created empty when missing: copy main.tsx and webfront.project.json from examples/life/react/ into it first.\n";
         return 2;

@@ -4,6 +4,7 @@
 #include <webfront/networking/TCPNetworkingStdnet.hpp>
 #include <webfront/system/DefaultFS.hpp>
 #include <webfront/WebFront.hpp>
+#include "../../examples/PortOption.hpp"
 
 #ifdef _WIN32
     #include <webfront/system/WindowsCompat.hpp>
@@ -12,6 +13,7 @@
 #endif
 
 #include <array>
+#include <cstdlib>
 #include <atomic>
 #include <future>
 #include <chrono>
@@ -19,6 +21,10 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <memory>
+#include <optional>
+#include <set>
+#include <vector>
 
 using namespace webfront::bdd;
 
@@ -337,5 +343,135 @@ const Scenario drainingPumps{"Draining pumps cancelled tasks while a route handl
         release();  // never leave the test hanging if the drain waited for the cleanup it was to run
         drained.wait();
         then("the drain ran the cleanup which released the handler", [&] { require(finished); });
+    });
+}};
+
+const Scenario simultaneousInstances{"Servers side by side on ephemeral ports", [] {
+    given("a server that holds a port", [&] {
+        http::Server<Stdnet, fs::DefaultFS> first("127.0.0.1", "0");
+        then("a second server on port \"0\" gets another port", [&] {
+            http::Server<Stdnet, fs::DefaultFS> second("127.0.0.1", "0");
+            require(first.port() != second.port());
+            require(second.port() != "0");
+        });
+        then("a server asking for the same port reports the address, the port and the cause", [&] {
+            const std::string port{first.port()};
+            requireThrows<std::system_error>([&] { http::Server<Stdnet, fs::DefaultFS> clash("127.0.0.1", port); },
+                                             contains("127.0.0.1:" + port));
+            requireThrows<std::system_error>([&] { http::Server<Stdnet, fs::DefaultFS> clash("127.0.0.1", port); }, contains("WEBFRONT_PORT=0"));
+        });
+    });
+    given("many servers without a configured port", [&] {
+        std::vector<std::unique_ptr<http::Server<Stdnet, fs::DefaultFS>>> servers;
+        for (int i = 0; i < 40; ++i)
+            servers.push_back(std::make_unique<http::Server<Stdnet, fs::DefaultFS>>("127.0.0.1", "0"));
+        then("each one listens on its own port", [&] {
+            std::set<std::string> ports;
+            for (const auto& server : servers)
+                ports.insert(std::string(server->port()));
+            require(ports.size() == servers.size());
+        });
+    });
+}};
+
+void setPortVariable(const char* value) {
+#ifdef _WIN32
+    _putenv_s("WEBFRONT_PORT", value);  // an empty value removes the variable on Windows, which defaultPort() treats alike
+#else
+    setenv("WEBFRONT_PORT", value, 1);
+#endif
+}
+
+// Restores WEBFRONT_PORT as the process had it (present or absent) when a scenario ends, even through an exception.
+struct PortVariableGuard {
+    std::optional<std::string> saved;
+    PortVariableGuard() {
+#ifdef _WIN32
+        char*  buffer = nullptr;
+        size_t length = 0;
+        if (_dupenv_s(&buffer, &length, "WEBFRONT_PORT") == 0 && buffer != nullptr) {
+            saved = buffer;
+            std::free(buffer);
+        }
+#else
+        if (const char* value = std::getenv("WEBFRONT_PORT"))
+            saved = value;
+#endif
+    }
+    ~PortVariableGuard() {
+#ifdef _WIN32
+        _putenv_s("WEBFRONT_PORT", saved ? saved->c_str() : "");  // an empty value removes the variable on Windows
+#else
+        if (saved)
+            setenv("WEBFRONT_PORT", saved->c_str(), 1);
+        else
+            unsetenv("WEBFRONT_PORT");
+#endif
+    }
+};
+
+const Scenario defaultPortFromEnvironment{"The default port follows WEBFRONT_PORT", [] {
+    const PortVariableGuard portGuard;
+    given("WEBFRONT_PORT set to 0", [&] {
+        setPortVariable("0");
+        then("a configuration asks for an ephemeral port and two applications coexist", [&] {
+            require(WebFrontConfig{}.port == "0");
+            BasicWF<Stdnet, fs::DefaultFS> a{WebFrontConfig{}}, b{WebFrontConfig{}};
+            require(a.port() != b.port());
+        });
+        setPortVariable("");
+    });
+    given("WEBFRONT_PORT unset or empty", [&] {
+        setPortVariable("");
+        then("the historical 9002 remains", [&] { require(defaultPort() == "9002"); });
+        setPortVariable("");
+    });
+}};
+
+const Scenario portValidation{"A port is a number from 0 to 65535", [] {
+    const PortVariableGuard portGuard;
+    given("values the resolver would accept", [&] {
+        then("only canonical port numbers pass", [&] {
+            require(validatedPort("0", "t") == "0");
+            require(validatedPort("9002", "t") == "9002");
+            require(validatedPort("65535", "t") == "65535");
+            for (const char* bad : {"", "00", "65536", "http", "-1", "+80", "80 ", "080", "123456"})
+                requireThrows<std::invalid_argument>([&] { (void)validatedPort(bad, "WEBFRONT_PORT"); }, contains("WEBFRONT_PORT"));
+        });
+        then("an invalid WEBFRONT_PORT makes the default configuration fail", [&] {
+            setPortVariable("http");
+            requireThrows<std::invalid_argument>([&] { (void)defaultPort(); }, contains("'http'"));
+            setPortVariable("");
+        });
+    });
+    given("a server asked for port 00", [&] {
+        http::Server<Stdnet, fs::DefaultFS> server("127.0.0.1", "00");
+        then("it announces the port really bound", [&] { require(server.port() != "00" && server.port() != "0"); });
+    });
+}};
+
+const Scenario portOption{"The examples take --port", [] {
+    const PortVariableGuard portGuard;
+    given("--port <n> and --port=<n> among other arguments", [&] {
+        setPortVariable("");
+        char  program[] = "app", flag[] = "--port", value[] = "0", other[] = "project", joined[] = "--port=0";
+        char* argv[]    = {program, other, flag, value, joined, nullptr};
+        int   argc      = 5;
+        then("they set the default port and leave the other arguments", [&] {
+            require(demo::applyPortOption(argc, argv));
+            require(argc == 2 && std::string(argv[1]) == "project" && argv[2] == nullptr);
+            require(defaultPort() == "0");
+            setPortVariable("");
+        });
+    });
+    given("an invalid or missing value", [&] {
+        char  program[] = "app", flag[] = "--port", bad[] = "65536";
+        char* withBad[] = {program, flag, bad, nullptr};
+        char* missing[] = {program, flag, nullptr};
+        int   badCount = 3, missingCount = 2;
+        then("the option is refused", [&] {
+            require(!demo::applyPortOption(badCount, withBad));
+            require(!demo::applyPortOption(missingCount, missing));
+        });
     });
 }};

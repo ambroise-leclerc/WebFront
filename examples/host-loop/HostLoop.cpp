@@ -1,5 +1,6 @@
 #include "HostLoopCapture.hpp"
 #include "HostLoopUI.hpp"
+#include "../PortOption.hpp"
 #include <webfront/frontend/Capture.hpp>
 #include <webfront/WebFront.hpp>
 
@@ -232,13 +233,16 @@ bool parse(std::span<char* const> arguments, Options& options) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    if (!webfront::demo::applyPortOption(argc, argv))
+        return 2;
     Options options;
     if (!parse({argv + 1, static_cast<std::size_t>(argc - 1)}, options)) {
         std::cerr
-            << "Usage: WebFrontHostLoop [--engine cpu|cuda] [--quality 0-3] [--glass] [--browser] [--stats] [--capture <file.png>] [--capture-frames 1-600] [--capture-demo]\n"
+            << "Usage: WebFrontHostLoop [--port <n>] [--engine cpu|cuda] [--quality 0-3] [--glass] [--browser] [--stats] [--capture <file.png>] [--capture-frames 1-600] [--capture-demo]\n"
                "       WebFrontHostLoop --benchmark\n"
                "  --engine     the renderer at start (default cpu); cuda is an error where it is unavailable\n"
                "  --quality    0: 320x240, 1: 640x480, 2: 640x480 with 4 rays per pixel, 3: 960x720 with 4 (default)\n"
+               "  --port       the port of the browser interface, 0 for a free port (default WEBFRONT_PORT, else 9002)\n"
                "  --browser    open the system browser even when the native window is built\n"
                "  --stats      print the timings of an image every second\n"
                "  --capture    write a PNG of the native window after six seconds, then stop\n"

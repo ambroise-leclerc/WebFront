@@ -487,6 +487,42 @@ inline bool noteDevelopmentPath() {
 }
 }  // namespace detail
 
+/// Returns `text` when it is a port number: decimal digits, from 0 to 65535, without a sign or a leading zero ("0" asks for a
+/// free port). Anything else (a service name such as "http", "00", "65536") throws std::invalid_argument naming `origin`,
+/// because the resolver would accept some of those and bind a port other than the one announced.
+[[nodiscard]] inline std::string validatedPort(std::string_view text, std::string_view origin) {
+    unsigned value = 0;
+    bool     valid = !text.empty() && text.size() <= 5 && (text.size() == 1 || text.front() != '0');
+    for (const char c : text) {
+        valid = valid && c >= '0' && c <= '9';
+        if (valid)
+            value = value * 10 + static_cast<unsigned>(c - '0');
+    }
+    if (!valid || value > 65535)
+        throw std::invalid_argument(std::string(origin) + " must be a port number from 0 to 65535 (0 asks for a free port), not '" + std::string(text) + "'");
+    return std::string(text);
+}
+
+/// The port of a configuration that does not choose one: the environment variable WEBFRONT_PORT when it is set and not
+/// empty ("0" asks for a free port, so any number of instances can run side by side), "9002" otherwise. A value that is not a
+/// port number throws std::invalid_argument.
+[[nodiscard]] inline std::string defaultPort() {
+    std::string value;
+#ifdef _WIN32
+    // std::getenv is deprecated for MSVC (C4996, an error with /WX); _dupenv_s copies the value.
+    char*  buffer = nullptr;
+    size_t length = 0;
+    if (_dupenv_s(&buffer, &length, "WEBFRONT_PORT") == 0 && buffer != nullptr) {
+        value = buffer;
+        std::free(buffer);
+    }
+#else
+    if (const char* found = std::getenv("WEBFRONT_PORT"))
+        value = found;
+#endif
+    return value.empty() ? std::string("9002") : validatedPort(value, "WEBFRONT_PORT");
+}
+
 /**
  * @brief Configuration for the newcomer-friendly default construction of BasicWF.
  *
@@ -498,8 +534,8 @@ inline bool noteDevelopmentPath() {
  */
 struct WebFrontConfig {
     std::string           address{"127.0.0.1"};
-    /// "0" requests an ephemeral port with TCPStdnet. The frontend receives the bound port.
-    std::string           port{"9002"};
+    /// "0" requests an ephemeral port with TCPStdnet. The frontend receives the bound port. Defaults to defaultPort().
+    std::string           port{defaultPort()};
     std::filesystem::path documentRoot{};
     ContentPolicy         contentPolicy{};
     /// Initial window of the embedded frontends; the title defaults to the executable's name.

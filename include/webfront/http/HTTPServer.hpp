@@ -7,6 +7,7 @@
 #include "../networking/BasicNetworking.hpp"
 #include "../networking/Tasks.hpp"
 #include "../system/FileSystem.hpp"
+#include "../system/WindowsCompat.hpp"
 #include "../Task.hpp"
 #include "../tooling/HexDump.hpp"
 #include "AcceptEncoding.hpp"
@@ -38,6 +39,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -1002,14 +1004,28 @@ private:
     std::function<void(typename Net::Socket&&)> upgradeHandler;
 
     std::string bind(std::string_view address, std::string_view requestedPort) {
-        const auto endpoint = Net::Resolve(address, requestedPort);
-        acceptor.open(endpoint.protocol());
-        acceptor.set_option(typename Net::Acceptor::reuse_address(true));
-        acceptor.bind(endpoint);
-        acceptor.listen();
-        // Only the literal "0" asks for an OS-assigned port; any other value is already the port.
-        if (requestedPort != "0")
-            return std::string(requestedPort);
+        try {
+            const auto endpoint = Net::Resolve(address, requestedPort);
+            acceptor.open(endpoint.protocol());
+#ifdef _WIN32
+            // SO_REUSEADDR lets Winsock bind a second socket to a port in use and then deals the connections out unpredictably, so
+            // two applications would answer each other's requests. SO_EXCLUSIVEADDRUSE makes the second bind fail instead.
+            if constexpr (requires { acceptor.native_handle(); }) {
+                const BOOL exclusive = TRUE;
+                if (::setsockopt(static_cast<SOCKET>(acceptor.native_handle()), SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&exclusive), sizeof exclusive) != 0)
+                    throw std::system_error(::WSAGetLastError(), std::system_category(), "SO_EXCLUSIVEADDRUSE");
+            }
+#else
+            acceptor.set_option(typename Net::Acceptor::reuse_address(true));  // rebinding after a restart; POSIX still refuses a port in use
+#endif
+            acceptor.bind(endpoint);
+            acceptor.listen();
+        } catch (const std::system_error& error) {
+            // Name the address and port: the bare "bind: Address already in use" does not say which server failed.
+            throw std::system_error(error.code(), "WebFront cannot listen on " + std::string(address) + ":" + std::string(requestedPort) + ": " + error.code().message()
+                + (error.code() == std::errc::address_in_use ? " (another instance may use this port; set WEBFRONT_PORT=0 or WebFrontConfig::port to \"0\" for a free port)" : ""));
+        }
+        // The port really bound, whatever the request said: the resolver also accepts "00", "65536" or a service name.
         if constexpr (requires { acceptor.local_endpoint().port(); })
             return std::to_string(acceptor.local_endpoint().port());
         else
