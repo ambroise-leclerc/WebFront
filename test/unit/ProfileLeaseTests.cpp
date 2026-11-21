@@ -31,20 +31,15 @@ std::filesystem::path scratch(const std::string& name) {
 const Scenario profileLease{"A browser profile is never used by two live instances", [] {
     given("a profile directory", [&] {
         const auto profile = scratch("profile");
-        then("the first lease keeps it and the next ones get a directory of their own", [&] {
+        then("the process keeps the profile, and finds its data again when it asks again", [&] {
             const auto first = frontend::leaseProfileDirectory(profile);
             require(first == profile);
-            std::set<std::filesystem::path> others;
-            for (int i = 0; i < 20; ++i) {
-                const auto other = frontend::leaseProfileDirectory(profile);
-                require(other != profile && std::filesystem::is_directory(other));
-                require(other.parent_path() == std::filesystem::path(profile.string() + ".instances"));
-                others.insert(other);
-            }
-            require(others.size() == 20);
+            std::ofstream{first / "data"} << "saved by the first window";
+            const auto reopened = frontend::leaseProfileDirectory(profile);
+            require(reopened == first && std::filesystem::exists(reopened / "data"));
+            require(!std::filesystem::exists(profile.string() + ".instances"));
         });
         std::filesystem::remove_all(profile);
-        std::filesystem::remove_all(profile.string() + ".instances");
     });
     given("the directory of an instance that died without cleaning up", [&] {
         const auto profile = scratch("stale");
@@ -52,8 +47,7 @@ const Scenario profileLease{"A browser profile is never used by two live instanc
         std::filesystem::create_directories(dead);
         std::ofstream{dead / "data"} << "left behind";
         then("the next lease removes it", [&] {
-            (void)frontend::leaseProfileDirectory(profile);  // takes the profile itself
-            (void)frontend::leaseProfileDirectory(profile);  // scans the instances
+            (void)frontend::leaseProfileDirectory(profile);  // takes the profile itself and clears the abandoned instances
             require(!std::filesystem::exists(dead));
         });
         std::filesystem::remove_all(profile);
