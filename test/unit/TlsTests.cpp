@@ -124,9 +124,9 @@ const Scenario tlsRefusals("TLS rejects invalid framing and negotiation", {"fast
         auto hello = traceHello();
         // Remove the modes extension from the trace and append an early-data PSK offer.
         const auto modes = tlsHex("002d00020101");
-        const auto pos = std::ranges::search(hello, modes).begin();
-        require(pos != hello.end());
-        hello.erase(pos, pos + modes.size());
+        const auto match = std::ranges::search(hello, modes);
+        require(!match.empty());
+        hello.erase(match.begin(), match.end());
         tls::append(hello, tlsHex("002a00000029002c000700010100000000002120"));
         hello.resize(hello.size() + 32);
         const auto lengths = [&] {
