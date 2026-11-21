@@ -459,8 +459,12 @@ private:
                 if (received == 0) {
                     if constexpr (networking::secureTransport<Net>) {
                         // TLS reports an authenticated EOF. Let the current writer flush any pending close_notify.
-                        if (claimClose() && closeHandler)
-                            closeHandler(CloseEvent{});
+                        if (claimClose()) {
+                            if (closeHandler)
+                                closeHandler(CloseEvent{});
+                            if (pendingWrites() != 0)
+                                boundCloseWait();  // the writer owns the alert: a peer that stopped reading must not hold it
+                        }
                         co_return;
                     } else {
                         failure = std::make_error_code(std::errc::connection_reset);
@@ -543,8 +547,12 @@ private:
         }
         if (writerNeeded)
             spawn(writeFrames(this->shared_from_this()));
-        // The reply waits behind any write in flight, and stop() no longer reaches it (the closure is claimed):
-        // bound that wait, so that a blocked write cannot keep the connection alive for ever.
+        boundCloseWait();
+    }
+
+    // The closure is claimed, so stop() no longer reaches a write in flight, and the TLS alert waits behind it:
+    // bound that wait, so that a blocked write cannot keep the connection alive for ever.
+    void boundCloseWait() {
         if constexpr (requires { Net::ResumeAfter(socket, std::chrono::seconds{10}); })
             spawn(closeDeadline(this->shared_from_this()));
     }

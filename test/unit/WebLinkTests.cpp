@@ -605,3 +605,45 @@ const Scenario securePeerCloseResumesWriters{"A secure peer Close releases write
     InjectableSocket::deferWrites(false);
     InjectableSocket::reset();
 }};
+
+namespace {
+struct SecureDeadlineNetwork : SecureCloseTestNetwork {
+    static inline ManualSender::Completion timer;
+    static inline unsigned                 timers = 0;
+
+    static ManualSender ResumeAfter(Socket&, std::chrono::seconds) {
+        return ManualSender([](ManualSender::Completion completion) {
+            ++timers;
+            timer = std::move(completion);
+        });
+    }
+};
+}
+
+const Scenario securePeerEofBoundsBlockedWrite{"A secure peer EOF cannot hold a blocked write for ever", [] {
+    InjectableSocket::reset();
+    SecureDeadlineNetwork::alerts = 0;
+    SecureDeadlineNetwork::timers = 0;
+    SecureDeadlineNetwork::timer  = {};
+    InlineTaskScope scope;
+    using Link = WebLink<SecureDeadlineNetwork>;
+    vector<WebLinkEvent::Code> events;
+    auto link = make_shared<Link>(InjectableSocket{}, WebLinkId{55}, [&](WebLinkEvent event) { events.push_back(event.code); }, scope);
+    InjectableSocket::deferWrites();
+    link->sendError(1, "in flight");
+    given("a write blocked by backpressure and a peer close_notify", [&] {
+        require(link->pendingWrites() == 1);
+        InjectableSocket::fail({});
+        require(events == vector{WebLinkEvent::Code::closed});
+        then("the wait for the writer is bounded by the close deadline", [&] {
+            require(SecureDeadlineNetwork::timers == 1);
+            require(link->pendingWrites() == 1);
+            require(SecureDeadlineNetwork::alerts == 0);
+            require(SecureDeadlineNetwork::timer.complete);
+            SecureDeadlineNetwork::timer.complete({}, 0);
+            require(link->pendingWrites() == 0);
+        });
+    });
+    InjectableSocket::deferWrites(false);
+    InjectableSocket::reset();
+}};
