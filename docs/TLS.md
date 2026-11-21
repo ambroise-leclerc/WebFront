@@ -61,8 +61,8 @@ optional second ClientHello and Finished sequence described in the
 The two X25519 operations and the CertificateVerify signature run on the I/O
 thread. Other connections wait while this work runs. An incomplete handshake
 has no built-in deadline. Bursts of handshakes can delay established HTTP/WSS
-connections, and idle handshakes can hold sockets and memory. WebFront logs
-a warning when the integrated listener is configured outside loopback.
+connections, and idle handshakes can hold sockets and memory. WebFront writes
+a warning to standard error when the integrated listener is configured outside loopback.
 
 On orderly WSS closure initiated by the peer, WebFront answers the WebSocket
 Close frame and then sends TLS `close_notify`. If TLS closure is requested

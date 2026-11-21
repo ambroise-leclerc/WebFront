@@ -687,7 +687,8 @@ inline WebFrontConfig checkedPtyPageConfig(WebFrontConfig config) {
 inline std::shared_ptr<ReadBinding> makeReadBinding(const WebFrontConfig& config, bool secure = false) {
     checkedAddress(config);
     if (secure && !isLoopbackName(config.address))
-        log::warn("TLS listener outside loopback on {}: handshake cryptography runs on the I/O thread and incomplete handshakes have no deadline", config.address);
+        std::cerr << "WebFront: TLS listener outside loopback. Handshake cryptography runs on the I/O thread, "
+                     "and incomplete handshakes have no deadline. See docs/TLS.md.\n";
     return std::make_shared<ReadBinding>(secure, config.remoteFileTransport);
 }
 }  // namespace detail
