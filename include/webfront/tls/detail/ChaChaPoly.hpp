@@ -62,12 +62,42 @@ inline void chachaXor(const Digest& key, const Nonce& nonce, std::span<Byte> pay
     }
 }
 
+using PolyLimbs                         = std::array<std::uint64_t, 5>;
+inline constexpr std::uint64_t polyMask = (1u << 26) - 1;
+
+inline void carryPoly(PolyLimbs& value) {
+    for (std::size_t i = 0; i != 4; ++i) {
+        value[i + 1] += value[i] >> 26;
+        value[i]     &= polyMask;
+    }
+    value[0] += 5 * (value[4] >> 26);
+    value[4] &= polyMask;
+}
+
+inline void reducePoly(PolyLimbs& value) {
+    // The multiplication carried twice. Limb 0 can still have at most one carry.
+    // If it propagates all the way around, the final fold leaves limb 0 at most nine.
+    carryPoly(value);
+    carryPoly(value);
+    auto reduced = value;
+    reduced[0]  += 5;
+    for (std::size_t i = 0; i != 4; ++i) {
+        reduced[i + 1] += reduced[i] >> 26;
+        reduced[i]     &= polyMask;
+    }
+    const auto mask = std::uint64_t{0} - (reduced[4] >> 26);
+    reduced[4]     &= polyMask;
+    for (std::size_t i = 0; i != value.size(); ++i)
+        value[i] ^= (value[i] ^ reduced[i]) & mask;
+    wipe(reduced.data(), sizeof(reduced));
+}
+
 // RFC 8439 sections 2.5 and 2.8.1. The radix makes the carry from limb 4
 // worth five in limb 0, since 2^130 is congruent to five modulo the prime.
 inline Tag polyTag(const Digest& key, const Nonce& nonce, std::span<const Byte> aad, std::span<const Byte> ciphertext) {
-    constexpr std::uint64_t low = (1u << 26) - 1;
-    using Limbs                 = std::array<std::uint64_t, 5>;
-    const auto unpack           = [](const Byte* data) -> Limbs {
+    constexpr auto low = polyMask;
+    using Limbs        = PolyLimbs;
+    const auto unpack  = [](const Byte* data) -> Limbs {
         return {loadLittle(data) & low,
                 (loadLittle(data + 3) >> 2) & low,
                 (loadLittle(data + 6) >> 4) & low,
@@ -81,14 +111,6 @@ inline Tag polyTag(const Digest& key, const Nonce& nonce, std::span<const Byte> 
         oneTimeKey[i] &= 252;
     auto       r = unpack(oneTimeKey.data());
     Limbs      h{};
-    const auto carry = [&h] {
-        for (std::size_t i = 0; i != 4; ++i) {
-            h[i + 1] += h[i] >> 26;
-            h[i]     &= low;
-        }
-        h[0] += 5 * (h[4] >> 26);
-        h[4] &= low;
-    };
     const auto absorb = [&](const Byte* data) {
         const auto m = unpack(data);
         for (std::size_t i = 0; i != 5; ++i)
@@ -99,9 +121,9 @@ inline Tag polyTag(const Digest& key, const Nonce& nonce, std::span<const Byte> 
             for (std::size_t j = 0; j != 5; ++j)
                 product[(i + j) % 5] += h[i] * r[j] * (i + j < 5 ? 1u : 5u);
         h = product;
-        carry();
+        carryPoly(h);
         // The first carry leaves only limb 0 potentially wide.
-        carry();
+        carryPoly(h);
     };
     for (auto data : {aad, ciphertext}) {
         while (data.size() >= 16) {
@@ -120,18 +142,7 @@ inline Tag polyTag(const Digest& key, const Nonce& nonce, std::span<const Byte> 
         lengths[i + 8] = static_cast<Byte>(std::uint64_t{ciphertext.size()} >> (8 * i));
     }
     absorb(lengths.data());
-    carry();
-
-    // h + 5 crosses bit 130 precisely when h is at least the modulus.
-    auto reduced = h;
-    reduced[0]  += 5;
-    for (std::size_t i = 0; i != 4; ++i) {
-        reduced[i + 1] += reduced[i] >> 26;
-        reduced[i]     &= low;
-    }
-    const auto mask = std::uint64_t{0} - (reduced[4] >> 26);
-    for (std::size_t i = 0; i != 5; ++i)
-        h[i] ^= (h[i] ^ reduced[i]) & mask;
+    reducePoly(h);
 
     Tag      tag;
     unsigned padCarry = 0;
@@ -145,7 +156,6 @@ inline Tag polyTag(const Digest& key, const Nonce& nonce, std::span<const Byte> 
     wipe(oneTimeKey.data(), oneTimeKey.size());
     wipe(r.data(), sizeof(r));
     wipe(h.data(), sizeof(h));
-    wipe(reduced.data(), sizeof(reduced));
     return tag;
 }
 }  // namespace webfront::tls::detail

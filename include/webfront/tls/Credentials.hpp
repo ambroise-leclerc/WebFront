@@ -1,10 +1,10 @@
 #pragma once
 #include "detail/Wire.hpp"
 
-#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <mutex>
 
 namespace webfront::tls {
 namespace detail {
@@ -179,14 +179,18 @@ public:
     Credentials(const std::filesystem::path& chain, const std::filesystem::path& key) : identity(detail::loadIdentity(chain, key)) {}
 
     void reload(const std::filesystem::path& chain, const std::filesystem::path& key) {
-        identity.store(detail::loadIdentity(chain, key));
+        auto             next = detail::loadIdentity(chain, key);
+        std::scoped_lock lock(mutex);
+        identity.swap(next);
     }
 
     [[nodiscard]] auto snapshot() const {
-        return identity.load();
+        std::scoped_lock lock(mutex);
+        return identity;
     }
 
 private:
-    std::atomic<std::shared_ptr<const detail::Identity>> identity;
+    mutable std::mutex                      mutex;
+    std::shared_ptr<const detail::Identity> identity;
 };
 }  // namespace webfront::tls

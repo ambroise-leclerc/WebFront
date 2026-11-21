@@ -17,19 +17,14 @@ class Server : public networking::TCPStdnet {
     using View  = detail::View;
 
     struct Connection {
-        detail::Traffic     read, write;
-        detail::Secret<>    readSecret{}, writeSecret{};
-        Bytes               input;
-        std::size_t         offset = 0;
-        std::array<Byte, 5> update{};
-        std::size_t         updateSize      = 0;
-        unsigned            skipped         = 0;
-        bool                sending         = false;
-        bool                compat          = false;
-        bool                writeEncrypted  = false;
-        bool                established     = false;
-        bool                closed          = false;
-        bool                updateRequested = false;
+        detail::Traffic       read, write;
+        detail::Secret<>      readSecret{}, writeSecret{};
+        Bytes                 input;
+        std::size_t           offset = 0;
+        detail::RecordControl control;
+        bool                  compat         = false;
+        bool                  writeEncrypted = false;
+        bool                  established    = false;
     };
 
 public:
@@ -74,11 +69,11 @@ public:
     static Result<std::size_t> Receive(Socket& socket, MutableBuffer target) {
         using namespace detail;
         auto& state = *socket.connection;
-        if (state.closed)
+        if (state.control.closed)
             co_return 0;
         Byte failure = 0;
         try {
-            while (!state.closed) {
+            while (!state.control.closed && !state.control.peerNotified) {
                 if (state.offset != state.input.size()) {
                     const auto count = std::min(target.size(), state.input.size() - state.offset);
                     std::copy_n(state.input.data() + state.offset, count, static_cast<Byte*>(target.data()));
@@ -87,32 +82,15 @@ public:
                 }
                 const auto type = co_await readRecord(socket, true);
                 state.offset    = state.input.size();
-                if (type == alert && state.input.size() == 2) {
-                    state.closed = true;
-                    if (state.input[1] != 0)
-                        throw std::system_error(std::make_error_code(std::errc::connection_aborted));
-                } else if (type == handshakeRecord) {
-                    receiveKeyUpdate(state);
-                } else if (type == applicationData && state.updateSize == 0) {
-                    if (!state.input.empty()) {
-                        state.skipped = 0;
-                        state.offset  = 0;
-                        continue;
-                    }
-                } else {
-                    throw Error("unexpected application record", 10);
-                }
-                if (++state.skipped > 32)
-                    throw Error("too many consecutive control or empty records", 10);
+                if (state.control.receive(type, state.input, state.read, state.readSecret))
+                    state.offset = 0;
             }
         } catch (const Error& error) {
             failure = error.alert;
         }
-        state.closed = true;
-        // An alert cannot overtake a record already being written by the WebSocket task.
-        if (!state.sending) {
+        if (state.control.beginClose()) {
             const std::array<Byte, 2> response{static_cast<Byte>(failure ? 2 : 1), failure};
-            co_await writeRecord(socket, alert, response);
+            co_await tryAlert(socket, response);
         }
         if (failure)
             throw std::system_error(std::make_error_code(std::errc::protocol_error));
@@ -122,15 +100,15 @@ public:
     static Task Send(Socket& socket, auto buffers) {
         using namespace detail;
         auto& state = *socket.connection;
-        if (state.closed)
+        if (state.control.closed)
             throw std::system_error(std::make_error_code(std::errc::connection_reset));
-        state.sending = true;
+        state.control.sending = true;
         struct Sending {
             bool& active;
             ~Sending() {
                 active = false;
             }
-        } sending{state.sending};
+        } sending{state.control.sending};
         constexpr std::size_t header = 5;
         std::size_t           length = 0;
         for (const auto buffer : buffers)
@@ -154,28 +132,21 @@ public:
     }
 
     static Task Close(Socket& socket) {
-        if (!socket.connection->closed) {
+        if (socket.connection->control.beginClose()) {
             constexpr std::array<Byte, 2> notify{1, 0};
-            co_await writeRecord(socket, detail::alert, notify);
+            co_await tryAlert(socket, notify);
         }
-        socket.shutdown(Socket::shutdown_both);
+        std::error_code ignored;
+        socket.shutdown(Socket::shutdown_both, ignored);
     }
 
 private:
-    static void receiveKeyUpdate(Connection& state) {
-        using namespace detail;
-        if (state.input.empty() || state.input.size() > state.update.size() - state.updateSize)
-            throw Error("invalid KeyUpdate size", 10);
-        std::ranges::copy(state.input, state.update.begin() + static_cast<std::ptrdiff_t>(state.updateSize));
-        state.updateSize += state.input.size();
-        if (state.updateSize != state.update.size())
-            return;
-        if (!std::ranges::equal(View(state.update).first(4), std::array<Byte, 4>{24, 0, 0, 1}) || state.update.back() > 1)
-            throw Error("invalid KeyUpdate", 47);
-        state.readSecret = {expandLabel(state.readSecret, "traffic upd")};
-        state.read.install(state.readSecret);
-        state.updateRequested |= state.update.back() == 1;
-        state.updateSize       = 0;
+    static Task tryAlert(Socket& socket, const std::array<Byte, 2>& alert) {
+        try {
+            co_await writeRecord(socket, detail::alert, alert);
+        } catch (const std::system_error&) {
+            // An alert is best effort once the peer has closed the transport.
+        }
     }
 
     static Task readExact(Socket& socket, std::span<Byte> target) {
@@ -230,13 +201,15 @@ private:
     static Task writeApplication(Socket& socket, Bytes& record) {
         using namespace detail;
         auto& state = *socket.connection;
-        if (state.closed)
+        if (state.control.closed)
             throw std::system_error(std::make_error_code(std::errc::connection_reset));
-        if (std::exchange(state.updateRequested, false)) {
+        if (std::exchange(state.control.updateRequested, false)) {
             constexpr std::array<Byte, 5> update{24, 0, 0, 1, 0};
             co_await writeRecord(socket, handshakeRecord, update);
             state.writeSecret = {expandLabel(state.writeSecret, "traffic upd")};
             state.write.install(state.writeSecret);
+            if (state.control.closed)
+                throw std::system_error(std::make_error_code(std::errc::connection_reset));
         }
         state.write.seal(applicationData, record);
         co_await sendRecord(socket, record);

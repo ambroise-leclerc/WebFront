@@ -14,13 +14,14 @@ publie une paire complète après validation. Les handshakes en cours conservent
 Le navigateur valide la chaîne et le nom du serveur. TLS protège le transport, tandis que la politique
 d'origine continue de décider de l'accès au pont. Le profil ne demande aucun certificat au client.
 Le serveur sait que le transport est chiffré lorsqu'il termine TLS et marque alors le cookie de liaison `Secure`.
+Les lectures de fichiers pour un client non associé restent soumises à une déclaration explicite (ADR-020).
 
 Le composant demeure header-only, sous `include/webfront/tls/`. Ses primitives sont implémentées dans WebFront à partir des spécifications
 [RFC 7748](https://www.rfc-editor.org/rfc/rfc7748), [RFC 8439](https://www.rfc-editor.org/rfc/rfc8439),
 [SEC 1](https://www.secg.org/sec1-v2.pdf), [SEC 2](https://www.secg.org/sec2-v2.pdf) et
 [RFC 6979](https://www.rfc-editor.org/rfc/rfc6979). La génération de secrets utilise l'aléa de l'OS. Les opérations
-sur des secrets exigent des accès mémoire et un contrôle de flux indépendants de ces secrets, avec
-vérification sur les compilateurs et architectures supportés. Les vecteurs des RFC, les refus de protocole,
+sur des secrets visent des accès mémoire et un contrôle de flux indépendants de ces secrets. La qualification
+exige une vérification du code produit par les compilateurs et architectures supportés. Cet audit reste à faire. Les vecteurs des RFC, les refus de protocole,
 le fuzzing et un test navigateur HTTPS/WSS font partie de la qualification. Les régressions de sécurité
 peuvent être signalées en privé aux mainteneurs. La maintenance du composant inclut la revue des primitives,
 le suivi des errata des spécifications et des mesures reproductibles de taille et de mémoire.

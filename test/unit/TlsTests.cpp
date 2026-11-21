@@ -1,4 +1,6 @@
 #include "Bdd.hpp"
+#include "TemporaryDirectory.hpp"
+#include <webfront/http/Encodings.hpp>
 #include <webfront/tls/Credentials.hpp>
 #include <webfront/tls/detail/Protocol.hpp>
 
@@ -133,5 +135,120 @@ const Scenario tlsRefusals("TLS rejects invalid framing and negotiation", {"fast
             receiver.open(View(record).first(5), payload);
         });
     });
+});
+}  // namespace
+
+namespace {
+const Scenario tlsRecordControl("TLS application records coordinate updates and closure", [] {
+    tls::RecordControl control;
+    tls::Traffic       traffic;
+    tls::Secret<>      secret{};
+    traffic.install(secret);
+    given("a KeyUpdate split across authenticated handshake records", [&] {
+        require(!control.receive(tls::handshakeRecord, tlsHex("180000"), traffic, secret));
+        require(!control.updateRequested);
+        const auto next = tls::expandLabel(secret, "traffic upd");
+        require(!control.receive(tls::handshakeRecord, tlsHex("0101"), traffic, secret));
+        require(control.updateRequested);
+        require(std::ranges::equal(secret, next));
+        tls::Traffic sender;
+        sender.install(next);
+        Bytes record{0, 0, 0, 0, 0, 42};
+        sender.seal(tls::applicationData, record);
+        Bytes ciphertext(record.begin() + 5, record.end());
+        require(traffic.open(View(record).first(5), ciphertext) == tls::applicationData);
+        require(control.receive(tls::applicationData, ciphertext, traffic, secret));
+    });
+    then("an unexpected handshake type elicits unexpected_message", [&] {
+        try {
+            control.receive(tls::handshakeRecord, tlsHex("14000000"), traffic, secret);
+            require(false);
+        } catch (const tls::Error& error) {
+            require(error.alert == 10);
+        }
+    });
+    then("32 empty records are tolerated and application data resets the count", [&] {
+        tls::RecordControl limit;
+        for (unsigned batch = 0; batch != 2; ++batch) {
+            for (unsigned i = 0; i != 32; ++i)
+                require(!limit.receive(tls::applicationData, {}, traffic, secret));
+            if (batch == 0)
+                require(limit.receive(tls::applicationData, tlsHex("42"), traffic, secret));
+        }
+        requireThrows<tls::Error>([&] {
+            limit.receive(tls::applicationData, {}, traffic, secret);
+        });
+    });
+    then("the orderly response is sent once, except during an in-flight write", [&] {
+        for (const bool sending : {false, true}) {
+            tls::RecordControl closing;
+            closing.sending = sending;
+            require(!closing.receive(tls::alert, tlsHex("0100"), traffic, secret));
+            require(closing.peerNotified);
+            require(closing.beginClose() == !sending);
+            require(closing.closed);
+            require(!closing.beginClose());
+        }
+    });
+    then("a fatal peer alert closes without a reply", [&] {
+        tls::RecordControl fatal;
+        requireThrows<std::system_error>([&] {
+            fatal.receive(tls::alert, tlsHex("0214"), traffic, secret);
+        });
+        require(fatal.closed);
+        require(!fatal.beginClose());
+    });
+});
+
+const Scenario tlsPolyBoundary("Poly1305 reduction handles a carry around bit 130", [] {
+    constexpr auto max = tls::polyMask;
+    tls::PolyLimbs primeMinusOne{max - 5, max, max, max, max};
+    const auto     unchanged = primeMinusOne;
+    tls::reducePoly(primeMinusOne);
+    require(primeMinusOne == unchanged);
+    tls::PolyLimbs prime{max - 4, max, max, max, max};
+    tls::reducePoly(prime);
+    require(prime == tls::PolyLimbs{});
+    tls::PolyLimbs wide{max + 1, max, max, max, max};
+    tls::reducePoly(wide);
+    require(wide == (tls::PolyLimbs{5, 0, 0, 0, 0}));
+});
+
+const Scenario tlsCredentials("TLS loads matching PEM formats and preserves the published identity on reload failure", [] {
+    const auto                 fixtures    = std::filesystem::path(WEBFRONT_SOURCE_DIR) / "test/web/fixtures/tls";
+    const auto                 certificate = fixtures / "cert.pem";
+    const auto                 sec1        = fixtures / "key-sec1.pem";
+    webfront::tls::Credentials credentials(certificate, fixtures / "key.pem");
+    const auto                 pkcs8 = credentials.snapshot();
+    credentials.reload(certificate, sec1);
+    const auto expected = credentials.snapshot();
+    require(expected != pkcs8);
+    require(tls::equalSecret(expected->key, pkcs8->key));
+
+    webfront::test::TemporaryDirectory temporary;
+    const auto                         invalid = temporary.path() / "invalid.pem";
+    std::ofstream(invalid) << "-----BEGIN EC PRIVATE KEY-----\n????\n-----END EC PRIVATE KEY-----\n";
+    requireThrows<tls::Error>([&] {
+        credentials.reload(certificate, invalid);
+    });
+    require(credentials.snapshot() == expected);
+
+    std::string source;
+    tls::readPemFile(sec1, source);
+    std::string_view pem = source;
+    auto             der = tls::pem(pem, "EC PRIVATE KEY");
+    tls::Reader      outer{der};
+    const auto       keySequence = outer.der(0x30);
+    tls::Reader      key{keySequence};
+    key.der(2);
+    const auto scalar                                          = key.der(4);
+    der[static_cast<std::size_t>(scalar.data() - der.data())] ^= 1;
+    std::ofstream(invalid) << "-----BEGIN EC PRIVATE KEY-----\n" << webfront::base64::encode(der) << "\n-----END EC PRIVATE KEY-----\n";
+    requireThrows<tls::Error>(
+        [&] {
+            credentials.reload(certificate, invalid);
+        },
+        contains("certificate and private key do not match"));
+    require(credentials.snapshot() == expected);
 });
 }  // namespace

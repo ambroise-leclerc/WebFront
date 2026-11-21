@@ -281,22 +281,21 @@ lève).
 - **Exposition du jeton.** Chaque réponse de lecture porte `Cache-Control: no-store` et `Referrer-Policy: no-referrer` ;
   le jeton n'apparaît dans aucun journal HTTP ni diagnostic (chemin masqué). Le cookie de liaison porte `Secure`
   lorsque la page est servie en HTTPS.
-- **Transport** : lorsque WebFront termine TLS ([ADR-024](ADR-024-tls-integre.md)), le transport est connu
-  et le cookie de liaison est `Secure`. Pour le fournisseur TCP, le transport distant reste déclaré par le déploiement.
+- **Transport.** Lorsque WebFront termine TLS ([ADR-024](ADR-024-tls-integre.md)), le cookie de liaison
+  porte `Secure`. Le transport est authentifié côté serveur et l'autorisation de lecture distante reste déclarative.
   Une connexion est de transport local seulement si elle est **associée à la vue d'un frontend intégré** : son secret
   est remis à la vue par l'adaptateur, dans le processus, sans transiter par une ligne de commande, une URL ou un
   historique. Aucun secret transmis au navigateur système (fragment de l'URL ouverte) n'atteste le transport : la ligne
   de commande et l'historique peuvent le divulguer, et un acteur qui le présente le premier depuis un navigateur
   distant serait accepté ; l'échec ultérieur de l'association légitime ne protège pas cette première connexion. Pour
-  toute connexion non associée sur le fournisseur TCP, dont celles du navigateur système, le transport est inconnu, quelle que soit son
-  adresse : lectures et écritures de fichiers y sont refusées, sauf déclaration explicite de l'application sur son
-  déploiement (`remoteFileTransport`) :
+  toute connexion non associée, dont celle du navigateur système, les lectures de fichiers sont refusées par défaut,
+  quel que soit le fournisseur. Une déclaration explicite de l'application (`remoteFileTransport`) est requise :
   - `refused` (défaut) ;
   - `loopbackAttested` : WebFront vérifie que le serveur n'écoute que sur la boucle locale ; l'intégrateur atteste
     qu'aucun mandataire ni tunnel ne l'expose et que la machine n'est pas partagée avec des utilisateurs non fiables.
     C'est la déclaration attendue d'une application de bureau qui utilise le navigateur système ;
   - `encryptedByDeployment` : le déploiement chiffre sous HTTP (VPN, tunnel) alors que le navigateur utilise `http://` : le cookie n'est pas `Secure`, qu'un navigateur refuserait ;
-  - `httpsByDeployment` : le navigateur atteint l'application en `https://` (mandataire inverse TLS) : le cookie est `Secure` ;
+  - `httpsByDeployment` : le navigateur atteint l'application en `https://` (TLS intégré ou mandataire inverse TLS) : le cookie est `Secure` ;
   - `plaintextAccepted` : réseau isolé de confiance.
 
   Hors la part vérifiée de `loopbackAttested`, ces déclarations sont des attestations de l'intégrateur, que WebFront ne
@@ -376,7 +375,7 @@ limites par moteur. #452 est livré dans la version 1.2 (`beforeunload` n'est pa
 
 #455 est livré dans la version 1.4 : un fichier non encodé de taille connue est servi par plages (`Range: bytes=a-b`, `a-`, `-n` sur une seule plage : `206` avec `Content-Range`, `416` pour une plage qui commence après la fin, `Accept-Ranges: bytes`), en ne lisant que la plage demandée. Les plages multiples sont servies en entier (`200`) ; il n'y a pas de réponse `multipart/byteranges`. Les réponses encodées ou décodées par le repli annoncent `Accept-Ranges: none`. `If-Range` n'accepte qu'un `ETag` fort fourni par le fournisseur (`fs::File::setEntityTag`) ; WebFront n'en déduit aucun d'un chemin, d'une taille ou d'une date, qui peuvent désigner une autre version que le flux ouvert. Sans validateur (fichiers natifs, données embarquées), la plage conditionnée est servie en entier. Une route dynamique sert un fichier par plages avec `http::fileReply`. Le jeton de lecture reste donc réutilisable pour plusieurs requêtes `Range` ; leur liaison à la connexion propriétaire vient de #469.
 
-#469 est livré dans la version 1.5 : `app.addReadRoute(préfixe, gestionnaire)` (sous `/webfront/services/`, hors `bind/`) et `ui.grantRead(route, chemin, ReadOptions)` appliquent les règles ci-dessus. Le jeton est `<identifiant 64 bits>.<secret 256 bits>` placé après le préfixe ; la requête est acceptée si le jeton est connu, non expiré, si la connexion propriétaire est ouverte et si l'un des cookies présentés désigne son client (sauf mode transférable : durée obligatoire de 15 minutes au plus). Un jeton est refusé de la même façon dans tous les cas (`403`, mêmes en-têtes). `WebFront.js` échange le secret reçu par `wfBind.exchange` contre le cookie (`GET /webfront/services/bind/<secret>`, puis `check`) et `webFront.bound` rejette avec une erreur explicite si le navigateur refuse le cookie. Le cookie est `Secure` si l'application déclare `httpsByDeployment` (le navigateur utilise `https://`) ; un tunnel chiffré sous `http://` (`encryptedByDeployment`) n'en reçoit pas, car le navigateur refuserait un cookie `Secure` reçu en HTTP. Sur le fournisseur TCP, un transport non local sans déclaration est refusé à l'émission du jeton et à chaque requête.
+#469 est livré dans la version 1.5 : `app.addReadRoute(préfixe, gestionnaire)` (sous `/webfront/services/`, hors `bind/`) et `ui.grantRead(route, chemin, ReadOptions)` appliquent les règles ci-dessus. Le jeton est `<identifiant 64 bits>.<secret 256 bits>` placé après le préfixe ; la requête est acceptée si le jeton est connu, non expiré, si la connexion propriétaire est ouverte et si l'un des cookies présentés désigne son client (sauf mode transférable : durée obligatoire de 15 minutes au plus). Un jeton est refusé de la même façon dans tous les cas (`403`, mêmes en-têtes). `WebFront.js` échange le secret reçu par `wfBind.exchange` contre le cookie (`GET /webfront/services/bind/<secret>`, puis `check`) et `webFront.bound` rejette avec une erreur explicite si le navigateur refuse le cookie. Le cookie est `Secure` si l'application déclare `httpsByDeployment` (le navigateur utilise `https://`) ; un tunnel chiffré sous `http://` (`encryptedByDeployment`) n'en reçoit pas, car le navigateur refuserait un cookie `Secure` reçu en HTTP. Un transport non local sans déclaration est refusé à l'émission du jeton et à chaque requête.
 
 #460 est livré dans la version 1.7 (révision 3.0 de l'ADR-002, qui en donne le détail) : `fs::NativeStorage` applique les mesures de la section « Prescriptions » à toute opération (listage paginé, métadonnées, lecture, écriture par temporaire et renommage, création, suppression, renommage), avec les erreurs typées `storage.rootMoved`, `storage.confinementViolated`, `storage.unsafeDirectory`, `storage.linkRefused`… (`fs::StorageError`, une `BridgeError`). Quatre écarts aux prescriptions, sans affaiblir la garantie : sous Linux, la descente composant par composant est toujours employée plutôt qu'`openat2`, puisque chaque répertoire traversé doit être ouvert pour contrôler son propriétaire ; sous Windows, un point de réanalyse n'est jamais suivi (`LinkPolicy::followInside` ne vaut que sous POSIX) : une opération qui le traverserait ou le lirait échoue avec `linkRefused`, tandis que `status` le signale comme lien et que `remove` supprime le point lui-même, sans atteindre sa cible ; sous Windows, l'appartenance du répertoire à la racine se vérifie par le chemin final de son handle, les handles tenus empêchant déjà le déplacement ; sous Windows encore, le renommage passe par `NtSetInformationFile`, car `SetFileInformationByHandle` convertit un nom relatif en chemin absolu, que refuse un renommage relatif au handle d'un dossier (`STATUS_INVALID_PARAMETER`). Les tests Catch2 couvrent le stockage simulé, les sorties par liens (jonctions sous Windows), le remplacement concurrent d'un composant ou du fichier final par des points d'injection, une course répétée (POSIX), les déplacements d'un répertoire ou de la racine pendant la résolution, l'écriture du temporaire et avant la validation, et les propriétaires refusés ou admis (simulés, et `/tmp` réel). Les droits refusés par le système réel ne sont simulés que par `fs::MemoryStorage` : un test qui retire des droits sur disque échoue sous le superutilisateur. Le paquet `@webfront/services` (#461) est livré dans la version 1.8 : sources dans `js/services/` (`services`, objet gelé vide, et `selfTest()`), archive produite par `wf run services-package` avec le packager partagé de `@webfront/react`, servie par le registre de test, installée par la suite Jasmine qui l'importe ; `wf check` vérifie ses déclarations et `ServicesPackageContents` compare l'archive aux sources, à la licence et au SHA-512. Aucune ressource n'est ajoutée au cœur. L'étape 4 est achevée ; la façade du premier service s'ajoutera à ce paquet avec son épique.
 
@@ -505,9 +504,10 @@ autorisations explicites, backend par connexion).
   peuvent lire les URL les unes des autres.
 - **Coût accepté :** un cookie de liaison par client, à qualifier dans chaque moteur ; les téléchargements gérés par
   l'adaptateur doivent le présenter.
-- **Risque :** Avec le fournisseur TCP, WebFront ne peut pas attester le transport ; `remoteFileTransport` repose sur la
-  déclaration de l'intégrateur. Une déclaration fausse expose jeton et contenu. Par défaut, toute connexion non
-  associée est refusée, y compris celle du navigateur système.
+- **Risque :** avec le fournisseur TCP, une attestation de transport fausse peut exposer le jeton et le contenu.
+  Avec le TLS intégré, le chiffrement du transport et le cookie `Secure` protègent l'échange. Le cookie lie un profil
+  de navigateur et l'application reste responsable de l'authentification du client. La valeur `refused` refuse par défaut
+  les lectures via toute connexion non associée.
 - **Coût accepté :** une application qui utilise le navigateur système doit déclarer `loopbackAttested` pour accéder aux
   fichiers de l'hôte ; sans cette déclaration, seuls les fichiers du client sont disponibles.
 - **Coût accepté :** les fichiers actifs ne s'affichent pas en ligne ; un aperçu HTML ou un SVG interactif exige une

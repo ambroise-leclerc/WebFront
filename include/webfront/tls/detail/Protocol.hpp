@@ -1,8 +1,9 @@
 #pragma once
 #include "Wire.hpp"
 
-#include <bitset>
 #include <optional>
+#include <system_error>
+#include <utility>
 
 namespace webfront::tls::detail {
 inline constexpr unsigned suite = 0x1303, group = 29, signatureScheme = 0x0403;
@@ -53,16 +54,23 @@ inline ClientHello parseHello(View message, bool retry) {
     invariant.update(original.first(original.size() - hello.remaining.size()));
     Reader extensions{hello.vector(2)};
     hello.end();
-    bool               version = false, signature = false, supportedGroup = false, earlyData = false;
-    std::bitset<65536> seen;
-    View               shares, groups;
+    bool                      version = false, signature = false, supportedGroup = false, earlyData = false;
+    std::array<unsigned, 128> seen;
+    std::size_t               extensionCount    = 0;
+    const auto                containsExtension = [&](unsigned kind) {
+        const auto prior = std::span(seen).first(extensionCount);
+        return std::ranges::find(prior, kind) != prior.end();
+    };
+    View shares, groups;
     while (!extensions.empty()) {
         const auto encoded = extensions.remaining;
         const auto kind    = extensions.number(2);
         Reader     extension{extensions.vector(2)};
-        if (seen.test(kind))
+        if (containsExtension(kind))
             throw Error("duplicate ClientHello extension", 47);
-        seen.set(kind);
+        if (extensionCount == seen.size())
+            throw Error("too many ClientHello extensions");
+        seen[extensionCount++] = kind;
         switch (kind) {
             case 43:
                 version = contains(extension.vector(1), 2, 0x0304);
@@ -112,7 +120,7 @@ inline ClientHello parseHello(View message, bool retry) {
         throw Error("TLS 1.3 required", 70);
     if (!offeredSuite || !signature || !supportedGroup)
         throw Error("no common cipher suite, signature or group", 40);
-    if (earlyData && (retry || !seen.test(41)))
+    if (earlyData && (retry || !containsExtension(41)))
         throw Error("unexpected early_data", 47);
     Reader      keys{shares};
     std::size_t groupOffset = 0;
@@ -234,5 +242,60 @@ private:
     Secret<>             key{};
     std::array<Byte, 12> iv{};
     std::uint64_t        sequence = 0;
+};
+// Serialized by the socket's context. A close cannot overtake an in-flight write.
+struct RecordControl {
+    bool sending         = false;
+    bool closed          = false;
+    bool updateRequested = false;
+    bool peerNotified    = false;
+
+    bool beginClose() {
+        return !std::exchange(closed, true) && !sending;
+    }
+
+    // Returns true for a nonempty application record ready to deliver.
+    bool receive(Byte type, View input, Traffic& traffic, Secret<>& secret) {
+        if (type == alert && input.size() == 2) {
+            if (input[1] != 0) {
+                closed = true;
+                throw std::system_error(std::make_error_code(std::errc::connection_aborted));
+            }
+            peerNotified = true;
+            return false;
+        }
+        if (type == handshakeRecord) {
+            constexpr std::array<Byte, 4> header{24, 0, 0, 1};
+            if (input.empty() || input.size() > update.size() - updateSize)
+                throw Error("invalid KeyUpdate size", 10);
+            std::ranges::copy(input, update.data() + updateSize);
+            updateSize += input.size();
+            if (!std::ranges::equal(View(update).first(std::min(updateSize, header.size())), View(header).first(std::min(updateSize, header.size()))))
+                throw Error("unexpected post-handshake message", 10);
+            if (updateSize == update.size()) {
+                if (update.back() > 1)
+                    throw Error("invalid KeyUpdate request", 47);
+                secret = {expandLabel(secret, "traffic upd")};
+                traffic.install(secret);
+                updateRequested |= update.back() == 1;
+                updateSize       = 0;
+            }
+        } else if (type == applicationData && updateSize == 0) {
+            if (!input.empty()) {
+                skipped = 0;
+                return true;
+            }
+        } else {
+            throw Error("unexpected application record", 10);
+        }
+        if (++skipped > 32)
+            throw Error("too many consecutive control or empty records", 10);
+        return false;
+    }
+
+private:
+    std::array<Byte, 5> update{};
+    std::size_t         updateSize = 0;
+    unsigned            skipped    = 0;
 };
 }  // namespace webfront::tls::detail

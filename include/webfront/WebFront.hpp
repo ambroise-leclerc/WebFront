@@ -1220,19 +1220,26 @@ public:
      * which show() does not give them either (ADR-020).
      */
     void start(std::string_view page = "index.html") {
-        static_assert(requires { Frontend::launch(std::string_view{}, std::string_view{}, std::string_view{}); },
-                      "webfront::BasicWF::start(): this frontend opens its window inside the loop of show(), which keeps the "
-                      "calling thread. Call show() on the interface thread and end it with requestClose(), or run the "
-                      "application in a webfront::UIThread when the frontend allows a secondary thread "
-                      "(docs/HOST_INTEGRATION.md).");
-        if constexpr (requires { Frontend::launch(std::string_view{}, std::string_view{}, std::string_view{}); }) {
+        constexpr bool secure = networking::secureTransport<Net>;
+        constexpr bool canLaunch = secure
+            ? requires { Frontend::launchHttps(std::string_view{}, std::string_view{}, std::string_view{}); }
+            : requires { Frontend::launch(std::string_view{}, std::string_view{}, std::string_view{}); };
+        if constexpr (secure)
+            static_assert(canLaunch, "webfront::BasicWF::start(): an HTTPS frontend must provide launchHttps(address, port, page)");
+        else
+            static_assert(canLaunch,
+                          "webfront::BasicWF::start(): this frontend opens its window inside the loop of show(), which keeps the "
+                          "calling thread. Call show() on the interface thread and end it with requestClose(), or run the "
+                          "application in a webfront::UIThread when the frontend allows a secondary thread "
+                          "(docs/HOST_INTEGRATION.md).");
+        if constexpr (canLaunch) {
             if (shown || serverThread.joinable() || launched.exchange(true))
                 throw std::logic_error("webfront::BasicWF::start(): the application is already started; call start() once, instead of show()");
             if (!httpDocRoot.empty() && !developerEnvironment)
                 detail::noteDevelopmentPath();
             startServerThread();
             try {
-                if constexpr (networking::secureTransport<Net>)
+                if constexpr (secure)
                     Frontend::launchHttps(httpAddress, httpPort, page);
                 else if constexpr (requires { Frontend::launch(httpAddress, httpPort, page, contentPolicy); })
                     Frontend::launch(httpAddress, httpPort, page, contentPolicy);

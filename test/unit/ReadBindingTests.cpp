@@ -367,9 +367,15 @@ const Scenario connectionNot{"A connection that is not the view of an embedded f
     given("a connection to the integrated TLS listener", [&] {
         Fixture fixture{RemoteFileTransport::refused, true};
         const auto cookies = headers(fixture.bind(1, false), "Set-Cookie");
-        then("its binding uses a Secure cookie and authorizes reads", [&] {
+        then("its binding uses a Secure cookie and the default still refuses reads", [&] {
             require(cookies.front().contains("; Secure"));
-            require(call(fixture.read, fixture.url(1), cookiePair(cookies.front())).status == http::Response::ok);
+            requireThrows<ReadRefused>([&] { fixture.url(1); });
+        });
+        then("an explicit HTTPS declaration authorizes reads with the binding cookie", [&] {
+            Fixture authorized{RemoteFileTransport::httpsByDeployment, true};
+            const auto bound = headers(authorized.bind(2, false), "Set-Cookie").front();
+            require(bound.contains("; Secure"));
+            require(call(authorized.read, authorized.url(2), cookiePair(bound)).status == http::Response::ok);
         });
     });
     given("a request through a local proxy that forges the forwarding headers, with the default declaration", [&] {

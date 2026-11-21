@@ -1021,6 +1021,7 @@ private:
             co_await Net::Close(socket);
         else
             socket.shutdown(Net::Socket::shutdown_both);
+        co_return;
     }
 
     std::string bind(std::string_view address, std::string_view requestedPort) {
@@ -1163,7 +1164,7 @@ private:
                             const auto wanted = std::min<std::size_t>(*length - body.size(), buffer.size());
                             const auto count  = co_await Net::Receive(socket, Net::Buffer(buffer.data(), wanted));
                             if (count == 0) {  // the client ended the connection before the announced length
-                                socket.shutdown(Net::Socket::shutdown_both);
+                                co_await closeResponse(socket);
                                 co_return;
                             }
                             body.append(buffer.data(), count);

@@ -1,3 +1,6 @@
 This public test identity serves localhost and 127.0.0.1 in the CEF HTTPS Jasmine
 test. Its unencrypted key is committed for repeatable tests. CEF is configured
 to accept this SPKI fingerprint in an isolated test profile.
+
+The two key files encode the same test key as PKCS#8 and SEC1 so credential
+loading and reload can be checked on every platform.

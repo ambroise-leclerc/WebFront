@@ -130,7 +130,7 @@ public:
 #ifdef WEBFRONT_TEST_TLS_FIXTURE
         const filesystem::path fixture(WEBFRONT_TEST_TLS_FIXTURE);
         config.tlsCredentials = make_shared<tls::Credentials>(fixture / "cert.pem", fixture / "key.pem");
-        config.remoteFileTransport = RemoteFileTransport::refused;
+        config.remoteFileTransport = RemoteFileTransport::httpsByDeployment;
 #endif
     }
 
