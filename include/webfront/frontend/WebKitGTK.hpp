@@ -209,13 +209,17 @@ inline std::string executableProfileName() {
     return executable.filename().string() + "-" + std::to_string(hash);
 }
 
-inline std::filesystem::path profileDirectory(const char* variable, const char* fallback) {
-    // One live process per profile: another instance of this executable gets a directory of its own (ProfileLease.hpp).
-    const auto directory = leaseProfileDirectory(xdgRoot(variable, fallback) / "webfront" / executableProfileName());
+/// Restricts a profile directory to its owner and checks that it is writable.
+inline std::filesystem::path privateProfileDirectory(const std::filesystem::path& directory) {
     std::filesystem::permissions(directory, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
     if (access(directory.c_str(), W_OK | X_OK) != 0)
         throw std::runtime_error("WebKitGTK: profile directory is not writable: " + directory.string());
     return directory;
+}
+
+inline std::filesystem::path profileDirectory(const char* variable, const char* fallback) {
+    // One live process per profile: another instance of this executable gets a directory of its own (ProfileLease.hpp).
+    return privateProfileDirectory(leaseProfileDirectory(xdgRoot(variable, fallback) / "webfront" / executableProfileName()));
 }
 
 /// The view as seen by capture requests: read and cleared only on the GTK main thread, so a request that

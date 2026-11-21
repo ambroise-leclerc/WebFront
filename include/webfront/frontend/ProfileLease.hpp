@@ -93,25 +93,33 @@ inline LeaseHolder& leaseHolder() {
 /// Throws std::system_error when a lock cannot be taken for a reason other than another process holding it.
 inline std::filesystem::path leaseProfileDirectory(const std::filesystem::path& directory) {
     std::filesystem::create_directories(directory);
-    auto& holder = detail::leaseHolder();
-    if (auto shared = detail::FileLock::tryLock(directory / detail::leaseFile)) {
-        holder.leases.emplace_back(std::move(*shared), std::filesystem::path{});
-        return directory;
-    }
+    auto&      holder    = detail::leaseHolder();
     const auto instances = std::filesystem::path(directory.string() + ".instances");
-    std::filesystem::create_directories(instances);
     // Creating an instance directory and locking it, and removing the abandoned ones, never interleave between processes: a
     // directory that exists without its lock held yet is a starting process, not an abandoned one. The registry lock is held
     // only for these steps, and a process that dies releases it.
-    const auto registry = detail::FileLock::wait(instances / detail::registryFile);
-    for (const auto& entry : std::filesystem::directory_iterator(instances)) {
-        if (!entry.is_directory())
-            continue;
-        if (auto stale = detail::FileLock::tryLock(entry.path() / detail::leaseFile)) {
-            std::error_code ignored;
-            std::filesystem::remove_all(entry.path(), ignored);
+    const auto removeAbandoned = [&] {
+        for (const auto& entry : std::filesystem::directory_iterator(instances)) {
+            if (!entry.is_directory())
+                continue;
+            if (auto stale = detail::FileLock::tryLock(entry.path() / detail::leaseFile)) {
+                std::error_code ignored;
+                std::filesystem::remove_all(entry.path(), ignored);
+            }
         }
+    };
+    if (auto shared = detail::FileLock::tryLock(directory / detail::leaseFile)) {
+        holder.leases.emplace_back(std::move(*shared), std::filesystem::path{});
+        // The instances of an earlier run may have died after the shared profile's owner ended: nobody else would clear them.
+        if (std::filesystem::exists(instances)) {
+            const auto registry = detail::FileLock::wait(instances / detail::registryFile);
+            removeAbandoned();
+        }
+        return directory;
     }
+    std::filesystem::create_directories(instances);
+    const auto registry = detail::FileLock::wait(instances / detail::registryFile);
+    removeAbandoned();
     // Another process with the same number (another PID namespace over the same directory) makes a name busy: the next one.
     for (unsigned attempt = 0; attempt < 100000; ++attempt) {
         const auto candidate = instances / (std::to_string(::getpid()) + "-" + std::to_string(attempt));

@@ -35,8 +35,13 @@ std::string firstLine(const std::string& port) {
     const std::string request = "GET /WebFront.js HTTP/1.1\r\nHost: 127.0.0.1:" + port + "\r\nConnection: close\r\n\r\n";
     client.send(Net::Buffer(request.data(), request.size()));
     std::array<char, 256> buffer{};
-    const auto            size = client.receive(Net::Buffer(buffer));
-    const std::string     head(buffer.data(), size);
+    std::string           head;
+    while (head.find("\r\n") == std::string::npos) {  // a reception may end inside the status line
+        const auto size = client.receive(Net::Buffer(buffer));
+        if (size == 0)
+            break;
+        head.append(buffer.data(), size);
+    }
     return head.substr(0, head.find("\r\n"));
 }
 

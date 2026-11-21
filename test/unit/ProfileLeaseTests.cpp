@@ -16,10 +16,11 @@
 using namespace webfront::bdd;
 using namespace webfront;
 
+#ifndef _WIN32
 namespace {
 
 std::filesystem::path scratch(const std::string& name) {
-    const auto path = std::filesystem::temp_directory_path() / ("webfront-lease-" + name);
+    const auto path = std::filesystem::temp_directory_path() / ("webfront-lease-" + std::to_string(::getpid()) + "-" + name);
     std::filesystem::remove_all(path);
     std::filesystem::remove_all(path.string() + ".instances");
     return path;
@@ -27,7 +28,6 @@ std::filesystem::path scratch(const std::string& name) {
 
 }  // namespace
 
-#ifndef _WIN32
 const Scenario profileLease{"A browser profile is never used by two live instances", [] {
     given("a profile directory", [&] {
         const auto profile = scratch("profile");
