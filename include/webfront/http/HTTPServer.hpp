@@ -1217,6 +1217,9 @@ private:
                 co_await Net::Handshake(socket, acceptor);
             } catch (const std::system_error&) {
                 co_return;
+            } catch (const std::exception& error) {
+                log::warn("TLS handshake failed: {}", error.what());
+                co_return;
             }
         }
         Request request;

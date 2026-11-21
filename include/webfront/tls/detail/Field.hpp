@@ -51,10 +51,22 @@ inline std::uint32_t nonzero(const Integer& value) {
     return (combined | (0u - combined)) >> 31;
 }
 
+constexpr std::uint32_t selectionMask(std::uint32_t choice) {
+    if consteval {
+        return 0u - choice;
+    } else {
+        // Keep the mask opaque: Clang can otherwise select an input pointer and
+        // read through it, making the memory address depend on the secret bit.
+        const volatile std::uint32_t mask = 0u - choice;
+        return mask;
+    }
+}
+
 constexpr Integer select(const Integer& first, const Integer& second, std::uint32_t choice) {
-    Integer result;
+    const auto mask = selectionMask(choice);
+    Integer    result;
     for (std::size_t i = 0; i != result.size(); ++i)
-        result[i] = first[i] ^ ((first[i] ^ second[i]) & (0u - choice));
+        result[i] = first[i] ^ ((first[i] ^ second[i]) & mask);
     return result;
 }
 

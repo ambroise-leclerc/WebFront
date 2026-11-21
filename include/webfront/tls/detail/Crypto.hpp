@@ -187,8 +187,10 @@ inline Bytes sign(std::span<const Byte, 32> key, const Digest& messageHash) {
         Erase eraseNonce{k};
         if (F::validScalar(k)) {
             const auto x   = F::reduce(p256Base(k)[0]);
-            const auto sum = F::add(z, F::multiply(F::enter(x), scalar));
-            const auto y   = F::leave(F::multiply(F::invert(F::enter(k)), sum));
+            auto       sum = F::add(z, F::multiply(F::enter(x), scalar));
+            Erase      eraseSum{sum};
+            auto       y = F::leave(F::multiply(F::invert(F::enter(k)), sum));
+            Erase      eraseResult{y};
             if (nonzero(x) && nonzero(y)) {
                 const auto r = encode(x), s = encode(y);
                 Bytes      signature{0x30, 0};

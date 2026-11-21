@@ -54,7 +54,7 @@ inline ClientHello parseHello(View message, bool retry) {
     invariant.update(original.first(original.size() - hello.remaining.size()));
     Reader extensions{hello.vector(2)};
     hello.end();
-    bool                      version = false, signature = false, supportedGroup = false, earlyData = false;
+    bool                      supportsTls13 = false, signature = false, supportedGroup = false, earlyData = false;
     std::array<unsigned, 128> seen;
     std::size_t               extensionCount    = 0;
     const auto                containsExtension = [&](unsigned kind) {
@@ -73,7 +73,7 @@ inline ClientHello parseHello(View message, bool retry) {
         seen[extensionCount++] = kind;
         switch (kind) {
             case 43:
-                version = contains(extension.vector(1), 2, 0x0304);
+                supportsTls13 = contains(extension.vector(1), 2, 0x0304);
                 break;
             case 13:
                 signature = contains(extension.vector(2), 2, signatureScheme);
@@ -116,7 +116,7 @@ inline ClientHello parseHello(View message, bool retry) {
         if (kind != 51 && kind != 21 && kind != 41 && kind != 42)
             invariant.update(encoded.first(encoded.size() - extensions.remaining.size()));
     }
-    if (!version)
+    if (!supportsTls13)
         throw Error("TLS 1.3 required", 70);
     if (!offeredSuite || !signature || !supportedGroup)
         throw Error("no common cipher suite, signature or group", 40);
@@ -145,9 +145,9 @@ inline ClientHello parseHello(View message, bool retry) {
 }
 
 inline Bytes serverHello(View session, View random, View publicKey) {
-    constexpr std::array<Byte, 2> version{3, 4};
+    constexpr std::array<Byte, 2> tls13{3, 4};
     Bytes                         extensions;
-    extension(extensions, 43, version);
+    extension(extensions, 43, tls13);
     Bytes keyShare;
     put(keyShare, group, 2);
     if (!publicKey.empty())
@@ -170,11 +170,11 @@ struct RecordHeader {
 
 inline RecordHeader parseRecord(View header, bool encrypted, bool initial = false) {
     Reader     input{header};
-    const auto type    = static_cast<Byte>(input.number(1));
-    const auto version = input.number(2);
-    const auto size    = input.number(2);
+    const auto type          = static_cast<Byte>(input.number(1));
+    const auto recordVersion = input.number(2);
+    const auto size          = input.number(2);
     input.end();
-    if (version != 0x0303 && !(initial && version == 0x0301 && type == handshakeRecord))
+    if (recordVersion != 0x0303 && !(initial && recordVersion == 0x0301 && type == handshakeRecord))
         throw Error("invalid record version", 70);
     if (size > (encrypted && type == applicationData ? maxCiphertext : maxPlaintext))
         throw Error("oversized record", 22);
@@ -250,8 +250,15 @@ struct RecordControl {
     bool updateRequested = false;
     bool peerNotified    = false;
 
-    bool beginClose() {
-        return !std::exchange(closed, true) && !sending;
+    bool beginClose(Byte failure = 0) {
+        if (std::exchange(closed, true))
+            return false;
+        pendingAlert = failure;
+        return !sending;
+    }
+
+    std::optional<Byte> takeAlert() {
+        return std::exchange(pendingAlert, std::nullopt);
     }
 
     // Returns true for a nonempty application record ready to deliver.
@@ -294,6 +301,7 @@ struct RecordControl {
     }
 
 private:
+    std::optional<Byte> pendingAlert;
     std::array<Byte, 5> update{};
     std::size_t         updateSize = 0;
     unsigned            skipped    = 0;

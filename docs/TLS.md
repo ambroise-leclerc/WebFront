@@ -61,24 +61,40 @@ optional second ClientHello and Finished sequence described in the
 The two X25519 operations and the CertificateVerify signature run on the I/O
 thread. Other connections wait while this work runs. An incomplete handshake
 has no built-in deadline. Bursts of handshakes can delay established HTTP/WSS
-connections, and idle handshakes can hold sockets and memory.
+connections, and idle handshakes can hold sockets and memory. WebFront logs
+a warning when the integrated listener is configured outside loopback.
+
+On orderly WSS closure initiated by the peer, WebFront answers the WebSocket
+Close frame and then sends TLS `close_notify`. If TLS closure is requested
+during a send, the alert follows the current complete TLS record. A reset,
+failed write or cancellation during server shutdown can end the connection
+before the alert can be sent.
+
+## Constant-time regression
+
+On Linux with Valgrind and its development headers installed, the optional
+`TLSConstantTime` CTest case marks the private inputs to `p256Base` and `x25519`
+undefined and checks compiler-generated branches and addresses with Memcheck.
+The probe passed locally on x86-64 with GCC 16.1 and Clang 21 at `-Os` and `-O3`.
+The probe covers those scalar operations and compiler configurations. It leaves
+an audit of the rest of TLS and other targets, including Thumb-2, outstanding.
 
 ## Size, memory and handshake time
 
 On Linux x86-64 with GCC 16.1, a minimal app with one bridge callback built at
 `-Os -DNDEBUG -ffunction-sections -fdata-sections -Wl,--gc-sections` gained
-43.6 KiB of `.text` and 5.0 KiB of `.rodata` when the TCP provider was
+47.3 KiB of `.text` and 5.5 KiB of `.rodata` when the TCP provider was
 replaced by the TLS provider. The TLS headers total about 1,500 lines, including the in-tree primitives and comments.
 
 In the same binaries, 200 open loopback WebSockets increased Linux
-`smaps_rollup` private dirty memory by about 3.6 KiB more per idle connection
+`smaps_rollup` private dirty memory by about 3.5 KiB more per idle connection
 for WSS than for WS. Giving each socket 16,384 bytes of an incomplete frame
 increased the WSS overhead to about 18.8 KiB per connection. These are process
 measurements after a warm-up connection and include allocator overhead.
 Thumb-2 size and peak memory during the handshake remain unmeasured.
 
 On an AMD Ryzen 9 3900X, an OpenSSL-backed Python client completed 200
-sequential loopback handshakes in 2.7 ms at the median and 3.8 ms at the 95th
+sequential loopback handshakes in 2.0 ms at the median and 2.2 ms at the 95th
 percentile. The measurement starts after TCP connect and ends after TLS
 negotiation, following ten warm-up connections. It includes both endpoints
 and excludes HTTP traffic.

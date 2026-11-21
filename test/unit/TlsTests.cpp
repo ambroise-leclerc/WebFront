@@ -179,7 +179,7 @@ const Scenario tlsRecordControl("TLS application records coordinate updates and 
             limit.receive(tls::applicationData, {}, traffic, secret);
         });
     });
-    then("the orderly response is sent once, except during an in-flight write", [&] {
+    then("the orderly response is sent once after any in-flight write", [&] {
         for (const bool sending : {false, true}) {
             tls::RecordControl closing;
             closing.sending = sending;
@@ -188,6 +188,9 @@ const Scenario tlsRecordControl("TLS application records coordinate updates and 
             require(closing.beginClose() == !sending);
             require(closing.closed);
             require(!closing.beginClose());
+            // The active writer consumes the alert once it has finished its record.
+            require(closing.takeAlert() == 0);
+            require(!closing.takeAlert());
         }
     });
     then("a fatal peer alert closes without a reply", [&] {
@@ -197,6 +200,7 @@ const Scenario tlsRecordControl("TLS application records coordinate updates and 
         });
         require(fatal.closed);
         require(!fatal.beginClose());
+        require(!fatal.takeAlert());
     });
 });
 

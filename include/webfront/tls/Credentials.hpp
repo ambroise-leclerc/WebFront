@@ -13,6 +13,7 @@ inline constexpr std::array<Byte, 7> ecPublicKey{0x2a, 0x86, 0x48, 0xce, 0x3d, 2
 inline constexpr std::array<Byte, 8> prime256v1{0x2a, 0x86, 0x48, 0xce, 0x3d, 3, 1, 7};
 
 inline void ecAlgorithm(Reader oid) {
+    // AlgorithmIdentifier carries the algorithm OID followed by the named-curve OID.
     if (!std::ranges::equal(oid.der(6), ecPublicKey) || !std::ranges::equal(oid.der(6), prime256v1))
         throw Error("expected P-256 algorithm");
     oid.end();
@@ -40,17 +41,17 @@ inline Secret<> privateKey(View input, bool pkcs8) {
     Reader source{input};
     Reader key{source.der(0x30)};
     source.end();
-    auto version = key.der(2);
+    auto keyVersion = key.der(2);
     if (pkcs8) {
-        if (version.size() != 1 || version.front() != 0)
+        if (keyVersion.size() != 1 || keyVersion.front() != 0)
             throw Error("expected PKCS#8 private key");
         ecAlgorithm({key.der(0x30)});
         Reader wrapped{key.der(4)};
         key = {wrapped.der(0x30)};
         wrapped.end();
-        version = key.der(2);
+        keyVersion = key.der(2);
     }
-    if (version.size() != 1 || version.front() != 1)
+    if (keyVersion.size() != 1 || keyVersion.front() != 1)
         throw Error("expected EC private key");
     const auto scalar = key.der(4);
     if (scalar.size() != 32)

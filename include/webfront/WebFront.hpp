@@ -686,6 +686,8 @@ inline WebFrontConfig checkedPtyPageConfig(WebFrontConfig config) {
 /// The read binding of a configuration, which is refused here, before anything is bound, if its declaration is false.
 inline std::shared_ptr<ReadBinding> makeReadBinding(const WebFrontConfig& config, bool secure = false) {
     checkedAddress(config);
+    if (secure && !isLoopbackName(config.address))
+        log::warn("TLS listener outside loopback on {}: handshake cryptography runs on the I/O thread and incomplete handshakes have no deadline", config.address);
     return std::make_shared<ReadBinding>(secure, config.remoteFileTransport);
 }
 }  // namespace detail

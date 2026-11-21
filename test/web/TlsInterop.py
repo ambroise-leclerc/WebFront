@@ -25,7 +25,24 @@ def exercise(server, openssl, certificate):
 
     def connect():
         return context.wrap_socket(socket.create_connection(("127.0.0.1", port), timeout=5),
-                                   server_hostname="127.0.0.1")
+                                   server_hostname="127.0.0.1", suppress_ragged_eofs=False)
+
+    # A WebSocket Close must be answered before the authenticated TLS EOF.
+    with connect() as peer:
+        peer.sendall(
+            f"GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+            f"Origin: https://127.0.0.1:{port}\r\n"
+            "Connection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\n"
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: WebFront_0.1\r\n\r\n".encode()
+        )
+        with peer.makefile("rb") as response:
+            if response.readline().rstrip() != b"HTTP/1.1 101 Switching Protocols":
+                raise RuntimeError("WebSocket upgrade failed")
+            while response.readline() not in (b"\r\n", b""):
+                pass
+            peer.sendall(bytes.fromhex("88820102030402ea"))  # masked status 1000
+            if response.read(4) != bytes.fromhex("880203e8") or response.read(1):
+                raise RuntimeError("Missing WebSocket Close reply or TLS close_notify")
 
     post = b"POST /post/ HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\n"
     with connect() as peer:

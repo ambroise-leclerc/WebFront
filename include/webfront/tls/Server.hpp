@@ -68,9 +68,11 @@ public:
 
     static Result<std::size_t> Receive(Socket& socket, MutableBuffer target) {
         using namespace detail;
+        if (target.size() == 0)
+            throw std::invalid_argument("TLS: Receive requires a nonempty buffer");
         auto& state = *socket.connection;
         if (state.control.closed)
-            co_return 0;
+            co_return std::size_t{0};
         Byte failure = 0;
         try {
             while (!state.control.closed && !state.control.peerNotified) {
@@ -88,13 +90,11 @@ public:
         } catch (const Error& error) {
             failure = error.alert;
         }
-        if (state.control.beginClose()) {
-            const std::array<Byte, 2> response{static_cast<Byte>(failure ? 2 : 1), failure};
-            co_await tryAlert(socket, response);
-        }
+        if (state.control.beginClose(failure))
+            co_await finishClose(socket);
         if (failure)
             throw std::system_error(std::make_error_code(std::errc::protocol_error));
-        co_return 0;
+        co_return std::size_t{0};
     }
 
     static Task Send(Socket& socket, auto buffers) {
@@ -111,13 +111,18 @@ public:
         } sending{state.control.sending};
         constexpr std::size_t header = 5;
         std::size_t           length = 0;
-        for (const auto buffer : buffers)
+        for (const auto buffer : buffers) {
             length += std::min(buffer.size(), maxPlaintext - length);
+            if (length == maxPlaintext)
+                break;
+        }
         Bytes record(header);
         record.reserve(header + length + 17);
         for (auto buffer : buffers) {
             View data{static_cast<const Byte*>(buffer.data()), buffer.size()};
-            while (!data.empty()) {
+            if (state.control.closed)
+                break;
+            while (!data.empty() && !state.control.closed) {
                 const auto count = std::min(data.size(), maxPlaintext + header - record.size());
                 append(record, data.first(count));
                 data = data.subspan(count);
@@ -127,26 +132,33 @@ public:
                 }
             }
         }
-        if (record.size() != header)
+        if (!state.control.closed && record.size() != header)
             co_await writeApplication(socket, record);
+        if (state.control.closed) {
+            co_await finishClose(socket);
+            throw std::system_error(std::make_error_code(std::errc::connection_aborted));
+        }
     }
 
+    // If a send is in progress, that writer owns the final alert and shutdown.
     static Task Close(Socket& socket) {
-        if (socket.connection->control.beginClose()) {
-            constexpr std::array<Byte, 2> notify{1, 0};
-            co_await tryAlert(socket, notify);
-        }
-        std::error_code ignored;
-        socket.shutdown(Socket::shutdown_both, ignored);
+        if (socket.connection->control.beginClose())
+            co_await finishClose(socket);
     }
 
 private:
-    static Task tryAlert(Socket& socket, const std::array<Byte, 2>& alert) {
+    static Task finishClose(Socket& socket) {
+        const auto failure = socket.connection->control.takeAlert();
+        if (!failure)
+            co_return;
+        const std::array<Byte, 2> response{static_cast<Byte>(*failure ? 2 : 1), *failure};
         try {
-            co_await writeRecord(socket, detail::alert, alert);
+            co_await writeRecord(socket, detail::alert, response);
         } catch (const std::system_error&) {
             // An alert is best effort once the peer has closed the transport.
         }
+        std::error_code ignored;
+        socket.shutdown(Socket::shutdown_both, ignored);
     }
 
     static Task readExact(Socket& socket, std::span<Byte> target) {
@@ -209,7 +221,7 @@ private:
             state.writeSecret = {expandLabel(state.writeSecret, "traffic upd")};
             state.write.install(state.writeSecret);
             if (state.control.closed)
-                throw std::system_error(std::make_error_code(std::errc::connection_reset));
+                co_return;
         }
         state.write.seal(applicationData, record);
         co_await sendRecord(socket, record);
