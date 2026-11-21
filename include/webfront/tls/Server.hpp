@@ -312,6 +312,11 @@ private:
         }
     }
 
+#ifdef _MSC_VER
+// MSVC reports C4737 as an error from its optimizer. The handshake stages run once per connection: build them unoptimized,
+// and keep the data path (Receive, Send) optimized.
+#pragma optimize("", off)
+#endif
     // MSVC refuses (C4737) one coroutine holding the whole flight, so the handshake runs in three stages.
     static Task negotiate(Socket& socket, std::shared_ptr<const detail::Identity> identity) {
         using namespace detail;
@@ -363,6 +368,34 @@ private:
             co_await writeRecord(socket, changeCipherSpec, ccs);
     }
 
+    // Plain functions: fewer locals live across the awaits of sendFlight, which MSVC compiles with a missed tail call.
+    static detail::Bytes encryptedExtensionsMessage(bool alpn) {
+        using namespace detail;
+        Bytes extensions;
+        if (alpn) {
+            Bytes protocol;
+            vector(protocol, bytes("http/1.1"), 1);
+            Bytes protocols;
+            vector(protocols, protocol, 2);
+            extension(extensions, 16, protocols);
+        }
+        Bytes body;
+        vector(body, extensions, 2);
+        return handshake(8, body);
+    }
+
+    static detail::Bytes certificateVerifyMessage(const detail::Identity& identity, const detail::Digest& transcriptHash) {
+        using namespace detail;
+        Bytes input(64, 0x20);
+        append(input, bytes("TLS 1.3, server CertificateVerify"));
+        input.push_back(0);
+        append(input, transcriptHash);
+        Bytes verify;
+        put(verify, signatureScheme, 2);
+        vector(verify, sign(identity.key, hash(input)), 2);
+        return handshake(15, verify);
+    }
+
     // EncryptedExtensions to server Finished, then the application keys.
     static Task sendFlight(Socket& socket, detail::Sha256& transcript, const detail::Identity& identity, bool alpn, const detail::Secret<>& shared,
                            detail::Secret<>& client, detail::Digest& afterFinished) {
@@ -378,27 +411,9 @@ private:
         state.read.install(client);
         state.write.install(server);
         state.writeEncrypted = true;
-        Bytes extensions;
-        if (alpn) {
-            Bytes protocol;
-            vector(protocol, bytes("http/1.1"), 1);
-            Bytes protocols;
-            vector(protocols, protocol, 2);
-            extension(extensions, 16, protocols);
-        }
-        Bytes encryptedExtensions;
-        vector(encryptedExtensions, extensions, 2);
-        co_await writeHandshake(socket, transcript, handshake(8, encryptedExtensions));
+        co_await writeHandshake(socket, transcript, encryptedExtensionsMessage(alpn));
         co_await writeHandshake(socket, transcript, identity.certificateMessage);
-
-        Bytes input(64, 0x20);
-        append(input, bytes("TLS 1.3, server CertificateVerify"));
-        input.push_back(0);
-        append(input, transcript.digest());
-        Bytes verify;
-        put(verify, signatureScheme, 2);
-        vector(verify, sign(identity.key, hash(input)), 2);
-        co_await writeHandshake(socket, transcript, handshake(15, verify));
+        co_await writeHandshake(socket, transcript, certificateVerifyMessage(identity, transcript.digest()));
         const Secret<> serverFinished{expandLabel(server, "finished")};
         co_await writeHandshake(socket, transcript, handshake(20, hmac(serverFinished, {transcript.digest()})));
 
@@ -427,6 +442,9 @@ private:
         state.input.clear();
         state.established = true;
     }
+#ifdef _MSC_VER
+#pragma optimize("", on)
+#endif
 };
 }  // namespace webfront::tls
 
