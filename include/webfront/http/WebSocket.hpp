@@ -543,6 +543,18 @@ private:
         }
         if (writerNeeded)
             spawn(writeFrames(this->shared_from_this()));
+        // The reply waits behind any write in flight, and stop() no longer reaches it (the closure is claimed):
+        // bound that wait, so that a blocked write cannot keep the connection alive for ever.
+        if constexpr (requires { Net::ResumeAfter(socket, std::chrono::seconds{10}); })
+            spawn(closeDeadline(this->shared_from_this()));
+    }
+
+    networking::Task closeDeadline(std::shared_ptr<WebSocket>) {
+        if constexpr (requires { Net::ResumeAfter(socket, std::chrono::seconds{10}); }) {
+            co_await Net::ResumeAfter(socket, std::chrono::seconds{10});
+            stopSource->request_stop();
+        }
+        co_return;
     }
 
     // Control frames (close, ping, pong) carry at most 125 bytes (RFC 6455, 5.5), whatever maxMessageSize.
@@ -636,6 +648,7 @@ private:
                         nextFrame(true);
                         if (writtenHandler) writtenHandler();
                         co_await Net::Close(socket);
+                        stopSource->request_stop();  // the reply is out: ends closeDeadline()
                         co_return;
                     }
                 }

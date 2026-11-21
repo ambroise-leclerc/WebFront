@@ -3,7 +3,6 @@
 #include "../networking/TCPNetworkingStdnet.hpp"
 #include "Credentials.hpp"
 #include "detail/Protocol.hpp"
-#include <exec/when_any.hpp>
 #include <cassert>
 
 namespace webfront::tls {
@@ -56,9 +55,11 @@ public:
         });
     }
 
-    // Both senders complete on the I/O context. The winner cancels and joins the other.
+    /// The time a connection has to complete its handshake. The caller enforces it (http::Server does).
+    static constexpr std::chrono::seconds handshakeTimeout{10};
+
+    // Completes on the I/O context. Its stop token cancels the pending reads and writes.
     static Task Handshake(Socket& socket, const Acceptor& acceptor) {
-        using namespace std::chrono_literals;
         constexpr std::size_t maxPendingHandshakes = 16;
         if (acceptor.pendingHandshakes >= maxPendingHandshakes)
             throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again), "TLS handshake limit reached");
@@ -67,10 +68,7 @@ public:
             std::size_t& pending;
             ~Slot() { --pending; }
         } slot{acceptor.pendingHandshakes};
-        auto deadline = networking::ex::then(TCP::ResumeAfter(socket, 10s), [] {
-            throw std::system_error(std::make_error_code(std::errc::timed_out));
-        });
-        co_await exec::when_any(runHandshake(socket, acceptor), std::move(deadline));
+        co_await runHandshake(socket, acceptor);
     }
 
     static Result<std::size_t> Receive(Socket& socket, MutableBuffer target) {

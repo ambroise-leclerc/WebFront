@@ -1016,6 +1016,15 @@ private:
         }
     }
 
+    // Cancels a handshake that outlives Net::handshakeTimeout, unless `settled` ends the wait first.
+    networking::Task handshakeDeadline(std::shared_ptr<networking::ex::inplace_stop_source> expired,
+                                       std::shared_ptr<networking::ex::inplace_stop_source> settled) {
+        if constexpr (networking::secureTransport<Net>)
+            co_await networking::ex::write_env(Net::ResumeAfter(acceptor, Net::handshakeTimeout),
+                                               networking::ex::prop{networking::ex::get_stop_token, settled->get_token()});
+        expired->request_stop();
+    }
+
     networking::Task closeResponse(typename Net::Socket& socket) {
         if constexpr (networking::secureTransport<Net>)
             co_await Net::Close(socket);
@@ -1213,8 +1222,23 @@ private:
 
     networking::Task serve(typename Net::Socket socket) {
         if constexpr (networking::secureTransport<Net>) {
+            // The deadline and the server's shutdown cancel the handshake through this source.
+            struct Forward {
+                networking::ex::inplace_stop_source& source;
+                void operator()() noexcept { source.request_stop(); }
+            };
+            const auto                                                        expired = std::make_shared<networking::ex::inplace_stop_source>();
+            const auto                                                        settled = std::make_shared<networking::ex::inplace_stop_source>();
+            networking::ex::stop_callback_for_t<networking::ex::inplace_stop_token, Forward> shutdown(tasks.stopToken(), Forward{*expired});
+            spawn(handshakeDeadline(expired, settled));
+            struct Settle {
+                networking::ex::inplace_stop_source& source;
+                ~Settle() { source.request_stop(); }
+            } settle{*settled};
             try {
-                co_await Net::Handshake(socket, acceptor);
+                co_await networking::ex::stopped_as_error(
+                    networking::ex::write_env(Net::Handshake(socket, acceptor), networking::ex::prop{networking::ex::get_stop_token, expired->get_token()}),
+                    std::make_error_code(std::errc::timed_out));
             } catch (const std::system_error& error) {
                 log::debug("TLS handshake failed ({}:{}): {}", error.code().category().name(), error.code().value(), error.what());
                 co_return;
