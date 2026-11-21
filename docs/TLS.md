@@ -50,7 +50,9 @@ example requires the header so requests without one are refused.
 
 The initial profile negotiates TLS 1.3, X25519, ECDSA P-256 with SHA-256 and
 `TLS_CHACHA20_POLY1305_SHA256`. Clients must offer this suite. The profile
-uses full handshakes and HTTP/1.1. Where clients require AES-GCM, HTTP/2,
+uses full handshakes and HTTP/1.1. If a client sends ALPN, it must offer
+`http/1.1`. An ALPN offer without it is rejected with `no_application_protocol`
+(alert 120). Where clients require AES-GCM, HTTP/2,
 or another certificate type, terminate TLS at the deployment proxy and
 configure `httpsByDeployment` if file-service reads are enabled.
 Client 0-RTT ciphertext offered with a PSK is discarded, up to 64 KiB.
@@ -65,15 +67,20 @@ The TLS handshake has a ten-second deadline from accept through Finished.
 The two X25519 operations and the CertificateVerify signature run on the I/O
 thread. Other connections wait during that work, so bursts of handshakes can
 delay established HTTP/WSS connections. WebFront writes a warning to standard
-error when the integrated listener is configured outside loopback.
+error when the integrated listener is configured outside loopback. Enable
+`log::Debug` with a log sink to see handshake failure reasons and error codes.
 
 On orderly WSS closure initiated by the peer, WebFront answers the WebSocket
 Close frame and then sends TLS `close_notify`. The secure queue retains the
 active frame and discards other queued frames and subsequent writes once the
 peer's Close is accepted. The TCP queue follows its existing stop behavior.
 If TLS closure is requested during a send, the alert follows the current
-complete TLS record. A reset, failed write or cancellation during server
-shutdown can end the connection before the alert can be sent.
+complete TLS record. Local `stop()` during a write can cancel that record,
+so the peer sees a truncated TLS stream without `close_notify`. A reset or
+failed write can also prevent the alert from being sent.
+
+A peer's `KeyUpdate(update_requested)` is answered before the next
+application data record. The response stays pending while the server is idle.
 
 ## Constant-time regression
 

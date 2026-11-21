@@ -4,6 +4,7 @@
 #include "Credentials.hpp"
 #include "detail/Protocol.hpp"
 #include <exec/when_any.hpp>
+#include <cassert>
 
 namespace webfront::tls {
 /// TCP-style stream provider. Handshake, reads and writes run on the same server I/O context.
@@ -94,11 +95,13 @@ public:
         co_return std::size_t{0};
     }
 
+    // HTTP and WebSocket serialize Send calls on each socket. The active writer owns any pending close alert.
     static Task Send(Socket& socket, auto buffers) {
         using namespace detail;
         auto& state = *socket.connection;
         if (state.control.closed)
             throw std::system_error(std::make_error_code(std::errc::connection_reset));
+        assert(!state.control.sending);
         state.control.sending = true;
         struct Sending {
             bool& active;
@@ -145,19 +148,19 @@ public:
 
 private:
     static Task runHandshake(Socket& socket, const Acceptor& acceptor) {
-        Byte failure = 0;
+        std::optional<detail::Error> failure;
         try {
             socket.connection = std::make_unique<Connection>();
             co_await negotiate(socket, acceptor.credentials->snapshot());
             co_return;
         } catch (const detail::Error& error) {
-            failure = error.alert;
+            failure.emplace(error);
         }
         try {
-            const std::array<Byte, 2> alert{2, failure};
+            const std::array<Byte, 2> alert{2, failure->alert};
             co_await writeRecord(socket, detail::alert, alert);
         } catch (const std::system_error&) {}
-        throw std::system_error(std::make_error_code(std::errc::protocol_error));
+        throw std::system_error(std::make_error_code(std::errc::protocol_error), failure->what());
     }
 
     static Task finishClose(Socket& socket) {

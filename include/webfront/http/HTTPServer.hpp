@@ -1215,7 +1215,8 @@ private:
         if constexpr (networking::secureTransport<Net>) {
             try {
                 co_await Net::Handshake(socket, acceptor);
-            } catch (const std::system_error&) {
+            } catch (const std::system_error& error) {
+                log::debug("TLS handshake failed ({}:{}): {}", error.code().category().name(), error.code().value(), error.what());
                 co_return;
             } catch (const std::exception& error) {
                 log::warn("TLS handshake failed: {}", error.what());

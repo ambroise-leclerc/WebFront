@@ -120,6 +120,18 @@ const Scenario tlsRefusals("TLS rejects invalid framing and negotiation", {"fast
             tls::parseHello(hello, false);
         });
     });
+    then("a missing signature_algorithms extension elicits missing_extension", [] {
+        auto hello = traceHello();
+        const auto extension = std::ranges::search(hello, tlsHex("000d0020001e"));
+        require(!extension.empty());
+        *extension.begin() = 0xfe;  // Unknown extension of the same length.
+        try {
+            tls::parseHello(hello, false);
+            require(false);
+        } catch (const tls::Error& error) {
+            require(error.alert == 109);
+        }
+    });
     then("a PSK offer requires key-exchange modes, and early data is forbidden on retry", [] {
         auto hello = traceHello();
         // Remove the modes extension from the trace and append an early-data PSK offer.

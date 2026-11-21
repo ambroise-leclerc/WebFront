@@ -1,4 +1,6 @@
 """Exercise the TLS provider against an independent OpenSSL client over loopback."""
+import errno
+import re
 import select
 import socket
 import ssl
@@ -32,8 +34,19 @@ def exercise(server, openssl, certificate):
         return context.wrap_socket(socket.create_connection(("127.0.0.1", port), timeout=5),
                                    server_hostname="127.0.0.1", suppress_ragged_eofs=False)
 
+    context.set_alpn_protocols(["h2"])
+    try:
+        with connect():
+            raise RuntimeError("A client offering only h2 in ALPN should be refused")
+    except ssl.SSLError as error:
+        if error.reason != "TLSV1_ALERT_NO_APPLICATION_PROTOCOL":
+            raise
+    context.set_alpn_protocols(["http/1.1"])
+
     # A WebSocket Close must be answered before the authenticated TLS EOF.
     with connect() as peer:
+        if peer.selected_alpn_protocol() != "http/1.1":
+            raise RuntimeError("The server did not negotiate HTTP/1.1 in ALPN")
         peer.sendall(
             f"GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
             f"Origin: https://127.0.0.1:{port}\r\n"
@@ -78,10 +91,15 @@ if __name__ == "__main__":
     program, openssl, fixtures = sys.argv[1:]
     certificate = Path(fixtures) / "cert.pem"
     with subprocess.Popen([program, certificate, Path(fixtures) / "key.pem"],
-                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True) as server:
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as server:
         try:
             exercise(server, openssl, certificate)
         finally:
             server.stdin.close()
             if server.wait(timeout=5) != 0:
                 raise RuntimeError("TLS interop server exited unsuccessfully")
+        diagnostics = server.stderr.read()
+        if not re.search(r"TLS handshake failed \([^:\n]+:\d+\): TLS: HTTP/1\.1 not offered", diagnostics):
+            raise RuntimeError(f"Missing ALPN handshake diagnostic: {diagnostics!r}")
+        if not re.search(rf"TLS handshake failed \([^:\n]+:{errno.ETIMEDOUT}\): ", diagnostics):
+            raise RuntimeError(f"Missing handshake timeout diagnostic: {diagnostics!r}")

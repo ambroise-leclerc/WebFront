@@ -7,6 +7,11 @@
 int main(int argc, char** argv) {
     if (argc != 3)
         return 1;
+    webfront::log::setLogLevel(webfront::log::Debug);
+    webfront::log::addSinks([](std::string_view line) {
+        if (line.contains("TLS handshake failed ("))
+            std::clog << line << '\n';
+    });
     webfront::tls::WebFront<> app({.port = "0", .tlsCredentials = std::make_shared<webfront::tls::Credentials>(argv[1], argv[2])});
     std::latch                reply{1};
     const auto                post = [&](const webfront::http::RouteRequest&) {

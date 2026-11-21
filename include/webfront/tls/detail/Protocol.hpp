@@ -123,6 +123,8 @@ inline ClientHello parseHello(View message, bool retry) {
     }
     if (!supportsTls13)
         throw Error("TLS 1.3 required", 70);
+    if (!containsExtension(13))
+        throw Error("missing signature_algorithms", 109);
     if (!offeredSuite || !signature || !supportedGroup)
         throw Error("no common cipher suite, signature or group", 40);
     const bool hasPsk = containsExtension(41);
