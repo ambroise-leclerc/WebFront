@@ -10,8 +10,11 @@ these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
+### Breaking
+- The CEF profile is now `cef_cache/<executable>`, not `cef_cache`: an application starts with an empty profile (localStorage, cookies); to keep the data, move the old contents of `cef_cache` into `cef_cache/<executable>` once (#617, `docs/HOST_INTEGRATION.md`).
+
 ### Added
-- Start an application with no port setting when `9002` is taken: an empty `WebFrontConfig::port` falls back to a free port, a chosen port is never replaced, and CEF and WebKitGTK give each live instance of an executable its own profile directory, so that dozens of instances run side by side; the CEF profile moves to `cef_cache/<executable>`, one per executable instead of one per directory (#617, `docs/HOST_INTEGRATION.md`).
+- Start an application with no port setting when `9002` is taken: an empty `WebFrontConfig::port` falls back to a free port, a chosen port is never replaced, and CEF and WebKitGTK give each live instance its own profile directory (#617, `docs/HOST_INTEGRATION.md`).
 - Start several applications side by side: the default port follows `WEBFRONT_PORT` (a number from 0 to 65535, `0` asks for a free port, `9002` remains the default), the examples take `--port`, the server announces the port really bound, and a failed bind names the address, the port and the cause (#617, `docs/HOST_INTEGRATION.md`).
 - Run the MSVC code analysis in a pull request into `develop` that changes Windows code, and list the reruns each job needed before going green with `FlakeReport.py --days` (#628, `docs/TEST_TIERS.md`, `docs/TEST_PERFORMANCE.md`).
 

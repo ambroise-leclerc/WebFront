@@ -177,7 +177,7 @@ cookie must not assume a port of its own, as the read binding's cookie names alr
 lock file (`.webfront-lock`), so a fixed port finds its storage again; every other live instance of the same executable gets
 a directory of its own beside it (`<directory>.instances/<pid>-<n>`), removed when it ends, and the directories of instances that
 died are removed by the next one (`frontend/ProfileLease.hpp`). Without that, Chromium hands the second process over to the first.
-WebView2 shares one user data folder between processes by design, and a WKWebView data store is not persistent. The system
+The CEF profile is `cef_cache/<executable>` beside the executable, one per executable; data written under the former shared `cef_cache` is not migrated (move it there to keep it). WebView2 shares one user data folder between processes by design, and a WKWebView data store is not persistent. The system
 browser is the user's own. `WEBFRONT_STARTUP_TRACE` only writes to the standard error of its process.
 
 **Other alternatives.** A loopback address of its own (`WebFrontConfig::address = "127.0.0.2"`, any `127.x.y.z` on Linux; macOS
