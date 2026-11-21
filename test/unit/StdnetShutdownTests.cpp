@@ -415,7 +415,7 @@ const Scenario defaultPortFromEnvironment{"The default port follows WEBFRONT_POR
     given("WEBFRONT_PORT set to 0", [&] {
         setPortVariable("0");
         then("a configuration asks for an ephemeral port and two applications coexist", [&] {
-            require(WebFrontConfig{}.port == "0");
+            require(WebFrontConfig{}.port.empty() && defaultPort() == "0");
             BasicWF<Stdnet, fs::DefaultFS> a{WebFrontConfig{}}, b{WebFrontConfig{}};
             require(a.port() != b.port());
         });
@@ -472,6 +472,25 @@ const Scenario portOption{"The examples take --port", [] {
         then("the option is refused", [&] {
             require(!demo::applyPortOption(badCount, withBad));
             require(!demo::applyPortOption(missingCount, missing));
+        });
+    });
+}};
+
+const Scenario defaultPortFallback{"A configuration without a port falls back to a free port when its default is taken", [] {
+    const PortVariableGuard portGuard;
+    given("the preferred port held by another server", [&] {
+        setPortVariable("");
+        http::Server<Stdnet, fs::DefaultFS> holder("127.0.0.1", "0");
+        const std::string                   taken{holder.port()};
+        using Server = http::Server<Stdnet, fs::DefaultFS>;
+        then("an empty port binds another port", [&] {
+            const auto server = detail::makeHttpServer<Server>(WebFrontConfig{}, taken);
+            require(server.port() != taken && server.port() != "0");
+        });
+        then("a chosen port in use is refused, not replaced", [&] {
+            requireThrows<std::system_error>([&] { (void)detail::makeHttpServer<Server>(WebFrontConfig{.port = taken}, "0"); }, contains(taken));
+            setPortVariable(taken.c_str());
+            requireThrows<std::system_error>([&] { (void)detail::makeHttpServer<Server>(WebFrontConfig{}, "0"); }, contains(taken));
         });
     });
 }};

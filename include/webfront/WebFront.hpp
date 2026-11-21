@@ -28,6 +28,7 @@
 #include <chrono>
 #include <concepts>
 #include <cstdlib>
+#include <optional>
 #include <filesystem>
 #include <functional>
 #include <iostream>
@@ -503,10 +504,9 @@ inline bool noteDevelopmentPath() {
     return std::string(text);
 }
 
-/// The port of a configuration that does not choose one: the environment variable WEBFRONT_PORT when it is set and not
-/// empty ("0" asks for a free port, so any number of instances can run side by side), "9002" otherwise. A value that is not a
-/// port number throws std::invalid_argument.
-[[nodiscard]] inline std::string defaultPort() {
+/// The port that the environment variable WEBFRONT_PORT asks for, when it is set and not empty ("0" asks for a free port). A
+/// value that is not a port number throws std::invalid_argument.
+[[nodiscard]] inline std::optional<std::string> environmentPort() {
     std::string value;
 #ifdef _WIN32
     // std::getenv is deprecated for MSVC (C4996, an error with /WX); _dupenv_s copies the value.
@@ -520,8 +520,14 @@ inline bool noteDevelopmentPath() {
     if (const char* found = std::getenv("WEBFRONT_PORT"))
         value = found;
 #endif
-    return value.empty() ? std::string("9002") : validatedPort(value, "WEBFRONT_PORT");
+    if (value.empty())
+        return std::nullopt;
+    return validatedPort(value, "WEBFRONT_PORT");
 }
+
+/// The port of a configuration that does not choose one: WEBFRONT_PORT when it is set, "9002" otherwise. A server created
+/// from such a configuration (an empty `WebFrontConfig::port`) also falls back to a free port when "9002" is taken.
+[[nodiscard]] inline std::string defaultPort() { return environmentPort().value_or("9002"); }
 
 /**
  * @brief Configuration for the newcomer-friendly default construction of BasicWF.
@@ -534,8 +540,10 @@ inline bool noteDevelopmentPath() {
  */
 struct WebFrontConfig {
     std::string           address{"127.0.0.1"};
-    /// "0" requests an ephemeral port with TCPStdnet. The frontend receives the bound port. Defaults to defaultPort().
-    std::string           port{defaultPort()};
+    /// "0" requests an ephemeral port with TCPStdnet. The frontend receives the bound port. Empty (the default) takes
+    /// defaultPort(): WEBFRONT_PORT, else 9002, and then, 9002 being taken, a free port, so that several applications start side
+    /// by side. A port that is chosen, here or by WEBFRONT_PORT, is never replaced: when it is taken the start fails.
+    std::string           port{};
     std::filesystem::path documentRoot{};
     ContentPolicy         contentPolicy{};
     /// Initial window of the embedded frontends; the title defaults to the executable's name.
@@ -552,6 +560,26 @@ struct WebFrontConfig {
     /// Allows the optional PtyPage component. Requires a literal loopback bind and a bridge policy limited to the application's Origin.
     bool                  allowPtyPages = false;
 };
+
+namespace detail {
+/// Binds the server of a configuration: its port, or, when the configuration leaves the port empty and WEBFRONT_PORT is not
+/// set, 9002 and then a free port if 9002 is taken. Any other failure, and any chosen port in use, propagates.
+template <typename ServerType>
+ServerType makeHttpServer(const WebFrontConfig& config, std::string_view preferred = "9002") {
+    if (!config.port.empty())
+        return ServerType(config.address, config.port, config.documentRoot, config.contentPolicy);
+    const auto chosen = environmentPort();
+    if (chosen)
+        return ServerType(config.address, *chosen, config.documentRoot, config.contentPolicy);
+    try {
+        return ServerType(config.address, std::string(preferred), config.documentRoot, config.contentPolicy);
+    } catch (const std::system_error& error) {
+        if (error.code() != std::errc::address_in_use)
+            throw;
+    }
+    return ServerType(config.address, "0", config.documentRoot, config.contentPolicy);
+}
+}  // namespace detail
 
 namespace detail {
 /// True when `address` parses as the IPv6 address ::1 in any spelling (::1, 0:0:0:0:0:0:0:1, 0::0001...).
@@ -669,7 +697,7 @@ public:
     using FrontendProvider = Frontend;
     using UI               = BasicUI<BasicWF<Net, Filesystem, Policy, Frontend>>;
 
-    // Newcomer-friendly defaults: loopback address, port 9002, no local document root.
+    // Newcomer-friendly defaults: loopback address, port 9002 (a free one when it is taken), no local document root.
     BasicWF() : BasicWF(WebFrontConfig{}) {}
 
     explicit BasicWF(WebFrontConfig config) : BasicWF(detail::checkedPtyPageConfig(std::move(config)), CheckedConfig{}) {}
@@ -678,7 +706,7 @@ private:
     struct CheckedConfig {};
     BasicWF(WebFrontConfig config, CheckedConfig)
         : readBinding(detail::makeReadBinding(config)),
-          httpServer((detail::ensureFrontendInitialized<Frontend>(), config.address), config.port, config.documentRoot, config.contentPolicy),
+          httpServer((detail::ensureFrontendInitialized<Frontend>(), detail::makeHttpServer<http::Server<Net, Filesystem, Policy>>(config))),
           httpAddress(config.address),
           httpPort(httpServer.port()),
           httpDocRoot(config.documentRoot),

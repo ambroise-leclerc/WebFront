@@ -993,10 +993,10 @@ const Scenario uIFirst{"A UI first parameter selects the caller form of cppFunct
 }};
 
 const Scenario webFrontConfigHas{"WebFrontConfig has newcomer-friendly defaults", [] {
-    then("the defaults are loopback binding, port 9002, and no local document root", [&] {
+    then("the defaults are loopback binding, an empty port (9002, else a free one), and no local document root", [&] {
         WebFrontConfig config;
         require(config.address == "127.0.0.1");
-        require(config.port == "9002");
+        require(config.port.empty());
         require(config.documentRoot.empty());
     });
 }};

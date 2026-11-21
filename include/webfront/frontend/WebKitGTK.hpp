@@ -8,6 +8,7 @@
 #include "DefaultBrowser.hpp"
 #include "Downloads.hpp"
 #include "NativeWindow.hpp"
+#include "ProfileLease.hpp"
 #include "ScriptDialogs.hpp"
 #include "UIExecutor.hpp"
 #include "Url.hpp"
@@ -209,8 +210,8 @@ inline std::string executableProfileName() {
 }
 
 inline std::filesystem::path profileDirectory(const char* variable, const char* fallback) {
-    const auto directory = xdgRoot(variable, fallback) / "webfront" / executableProfileName();
-    std::filesystem::create_directories(directory);
+    // One live process per profile: another instance of this executable gets a directory of its own (ProfileLease.hpp).
+    const auto directory = leaseProfileDirectory(xdgRoot(variable, fallback) / "webfront" / executableProfileName());
     std::filesystem::permissions(directory, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
     if (access(directory.c_str(), W_OK | X_OK) != 0)
         throw std::runtime_error("WebKitGTK: profile directory is not writable: " + directory.string());
