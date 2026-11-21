@@ -239,8 +239,6 @@ struct Traffic {
         if (!equalSecret(expectedTag, View(payload).subspan(size)))
             throw Error("invalid authentication tag", 20);
         ++sequence;
-        if (size > maxPlaintext + 1)
-            throw Error("oversized inner plaintext", 22);
         chachaXor(key, nonce, ciphertext);
         payload.resize(size);
         while (!payload.empty() && payload.back() == 0)
@@ -249,6 +247,10 @@ struct Traffic {
             throw Error("missing inner record type", 10);
         const auto type = payload.back();
         payload.pop_back();
+        // RFC 8446, section 5.4: padding follows the type, so the content limit applies once it is removed. The ciphertext
+        // bound (maxCiphertext) was checked by parseRecord.
+        if (payload.size() > maxPlaintext)
+            throw Error("oversized inner plaintext", 22);
         return type;
     }
 

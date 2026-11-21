@@ -169,26 +169,30 @@ const Scenario tlsRefusals("TLS rejects invalid framing and negotiation", {"fast
         payload.back() ^= 1;
         require(receiver.open(View(record).first(5), payload) == tls::applicationData);
     });
-    then("the authenticated size limit includes the type and padding", [] {
+    then("padding after the inner type is accepted, and the content limit applies once it is removed", [] {
         const auto key = tls::expandLabel(tls::zeros, "key");
         tls::Nonce nonce;
         std::ranges::copy_n(tls::expandLabel(tls::zeros, "iv", {}, 12).begin(), nonce.size(), nonce.begin());
-        for (const bool padded : {false, true}) {
-            Bytes payload(tls::maxPlaintext + 1 + padded, 0);
-            payload[tls::maxPlaintext] = tls::applicationData;
+        const auto open = [&](std::size_t content, std::size_t padding, Bytes& payload) {
+            payload.assign(content + 1 + padding, 0);
+            payload[content] = tls::applicationData;
             Bytes header{tls::applicationData, 3, 3};
             tls::put(header, payload.size() + 16, 2);
             tls::chachaXor(key, nonce, payload);
             tls::append(payload, tls::polyTag(key, nonce, header, payload));
             tls::Traffic receiver;
             receiver.install(tls::zeros);
-            if (padded)
-                requireThrows<tls::Error>([&] { receiver.open(header, payload); }, contains("oversized inner plaintext"));
-            else {
-                require(receiver.open(header, payload) == tls::applicationData);
-                require(payload.size() == tls::maxPlaintext);
-            }
-        }
+            return receiver.open(header, payload);
+        };
+        Bytes payload;
+        require(open(tls::maxPlaintext, 0, payload) == tls::applicationData);
+        require(payload.size() == tls::maxPlaintext);
+        require(open(tls::maxPlaintext, 1, payload) == tls::applicationData);  // a full record with one byte of padding
+        require(payload.size() == tls::maxPlaintext);
+        require(open(10, 200, payload) == tls::applicationData);
+        require(payload.size() == 10);
+        requireThrows<tls::Error>([&] { open(tls::maxPlaintext + 1, 0, payload); }, contains("oversized inner plaintext"));
+        requireThrows<tls::Error>([&] { open(tls::maxPlaintext + 1, 1, payload); }, contains("oversized inner plaintext"));
     });
     then("an exhausted record sequence fails as a transport error before wrapping", [] {
         require(tls::recordNonce({}, UINT64_MAX - 1).back() == 0xfe);
