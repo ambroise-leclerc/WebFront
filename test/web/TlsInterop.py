@@ -36,13 +36,13 @@ def exercise(server, openssl, certificate):
         return context.wrap_socket(socket.create_connection(("127.0.0.1", port), timeout=5),
                                    server_hostname="127.0.0.1", suppress_ragged_eofs=False)
 
-    context.set_alpn_protocols(["h2"])
-    try:
-        with connect():
-            raise RuntimeError("A client offering only h2 in ALPN should be refused")
-    except ssl.SSLError as error:
-        if error.reason != "TLSV1_ALERT_NO_APPLICATION_PROTOCOL":
-            raise
+    refused = subprocess.run(
+        [openssl, "s_client", "-connect", f"127.0.0.1:{port}", "-tls1_3", "-alpn", "h2", "-msg"],
+        input=b"", capture_output=True, timeout=10,
+    )
+    # Check the alert on the wire. Some Python/OpenSSL builds report its reason as unknown.
+    if not refused.returncode or not re.search(rb"<<< [^\n]*Alert[^\n]*\n[ \t]+02 78\b", refused.stdout):
+        raise RuntimeError(f"Expected fatal no_application_protocol (120): {refused.stdout!r} {refused.stderr!r}")
     context.set_alpn_protocols(["http/1.1"])
 
     with ExitStack() as pending:
