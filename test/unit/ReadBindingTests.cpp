@@ -29,6 +29,8 @@ using namespace std::chrono_literals;
 
 namespace {
 
+static_assert(requires { ReadBinding({}); });
+
 constexpr std::string_view readPrefix = "/webfront/services/files/";
 
 std::optional<std::string> header(const http::RouteReply& reply, std::string_view name) {

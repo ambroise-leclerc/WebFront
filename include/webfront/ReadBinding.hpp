@@ -23,6 +23,7 @@
 #include <any>
 #include <cctype>
 #include <chrono>
+#include <concepts>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -214,7 +215,7 @@ public:
     explicit ReadBinding(RemoteFileTransport declared = RemoteFileTransport::refused, Clock clock = [] { return std::chrono::steady_clock::now(); })
         : ReadBinding(Options{.remote = declared}, std::move(clock)) {}
 
-    explicit ReadBinding(Options options, Clock clock = [] { return std::chrono::steady_clock::now(); })
+    explicit ReadBinding(std::same_as<Options> auto options, Clock clock = [] { return std::chrono::steady_clock::now(); })
         : transport(options.remote), secureTransport(options.secure), now(std::move(clock)),
           ownPrefix(std::string(cookiePrefix) + automation::channel::nonce().substr(0, 8) + "-") {}
 
