@@ -633,9 +633,13 @@ void profilePermissions() {
         if (std::filesystem::status(directory).permissions() != owner_all)
             throw std::runtime_error("New profile directory is not private");
         std::filesystem::permissions(directory, all, std::filesystem::perm_options::replace);
-        gtk::profileDirectory(variable, ".unused");
+        // A second call in the same process leases another directory (one live process per profile): the restriction of an
+        // existing directory is the one of privateProfileDirectory.
+        gtk::privateProfileDirectory(directory);
         if (std::filesystem::status(directory).permissions() != owner_all)
             throw std::runtime_error("Existing profile directory was not restricted to 0700");
+        if (std::filesystem::status(gtk::profileDirectory(variable, ".unused")).permissions() != owner_all)
+            throw std::runtime_error("An instance profile directory is not private");
     }
 }
 

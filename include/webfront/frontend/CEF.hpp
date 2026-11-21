@@ -5,6 +5,7 @@
 #include "../ViewAssociation.hpp"
 #include "../tooling/Logger.hpp"
 #include "CEFPaths.hpp"
+#include "ProfileLease.hpp"
 #include "Capture.hpp"
 #include "DefaultBrowser.hpp"
 #include "Downloads.hpp"
@@ -146,8 +147,8 @@ inline void configurePlatformPaths(CefSettings& settings [[maybe_unused]]) {
     std::filesystem::path exe_dir        = exe_path.parent_path();
     std::filesystem::path framework_path = detail::macOSFrameworkPath(exe_path);
     std::filesystem::path resources_path = framework_path / kResourcesDir;
-    std::filesystem::path cache_path     = exe_dir / kCEFCacheDir;
-    std::filesystem::create_directories(cache_path);
+    // One live process per profile: Chromium would hand a second instance over to the first (ProfileLease.hpp).
+    std::filesystem::path cache_path     = frontend::leaseProfileDirectory(exe_dir / kCEFCacheDir / exe_path.filename());
 
     // Convert to absolute paths
     framework_path = std::filesystem::absolute(framework_path);
@@ -173,8 +174,8 @@ inline void configurePlatformPaths(CefSettings& settings [[maybe_unused]]) {
     std::filesystem::path resources_path = exe_dir;
     std::filesystem::path locales_path   = resources_path / kLocalesDir;
     std::filesystem::path exe_path       = current_exe;
-    std::filesystem::path cache_path     = exe_dir / kCEFCacheDir;
-    std::filesystem::create_directories(cache_path);
+    // One live process per profile: Chromium would hand a second instance over to the first (ProfileLease.hpp).
+    std::filesystem::path cache_path     = frontend::leaseProfileDirectory(exe_dir / kCEFCacheDir / exe_path.filename());
 
     // Convert to absolute paths
     resources_path = std::filesystem::absolute(resources_path);

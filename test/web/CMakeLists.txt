@@ -65,6 +65,16 @@ if(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_OPTION}
     set_tests_properties(FrontendLifecycleWatchdog PROPERTIES TIMEOUT 10 LABELS fast)
 endif()
 
+# Several applications with no configured port: all start, answer on the port they announce and stop (#617). The first one
+# takes 9002 when it is free, hence the lock.
+add_executable(multi_instance MultiInstance.cpp)
+target_link_libraries(multi_instance PRIVATE WebFront WebFront_warnings WebFront_options)
+webfront_setup_frontends_for_target(multi_instance)
+foreach(_count 2 48)
+    add_test(NAME MultiInstance-${_count} COMMAND multi_instance ${_count})
+    set_tests_properties(MultiInstance-${_count} PROPERTIES LABELS "web-integration" TIMEOUT 60 RESOURCE_LOCK webfront_port_9002)
+endforeach()
+
 # Keep the stage values in the HTML probes synchronized with the C++ enum, including in CEF-off builds.
 add_test(NAME FrontendLifecycleStageValues COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
     -P "${PROJECT_SOURCE_DIR}/test/cmake/CheckLifecycleStageValues.cmake")
