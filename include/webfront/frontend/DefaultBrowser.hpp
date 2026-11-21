@@ -170,10 +170,14 @@ struct LaunchContext {
 };
 
 /// Launch the page, then wait for Enter before returning control to the caller.
-inline void open(std::string_view address, std::string_view port, std::string_view file, const LaunchContext& context = {}) {
-    context.launcher(frontend::detail::applicationUrl(address, port, file));
+inline void openUrl(const std::string& url, const LaunchContext& context = {}) {
+    context.launcher(url);
     context.output << "Browser opened. Press Enter to close and stop the server..." << std::endl;
     context.input.get();
+}
+
+inline void open(std::string_view address, std::string_view port, std::string_view file, const LaunchContext& context = {}) {
+    openUrl(frontend::detail::applicationUrl(address, port, file), context);
 }
 
 inline void open(std::string_view port, std::string_view file, const LaunchContext& context = {}) {

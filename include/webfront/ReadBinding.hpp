@@ -209,6 +209,9 @@ public:
     explicit ReadBinding(RemoteFileTransport declared = RemoteFileTransport::refused, Clock clock = [] { return std::chrono::steady_clock::now(); })
         : transport(declared), now(std::move(clock)), ownPrefix(std::string(cookiePrefix) + automation::channel::nonce().substr(0, 8) + "-") {}
 
+    ReadBinding(bool secure, RemoteFileTransport declared, Clock clock = [] { return std::chrono::steady_clock::now(); })
+        : ReadBinding(declared, std::move(clock)) { secureTransport = secure; }
+
     /// Names the cookies after `name` (the port the server listens on) instead of a random word, so that a restart on the
     /// same port erases the cookies of its previous run. Call before the first `open`.
     void useNamespace(std::string_view name) {
@@ -280,7 +283,7 @@ public:
         const auto       connection = connections.find(key);
         if (stopped || connection == connections.end())
             throw ReadRefused("The connection is closed");
-        if (!connection->second.local && transport == RemoteFileTransport::refused)
+        if (!connection->second.local && !secureTransport && transport == RemoteFileTransport::refused)
             throw ReadRefused("This connection is not the view of an embedded frontend: declare WebFrontConfig::remoteFileTransport to read files");
         Grant record{.owner = key, .route = std::string(routeId), .secret = secret, .path = std::string(rest), .transferable = options.transferable, .expiry = {}, .context = std::make_shared<const std::any>(std::move(options.context))};
         if (options.lifetime.count() > 0) {
@@ -486,13 +489,13 @@ private:
         // Cookies named after a client the server forgot are erased; the ones of a known client are left alone.
         for (const auto& [name, value] : cookies)
             if (name.starts_with(ownPrefix) && !clients.contains(name.substr(ownPrefix.size())))
-                reply.headers.emplace_back("Set-Cookie", name + "=; Max-Age=0; Path=" + std::string(servicesPath) + "; HttpOnly; SameSite=Strict");
+                reply.headers.emplace_back("Set-Cookie", name + "=; Max-Age=0; Path=" + std::string(servicesPath) + "; HttpOnly; SameSite=Strict" + (secureCookies() ? "; Secure" : ""));
         auto id = cookieClient(cookies);
         if (id.empty()) {
             id = automation::channel::nonce().substr(0, 16);
             Client created{.secret = automation::channel::nonce(), .connections = {}};
             std::string cookie = ownPrefix + id + "=" + created.secret + "; Path=" + std::string(servicesPath) + "; HttpOnly; SameSite=Strict";
-            if (transport == RemoteFileTransport::httpsByDeployment)
+            if (secureCookies())
                 cookie += "; Secure";
             reply.headers.emplace_back("Set-Cookie", std::move(cookie));
             clients.emplace(id, std::move(created));
@@ -527,7 +530,7 @@ private:
         const auto connection = connections.find(grant.owner);
         if (connection == connections.end())
             return std::nullopt;
-        if (!connection->second.local && transport == RemoteFileTransport::refused)
+        if (!connection->second.local && !secureTransport && transport == RemoteFileTransport::refused)
             return std::nullopt;
         if (!grant.transferable) {
             // Any one of the presented cookies may designate the owner's client (concurrent exchanges leave several).
@@ -537,7 +540,10 @@ private:
         return grant.context;
     }
 
+    bool secureCookies() const { return secureTransport || transport == RemoteFileTransport::httpsByDeployment; }
+
     RemoteFileTransport                transport;
+    bool                               secureTransport = false;
     Clock                              now;
     std::string                        ownPrefix;
     std::mutex                         mutex;

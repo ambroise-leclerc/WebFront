@@ -559,6 +559,8 @@ struct WebFrontConfig {
     RemoteFileTransport   remoteFileTransport = RemoteFileTransport::refused;
     /// Allows the optional PtyPage component. Requires a literal loopback bind and a bridge policy limited to the application's Origin.
     bool                  allowPtyPages = false;
+    /// PEM identity for the optional HTTPS provider (webfront/tls/WebFront.hpp).
+    std::shared_ptr<tls::Credentials> tlsCredentials{};
 };
 
 namespace detail {
@@ -567,17 +569,17 @@ namespace detail {
 template <typename ServerType>
 ServerType makeHttpServer(const WebFrontConfig& config, std::string_view preferred = "9002") {
     if (!config.port.empty())
-        return ServerType(config.address, config.port, config.documentRoot, config.contentPolicy);
+        return ServerType(config.address, config.port, config.documentRoot, config.contentPolicy, {}, config.tlsCredentials);
     const auto chosen = environmentPort();
     if (chosen)
-        return ServerType(config.address, *chosen, config.documentRoot, config.contentPolicy);
+        return ServerType(config.address, *chosen, config.documentRoot, config.contentPolicy, {}, config.tlsCredentials);
     try {
-        return ServerType(config.address, std::string(preferred), config.documentRoot, config.contentPolicy);
+        return ServerType(config.address, std::string(preferred), config.documentRoot, config.contentPolicy, {}, config.tlsCredentials);
     } catch (const std::system_error& error) {
         if (error.code() != std::errc::address_in_use)
             throw;
     }
-    return ServerType(config.address, "0", config.documentRoot, config.contentPolicy);
+    return ServerType(config.address, "0", config.documentRoot, config.contentPolicy, {}, config.tlsCredentials);
 }
 }  // namespace detail
 
@@ -682,9 +684,9 @@ inline WebFrontConfig checkedPtyPageConfig(WebFrontConfig config) {
 }
 
 /// The read binding of a configuration, which is refused here, before anything is bound, if its declaration is false.
-inline std::shared_ptr<ReadBinding> makeReadBinding(const WebFrontConfig& config) {
+inline std::shared_ptr<ReadBinding> makeReadBinding(const WebFrontConfig& config, bool secure = false) {
     checkedAddress(config);
-    return std::make_shared<ReadBinding>(config.remoteFileTransport);
+    return std::make_shared<ReadBinding>(secure, config.remoteFileTransport);
 }
 }  // namespace detail
 
@@ -705,7 +707,7 @@ public:
 private:
     struct CheckedConfig {};
     BasicWF(WebFrontConfig config, CheckedConfig)
-        : readBinding(detail::makeReadBinding(config)),
+        : readBinding(detail::makeReadBinding(config, networking::secureTransport<Net>)),
           httpServer((detail::ensureFrontendInitialized<Frontend>(), detail::makeHttpServer<http::Server<Net, Filesystem, Policy>>(config))),
           httpAddress(config.address),
           httpPort(httpServer.port()),
@@ -1138,7 +1140,9 @@ public:
                 throw std::logic_error("webfront::BasicWF::show(): another application is already showing a window through this frontend");
         }
         if constexpr (requires(const ViewLaunch& launch) { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, launch); })
-            Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, ViewLaunch{viewSecret, detail::browserOrigin(httpAddress, httpPort)});
+            Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, ViewLaunch{viewSecret, detail::browserOrigin(httpAddress, httpPort, networking::secureTransport<Net>)});
+        else if constexpr (networking::secureTransport<Net>)
+            static_assert(!networking::secureTransport<Net>, "An HTTPS frontend must accept ViewLaunch in open()");
         else if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions); })
             Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions);
         else if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy); })
@@ -1228,7 +1232,9 @@ public:
                 detail::noteDevelopmentPath();
             startServerThread();
             try {
-                if constexpr (requires { Frontend::launch(httpAddress, httpPort, page, contentPolicy); })
+                if constexpr (networking::secureTransport<Net>)
+                    Frontend::launchHttps(httpAddress, httpPort, page);
+                else if constexpr (requires { Frontend::launch(httpAddress, httpPort, page, contentPolicy); })
                     Frontend::launch(httpAddress, httpPort, page, contentPolicy);
                 else
                     Frontend::launch(httpAddress, httpPort, page);

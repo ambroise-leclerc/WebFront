@@ -8,6 +8,10 @@
 #include <webfront/PtyPage.hpp>
 #include <webfront/WebFront.hpp>
 
+#ifdef WEBFRONT_TEST_TLS_FIXTURE
+#include <webfront/tls/Server.hpp>
+#endif
+
 #include "../driver/WfDriver.hpp"
 #include "../../examples/host-loop/HostLoopUI.hpp"
 #include "../../examples/life/react/LifeReact.hpp"
@@ -101,11 +105,17 @@ private:
 #ifndef WEBFRONT_TEST_FRONTEND
     #define WEBFRONT_TEST_FRONTEND webfront::frontend::CEFFrontend
 #endif
-using TestWF = BasicDeveloperApp<testdriver::DriverFrontend<WEBFRONT_TEST_FRONTEND>, testdriver::DriverFS, TestPages>;
+#ifdef WEBFRONT_TEST_TLS_FIXTURE
+using TestNet = webfront::tls::Server;
+#else
+using TestNet = NetProvider;
+#endif
+using TestWF = DeveloperAppWithNetwork<TestNet, testdriver::DriverFrontend<WEBFRONT_TEST_FRONTEND>, testdriver::DriverFS, TestPages>;
 
 class BrowserIntegrationTest {
 public:
     using Pages = TestPages;
+    using Application = TestWF;
 
     ~BrowserIntegrationTest() {
         joinHostLoop();
@@ -117,6 +127,11 @@ public:
     void configureApplication(WebFrontConfig& config) {
         config.contentPolicy.allowMissingOrigin = false;
         config.allowPtyPages = true;
+#ifdef WEBFRONT_TEST_TLS_FIXTURE
+        const filesystem::path fixture(WEBFRONT_TEST_TLS_FIXTURE);
+        config.tlsCredentials = make_shared<tls::Credentials>(fixture / "cert.pem", fixture / "key.pem");
+        config.remoteFileTransport = RemoteFileTransport::refused;
+#endif
     }
 
     /// Registers the callbacks of the specs before the page opens; the rejecting WebSocket server starts after the CEF
@@ -124,6 +139,9 @@ public:
     void configure(TestWF& app) {
         log::info("Starting automated Jasmine browser integration test");
         webFront = &app;
+        app.cppFunction("expectedProtocol", [] {
+            return networking::secureTransport<TestNet> ? "https:"s : "http:"s;
+        });
         rejectedWebSocket.emplace();
         registerCallbacks();
         registerPtyPage(app, {
@@ -743,7 +761,10 @@ private:
         webFront->cppFunction("senderCancellationObserved", [this] {
             return state.senderCancellationObserved.load();
         });
-        webFront->cppFunction("plusPageUrl", [this] { return frontend::detail::applicationUrl(webFront->port(), "a+b.html"); });
+        webFront->cppFunction("plusPageUrl", [this] {
+            const auto origin = webfront::detail::applicationOrigin("127.0.0.1", webFront->port(), networking::secureTransport<TestNet>);
+            return frontend::detail::applicationUrl("127.0.0.1", webFront->port(), "a+b.html", origin);
+        });
         webFront->cppFunction<string>("rejectedWebSocketUrl", [this] { return rejectedWebSocket->url(); });
         uiSubscription = webFront->subscribeUIStarted([this](TestWF::UI) {
             state.subscriberNotified = true;
@@ -892,6 +913,18 @@ int main(int argc, char** argv) {
     log::setLogLevel(log::Warn);
     const auto consoleSink = log::addSinks(log::clogSink);
 
+#ifdef WEBFRONT_TEST_TLS_FIXTURE
+    // CEF reads its switches from the process command line. Pass only wf options to the driver.
+    vector<char*> driverArgs{argv[0]};
+    for (int i = 1; i < argc; ++i) {
+        const string_view option(argv[i]);
+        if (!option.starts_with("--ignore-certificate-errors-spki-list=") && !option.starts_with("--user-data-dir=")
+            && option != "--disable-frame-rate-limit")
+            driverArgs.push_back(argv[i]);
+    }
+    argc = static_cast<int>(driverArgs.size());
+    argv = driverArgs.data();
+#endif
     BrowserIntegrationTest test;
     const int              result = webfront::testdriver::main<WEBFRONT_TEST_FRONTEND>(argc, argv, "webtest", test);
     log::removeSinks(consoleSink);

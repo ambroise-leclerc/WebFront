@@ -272,6 +272,14 @@ if(_browser_tests_available)
         ARGUMENTS --project "${_suite_project}" --registry-dir "${_registry}" --timeout ${_suite_timeout}
                   -- test --timeout ${_suite_timeout})
     webfront_use_own_profile(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_TEST_NAME} jasmine)
+    if(WEBFRONT_WEBTEST_FRONTEND STREQUAL "CEF" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        webfront_find_xvfb(_tls_xvfb)
+        set(_tls_fixture "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/tls")
+        file(STRINGS "${_tls_fixture}/spki.txt" _tls_spki LIMIT_COUNT 1)
+        webfront_add_test_program(webtest_tls JasmineTest.cpp WITH_WEBTEST
+            DEFINITIONS WEBFRONT_TEST_TLS_FIXTURE="${_tls_fixture}" WEBFRONT_TEST_MEDIA_FILE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/media/seek.webm")
+        target_link_libraries(webtest_tls PRIVATE WebFront_boing)
+    endif()
 else()
     webfront_add_browser_tests(webtest "${WEBFRONT_WEBTEST_FRONTEND}" "${CMAKE_CURRENT_SOURCE_DIR}" frontend_lifecycle SKIP_JASMINE)
 endif()
@@ -511,7 +519,20 @@ if(_browser_tests_available)
             webfront_add_web_step(ReactAdapterPages REQUIRES ReactAdapterBuilt PROVIDES ReactAdapterPages LOCK "${_suite_project}"
                 COMMAND ${CMAKE_COMMAND} -DBUILD=${_suite_project}/.webfront/developer/build -DOUTPUT=${_suite_project}/pages/react-example
                 -P ${PROJECT_SOURCE_DIR}/test/cmake/PrepareReactExample.cmake)
-            set_tests_properties(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_TEST_NAME} PROPERTIES FIXTURES_REQUIRED "WebSuiteInstalled;ReactAdapterPages")
+            set_property(TEST ${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_TEST_NAME} APPEND PROPERTY FIXTURES_REQUIRED WebSuiteInstalled ReactAdapterPages)
+            if(TARGET webtest_tls)
+                # Use synthetic begin frames so the canvas specs advance under Xvfb.
+                add_test(NAME WebFrontCEFHTTPSIntegration COMMAND "${_tls_xvfb}" -a $<TARGET_FILE:webtest_tls>
+                    --disable-frame-rate-limit
+                    "--user-data-dir=${CMAKE_CURRENT_BINARY_DIR}/webkitgtk-profiles/jasmine-tls/cef"
+                    "--ignore-certificate-errors-spki-list=${_tls_spki}"
+                    --environment "${WEBFRONT_BOOTSTRAP_ARCHIVE}" --integrity "${WEBFRONT_BOOTSTRAP_INTEGRITY}"
+                    --project "${_suite_project}" --registry-dir "${_registry}" --timeout ${_suite_timeout}
+                    -- test --timeout ${_suite_timeout})
+                webfront_set_browser_test_properties(WebFrontCEFHTTPSIntegration "${CMAKE_CURRENT_SOURCE_DIR}" "${WEBFRONT_FRONTEND_CEF_TEST_TIMEOUT}")
+                webfront_use_own_profile(WebFrontCEFHTTPSIntegration jasmine-tls)
+                set_property(TEST WebFrontCEFHTTPSIntegration APPEND PROPERTY FIXTURES_REQUIRED WebSuiteInstalled ReactAdapterPages)
+            endif()
         endif()
 
         # The environment builds itself (#315): the pinned bootstrap environment runs js/developer/scripts on a copy of the

@@ -74,13 +74,13 @@ inline std::string bootstrapConfig(const DeveloperBootstrapOptions& options) {
 }
 }  // namespace developer
 
-template <frontend::FrontendType Frontend = frontend::DefaultFrontend, fs::Provider... Extra>
-class BasicDeveloperApp : public BasicWF<NetProvider, fs::Multi<fs::DeveloperFS, Extra...>, http::DefaultBuffersPolicy, Frontend> {
-    using Base = BasicWF<NetProvider, fs::Multi<fs::DeveloperFS, Extra...>, http::DefaultBuffersPolicy, Frontend>;
+template <typename Network, frontend::FrontendType Frontend, fs::Provider... Extra>
+class DeveloperAppWithNetwork : public BasicWF<Network, fs::Multi<fs::DeveloperFS, Extra...>, http::DefaultBuffersPolicy, Frontend> {
+    using Base = BasicWF<Network, fs::Multi<fs::DeveloperFS, Extra...>, http::DefaultBuffersPolicy, Frontend>;
 
 public:
     /// An explicit project is required before enabling development file operations.
-    explicit BasicDeveloperApp(std::filesystem::path projectDirectory = {}, WebFrontConfig config = {})
+    explicit DeveloperAppWithNetwork(std::filesystem::path projectDirectory = {}, WebFrontConfig config = {})
         : Base(developer::projectConfig(std::move(config), projectDirectory)),
           project(projectDirectory.empty() ? std::filesystem::path{} : developer::canonicalDirectory(projectDirectory)) { }
 
@@ -137,6 +137,9 @@ private:
     std::filesystem::path             project;
     std::shared_ptr<developer::Store> store;
 };
+
+template <frontend::FrontendType Frontend = frontend::DefaultFrontend, fs::Provider... Extra>
+using BasicDeveloperApp = DeveloperAppWithNetwork<NetProvider, Frontend, Extra...>;
 
 #if defined(_WIN32) || defined(__APPLE__) || defined(__linux__)
 using NativeApp = BasicDeveloperApp<frontend::NativeWebViewFrontend>;

@@ -86,6 +86,15 @@ struct DefaultBrowserFrontend {
         browser::launchWithoutWaiting(detail::applicationUrl(address, port, file));
     }
 
+    static void launchHttps(std::string_view address, std::string_view port, std::string_view file) {
+        browser::launchWithoutWaiting(detail::applicationUrl(address, port, file, webfront::detail::applicationOrigin(address, port, true)));
+    }
+
+    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy&, const WindowOptions&,
+                     const ViewLaunch& launch) {
+        browser::openUrl(detail::applicationUrl(address, port, file, launch.origin));
+    }
+
     static void open(std::string_view port, std::string_view file) {
         browser::open(port, file);
     }
@@ -159,13 +168,17 @@ struct BrowserWithUILoopFrontend {
     static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy&, const WindowOptions&) {
         open(address, port, file);
     }
+    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy&, const WindowOptions&,
+                     const ViewLaunch& launch) {
+        loop(address, port, file, browser::launchWithoutWaiting, launch.origin);
+    }
     /// The loop with another launcher: the unit tests start no browser.
-    static void loop(std::string_view address, std::string_view port, std::string_view file, browser::Launcher launcher) {
+    static void loop(std::string_view address, std::string_view port, std::string_view file, browser::Launcher launcher, std::string_view origin = {}) {
         // The page opens from inside the loop, once it can run (the platform's loop acquired, nothing left to fail): a loop
         // that refuses to run never opens a page that nobody serves. A launcher that fails throws before the executor is
         // attached, so none is left attached.
         detail::uiloop::run(uiExecutorHostOf<BrowserWithUILoopFrontend>(), loopStop(), [&] {
-            launcher(detail::applicationUrl(address, port, file));
+            launcher(detail::applicationUrl(address, port, file, origin));
         });
     }
 
@@ -377,7 +390,7 @@ struct NativeOrBrowserFrontendFor {
         if (usesNativeWindow())
             detail::openWith<Native>(address, port, file, policy, window, launch);
         else
-            detail::openWith<Browser>(address, port, file, policy, window);
+            detail::openWith<Browser>(address, port, file, policy, window, ViewLaunch{"", launch.origin});
     }
 
 private:

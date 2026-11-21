@@ -44,6 +44,8 @@
 #include <utility>
 #include <vector>
 
+namespace webfront::tls { class Credentials; }
+
 namespace webfront::http {
 
 class Headers {
@@ -875,10 +877,11 @@ private:
 template<networking::Features Net, fs::Provider FS, BuffersPolicyType Policy = DefaultBuffersPolicy, typename Decode = gzip::Decoder>
 class Server {
 public:
-    Server(std::string_view address, std::string_view port, std::filesystem::path docRoot = ".", ContentPolicy policy = {}, Decode decode = {})
+    Server(std::string_view address, std::string_view port, std::filesystem::path docRoot = ".", ContentPolicy policy = {}, Decode decode = {},
+           std::shared_ptr<tls::Credentials> credentials = {})
         : acceptor(ioContext),
-          listeningPort(bind(address, port)),
-          requestHandler(docRoot, detail::BoundContentPolicy{detail::applicationOrigin(address, listeningPort), std::move(policy)}),
+          listeningPort((configureTransport(std::move(credentials)), bind(address, port))),
+          requestHandler(docRoot, detail::BoundContentPolicy{detail::applicationOrigin(address, listeningPort, networking::secureTransport<Net>), std::move(policy)}),
           decodeExecutor(gzip::decodeLimits<Policy>(), std::move(decode)) {
         spawn(acceptConnections());
     }
@@ -1002,6 +1005,23 @@ private:
     BlockingWorker                              routeWorker{4};
     BlockingWorker                              fileWorker{2};
     std::function<void(typename Net::Socket&&)> upgradeHandler;
+
+    void configureTransport(std::shared_ptr<tls::Credentials> credentials) {
+        if constexpr (networking::secureTransport<Net>) {
+            if (!credentials)
+                throw std::invalid_argument("WebFront: missing TLS credentials");
+            acceptor.credentials = std::move(credentials);
+        } else if (credentials) {
+            throw std::invalid_argument("WebFront: TLS credentials require the HTTPS provider");
+        }
+    }
+
+    networking::Task closeResponse(typename Net::Socket& socket) {
+        if constexpr (networking::secureTransport<Net>)
+            co_await Net::Close(socket);
+        else
+            socket.shutdown(Net::Socket::shutdown_both);
+    }
 
     std::string bind(std::string_view address, std::string_view requestedPort) {
         try {
@@ -1187,10 +1207,17 @@ private:
         if (head) response.content.clear();  // an error page keeps its Content-Length; HEAD never has a body
         co_await Net::Send(socket, response.toBuffers<Net>());
         if (streaming) co_await streamBody(routeWorker, socket, std::move(reply.body), reply.contentLength, match.route->prefix, match.route->secretPath);
-        socket.shutdown(Net::Socket::shutdown_both);
+        co_await closeResponse(socket);
     }
 
     networking::Task serve(typename Net::Socket socket) {
+        if constexpr (networking::secureTransport<Net>) {
+            try {
+                co_await Net::Handshake(socket, acceptor);
+            } catch (const std::system_error&) {
+                co_return;
+            }
+        }
         Request request;
         std::optional<typename gzip::DecodeExecutor<Decode>::Lease> lease;
         std::unique_ptr<fs::File> streamed;
@@ -1275,7 +1302,7 @@ private:
                 return read;
             }, streamLength, "File response");
         if (response.statusCode != Response::switchingProtocols || tasks.stopRequested())
-            socket.shutdown(Net::Socket::shutdown_both);  // a stopped server hands nothing over: its drain would never end
+            co_await closeResponse(socket);  // a stopped server hands nothing over: its drain would never end
         else if (upgradeHandler)
             upgradeHandler(std::move(socket));
     }

@@ -147,7 +147,7 @@ two-second handshake deadline); they do not consume the 32 authenticated request
 This prevents silent connections from exhausting that worker pool. A sustained local flood can
 still deny service through OS or CPU resource exhaustion. Attached clients wait up to 30 seconds
 for each response; `--request-timeout 1..3600` changes this independently of the operation and
-startup deadlines. CLI result polling backs off from 50 ms to one second. There is no TLS or remote/multi-user authentication promise.
+startup deadlines. CLI result polling backs off from 50 ms to one second. The automation channel remains local. The optional [TLS listener](TLS.md) serves the application UI and bridge.
 Listening, accepted and client sockets are non-inheritable; POSIX closes them on exec. The page
 capability uses the same OS cryptographic generator and comparison as the attachment channel.
 

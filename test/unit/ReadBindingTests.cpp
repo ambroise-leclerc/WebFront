@@ -73,8 +73,8 @@ struct Fixture {
     std::string                 lastRest;
     std::any                    lastContext;
 
-    explicit Fixture(RemoteFileTransport transport = RemoteFileTransport::refused)
-        : binding(transport, [this] { return time; }) {
+    explicit Fixture(RemoteFileTransport transport = RemoteFileTransport::refused, bool secure = false)
+        : binding(secure, transport, [this] { return time; }) {
         read = binding.readHandler("route-a", std::string(readPrefix), [this](const http::RouteRequest&, const ReadGrant& grant) {
             lastRest    = std::string(grant.rest);
             lastContext = grant.context;
@@ -364,6 +364,14 @@ const Scenario connectionNot{"A connection that is not the view of an embedded f
             });
         });
     }
+    given("a connection to the integrated TLS listener", [&] {
+        Fixture fixture{RemoteFileTransport::refused, true};
+        const auto cookies = headers(fixture.bind(1, false), "Set-Cookie");
+        then("its binding uses a Secure cookie and authorizes reads", [&] {
+            require(cookies.front().contains("; Secure"));
+            require(call(fixture.read, fixture.url(1), cookiePair(cookies.front())).status == http::Response::ok);
+        });
+    });
     given("a request through a local proxy that forges the forwarding headers, with the default declaration", [&] {
         Fixture fixture;
         fixture.bind(1, false);
