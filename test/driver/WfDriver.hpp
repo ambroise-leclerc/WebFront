@@ -69,16 +69,20 @@ struct DriverCEFFrontend : frontend::CEFFrontend {
         open("127.0.0.1", port, page, {});
     }
     static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy = {}) {
+        open(address, port, page, policy, {}, {});
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy,
+                     const WindowOptions& window, const ViewLaunch& launch) {
 #if defined(WEBFRONT_EMBED_CEF) && defined(__linux__)
         const auto* profile = std::getenv("WEBFRONT_TEST_CEF_PROFILE");
         if (!profile || !*profile)
             throw std::runtime_error("CEF test driver requires an isolated WEBFRONT_TEST_CEF_PROFILE");
-        cef::detail::openWindow(frontend::detail::applicationUrl(address, port, page),
-                                webfront::detail::BoundContentPolicy{webfront::detail::applicationOrigin(address, port), policy},
+        const auto url = frontend::detail::applicationUrl(address, port, page, launch.origin);
+        cef::detail::openWindow(url, webfront::detail::BoundContentPolicy{url, policy},
                                 nullptr,
-                                std::filesystem::path(profile));
+                                std::filesystem::path(profile), window, false, launch);
 #else
-        frontend::CEFFrontend::open(address, port, page, policy);
+        frontend::CEFFrontend::open(address, port, page, policy, window, launch);
 #endif
     }
 };
@@ -402,7 +406,13 @@ struct PlainSetup {
 /// what C++ observed).
 template <typename Frontend, typename Setup = PlainSetup>
 int run(const Options& options, Setup&& setup = {}) {
-    using App = webfront::BasicDeveloperApp<DriverFrontend<Frontend>, DriverFS, typename std::remove_reference_t<Setup>::Pages>;
+    using Configuration = std::remove_reference_t<Setup>;
+    using App = typename decltype([] {
+        if constexpr (requires { typename Configuration::Application; })
+            return std::type_identity<typename Configuration::Application>{};
+        else
+            return std::type_identity<webfront::BasicDeveloperApp<DriverFrontend<Frontend>, DriverFS, typename Configuration::Pages>>{};
+    }())::type;
     static_assert(frontend::CanRequestClose<DriverFrontend<Frontend>>, "The driver closes its window with requestClose()");
     if (!std::filesystem::is_regular_file(*options.environment)) {
         std::cerr << "Bootstrap environment archive not found: " << *options.environment << '\n';

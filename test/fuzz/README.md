@@ -1,6 +1,6 @@
 # Decoder fuzzing
 
-`WEBFRONT_ENABLE_FUZZING=ON` builds `fuzz_messages`, `fuzz_http`, `fuzz_websocket`, and `fuzz_gzip` with
+`WEBFRONT_ENABLE_FUZZING=ON` builds `fuzz_messages`, `fuzz_http`, `fuzz_websocket`, `fuzz_gzip`, and `fuzz_tls` with
 Clang/libFuzzer, ASan, UBSan, standard library hardening and pattern initialization.
 Linux with Clang/compiler-rt is validated in CI. Apple Clang does not include libFuzzer;
 on macOS install it externally (for example as part of LLVM/compiler-rt) and use compatible

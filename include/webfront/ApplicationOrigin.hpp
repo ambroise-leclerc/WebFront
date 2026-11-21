@@ -25,12 +25,12 @@ inline std::string applicationHost(std::string_view address) {
 }
 
 /** @brief Canonical application authority shared by the HTTP server and frontend URL builders. */
-inline std::string applicationOrigin(std::string_view address, std::string_view port) {
+inline std::string applicationOrigin(std::string_view address, std::string_view port, bool secure = false) {
     if (port.empty())
         throw std::invalid_argument("WebFront: empty frontend port");
     if (port.find_first_not_of("0123456789") != std::string_view::npos)
         throw std::invalid_argument("WebFront: invalid frontend port");
-    return "http://" + applicationHost(address) + ":" + std::string(port);
+    return (secure ? "https://" : "http://") + applicationHost(address) + ":" + std::string(port);
 }
 
 }  // namespace webfront::detail

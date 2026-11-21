@@ -281,23 +281,21 @@ lève).
 - **Exposition du jeton.** Chaque réponse de lecture porte `Cache-Control: no-store` et `Referrer-Policy: no-referrer` ;
   le jeton n'apparaît dans aucun journal HTTP ni diagnostic (chemin masqué). Le cookie de liaison porte `Secure`
   lorsque la page est servie en HTTPS.
-- **Transport : déclaré, jamais déduit.** WebFront ne fournit pas TLS (ADR-008) et ne peut pas savoir comment un client
-  l'atteint : un mandataire ou un tunnel présente une connexion de boucle locale pour un client distant, et des en-têtes
-  `Forwarded`/`X-Forwarded-*` peuvent être forgés. WebFront ne lit donc **ni l'adresse ni ces en-têtes** pour décider.
+- **Transport.** Lorsque WebFront termine TLS ([ADR-024](ADR-024-tls-integre.md)), le cookie de liaison
+  porte `Secure`. Le transport est authentifié côté serveur et l'autorisation de lecture distante reste déclarative.
   Une connexion est de transport local seulement si elle est **associée à la vue d'un frontend intégré** : son secret
   est remis à la vue par l'adaptateur, dans le processus, sans transiter par une ligne de commande, une URL ou un
   historique. Aucun secret transmis au navigateur système (fragment de l'URL ouverte) n'atteste le transport : la ligne
   de commande et l'historique peuvent le divulguer, et un acteur qui le présente le premier depuis un navigateur
   distant serait accepté ; l'échec ultérieur de l'association légitime ne protège pas cette première connexion. Pour
-  toute connexion non associée, dont celles du navigateur système, le transport est inconnu, quelle que soit son
-  adresse : lectures et écritures de fichiers y sont refusées, sauf déclaration explicite de l'application sur son
-  déploiement (`remoteFileTransport`) :
+  toute connexion non associée, dont celle du navigateur système, les lectures de fichiers sont refusées par défaut,
+  quel que soit le fournisseur. Une déclaration explicite de l'application (`remoteFileTransport`) est requise :
   - `refused` (défaut) ;
   - `loopbackAttested` : WebFront vérifie que le serveur n'écoute que sur la boucle locale ; l'intégrateur atteste
     qu'aucun mandataire ni tunnel ne l'expose et que la machine n'est pas partagée avec des utilisateurs non fiables.
     C'est la déclaration attendue d'une application de bureau qui utilise le navigateur système ;
   - `encryptedByDeployment` : le déploiement chiffre sous HTTP (VPN, tunnel) alors que le navigateur utilise `http://` : le cookie n'est pas `Secure`, qu'un navigateur refuserait ;
-  - `httpsByDeployment` : le navigateur atteint l'application en `https://` (mandataire inverse TLS) : le cookie est `Secure` ;
+  - `httpsByDeployment` : le navigateur atteint l'application en `https://` (TLS intégré ou mandataire inverse TLS) : le cookie est `Secure` ;
   - `plaintextAccepted` : réseau isolé de confiance.
 
   Hors la part vérifiée de `loopbackAttested`, ces déclarations sont des attestations de l'intégrateur, que WebFront ne
@@ -506,9 +504,10 @@ autorisations explicites, backend par connexion).
   peuvent lire les URL les unes des autres.
 - **Coût accepté :** un cookie de liaison par client, à qualifier dans chaque moteur ; les téléchargements gérés par
   l'adaptateur doivent le présenter.
-- **Risque :** WebFront ne chiffre pas et ne peut pas attester le transport ; `remoteFileTransport` repose sur la
-  déclaration de l'intégrateur. Une déclaration fausse expose jeton et contenu. Par défaut, toute connexion non
-  associée est refusée, y compris celle du navigateur système.
+- **Risque :** avec le fournisseur TCP, une attestation de transport fausse peut exposer le jeton et le contenu.
+  Avec le TLS intégré, le chiffrement du transport et le cookie `Secure` protègent l'échange. Le cookie lie un profil
+  de navigateur et l'application reste responsable de l'authentification du client. La valeur `refused` refuse par défaut
+  les lectures via toute connexion non associée.
 - **Coût accepté :** une application qui utilise le navigateur système doit déclarer `loopbackAttested` pour accéder aux
   fichiers de l'hôte ; sans cette déclaration, seuls les fichiers du client sont disponibles.
 - **Coût accepté :** les fichiers actifs ne s'affichent pas en ligne ; un aperçu HTML ou un SVG interactif exige une

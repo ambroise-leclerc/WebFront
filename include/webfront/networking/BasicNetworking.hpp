@@ -25,6 +25,13 @@ concept Features = requires {
     typename T::MutableBuffer;
 };
 
+template <typename Net>
+inline constexpr bool secureTransport = []() -> bool {
+    if constexpr (requires { static_cast<bool>(Net::secure); })
+        return static_cast<bool>(Net::secure);
+    return false;
+}();
+
 namespace buffers {
 class MutableBuffer {
 public:

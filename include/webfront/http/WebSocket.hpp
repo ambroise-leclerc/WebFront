@@ -6,6 +6,7 @@
 #include "Encodings.hpp"
 #include "../tooling/HexDump.hpp"
 #include "../networking/Tasks.hpp"
+#include "../networking/BasicNetworking.hpp"
 #include "../tooling/Logger.hpp"
 
 #include <array>
@@ -13,6 +14,7 @@
 #include <cstddef>
 #include <deque>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <memory>
@@ -365,6 +367,8 @@ public:
     void writeLatest(std::shared_ptr<const Frame<Net>> frame, std::string_view key, std::size_t maxPending) {
         {
             std::lock_guard lock(writeMutex);
+            if constexpr (networking::secureTransport<Net>)
+                if (!started) return;
             auto            group = latestGroups.find(key);
             if (group == latestGroups.end())
                 group = latestGroups.emplace(std::string(key), LatestGroup{}).first;
@@ -453,8 +457,15 @@ private:
             while (started) {
                 const auto received = co_await Net::Receive(socket, Net::Buffer(readBuffer));
                 if (received == 0) {
-                    failure = std::make_error_code(std::errc::connection_reset);  // the browser closed the connection
-                    break;
+                    if constexpr (networking::secureTransport<Net>) {
+                        // TLS reports an authenticated EOF. Let the current writer flush any pending close_notify.
+                        if (claimClose() && closeHandler)
+                            closeHandler(CloseEvent{});
+                        co_return;
+                    } else {
+                        failure = std::make_error_code(std::errc::connection_reset);
+                        break;
+                    }
                 }
                 processFrames(std::span(readBuffer.data(), received));
             }
@@ -500,9 +511,38 @@ private:
             log::debug("Unhandled frameType");
             return;
         }
-        if (closeHandler)
-            closeHandler(CloseEvent{});
-        stop();
+        if constexpr (networking::secureTransport<Net>) {
+            if (!claimClose())
+                return;
+            queueSecureClose(decoder.payload());
+            if (closeHandler)
+                closeHandler(CloseEvent{});
+        } else {
+            if (closeHandler)
+                closeHandler(CloseEvent{});
+            stop();
+        }
+    }
+
+    // Keep the first frame (which the writer may already be sending), then answer the peer.
+    // This keeps the close frame and the TLS alert behind the in-flight data on the same writer.
+    void queueSecureClose(std::span<const std::byte> payload) {
+        Frame<Net> reply(payload);
+        reply.setOpcode(Header::Opcode::connectionClose);
+        auto frame = std::move(reply).share();
+        bool writerNeeded;
+        {
+            std::lock_guard lock(writeMutex);
+            writerNeeded = writeQueue.empty();
+            if (!writerNeeded) {
+                writeQueue.erase(std::next(writeQueue.begin()), writeQueue.end());
+                writeQueue.front().group.reset();
+            }
+            latestGroups.clear();
+            writeQueue.push_back({std::move(frame)});
+        }
+        if (writerNeeded)
+            spawn(writeFrames(this->shared_from_this()));
     }
 
     // Control frames (close, ping, pong) carry at most 125 bytes (RFC 6455, 5.5), whatever maxMessageSize.
@@ -575,6 +615,8 @@ private:
     bool enqueue(std::shared_ptr<const Frame<Net>> frame, std::size_t maxPending) {
         {
             std::lock_guard lock(writeMutex);
+            if constexpr (networking::secureTransport<Net>)
+                if (!started) return false;
             if (writeQueue.size() >= maxPending) return false;
             writeQueue.push_back({std::move(frame)});
             if (writeQueue.size() > 1) return true;  // the running writeFrames() task will get to it
@@ -589,6 +631,14 @@ private:
             for (auto frame = nextFrame(false); frame;) {
                 // A stopped WebSocket cancels the write: it fails like a write on a closed connection.
                 co_await networking::ex::stopped_as_error(Net::Send(socket, frame->toBuffers()), std::make_error_code(std::errc::operation_canceled));
+                if constexpr (networking::secureTransport<Net>) {
+                    if (frame->opcode() == Header::Opcode::connectionClose) {
+                        nextFrame(true);
+                        if (writtenHandler) writtenHandler();
+                        co_await Net::Close(socket);
+                        co_return;
+                    }
+                }
                 frame = nextFrame(true);
                 if (writtenHandler) writtenHandler();
             }

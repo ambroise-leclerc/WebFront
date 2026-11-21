@@ -45,6 +45,10 @@ inline std::string applicationUrl(std::string_view address, std::string_view por
     return webfront::detail::applicationOrigin(address, port) + "/" + encodePageReference(page);
 }
 
+inline std::string applicationUrl(std::string_view address, std::string_view port, std::string_view page, std::string_view origin) {
+    return origin.starts_with("https://") ? std::string(origin) + "/" + encodePageReference(page) : applicationUrl(address, port, page);
+}
+
 inline std::string applicationUrl(std::string_view port, std::string_view page) {
     return applicationUrl("127.0.0.1", port, page);
 }

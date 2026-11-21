@@ -23,6 +23,7 @@
 #include <any>
 #include <cctype>
 #include <chrono>
+#include <concepts>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -206,8 +207,17 @@ public:
     /// The longest lifetime of a transferable grant, which is a bearer capability.
     static constexpr std::chrono::seconds maxTransferableLifetime{15 * 60};
 
+    struct Options {
+        RemoteFileTransport remote = RemoteFileTransport::refused;
+        bool secure = false;
+    };
+
     explicit ReadBinding(RemoteFileTransport declared = RemoteFileTransport::refused, Clock clock = [] { return std::chrono::steady_clock::now(); })
-        : transport(declared), now(std::move(clock)), ownPrefix(std::string(cookiePrefix) + automation::channel::nonce().substr(0, 8) + "-") {}
+        : ReadBinding(Options{.remote = declared}, std::move(clock)) {}
+
+    explicit ReadBinding(std::same_as<Options> auto options, Clock clock = [] { return std::chrono::steady_clock::now(); })
+        : transport(options.remote), secureTransport(options.secure), now(std::move(clock)),
+          ownPrefix(std::string(cookiePrefix) + automation::channel::nonce().substr(0, 8) + "-") {}
 
     /// Names the cookies after `name` (the port the server listens on) instead of a random word, so that a restart on the
     /// same port erases the cookies of its previous run. Call before the first `open`.
@@ -486,13 +496,13 @@ private:
         // Cookies named after a client the server forgot are erased; the ones of a known client are left alone.
         for (const auto& [name, value] : cookies)
             if (name.starts_with(ownPrefix) && !clients.contains(name.substr(ownPrefix.size())))
-                reply.headers.emplace_back("Set-Cookie", name + "=; Max-Age=0; Path=" + std::string(servicesPath) + "; HttpOnly; SameSite=Strict");
+                reply.headers.emplace_back("Set-Cookie", name + "=; Max-Age=0; Path=" + std::string(servicesPath) + "; HttpOnly; SameSite=Strict" + (secureCookies() ? "; Secure" : ""));
         auto id = cookieClient(cookies);
         if (id.empty()) {
             id = automation::channel::nonce().substr(0, 16);
             Client created{.secret = automation::channel::nonce(), .connections = {}};
             std::string cookie = ownPrefix + id + "=" + created.secret + "; Path=" + std::string(servicesPath) + "; HttpOnly; SameSite=Strict";
-            if (transport == RemoteFileTransport::httpsByDeployment)
+            if (secureCookies())
                 cookie += "; Secure";
             reply.headers.emplace_back("Set-Cookie", std::move(cookie));
             clients.emplace(id, std::move(created));
@@ -537,7 +547,10 @@ private:
         return grant.context;
     }
 
+    bool secureCookies() const { return secureTransport || transport == RemoteFileTransport::httpsByDeployment; }
+
     RemoteFileTransport                transport;
+    bool                               secureTransport = false;
     Clock                              now;
     std::string                        ownPrefix;
     std::mutex                         mutex;

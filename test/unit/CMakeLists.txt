@@ -24,6 +24,20 @@ if(WEBFRONT_TEST_DOXYGEN)
   set_tests_properties(DoxygenDocumentation PROPERTIES TIMEOUT 60)
 endif()
 
+# Optional Memcheck regression for compiler-introduced secret-dependent curve operations.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  find_program(WEBFRONT_TEST_VALGRIND valgrind)
+  find_path(WEBFRONT_TEST_VALGRIND_INCLUDE valgrind/memcheck.h)
+  if(WEBFRONT_TEST_VALGRIND AND WEBFRONT_TEST_VALGRIND_INCLUDE)
+    add_executable(tls_constant_time TlsConstantTime.cpp)
+    target_link_libraries(tls_constant_time PRIVATE WebFront WebFront_warnings)
+    target_include_directories(tls_constant_time SYSTEM PRIVATE "${WEBFRONT_TEST_VALGRIND_INCLUDE}")
+    target_compile_options(tls_constant_time PRIVATE -Os)
+    add_test(NAME TLSConstantTime COMMAND "${WEBFRONT_TEST_VALGRIND}" --tool=memcheck --error-exitcode=1 $<TARGET_FILE:tls_constant_time>)
+    set_tests_properties(TLSConstantTime PROPERTIES TIMEOUT 30)
+  endif()
+endif()
+
 # The framework's own test: the order of the sections, the failures, the filters and the exit codes.
 add_executable(bdd_self_test BddSelfTest.cpp)
 target_link_libraries(bdd_self_test PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options)
@@ -40,6 +54,7 @@ add_test(NAME BddDiscovery COMMAND ${CMAKE_COMMAND} -DPROBE=$<TARGET_FILE:bdd_di
 set_tests_properties(BddSelfTest BddDiscovery PROPERTIES TIMEOUT 30 LABELS fast)
 
 set(TESTS_LIST)
+list(APPEND TESTS_LIST TlsTests.cpp)
 list(APPEND TESTS_LIST WebKitGTKPolicyTests.cpp ContentPolicyTests.cpp HTTPServerTests.cpp HTTPEncodingTests.cpp GzipExecutorTests.cpp AcceptEncodingTests.cpp GzipTests.cpp ModuleHTTPServerTests.cpp HTTPRoutesTests.cpp HTTPRangeTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp MimeTypeTests.cpp)
 list(APPEND TESTS_LIST FormsTests.cpp ReactStoreTests.cpp DomDocumentTests.cpp DomBatchTests.cpp JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)
 list(APPEND TESTS_LIST FileSystemTests.cpp NativeFSTests.cpp DownloadsTests.cpp StorageTests.cpp NativeStorageTests.cpp PtyTests.cpp)

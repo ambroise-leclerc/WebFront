@@ -37,7 +37,9 @@ peut forger cet en-tête. `Host` ne donne pas une permission de bridge.
 Que les dérogations de développement demeurent explicites. DevTools et menus restent activés
 par défaut. Le navigateur système contrôle sa propre navigation ; le serveur y applique néanmoins
 le contrôle du bridge. Les capacités des moteurs diffèrent, notamment les popups WKWebView.
-WebFront cible du contenu de confiance, sans TLS ni authentification intégrés.
+WebFront cible du contenu de confiance. Le TLS optionnel ([ADR-024](ADR-024-tls-integre.md)) protège la confidentialité
+et l'intégrité du transport. Il authentifie le serveur auprès du navigateur. Le contrôle d'origine reste seul juge
+de l'accès au pont et WebFront ne fournit pas d'authentification des clients.
 
 Que le secret de lancement d'une vue intégrée (#453) ne s'ajoute pas au contrôle d'origine : il ne donne aucun accès
 au pont, que le contrôle d'`Origin` règle seul. Il ne sert qu'à savoir si la connexion vient de la vue de
