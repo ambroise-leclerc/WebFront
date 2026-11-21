@@ -396,6 +396,11 @@ private:
         return handshake(15, verify);
     }
 
+    // A braced list inside a co_await expression is the construct MSVC cannot compile here (C4737): keep it out of the coroutine.
+    static detail::Bytes finishedMessage(const detail::Secret<>& finishedKey, const detail::Digest& transcriptHash) {
+        return detail::handshake(20, detail::hmac(finishedKey, {transcriptHash}));
+    }
+
     // EncryptedExtensions to server Finished, then the application keys.
     static Task sendFlight(Socket& socket, detail::Sha256& transcript, const detail::Identity& identity, bool alpn, const detail::Secret<>& shared,
                            detail::Secret<>& client, detail::Digest& afterFinished) {
@@ -415,7 +420,7 @@ private:
         co_await writeHandshake(socket, transcript, identity.certificateMessage);
         co_await writeHandshake(socket, transcript, certificateVerifyMessage(identity, transcript.digest()));
         const Secret<> serverFinished{expandLabel(server, "finished")};
-        co_await writeHandshake(socket, transcript, handshake(20, hmac(serverFinished, {transcript.digest()})));
+        co_await writeHandshake(socket, transcript, finishedMessage(serverFinished, transcript.digest()));
 
         const Secret<> masterSalt{expandLabel(secret, "derived", empty)};
         const Secret<> master{hmac(masterSalt, {zeros})};
