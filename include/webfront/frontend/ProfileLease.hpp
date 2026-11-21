@@ -9,7 +9,10 @@
 /// instances that died without cleaning up are removed by the next lease. WebView2 shares one user data folder between
 /// processes by design, and a WKWebView data store is not persistent, so neither needs this.
 
+#include <cerrno>
 #include <filesystem>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <system_error>
@@ -30,13 +33,6 @@ namespace detail {
 class FileLock {
 public:
     FileLock() = default;
-    explicit FileLock(const std::filesystem::path& file) {
-        fd = ::open(file.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
-        if (fd >= 0 && ::flock(fd, LOCK_EX | LOCK_NB) != 0) {
-            ::close(fd);
-            fd = -1;
-        }
-    }
     FileLock(const FileLock&)            = delete;
     FileLock& operator=(const FileLock&) = delete;
     FileLock(FileLock&& other) noexcept : fd(std::exchange(other.fd, -1)) {}
@@ -44,13 +40,35 @@ public:
         if (fd >= 0)
             ::close(fd);
     }
-    [[nodiscard]] bool held() const noexcept { return fd >= 0; }
+
+    /// Takes the lock of `file`, creating it. Returns nullopt when another process holds it (contention, the only expected
+    /// refusal) and throws std::system_error for any other failure (no descriptor left, a file that cannot be created...).
+    [[nodiscard]] static std::optional<FileLock> tryLock(const std::filesystem::path& file) { return lock(file, LOCK_EX | LOCK_NB); }
+
+    /// Waits for the lock of `file`; used for the short critical section that coordinates the leases of a directory.
+    [[nodiscard]] static FileLock wait(const std::filesystem::path& file) { return std::move(*lock(file, LOCK_EX)); }
 
 private:
+    static std::optional<FileLock> lock(const std::filesystem::path& file, int operation) {
+        FileLock result;
+        result.fd = ::open(file.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+        if (result.fd < 0)
+            throw std::system_error(errno, std::generic_category(), "profile lock " + file.string());
+        while (::flock(result.fd, operation) != 0) {
+            if (errno == EINTR)
+                continue;
+            if (errno == EWOULDBLOCK)
+                return std::nullopt;
+            throw std::system_error(errno, std::generic_category(), "profile lock " + file.string());
+        }
+        return result;
+    }
+
     int fd = -1;
 };
 
-inline constexpr const char* leaseFile = ".webfront-lock";
+inline constexpr const char* leaseFile    = ".webfront-lock";
+inline constexpr const char* registryFile = ".registry";
 
 /// What a process keeps of its lease until it exits: the lock, and the directory to remove when it is not the shared one.
 struct LeaseHolder {
@@ -71,31 +89,39 @@ inline LeaseHolder& leaseHolder() {
 
 }  // namespace detail
 
+/// The directory to use as a profile: `directory` for the first live process, a directory of its own for the others.
+/// Throws std::system_error when a lock cannot be taken for a reason other than another process holding it.
 inline std::filesystem::path leaseProfileDirectory(const std::filesystem::path& directory) {
     std::filesystem::create_directories(directory);
     auto& holder = detail::leaseHolder();
-    if (detail::FileLock shared{directory / detail::leaseFile}; shared.held()) {
-        holder.leases.emplace_back(std::move(shared), std::filesystem::path{});
+    if (auto shared = detail::FileLock::tryLock(directory / detail::leaseFile)) {
+        holder.leases.emplace_back(std::move(*shared), std::filesystem::path{});
         return directory;
     }
-    const auto           instances = std::filesystem::path(directory.string() + ".instances");
-    std::error_code      error;
-    std::filesystem::create_directories(instances, error);
-    // The directories whose owner is gone: nobody holds their lock any more.
-    for (const auto& entry : std::filesystem::directory_iterator(instances, error)) {
-        if (!entry.is_directory(error))
+    const auto instances = std::filesystem::path(directory.string() + ".instances");
+    std::filesystem::create_directories(instances);
+    // Creating an instance directory and locking it, and removing the abandoned ones, never interleave between processes: a
+    // directory that exists without its lock held yet is a starting process, not an abandoned one. The registry lock is held
+    // only for these steps, and a process that dies releases it.
+    const auto registry = detail::FileLock::wait(instances / detail::registryFile);
+    for (const auto& entry : std::filesystem::directory_iterator(instances)) {
+        if (!entry.is_directory())
             continue;
-        if (detail::FileLock stale{entry.path() / detail::leaseFile}; stale.held())
-            std::filesystem::remove_all(entry.path(), error);
+        if (auto stale = detail::FileLock::tryLock(entry.path() / detail::leaseFile)) {
+            std::error_code ignored;
+            std::filesystem::remove_all(entry.path(), ignored);
+        }
     }
-    for (unsigned attempt = 0;; ++attempt) {
+    // Another process with the same number (another PID namespace over the same directory) makes a name busy: the next one.
+    for (unsigned attempt = 0; attempt < 100000; ++attempt) {
         const auto candidate = instances / (std::to_string(::getpid()) + "-" + std::to_string(attempt));
         std::filesystem::create_directories(candidate);
-        if (detail::FileLock own{candidate / detail::leaseFile}; own.held()) {
-            holder.leases.emplace_back(std::move(own), candidate);
+        if (auto own = detail::FileLock::tryLock(candidate / detail::leaseFile)) {
+            holder.leases.emplace_back(std::move(*own), candidate);
             return candidate;
         }
     }
+    throw std::runtime_error("no profile directory is free in " + instances.string());
 }
 #else
 inline std::filesystem::path leaseProfileDirectory(const std::filesystem::path& directory) {
