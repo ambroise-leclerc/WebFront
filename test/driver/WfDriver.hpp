@@ -72,7 +72,7 @@ struct DriverCEFFrontend : frontend::CEFFrontend {
         open(address, port, page, policy, {}, {});
     }
     static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy,
-                     const WindowOptions&, const ViewLaunch& launch) {
+                     const WindowOptions& window, const ViewLaunch& launch) {
 #if defined(WEBFRONT_EMBED_CEF) && defined(__linux__)
         const auto* profile = std::getenv("WEBFRONT_TEST_CEF_PROFILE");
         if (!profile || !*profile)
@@ -80,10 +80,9 @@ struct DriverCEFFrontend : frontend::CEFFrontend {
         const auto url = frontend::detail::applicationUrl(address, port, page, launch.origin);
         cef::detail::openWindow(url, webfront::detail::BoundContentPolicy{url, policy},
                                 nullptr,
-                                std::filesystem::path(profile));
+                                std::filesystem::path(profile), window, false, launch);
 #else
-        (void)launch;
-        frontend::CEFFrontend::open(address, port, page, policy);
+        frontend::CEFFrontend::open(address, port, page, policy, window, launch);
 #endif
     }
 };

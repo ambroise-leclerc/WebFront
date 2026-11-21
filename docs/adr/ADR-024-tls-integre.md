@@ -1,13 +1,18 @@
 # ADR-024 — TLS intégré
 
-**Statut** : proposé ([#631](https://github.com/ambroise-leclerc/WebFront/issues/631)).
+## Versions
+
+| Version | Date | Statut | Auteur | Changement | Référence |
+| --- | --- | --- | --- | --- | --- |
+| 1.0 | 2026-11-21 | Proposée | Ambroise Leclerc | Fournisseur TLS 1.3 optionnel et règles de qualification. | [PR #635](https://github.com/ambroise-leclerc/WebFront/pull/635) |
 
 Un fournisseur réseau optionnel termine TLS 1.3 avant de livrer le flux au serveur HTTP et au pont WebSocket.
 Le cœur HTTP garde son fournisseur TCP. Un port TLS sert exclusivement HTTPS et WSS avec HTTP/1.1.
 Le profil initial utilise X25519 (avec HelloRetryRequest), ChaCha20-Poly1305, SHA-256 et ECDSA P-256
 avec nonce RFC 6979. AES-GCM reste conditionné à une implémentation à temps constant raisonnable.
 La reprise par tickets ajouterait une politique de rotation, une durée de vie et un second chemin de handshake.
-Le premier profil fait un handshake complet à chaque connexion.
+Le premier profil fait un handshake complet à chaque connexion. Le délai est de dix secondes. Le serveur
+écarte jusqu'à 64 Kio de données anticipées refusées pendant la négociation.
 
 L'application fournit une chaîne PEM et une clé P-256 via la configuration. Le rechargement explicite
 publie une paire complète après validation. Les handshakes en cours conservent leur instantané.

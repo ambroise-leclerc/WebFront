@@ -3,6 +3,7 @@
 #include "../networking/TCPNetworkingStdnet.hpp"
 #include "Credentials.hpp"
 #include "detail/Protocol.hpp"
+#include <exec/when_any.hpp>
 
 namespace webfront::tls {
 /// TCP-style stream provider. Handshake, reads and writes run on the same server I/O context.
@@ -20,7 +21,8 @@ class Server : public networking::TCPStdnet {
         detail::Traffic       read, write;
         detail::Secret<>      readSecret{}, writeSecret{};
         Bytes                 input;
-        std::size_t           offset = 0;
+        std::size_t           earlyBytes = 0;
+        std::size_t           offset     = 0;
         detail::RecordControl control;
         bool                  compat         = false;
         bool                  writeEncrypted = false;
@@ -49,21 +51,13 @@ public:
         });
     }
 
-    // The HTTP server invokes this in its per-connection task, so an incomplete handshake never holds up accept().
+    // Both senders complete on the I/O context. The winner cancels and joins the other.
     static Task Handshake(Socket& socket, const Acceptor& acceptor) {
-        Byte failure = 0;
-        try {
-            socket.connection = std::make_unique<Connection>();
-            co_await negotiate(socket, acceptor.credentials->snapshot());
-            co_return;
-        } catch (const detail::Error& error) {
-            failure = error.alert;
-        }
-        try {
-            const std::array<Byte, 2> alert{2, failure};
-            co_await writeRecord(socket, detail::alert, alert);
-        } catch (const std::system_error&) {}
-        throw std::system_error(std::make_error_code(std::errc::protocol_error));
+        using namespace std::chrono_literals;
+        auto deadline = networking::ex::then(TCP::ResumeAfter(socket, 10s), [] {
+            throw std::system_error(std::make_error_code(std::errc::timed_out));
+        });
+        co_await exec::when_any(runHandshake(socket, acceptor), std::move(deadline));
     }
 
     static Result<std::size_t> Receive(Socket& socket, MutableBuffer target) {
@@ -89,6 +83,9 @@ public:
             }
         } catch (const Error& error) {
             failure = error.alert;
+        } catch (const std::system_error&) {
+            state.control.transportLost();
+            throw;
         }
         if (state.control.beginClose(failure))
             co_await finishClose(socket);
@@ -147,6 +144,22 @@ public:
     }
 
 private:
+    static Task runHandshake(Socket& socket, const Acceptor& acceptor) {
+        Byte failure = 0;
+        try {
+            socket.connection = std::make_unique<Connection>();
+            co_await negotiate(socket, acceptor.credentials->snapshot());
+            co_return;
+        } catch (const detail::Error& error) {
+            failure = error.alert;
+        }
+        try {
+            const std::array<Byte, 2> alert{2, failure};
+            co_await writeRecord(socket, detail::alert, alert);
+        } catch (const std::system_error&) {}
+        throw std::system_error(std::make_error_code(std::errc::protocol_error));
+    }
+
     static Task finishClose(Socket& socket) {
         const auto failure = socket.connection->control.takeAlert();
         if (!failure)
@@ -176,7 +189,7 @@ private:
         for (;;) {
             std::array<Byte, 5> header;
             co_await readExact(socket, header);
-            const auto [type, size] = parseRecord(header, encrypted, initial);
+            const auto [type, size] = parseRecord(header, encrypted || state.earlyBytes != 0, initial);
             if (size > state.input.capacity())
                 state.input.reserve(size);
             state.input.resize(size);
@@ -185,8 +198,25 @@ private:
                 state.compat = true;
                 continue;
             }
-            if (encrypted && type == applicationData)
-                co_return state.read.open(header, state.input);
+            if (type == applicationData) {
+                if (encrypted) {
+                    try {
+                        const auto inner = state.read.open(header, state.input);
+                        state.earlyBytes = 0;
+                        co_return inner;
+                    } catch (const Error& error) {
+                        if (error.alert != 20 || state.earlyBytes == 0)
+                            throw;
+                    }
+                }
+                if (state.earlyBytes != 0) {
+                    const auto wireSize = size + header.size();
+                    if (wireSize > state.earlyBytes)
+                        throw Error("too much rejected early data", 10);
+                    state.earlyBytes -= wireSize;
+                    continue;
+                }
+            }
             if (!encrypted && (type == handshakeRecord || type == alert))
                 co_return type;
             throw Error("unexpected record type", 10);
@@ -215,7 +245,7 @@ private:
         auto& state = *socket.connection;
         if (state.control.closed)
             throw std::system_error(std::make_error_code(std::errc::connection_reset));
-        if (std::exchange(state.control.updateRequested, false)) {
+        while (std::exchange(state.control.updateRequested, false)) {
             constexpr std::array<Byte, 5> update{24, 0, 0, 1, 0};
             co_await writeRecord(socket, handshakeRecord, update);
             state.writeSecret = {expandLabel(state.writeSecret, "traffic upd")};
@@ -261,11 +291,13 @@ private:
 
     static Task negotiate(Socket& socket, std::shared_ptr<const detail::Identity> identity) {
         using namespace detail;
-        auto&                         state = *socket.connection;
-        Sha256                        transcript;
-        auto                          message = co_await readHandshake(socket, 65536, false, true);
-        auto                          hello   = parseHello(message, false);
-        bool                          retry   = hello.share.empty();
+        auto&  state = *socket.connection;
+        Sha256 transcript;
+        auto   message = co_await readHandshake(socket, 65536, false, true);
+        auto   hello   = parseHello(message, false);
+        if (hello.earlyData)
+            state.earlyBytes = 64 * 1024;
+        bool                          retry = hello.share.empty();
         constexpr std::array<Byte, 1> ccs{1};
         if (retry) {
             const auto first  = hello.invariant;
@@ -274,8 +306,9 @@ private:
             co_await writeHandshake(socket, transcript, serverHello(hello.session, retryRandom, {}));
             if (compat)
                 co_await writeRecord(socket, changeCipherSpec, ccs);
-            message = co_await readHandshake(socket, 65536, false);
-            hello   = parseHello(message, true);
+            message          = co_await readHandshake(socket, 65536, false);
+            state.earlyBytes = 0;
+            hello            = parseHello(message, true);
             if (hello.invariant != first || hello.share.empty() || hello.shareCount != 1)
                 throw Error("invalid second ClientHello", 47);
         }

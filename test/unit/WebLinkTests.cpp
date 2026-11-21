@@ -557,3 +557,51 @@ const Scenario webLinkNever{"WebLink never logs the payload of an incoming messa
     require(logged.find("QQQQ") == string::npos);
     require(logged.find("51 51") == string::npos);
 }};
+
+namespace {
+struct SecureCloseTestNetwork : InjectableNetworking {
+    static constexpr bool secure = true;
+    static inline unsigned alerts = 0;
+
+    static networking::Task Close(Socket&) {
+        ++alerts;
+        co_return;
+    }
+};
+}
+
+const Scenario securePeerCloseResumesWriters{"A secure peer Close releases writers during backpressure", [] {
+    InjectableSocket::reset();
+    SecureCloseTestNetwork::alerts = 0;
+    InlineTaskScope scope;
+    using Link = WebLink<SecureCloseTestNetwork>;
+    vector<WebLinkEvent::Code> events;
+    auto link = make_shared<Link>(InjectableSocket{}, WebLinkId{54}, [&](WebLinkEvent event) { events.push_back(event.code); }, scope);
+    InjectableSocket::deferWrites();
+    link->sendError(1, "in flight");
+    link->sendError(2, "queued before Close");
+    bool waiting = false;
+    networking::Spawn(scope, networking::ex::inline_scheduler{}, waitWrites(webfront::detail::WritesAtMost<Link>{link, 0}, waiting));
+    given("a blocked writer and a peer Close frame", [&] {
+        require(!waiting);
+        InjectableSocket::receive(std::array{byte{0x88}, byte{0x80}, byte{1}, byte{2}, byte{3}, byte{4}});
+        require(waiting);
+        require(events == vector{WebLinkEvent::Code::closed});
+        link->sendError(3, "queued after Close");
+        bool last = false;
+        networking::Spawn(scope, networking::ex::inline_scheduler{}, waitWrites(webfront::detail::WritesAtMost<Link>{link, 0}, last));
+        then("the terminal frame drains the queue and wakes a late waiter", [&] {
+            require(!last);
+            require(SecureCloseTestNetwork::alerts == 0);
+            while (InjectableSocket::completeDeferredWrites() != 0) {}
+            require(last);
+            require(link->pendingWrites() == 0);
+            require(SecureCloseTestNetwork::alerts == 1);
+            require(InjectableSocket::wrote("in flight"));
+            require(!InjectableSocket::wrote("queued before Close"));
+            require(!InjectableSocket::wrote("queued after Close"));
+        });
+    });
+    InjectableSocket::deferWrites(false);
+    InjectableSocket::reset();
+}};

@@ -688,8 +688,8 @@ inline std::shared_ptr<ReadBinding> makeReadBinding(const WebFrontConfig& config
     checkedAddress(config);
     if (secure && !isLoopbackName(config.address))
         std::cerr << "WebFront: TLS listener outside loopback. Handshake cryptography runs on the I/O thread, "
-                     "and incomplete handshakes have no deadline. See docs/TLS.md.\n";
-    return std::make_shared<ReadBinding>(secure, config.remoteFileTransport);
+                     "and bursts can delay established connections. See docs/TLS.md.\n";
+    return std::make_shared<ReadBinding>(ReadBinding::Options{.remote = config.remoteFileTransport, .secure = secure});
 }
 }  // namespace detail
 
@@ -1142,10 +1142,13 @@ public:
             if (!showing.owns)
                 throw std::logic_error("webfront::BasicWF::show(): another application is already showing a window through this frontend");
         }
-        if constexpr (requires(const ViewLaunch& launch) { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, launch); })
+        constexpr bool acceptsViewLaunch = requires(const ViewLaunch& launch) {
+            Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, launch);
+        };
+        if constexpr (networking::secureTransport<Net>)
+            static_assert(acceptsViewLaunch, "An HTTPS frontend must accept ViewLaunch in open()");
+        if constexpr (acceptsViewLaunch)
             Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, ViewLaunch{viewSecret, detail::browserOrigin(httpAddress, httpPort, networking::secureTransport<Net>)});
-        else if constexpr (networking::secureTransport<Net>)
-            static_assert(!networking::secureTransport<Net>, "An HTTPS frontend must accept ViewLaunch in open()");
         else if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions); })
             Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions);
         else if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy); })

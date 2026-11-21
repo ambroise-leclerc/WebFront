@@ -8,7 +8,6 @@
 
 namespace webfront::tls {
 namespace detail {
-inline constexpr std::size_t         maxCredentialBytes = 256 * 1024;
 inline constexpr std::array<Byte, 7> ecPublicKey{0x2a, 0x86, 0x48, 0xce, 0x3d, 2, 1};
 inline constexpr std::array<Byte, 8> prime256v1{0x2a, 0x86, 0x48, 0xce, 0x3d, 3, 1, 7};
 
@@ -19,16 +18,38 @@ inline void ecAlgorithm(Reader oid) {
     oid.end();
 }
 
-inline View certificateKey(View certificate) {
+inline View certificatePublicKey(View certificate) {
     Reader input{certificate};
     Reader outer{input.der(0x30)};
     input.end();
     Reader body{outer.der(0x30)};
+    Reader signatureAlgorithm{outer.der(0x30)};
+    if (signatureAlgorithm.der(6).empty())
+        throw Error("empty certificate signature algorithm");
+    const auto signature = outer.der(3);
+    if (signature.size() < 2 || signature.front() != 0)
+        throw Error("invalid certificate signature");
+    outer.end();
     if (!body.empty() && body.remaining.front() == 0xa0)
         body.der(0xa0);
     for (const Byte type : std::array<Byte, 5>{2, 0x30, 0x30, 0x30, 0x30})
         body.der(type);  // serial, signature, issuer, validity, subject
-    Reader publicKey{body.der(0x30)};
+    const auto publicKey = body.der(0x30);
+    Reader     components{publicKey};
+    Reader     algorithm{components.der(0x30)};
+    const auto point = components.der(3);
+    components.end();
+    if (algorithm.der(6).empty() || point.size() < 2 || point.front() != 0)
+        throw Error("invalid certificate public key");
+    for (const Byte tag : std::array<Byte, 3>{0x81, 0x82, 0xa3})
+        if (!body.empty() && body.remaining.front() == tag)
+            body.der(tag);
+    body.end();
+    return publicKey;
+}
+
+inline View certificateKey(View publicKeyInfo) {
+    Reader publicKey{publicKeyInfo};
     ecAlgorithm({publicKey.der(0x30)});
     const auto point = publicKey.der(3);
     publicKey.end();
@@ -88,6 +109,14 @@ inline Bytes pem(std::string_view& source, std::string_view label) {
         throw Error("unterminated PEM block");
     constexpr std::string_view alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     Bytes                      decoded;
+    struct WipeOnFailure {
+        Bytes& bytes;
+        bool   active = true;
+        ~WipeOnFailure() {
+            if (active)
+                wipe(bytes.data(), bytes.size());
+        }
+    } erase{decoded};
     decoded.reserve(stop / 4 * 3 + 3);
     unsigned bits = 0, count = 0, padding = 0;
     for (const auto character : source.substr(0, stop)) {
@@ -110,6 +139,7 @@ inline Bytes pem(std::string_view& source, std::string_view label) {
     if (decoded.empty() || count != 2 * padding || padding > 2 || (bits & ((1u << count) - 1)) != 0)
         throw Error("invalid PEM padding");
     source.remove_prefix(stop + end.size());
+    erase.active = false;
     return decoded;
 }
 
@@ -159,15 +189,20 @@ inline std::shared_ptr<const Identity> loadIdentity(const std::filesystem::path&
     std::ranges::copy(encode(x), point.begin());
     std::ranges::copy(encode(y), point.begin() + 32);
     auto leaf = pem(chainPem, "CERTIFICATE");
-    if (!std::ranges::equal(certificateKey(leaf), point))
+    if (!std::ranges::equal(certificateKey(certificatePublicKey(leaf)), point))
         throw Error("certificate and private key do not match");
 
-    Bytes entries;
-    for (auto certificate = std::move(leaf); !certificate.empty(); certificate = pem(chainPem, "CERTIFICATE")) {
+    Bytes      entries;
+    const auto add = [&](View certificate) {
         vector(entries, certificate, 3);
         put(entries, 0, 2);  // CertificateEntry extensions
+    };
+    add(leaf);
+    for (auto certificate = pem(chainPem, "CERTIFICATE"); !certificate.empty(); certificate = pem(chainPem, "CERTIFICATE")) {
+        certificatePublicKey(certificate);
+        add(certificate);
     }
-    Bytes body{0};           // empty certificate_request_context
+    Bytes body{0};  // empty certificate_request_context
     vector(body, entries, 3);
     identity->certificateMessage = handshake(11, body);
     return identity;

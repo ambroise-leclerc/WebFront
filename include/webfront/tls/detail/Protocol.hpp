@@ -30,6 +30,7 @@ struct ClientHello {
     Digest   invariant;
     unsigned shareCount = 0;
     bool     alpn       = false;
+    bool     earlyData  = false;
 };
 
 inline ClientHello parseHello(View message, bool retry) {
@@ -54,7 +55,7 @@ inline ClientHello parseHello(View message, bool retry) {
     invariant.update(original.first(original.size() - hello.remaining.size()));
     Reader extensions{hello.vector(2)};
     hello.end();
-    bool                      supportsTls13 = false, signature = false, supportedGroup = false, earlyData = false;
+    bool                      supportsTls13 = false, signature = false, supportedGroup = false;
     std::array<unsigned, 128> seen;
     std::size_t               extensionCount    = 0;
     const auto                containsExtension = [&](unsigned kind) {
@@ -86,7 +87,11 @@ inline ClientHello parseHello(View message, bool retry) {
                 shares = extension.vector(2);
                 break;
             case 42:
-                earlyData = true;
+                result.earlyData = true;
+                break;
+            case 45:
+                if (extension.vector(1).empty())
+                    throw Error("empty psk_key_exchange_modes", 50);
                 break;
             case 44:
                 throw Error("unexpected ClientHello cookie", 47);
@@ -111,7 +116,7 @@ inline ClientHello parseHello(View message, bool retry) {
             default:
                 break;
         }
-        if (kind == 43 || kind == 13 || kind == 10 || kind == 51 || kind == 42 || kind == 16)
+        if (kind == 43 || kind == 13 || kind == 10 || kind == 51 || kind == 42 || kind == 45 || kind == 16)
             extension.end();
         if (kind != 51 && kind != 21 && kind != 41 && kind != 42)
             invariant.update(encoded.first(encoded.size() - extensions.remaining.size()));
@@ -120,7 +125,10 @@ inline ClientHello parseHello(View message, bool retry) {
         throw Error("TLS 1.3 required", 70);
     if (!offeredSuite || !signature || !supportedGroup)
         throw Error("no common cipher suite, signature or group", 40);
-    if (earlyData && (retry || !containsExtension(41)))
+    const bool hasPsk = containsExtension(41);
+    if (hasPsk && !containsExtension(45))
+        throw Error("PSK offer missing psk_key_exchange_modes", 109);
+    if (result.earlyData && (retry || !hasPsk))
         throw Error("unexpected early_data", 47);
     Reader      keys{shares};
     std::size_t groupOffset = 0;
@@ -201,8 +209,9 @@ struct Traffic {
         record[3]             = static_cast<Byte>((size + 17) >> 8);
         record[4]             = static_cast<Byte>(size + 17);
         record[5 + size]      = type;
-        const auto nonce      = nextNonce();
-        auto       payload    = std::span(record).subspan(5, size + 1);
+        const auto nonce      = recordNonce();
+        ++sequence;
+        auto payload = std::span(record).subspan(5, size + 1);
         chachaXor(key, nonce, payload);
         std::ranges::copy(polyTag(key, nonce, View(record).first(5), payload), record.data() + 6 + size);
     }
@@ -210,12 +219,15 @@ struct Traffic {
     Byte open(View header, Bytes& payload) {
         if (payload.size() < 17)
             throw Error("short ciphertext");
-        const auto nonce       = nextNonce();
+        const auto nonce       = recordNonce();
         const auto size        = payload.size() - 16;
         const auto ciphertext  = std::span(payload).first(size);
         const auto expectedTag = polyTag(key, nonce, header, ciphertext);
         if (!equalSecret(expectedTag, View(payload).subspan(size)))
             throw Error("invalid authentication tag", 20);
+        ++sequence;
+        if (size > maxPlaintext + 1)
+            throw Error("oversized inner plaintext", 22);
         chachaXor(key, nonce, ciphertext);
         payload.resize(size);
         while (!payload.empty() && payload.back() == 0)
@@ -224,19 +236,16 @@ struct Traffic {
             throw Error("missing inner record type", 10);
         const auto type = payload.back();
         payload.pop_back();
-        if (payload.size() > maxPlaintext)
-            throw Error("oversized inner plaintext", 22);
         return type;
     }
 
 private:
-    Nonce nextNonce() {
+    Nonce recordNonce() const {
         if (sequence == UINT64_MAX)
             throw Error("record sequence exhausted", 80);
         auto nonce = iv;
         for (unsigned i = 0; i != 8; ++i)
             nonce[11 - i] ^= static_cast<Byte>(sequence >> (8 * i));
-        ++sequence;
         return nonce;
     }
     Secret<>             key{};
@@ -257,6 +266,11 @@ struct RecordControl {
         return !sending;
     }
 
+    void transportLost() {
+        closed = true;
+        pendingAlert.reset();
+    }
+
     std::optional<Byte> takeAlert() {
         return std::exchange(pendingAlert, std::nullopt);
     }
@@ -264,10 +278,18 @@ struct RecordControl {
     // Returns true for a nonempty application record ready to deliver.
     bool receive(Byte type, View input, Traffic& traffic, Secret<>& secret) {
         if (type == alert && input.size() == 2) {
+            // TLS 1.3 uses the description; user_canceled (90) can precede close_notify.
+            if (input[1] == 90) {
+                if (++skipped > 32)
+                    throw Error("too many consecutive control or empty records", 10);
+                return false;
+            }
             if (input[1] != 0) {
-                closed = true;
+                transportLost();
                 throw std::system_error(std::make_error_code(std::errc::connection_aborted));
             }
+            if (updateSize != 0)
+                throw Error("close_notify interrupted a KeyUpdate", 10);
             peerNotified = true;
             return false;
         }

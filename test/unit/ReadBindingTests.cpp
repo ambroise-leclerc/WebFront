@@ -16,6 +16,7 @@
 #include <list>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <utility>
@@ -74,7 +75,7 @@ struct Fixture {
     std::any                    lastContext;
 
     explicit Fixture(RemoteFileTransport transport = RemoteFileTransport::refused, bool secure = false)
-        : binding(secure, transport, [this] { return time; }) {
+        : binding(ReadBinding::Options{.remote = transport, .secure = secure}, [this] { return time; }) {
         read = binding.readHandler("route-a", std::string(readPrefix), [this](const http::RouteRequest&, const ReadGrant& grant) {
             lastRest    = std::string(grant.rest);
             lastContext = grant.context;
@@ -797,5 +798,24 @@ const Scenario droppingGrant{"Dropping a grant never runs its context's destruct
     when("the application shuts down", [&] {
         (void)fixture.url(1, "a", {.context = reentrant()});
         fixture.binding.shutdown();
+    });
+}};
+
+
+const Scenario secureListenerWarning{"An integrated TLS listener outside loopback warns without a log sink", [] {
+    std::ostringstream output;
+    struct Restore {
+        std::streambuf* previous;
+        ~Restore() { std::cerr.rdbuf(previous); }
+    } restore{std::cerr.rdbuf(output.rdbuf())};
+    then("loopback and the TCP provider stay quiet", [&] {
+        detail::makeReadBinding(WebFrontConfig{}, true);
+        detail::makeReadBinding(WebFrontConfig{.address = "0.0.0.0"}, false);
+        require(output.str().empty());
+    });
+    then("wildcard TLS reports the synchronous work on standard error", [&] {
+        detail::makeReadBinding(WebFrontConfig{.address = "0.0.0.0"}, true);
+        require(output.str().contains("TLS listener outside loopback"));
+        require(output.str().contains("bursts can delay established connections"));
     });
 }};

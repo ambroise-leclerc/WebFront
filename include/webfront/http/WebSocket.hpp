@@ -634,6 +634,7 @@ private:
                 if constexpr (networking::secureTransport<Net>) {
                     if (frame->opcode() == Header::Opcode::connectionClose) {
                         nextFrame(true);
+                        if (writtenHandler) writtenHandler();
                         co_await Net::Close(socket);
                         co_return;
                     }

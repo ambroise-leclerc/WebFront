@@ -206,11 +206,17 @@ public:
     /// The longest lifetime of a transferable grant, which is a bearer capability.
     static constexpr std::chrono::seconds maxTransferableLifetime{15 * 60};
 
-    explicit ReadBinding(RemoteFileTransport declared = RemoteFileTransport::refused, Clock clock = [] { return std::chrono::steady_clock::now(); })
-        : transport(declared), now(std::move(clock)), ownPrefix(std::string(cookiePrefix) + automation::channel::nonce().substr(0, 8) + "-") {}
+    struct Options {
+        RemoteFileTransport remote = RemoteFileTransport::refused;
+        bool secure = false;
+    };
 
-    ReadBinding(bool secure, RemoteFileTransport declared, Clock clock = [] { return std::chrono::steady_clock::now(); })
-        : ReadBinding(declared, std::move(clock)) { secureTransport = secure; }
+    explicit ReadBinding(RemoteFileTransport declared = RemoteFileTransport::refused, Clock clock = [] { return std::chrono::steady_clock::now(); })
+        : ReadBinding(Options{.remote = declared}, std::move(clock)) {}
+
+    explicit ReadBinding(Options options, Clock clock = [] { return std::chrono::steady_clock::now(); })
+        : transport(options.remote), secureTransport(options.secure), now(std::move(clock)),
+          ownPrefix(std::string(cookiePrefix) + automation::channel::nonce().substr(0, 8) + "-") {}
 
     /// Names the cookies after `name` (the port the server listens on) instead of a random word, so that a restart on the
     /// same port erases the cookies of its previous run. Call before the first `open`.

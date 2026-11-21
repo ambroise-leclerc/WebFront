@@ -2,6 +2,7 @@
 #include "Crypto.hpp"
 
 namespace webfront::tls::detail {
+inline constexpr std::size_t maxCredentialBytes = 256 * 1024;
 struct Error : std::runtime_error {
     Error(std::string_view message, Byte code = 50) : std::runtime_error("TLS: " + std::string(message)), alert(code) {}
     Byte alert;
@@ -48,6 +49,8 @@ struct Reader {
             if (size < (width == 1 ? 128u : 1u << (8 * (width - 1))))
                 throw Error("noncanonical DER length");
         }
+        if (size > maxCredentialBytes)
+            throw Error("oversized DER value");
         return take(size);
     }
 };

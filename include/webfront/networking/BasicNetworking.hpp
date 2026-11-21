@@ -26,9 +26,9 @@ concept Features = requires {
 };
 
 template <typename Net>
-inline constexpr bool secureTransport = [] {
-    if constexpr (requires { Net::secure; })
-        return Net::secure;
+inline constexpr bool secureTransport = []() -> bool {
+    if constexpr (requires { static_cast<bool>(Net::secure); })
+        return static_cast<bool>(Net::secure);
     return false;
 }();
 

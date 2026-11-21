@@ -120,6 +120,26 @@ const Scenario tlsRefusals("TLS rejects invalid framing and negotiation", {"fast
             tls::parseHello(hello, false);
         });
     });
+    then("a PSK offer requires key-exchange modes, and early data is forbidden on retry", [] {
+        auto hello = traceHello();
+        // Remove the modes extension from the trace and append an early-data PSK offer.
+        const auto modes = tlsHex("002d00020101");
+        const auto pos = std::ranges::search(hello, modes).begin();
+        require(pos != hello.end());
+        hello.erase(pos, pos + modes.size());
+        tls::append(hello, tlsHex("002a00000029002c000700010100000000002120"));
+        hello.resize(hello.size() + 32);
+        const auto lengths = [&] {
+            hello[3] = static_cast<tls::Byte>(hello.size() - 4);
+            hello[50] = static_cast<tls::Byte>(hello.size() - 51);
+        };
+        lengths();
+        requireThrows<tls::Error>([&] { tls::parseHello(hello, false); }, contains("missing psk_key_exchange_modes"));
+        hello.insert(hello.begin() + 51, modes.begin(), modes.end());
+        lengths();
+        require(tls::parseHello(hello, false).earlyData);
+        requireThrows<tls::Error>([&] { tls::parseHello(hello, true); }, contains("unexpected early_data"));
+    });
     then("oversized records and corrupted authentication tags are refused", [] {
         requireThrows<tls::Error>([] {
             tls::parseRecord(tlsHex("1703034101"), true);
@@ -134,6 +154,29 @@ const Scenario tlsRefusals("TLS rejects invalid framing and negotiation", {"fast
         requireThrows<tls::Error>([&] {
             receiver.open(View(record).first(5), payload);
         });
+        payload.back() ^= 1;
+        require(receiver.open(View(record).first(5), payload) == tls::applicationData);
+    });
+    then("the authenticated size limit includes the type and padding", [] {
+        const auto key = tls::expandLabel(tls::zeros, "key");
+        tls::Nonce nonce;
+        std::ranges::copy_n(tls::expandLabel(tls::zeros, "iv", {}, 12).begin(), nonce.size(), nonce.begin());
+        for (const bool padded : {false, true}) {
+            Bytes payload(tls::maxPlaintext + 1 + padded, 0);
+            payload[tls::maxPlaintext] = tls::applicationData;
+            Bytes header{tls::applicationData, 3, 3};
+            tls::put(header, payload.size() + 16, 2);
+            tls::chachaXor(key, nonce, payload);
+            tls::append(payload, tls::polyTag(key, nonce, header, payload));
+            tls::Traffic receiver;
+            receiver.install(tls::zeros);
+            if (padded)
+                requireThrows<tls::Error>([&] { receiver.open(header, payload); }, contains("oversized inner plaintext"));
+            else {
+                require(receiver.open(header, payload) == tls::applicationData);
+                require(payload.size() == tls::maxPlaintext);
+            }
+        }
     });
 });
 }  // namespace
@@ -193,6 +236,29 @@ const Scenario tlsRecordControl("TLS application records coordinate updates and 
             require(!closing.takeAlert());
         }
     });
+    then("a transport reset discards a pending alert and prohibits new writes", [&] {
+        tls::RecordControl reset;
+        reset.sending = true;
+        require(!reset.beginClose());
+        reset.transportLost();
+        require(reset.closed);
+        require(!reset.takeAlert());
+    });
+    then("user_canceled allows the peer to follow with close_notify", [&] {
+        tls::RecordControl warning;
+        require(!warning.receive(tls::alert, tlsHex("015a"), traffic, secret));
+        require(!warning.closed);
+        require(!warning.receive(tls::alert, tlsHex("0100"), traffic, secret));
+        require(warning.peerNotified);
+    });
+    then("close_notify cannot interrupt a fragmented KeyUpdate", [&] {
+        tls::RecordControl fragmented;
+        require(!fragmented.receive(tls::handshakeRecord, tlsHex("18"), traffic, secret));
+        requireThrows<tls::Error>([&] {
+            fragmented.receive(tls::alert, tlsHex("0100"), traffic, secret);
+        });
+        require(!fragmented.peerNotified);
+    });
     then("a fatal peer alert closes without a reply", [&] {
         tls::RecordControl fatal;
         requireThrows<std::system_error>([&] {
@@ -206,16 +272,20 @@ const Scenario tlsRecordControl("TLS application records coordinate updates and 
 
 const Scenario tlsPolyBoundary("Poly1305 reduction handles a carry around bit 130", [] {
     constexpr auto max = tls::polyMask;
-    tls::PolyLimbs primeMinusOne{max - 5, max, max, max, max};
-    const auto     unchanged = primeMinusOne;
-    tls::reducePoly(primeMinusOne);
-    require(primeMinusOne == unchanged);
-    tls::PolyLimbs prime{max - 4, max, max, max, max};
-    tls::reducePoly(prime);
-    require(prime == tls::PolyLimbs{});
-    tls::PolyLimbs wide{max + 1, max, max, max, max};
-    tls::reducePoly(wide);
-    require(wide == (tls::PolyLimbs{5, 0, 0, 0, 0}));
+    then("the modulus is reduced to zero and its predecessor stays canonical", [&] {
+        tls::PolyLimbs predecessor{max - 5, max, max, max, max};
+        const auto     unchanged = predecessor;
+        tls::reducePoly(predecessor);
+        require(predecessor == unchanged);
+        tls::PolyLimbs prime{max - 4, max, max, max, max};
+        tls::reducePoly(prime);
+        require(prime == tls::PolyLimbs{});
+    });
+    then("a carry crosses the five limbs and folds back as five", [&] {
+        tls::PolyLimbs wide{max + 1, max, max, max, max};
+        tls::reducePoly(wide);
+        require(wide == (tls::PolyLimbs{5, 0, 0, 0, 0}));
+    });
 });
 
 const Scenario tlsCredentials("TLS loads matching PEM formats and preserves the published identity on reload failure", [] {
@@ -226,33 +296,69 @@ const Scenario tlsCredentials("TLS loads matching PEM formats and preserves the 
     const auto                 pkcs8 = credentials.snapshot();
     credentials.reload(certificate, sec1);
     const auto expected = credentials.snapshot();
-    require(expected != pkcs8);
-    require(tls::equalSecret(expected->key, pkcs8->key));
+    then("the two key encodings produce the same key", [&] {
+        require(expected != pkcs8);
+        require(tls::equalSecret(expected->key, pkcs8->key));
+    });
 
     webfront::test::TemporaryDirectory temporary;
-    const auto                         invalid = temporary.path() / "invalid.pem";
-    std::ofstream(invalid) << "-----BEGIN EC PRIVATE KEY-----\n????\n-----END EC PRIVATE KEY-----\n";
-    requireThrows<tls::Error>([&] {
-        credentials.reload(certificate, invalid);
-    });
-    require(credentials.snapshot() == expected);
-
-    std::string source;
-    tls::readPemFile(sec1, source);
-    std::string_view pem = source;
-    auto             der = tls::pem(pem, "EC PRIVATE KEY");
-    tls::Reader      outer{der};
-    const auto       keySequence = outer.der(0x30);
-    tls::Reader      key{keySequence};
-    key.der(2);
-    const auto scalar                                          = key.der(4);
-    der[static_cast<std::size_t>(scalar.data() - der.data())] ^= 1;
-    std::ofstream(invalid) << "-----BEGIN EC PRIVATE KEY-----\n" << webfront::base64::encode(der) << "\n-----END EC PRIVATE KEY-----\n";
-    requireThrows<tls::Error>(
-        [&] {
+    const auto                         invalid  = temporary.path() / "invalid.pem";
+    const auto                         writePem = [](const auto& path, std::string_view label, Bytes der) {
+        std::ofstream(path, std::ios::app) << "-----BEGIN " << label << "-----\n" << webfront::base64::encode(der) << "\n-----END " << label << "-----\n";
+    };
+    then("an invalid private key PEM preserves the identity", [&] {
+        std::ofstream(invalid) << "-----BEGIN EC PRIVATE KEY-----\nAAAA????\n-----END EC PRIVATE KEY-----\n";
+        requireThrows<tls::Error>([&] {
             credentials.reload(certificate, invalid);
-        },
-        contains("certificate and private key do not match"));
-    require(credentials.snapshot() == expected);
+        });
+        require(credentials.snapshot() == expected);
+    });
+    then("a nonmatching private key preserves the identity", [&] {
+        std::string source;
+        tls::readPemFile(sec1, source);
+        std::string_view pem = source;
+        auto             der = tls::pem(pem, "EC PRIVATE KEY");
+        tls::Reader      outer{der};
+        tls::Reader      key{outer.der(0x30)};
+        key.der(2);
+        const auto scalar                                          = key.der(4);
+        der[static_cast<std::size_t>(scalar.data() - der.data())] ^= 1;
+        const auto keyPath                                         = temporary.path() / "other-key.pem";
+        writePem(keyPath, "EC PRIVATE KEY", std::move(der));
+        requireThrows<tls::Error>(
+            [&] {
+                credentials.reload(certificate, keyPath);
+            },
+            contains("certificate and private key do not match"));
+        require(credentials.snapshot() == expected);
+    });
+    then("an unsigned leaf or malformed intermediate preserves the identity", [&] {
+        std::string source;
+        tls::readPemFile(certificate, source);
+        std::string_view pem   = source;
+        auto             leaf  = tls::pem(pem, "CERTIFICATE");
+        const auto       chain = temporary.path() / "chain.pem";
+        writePem(chain, "CERTIFICATE", leaf);
+        writePem(chain, "CERTIFICATE", Bytes{0});
+        requireThrows<tls::Error>([&] {
+            credentials.reload(chain, sec1);
+        });
+        require(credentials.snapshot() == expected);
+
+        require(leaf[1] == 0x82);  // The fixture uses a two-byte DER length.
+        tls::Reader input{leaf};
+        tls::Reader outer{input.der(0x30)};
+        outer.der(0x30);
+        const auto  size = leaf.size() - outer.remaining.size();
+        leaf.resize(size);
+        leaf[2] = static_cast<tls::Byte>((size - 4) >> 8);
+        leaf[3] = static_cast<tls::Byte>(size - 4);
+        const auto unsignedLeaf = temporary.path() / "unsigned.pem";
+        writePem(unsignedLeaf, "CERTIFICATE", std::move(leaf));
+        requireThrows<tls::Error>([&] {
+            credentials.reload(unsignedLeaf, sec1);
+        });
+        require(credentials.snapshot() == expected);
+    });
 });
 }  // namespace
