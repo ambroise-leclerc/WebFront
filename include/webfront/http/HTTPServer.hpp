@@ -1240,6 +1240,7 @@ private:
                     networking::ex::write_env(Net::Handshake(socket, acceptor), networking::ex::prop{networking::ex::get_stop_token, expired->get_token()}),
                     std::make_error_code(std::errc::timed_out));
             } catch (const std::system_error& error) {
+                if (tasks.stopRequested()) co_return;  // interrupted by the server's shutdown, not a failed or expired handshake
                 log::debug("TLS handshake failed ({}:{}): {}", error.code().category().name(), error.code().value(), error.what());
                 co_return;
             } catch (const std::exception& error) {

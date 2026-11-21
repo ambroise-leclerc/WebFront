@@ -281,15 +281,19 @@ lève).
 - **Exposition du jeton.** Chaque réponse de lecture porte `Cache-Control: no-store` et `Referrer-Policy: no-referrer` ;
   le jeton n'apparaît dans aucun journal HTTP ni diagnostic (chemin masqué). Le cookie de liaison porte `Secure`
   lorsque la page est servie en HTTPS.
-- **Transport.** Lorsque WebFront termine TLS ([ADR-024](ADR-024-tls-integre.md)), le cookie de liaison
-  porte `Secure`. Le transport est authentifié côté serveur et l'autorisation de lecture distante reste déclarative.
+- **Transport : déclaré, jamais déduit.** Par défaut, WebFront ne fournit pas TLS (ADR-008) et ne peut pas savoir comment
+  un client l'atteint : un mandataire ou un tunnel présente une connexion de boucle locale pour un client distant, et des
+  en-têtes `Forwarded`/`X-Forwarded-*` peuvent être forgés. WebFront ne lit donc **ni l'adresse ni ces en-têtes** pour
+  décider. Le fournisseur de TLS intégré ([ADR-024](ADR-024-tls-integre.md)) n'y change rien : il ajoute seulement que
+  le cookie de liaison porte `Secure` lorsque WebFront termine TLS, sans que le transport devienne local pour autant.
   Une connexion est de transport local seulement si elle est **associée à la vue d'un frontend intégré** : son secret
   est remis à la vue par l'adaptateur, dans le processus, sans transiter par une ligne de commande, une URL ou un
   historique. Aucun secret transmis au navigateur système (fragment de l'URL ouverte) n'atteste le transport : la ligne
   de commande et l'historique peuvent le divulguer, et un acteur qui le présente le premier depuis un navigateur
   distant serait accepté ; l'échec ultérieur de l'association légitime ne protège pas cette première connexion. Pour
-  toute connexion non associée, dont celle du navigateur système, les lectures de fichiers sont refusées par défaut,
-  quel que soit le fournisseur. Une déclaration explicite de l'application (`remoteFileTransport`) est requise :
+  toute connexion non associée, dont celles du navigateur système, le transport est inconnu, quelle que soit son
+  adresse et quel que soit le fournisseur : lectures et écritures de fichiers y sont refusées, sauf déclaration
+  explicite de l'application sur son déploiement (`remoteFileTransport`) :
   - `refused` (défaut) ;
   - `loopbackAttested` : WebFront vérifie que le serveur n'écoute que sur la boucle locale ; l'intégrateur atteste
     qu'aucun mandataire ni tunnel ne l'expose et que la machine n'est pas partagée avec des utilisateurs non fiables.

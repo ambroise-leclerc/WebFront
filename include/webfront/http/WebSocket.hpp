@@ -368,7 +368,7 @@ public:
         {
             std::lock_guard lock(writeMutex);
             if constexpr (networking::secureTransport<Net>)
-                if (!started) return;
+                if (closing) return;
             auto            group = latestGroups.find(key);
             if (group == latestGroups.end())
                 group = latestGroups.emplace(std::string(key), LatestGroup{}).first;
@@ -432,6 +432,7 @@ private:
     };
     networking::ex::stop_callback_for_t<networking::ex::inplace_stop_token, StopConnection> parentStop;
     std::atomic_bool started;
+    std::atomic_bool closing{false};  // set once the close is claimed: no frame is queued after it, whether or not start() ran
     // A message sent in several frames (RFC 6455, 5.4), as browsers do with large messages: its
     // type and the payloads received so far, at most http::maxMessageSize<Policy>() bytes
     // (payloadBudget()).
@@ -444,7 +445,10 @@ private:
         log::debug("WebSocket constructor");
     }
 
-    bool claimClose() { return started.exchange(false); }
+    bool claimClose() {
+        closing = true;
+        return started.exchange(false);
+    }
 
     void spawn(networking::Task task) {
         networking::Spawn(taskScope, Net::Scheduler(socket), stopSource->get_token(), std::move(task));
@@ -636,7 +640,7 @@ private:
         {
             std::lock_guard lock(writeMutex);
             if constexpr (networking::secureTransport<Net>)
-                if (!started) return false;
+                if (closing) return false;
             if (writeQueue.size() >= maxPending) return false;
             writeQueue.push_back({std::move(frame)});
             if (writeQueue.size() > 1) return true;  // the running writeFrames() task will get to it

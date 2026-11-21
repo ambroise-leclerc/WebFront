@@ -43,6 +43,10 @@ continue with their negotiated keys.
 
 Open the deployment URL in the browser. When using `show()` on a local bind,
 the certificate must cover the configured address used in the window URL.
+`start()` (return at once, system browser) needs a frontend that provides
+`launchHttps(address, port, page)`; today only `DefaultBrowserFrontend`, the
+default, does. With another frontend, `start()` fails to compile; use `show()`
+or open the URL yourself.
 The browser verifies the certificate chain and server name. WebFront applies
 the usual bridge origin policy. The file-service binding cookie carries `Secure`.
 File reads for non-associated clients require an explicit `remoteFileTransport`
