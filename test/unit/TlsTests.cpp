@@ -292,7 +292,7 @@ const Scenario tlsRecordControl("TLS application records coordinate updates and 
 });
 
 const Scenario tlsPolyBoundary("Poly1305 reduction handles a carry around bit 130", [] {
-    constexpr auto max = tls::polyMask;
+    static constexpr auto max = tls::polyMask;
     then("the modulus is reduced to zero and its predecessor stays canonical", [&] {
         tls::PolyLimbs predecessor{max - 5, max, max, max, max};
         const auto     unchanged = predecessor;

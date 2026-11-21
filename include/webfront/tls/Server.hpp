@@ -119,7 +119,8 @@ public:
         auto& state = *socket.connection;
         if (state.control.closed)
             throw std::system_error(std::make_error_code(std::errc::connection_reset));
-        assert(!state.control.sending);
+        if (state.control.sending)
+            throw std::logic_error("TLS: concurrent Send on one socket");
         state.control.sending = true;
         struct Sending {
             bool& active;
