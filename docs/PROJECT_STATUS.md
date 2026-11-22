@@ -51,11 +51,9 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   explicitly disabled for development, with the local-process risks described in [Automation](AUTOMATION.md) (#637).
   Remote access is out of scope and automation does not compile with `WEBFRONT_DISTRIBUTION`. This does not isolate
   untrusted project code. [Automation](AUTOMATION.md) documents the listener, lifecycle, limits and the supported MCP profile.
-  The `webfront-agent` launcher, its JSON CLI and MCP on stdio were removed. Known limitation until the next environment
-  release: the published environment 1.0.1 that the library pins still tells agents (`wf help agents`, the `AGENTS.md`
-  that `wf create` writes) to run `webfront-agent`, which no longer exists, so that agent path is not ready from a pinned
-  environment. The replacement texts, which name the application's MCP URL and its `mcp.json`, are in the sources
-  (environment 1.0.2) and in `docs/DEVELOPING_WITH_AGENTS.md`, which an agent should follow meanwhile. First-contact
+  The `webfront-agent` launcher, its JSON CLI and MCP on stdio were removed. The pinned environment 1.0.2 describes MCP;
+  the starter guidance for stable client configuration is in the 1.0.3 sources and will reach `wf create` in the next
+  environment release. Until then agents can follow `docs/DEVELOPING_WITH_AGENTS.md`. First-contact
   guidance for agents (README section, `docs/DEVELOPING_WITH_AGENTS.md`, `webfront_write_agent_guide()`, configuration and
   startup notices) comes with the library.
 - **Maintaining WebFront.** The repository is itself a `wf` project, selected with
