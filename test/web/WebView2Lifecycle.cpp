@@ -591,19 +591,24 @@ private:
     }
 };
 
-bool comReleased() {
+// Empty when the thread holds no STA of ours; otherwise the apartment found, for the failure message.
+std::string remainingApartment() {
     APTTYPE          apartment{};
     APTTYPEQUALIFIER qualifier{};
     const auto       result = CoGetApartmentType(&apartment, &qualifier);
     if (result == CO_E_NOTINITIALIZED)
-        return true;
+        return {};
     if (result != S_OK)
-        return false;
+        return "CoGetApartmentType failed, HRESULT " + std::to_string(static_cast<unsigned long>(result));
     // WebView2 workers may retain a process-wide implicit MTA, but our STA must be released.
-    return apartment == APTTYPE_MTA && qualifier == APTTYPEQUALIFIER_IMPLICIT_MTA;
+    if (apartment == APTTYPE_MTA && qualifier == APTTYPEQUALIFIER_IMPLICIT_MTA)
+        return {};
+    return "apartment type " + std::to_string(static_cast<int>(apartment)) + ", qualifier " + std::to_string(static_cast<int>(qualifier));
 }
 
-int showTwice(std::string_view page, bool earlyClose = false) {
+// The apartment is checked only for a page that ran to its end (#638): a page that closes its window on a load failure can
+// close it while the runtime still starts, which leaves the runtime's own COM initialization on the thread (#564).
+int showTwice(std::string_view page, bool earlyClose = false, bool checksApartment = true) {
     // Repeated show() checks that WM_QUIT cannot poison the next loop.
     for (int iteration = 0; iteration < 2; ++iteration) {
         App               app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
@@ -618,8 +623,11 @@ int showTwice(std::string_view page, bool earlyClose = false) {
         require(!connected, "Unexpected bridge connection");
         // Closing while the runtime starts can leave the runtime's own COM initialization on the thread (#564): the frontend
         // answers for its apartment (unit test of Apartment) and, here, for a session that ran to its end.
-        if (!earlyClose)
-            require(comReleased(), "STA COM initialization was not released");
+        if (!earlyClose && checksApartment) {
+            const auto left = remainingApartment();
+            require(left.empty(),
+                    "STA COM initialization was not released: " + left + " (page " + std::string(page) + ", iteration " + std::to_string(iteration) + ")");
+        }
     }
     return 0;
 }
@@ -661,8 +669,8 @@ int run(std::string_view mode) {
          }                                                    },
         {          "repeated-show",
          [] {
-         showTwice("rejected-ready.html");
-         showTwice("encoded path %23.html?x=1#example");
+         showTwice("rejected-ready.html", false, false);
+         showTwice("encoded path %23.html?x=1#example", false, false);
          return showTwice("no-bridge.html");
          }                                                    },
         {  "navigation-diagnostic",

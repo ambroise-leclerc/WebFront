@@ -175,9 +175,11 @@ are retained for investigation; diagnostics alone do not establish a correction.
   Windows/macOS CEF deployment is not qualified. WebView2 needs its installed Evergreen runtime;
   fixed-version runtime packaging, application installers and accessibility remain application work.
 - `WebView2Frontend::open()` releases the STA it initialized. When a window is closed while the runtime is still
-  starting and the same thread then opens another one, the WebView2 runtime (observed with 157.0.4341.46) can keep one
-  COM initialization of its own: the thread then remains in its STA after `open()` returns (#564). A window that ran to
-  its end leaves none.
+  starting, or by a page that closes it on a load failure (a rejected bridge connection, an unreachable page), and the
+  same thread then opens another one, the WebView2 runtime (observed with 157.0.4341.46) can keep one COM
+  initialization of its own: the thread then remains in its STA after `open()` returns (#564, #638). A window whose
+  page ran to its end and closed it leaves none in the usual case; one intermittent failure of that check was seen on
+  CI (#638) and could not be reproduced in 50 repetitions, so the test now reports the apartment it finds.
 - The low-level DOM batch command and optional embedded interpreter are implemented; see
   [the wire contract](adr/ADR-003-protocole-binaire-et-bornes.md#commande-dom-dombatch-code-5-version-1).
   The per-connection document/node API, events (callbacks or `co_await node.next(name)`) and grouped
