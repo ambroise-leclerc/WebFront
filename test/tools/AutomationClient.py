@@ -132,13 +132,13 @@ def remove_profile(path, attempts=20, delay=0.1, remove=shutil.rmtree):
     The helper can create a file between the walk of the directory and its removal (ENOTEMPTY): the removal is repeated
     until the helper is gone, and what it still holds at the end is left to the system's temporary directory."""
     for _ in range(attempts):
-        try:
+        # A FileNotFoundError may come from a file that the helper removed during the walk, not from the root: only
+        # the absence of the root ends the removal.
+        with contextlib.suppress(OSError):
             remove(path)
+        if not os.path.exists(path):
             return True
-        except FileNotFoundError:
-            return True
-        except OSError:
-            time.sleep(delay)
+        time.sleep(delay)
     shutil.rmtree(path, ignore_errors=True)
     return not os.path.exists(path)
 
