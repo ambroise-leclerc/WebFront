@@ -86,6 +86,34 @@ public:
     Apartment& operator=(const Apartment&) = delete;
 };
 
+// Dispatches what the runtime queued on this thread while the session closed, once the session is destroyed and before the
+// apartment is released: the runtime ends its own COM initialization of the thread from those messages, and run() no longer
+// pumps after WM_QUIT (#638). Bounded, and a WM_QUIT found in the queue is posted again for the caller's own loop.
+struct DrainQueuedMessages {
+    DrainQueuedMessages() = default;
+    DrainQueuedMessages(const DrainQueuedMessages&)            = delete;
+    DrainQueuedMessages& operator=(const DrainQueuedMessages&) = delete;
+    ~DrainQueuedMessages() {
+        bool quit     = false;
+        int  quitCode = 0;
+        MSG  message{};
+        try {
+            for (int count = 0; count < 10000 && PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE); ++count) {
+                if (message.message == WM_QUIT) {
+                    quit     = true;
+                    quitCode = static_cast<int>(message.wParam);
+                    continue;
+                }
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        } catch (...) {
+        }
+        if (quit)
+            PostQuitMessage(quitCode);
+    }
+};
+
 inline std::wstring utf16(std::string_view text) {
     if (text.empty())
         return {};
@@ -978,7 +1006,8 @@ inline void open(std::string_view address,
     if (uiExecutorHostOf<WebView2Frontend>().executor().available())
         throw std::logic_error("WebView2Frontend: open() is already running; a process opens one window at a time");
     Apartment                                                apartment;
-    LPWSTR                                                   rawVersion = nullptr;
+    DrainQueuedMessages                                      drainAfterSession;  // runs after the session is gone, before the apartment
+    LPWSTR                                                  rawVersion = nullptr;
     const auto                                               available  = GetAvailableCoreWebView2BrowserVersionString(nullptr, &rawVersion);
     const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> version(rawVersion, CoTaskMemFree);
     if (FAILED(available) || !version)
