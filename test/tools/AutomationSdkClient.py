@@ -18,7 +18,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from AutomationClient import Host, check_withdrawn, install, interrupt_status  # noqa: E402
+from AutomationClient import Host, check_withdrawn, install  # noqa: E402
 
 
 async def exercise(configuration):
@@ -81,8 +81,8 @@ async def main():
                 # A second SDK client after the first one terminated its MCP session: the window and its session stay.
                 assert host.process.poll() is None, "Ending an SDK session closed the application's window"
                 assert await asyncio.wait_for(exercise(record["configuration"]), 90) == first
-                host.interrupt()
-                assert host.wait(timeout=30) == interrupt_status(), host.logs()
+                host.stop()
+                assert host.wait(timeout=30) == 0, host.logs()
                 check_withdrawn(record, int(record["mcp"].rsplit(":", 1)[1].split("/")[0]))
             finally:
                 host.close()

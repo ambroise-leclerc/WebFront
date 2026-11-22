@@ -13,7 +13,6 @@ import os
 import pathlib
 import re
 import shutil
-import signal
 import socket
 import subprocess
 import sys
@@ -152,11 +151,6 @@ def raw_request(port, text):
     return int(answer.split(b" ", 2)[1])
 
 
-def interrupt_status():
-    """The status of automation_host after interrupt(): 128 + the signal its handler records."""
-    return 128 + (signal.SIGINT if os.name == "nt" else signal.SIGTERM)
-
-
 class Host:
     """automation_host: an application that enabled automation, launched with its own browser profile."""
 
@@ -173,10 +167,9 @@ class Host:
         self.profiles = profile_directory()
         temporary = self.profiles.__enter__()
         env.update(TMPDIR=temporary, TEMP=temporary, TMP=temporary)
-        flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+        # Closing its standard input closes the application's window (stop()).
         self.process = subprocess.Popen([args.host, *self.base, "--sessions", str(self.sessions), *extra],
-                                        stdin=subprocess.DEVNULL, stdout=log, stderr=log, text=True, env=env,
-                                        creationflags=flags)
+                                        stdin=subprocess.PIPE, stdout=log, stderr=log, text=True, env=env)
         self.project = pathlib.Path(project).resolve()
 
     def logs(self):
@@ -198,8 +191,10 @@ class Host:
     def client(self, timeout=30):
         return Client(self.record()["configuration"], timeout)
 
-    def interrupt(self):
-        self.process.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGTERM)
+    def stop(self):
+        """Closes the window as its owner would; the application then exits with status 0."""
+        with contextlib.suppress(OSError):
+            self.process.stdin.close()
 
     def wait(self, timeout=30):
         try:
@@ -411,8 +406,9 @@ def consumer(args):
                     assert host.process.poll() is None, "Ending an MCP session closed the application's window"
                 # Closing the applications withdraws their URLs, private directories and records.
                 for host in hosts:
-                    host.interrupt()
-                    assert host.wait() == interrupt_status(), host.logs()
+                    host.stop()
+                    status_code = host.wait()
+                    assert status_code == 0, f"exit {status_code}\n{host.logs()}"
                     check_withdrawn(host.entry, host.mcp.url.port)
                 assert list(sessions.glob("*.json")) == []
             except BaseException:
@@ -499,8 +495,8 @@ def session(args):
                 other.close()
                 client.close()
                 assert host.process.poll() is None, "Ending the MCP sessions closed the window"
-                host.interrupt()
-                assert host.wait(timeout=30) == interrupt_status(), host.logs()
+                host.stop()
+                assert host.wait(timeout=30) == 0, host.logs()
                 check_withdrawn(record, client.url.port)
             except BaseException:
                 print(host.logs(), flush=True)
@@ -533,8 +529,8 @@ def session(args):
                 header = setup / "generated/LifeUI.hpp"
                 assert header.is_file() and b"class LifeUI" in header.read_bytes(), "embed did not write the provider"
                 client.close()
-                host.interrupt()
-                assert host.wait(timeout=30) == interrupt_status(), host.logs()
+                host.stop()
+                assert host.wait(timeout=30) == 0, host.logs()
             except BaseException:
                 print(host.logs(), flush=True)
                 raise

@@ -143,9 +143,9 @@ The record has the project, grants, allow-listed callbacks, process identifier, 
 (`endpoint`), the MCP URL (`mcp`) and the path of the client configuration (`configuration`); **never the token**, which
 stays in `mcp.json`: reading a record does not let anyone operate the session. With hundreds of instances, each has its own
 record and private directory, named after its session identifier (OS entropy), and its own port. The record and the
-directory are removed on closure. An application that wants them removed on SIGINT/SIGTERM ends `show()` on those signals
-(`app.requestClose()`) and calls `close()`, as the test application does; after a forced end, the next activation or
-listing removes the records whose process is gone, with the private directory named after them. A recycled process
+directory are removed on closure (`close()`), and by the unresponsive-window path. An application that wants them removed on
+SIGINT/SIGTERM ends `show()` on those signals with `app.requestClose()`, then calls `close()`; after a forced end, the next
+activation removes the records whose process is gone, with the private directory named after them. A recycled process
 identifier can keep a dead record for a while.
 
 Automation is also visible to the person at the window: once connected, the terminal prints the grants, the callbacks and
@@ -302,7 +302,7 @@ Python's standard library HTTP client:
 
 - `AutomationMcpWindow`: structured errors, file correction, check/build/test, preview inspection and actions, cross-frame
   rejection, a second client sharing the session and cancelling the first one's run, a project set up from nothing
-  (`create`, `init`, `install`, `restore`, `embed`), and the withdrawal of the listener, record and directory on SIGTERM.
+  (`create`, `init`, `install`, `restore`, `embed`), and the withdrawal of the listener, record and directory when the window closes.
 - `AutomationMcpWatchdog`: a real renderer blocked inside a test-archive operation body, without loading Jasmine to provoke
   the hang. It exercises the production signed callback and runner, the native two-second deadline, the five-second close
   grace and the withdrawal of the listener, record and directory; a relaunch on the same directory then checks its reuse and

@@ -79,7 +79,7 @@ Chaque activation tire un jeton de 256 bits de l'aléa de l'OS, distinct de la c
 lancement de la page et de l'identifiant de session. Chaque requête porte `Authorization: Bearer <jeton>` ; la comparaison
 est à temps constant et précède la lecture du JSON. Sinon : 401 avec `WWW-Authenticate: Bearer`, sans `resource_metadata`,
 car aucun serveur d'autorisation OAuth n'est annoncé. Le jeton vit autant que la session : il est révoqué à sa fermeture
-(fermeture normale, signal interceptable, échéance native, fenêtre perdue, watchdog), l'écouteur est alors fermé, et une
+(fermeture normale, échéance native, fenêtre perdue, watchdog, signal que l'application intercepte pour fermer), l'écouteur est alors fermé, et une
 nouvelle activation tire un nouveau jeton. Pas de rotation pendant la session.
 
 Le jeton n'apparaît jamais dans la page, une URL, une ligne de commande, les journaux, le message affiché, l'enregistrement

@@ -8,17 +8,21 @@
 //                   [--callbacks a,b,...] [--called <file>] [--timeout <seconds>] [--startup-timeout <seconds>]
 //
 // With --called, the application registers `consumer.render` (which appends its argument to the file) and
-// `consumer.secret` (never allow-listed by the tests). SIGINT and SIGTERM close the window. The status is 0 after a normal
-// closing, 70 when the developer environment failed to start (its reason on stderr), 71 when the native deadline of an
-// operation revoked the session, 128 + the signal after an interrupt; a window that does not close after a deadline ends
-// the process with enableAutomation's own status 72.
+// `consumer.secret` (never allow-listed by the tests). Closing its standard input closes the window, on every platform and
+// whatever the engine does with signals. The status is 0 after a normal closing, 70 when the developer environment failed
+// to start (its reason on stderr), 71 when the native deadline of an operation revoked the session; a window that does not
+// close after a deadline ends the process with enableAutomation's own status 72.
 #include "../driver/WfDriver.hpp"
 #include <webfront/automation/Enable.hpp>
-#include <webfront/automation/Interrupt.hpp>
 
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#ifndef _WIN32
+    #include <cerrno>
+    #include <poll.h>
+    #include <unistd.h>
+#endif
 
 namespace {
 struct Pages {
@@ -27,6 +31,29 @@ struct Pages {
         return {};
     }
 };
+
+// Whether standard input reached its end, without blocking: the test closes it to close the window.
+bool inputClosed() {
+#ifdef _WIN32
+    const HANDLE input     = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD        available = 0;
+    if (!PeekNamedPipe(input, nullptr, 0, nullptr, &available, nullptr))
+        return GetLastError() == ERROR_BROKEN_PIPE;
+    if (available > 0) {
+        char  bytes[256];
+        DWORD read = 0;
+        ReadFile(input, bytes, std::min<DWORD>(available, sizeof bytes), &read, nullptr);
+    }
+    return false;
+#else
+    pollfd readable{.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
+    if (::poll(&readable, 1, 0) <= 0)
+        return false;
+    char       bytes[256];
+    const auto count = ::read(STDIN_FILENO, bytes, sizeof bytes);
+    return count == 0 || (count < 0 && errno != EINTR && errno != EAGAIN);
+#endif
+}
 
 std::vector<std::string> split(const std::string& list) {
     std::vector<std::string> items;
@@ -114,7 +141,6 @@ int main(int argc, char** argv) {
                        .integrity         = integrity,
                        .registry          = registry.empty() ? std::nullopt : std::optional<std::string>{"/driver/registry/"},
                        .manifestDirectory = manifest});
-        webfront::automation::Interrupt interrupt;
         auto automation = webfront::automation::enableAutomation(app,
                                                                  {.grants         = split(grants),
                                                                   .callbacks      = called.empty() ? std::vector<std::string>{} : split(callbacks),
@@ -122,9 +148,9 @@ int main(int argc, char** argv) {
                                                                   .discovery      = sessions,
                                                                   .timeout        = timeout,
                                                                   .startupTimeout = startupTimeout});
-        // A signal closes the window natively, whatever the page does.
+        // The end of standard input closes the window natively, whatever the page does.
         std::jthread closer([&](std::stop_token shown) {
-            while (!shown.stop_requested() && interrupt.signal() == 0)
+            while (!shown.stop_requested() && !inputClosed())
                 std::this_thread::sleep_for(std::chrono::milliseconds{20});
             if (!shown.stop_requested())
                 webfront::testdriver::closeUntilShown(shown, [&] { return app.requestClose(); }, std::chrono::seconds{10});
@@ -135,9 +161,7 @@ int main(int argc, char** argv) {
         const webfront::automation::Object state{automation->controller()->describe()};
         const auto                        failure = state.string("failure");
         int                               status  = 0;
-        if (const auto number = interrupt.signal())
-            status = 128 + number;
-        else if (failure == "Native automation deadline exceeded")
+        if (failure == "Native automation deadline exceeded")
             status = 71;
         else if (!automation->controller()->wasReady() && !failure.empty()) {
             std::cerr << "Automation startup: " << failure << '\n';
