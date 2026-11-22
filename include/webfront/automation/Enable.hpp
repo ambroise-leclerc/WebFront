@@ -243,12 +243,12 @@ private:
     }
     // `directory`, or a new directory named after the session in the (private) discovery directory. The records of the
     // instances that ended without closing (a forced end) are removed first, with the private directories named after them.
-    static std::filesystem::path privateDirectoryFor(const AutomationOptions& options, const std::filesystem::path& discoveryDirectory, const Session& session) {
-        discovery::preparePrivateDirectory(discoveryDirectory);
-        (void)discovery::list(discoveryDirectory);
+    static std::filesystem::path privateDirectoryFor(const AutomationOptions& options, const std::filesystem::path& directoryOfRecords, const Session& session) {
+        discovery::preparePrivateDirectory(directoryOfRecords);
+        (void)discovery::list(directoryOfRecords);
         if (!options.directory.empty())
             return options.directory;
-        return discoveryDirectory / Object(session.describe()).string("session");
+        return directoryOfRecords / Object(session.describe()).string("session");
     }
     static discovery::Entry record(const Session& session, const std::filesystem::path& endpoint, const mcphttp::Server<Session>& mcp) {
         const Object description{session.describe()};
