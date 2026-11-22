@@ -42,7 +42,8 @@ bool inputClosed() {
     if (available > 0) {
         char  bytes[256];
         DWORD read = 0;
-        ReadFile(input, bytes, std::min<DWORD>(available, sizeof bytes), &read, nullptr);
+        if (!ReadFile(input, bytes, std::min<DWORD>(available, sizeof bytes), &read, nullptr))
+            return GetLastError() == ERROR_BROKEN_PIPE;
     }
     return false;
 #else
