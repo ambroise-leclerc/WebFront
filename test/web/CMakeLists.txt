@@ -156,19 +156,19 @@ endif()
 set(_self_project "${CMAKE_CURRENT_BINARY_DIR}/self-build-project")
 set(_registry "${_self_project}/build-registry")
 set(_fixtures "${CMAKE_CURRENT_BINARY_DIR}/developer-fixtures")
-if(_browser_tests_available AND TARGET webfront-agent)
-    # Only the test build logs HTTP to stderr; stdout remains the JSON/MCP protocol.
-    target_compile_definitions(webfront-agent PRIVATE WEBFRONT_TEST_REQUEST_LOG=1)
+if(_browser_tests_available)
     webfront_optional_window_test_runner(_window_test_prefix _automation_windows_available)
-    add_dependencies(webtest webfront-agent)
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND AND _automation_windows_available)
+        # An application that enabled automation, which serves MCP itself (ADR-025): the program every scenario drives
+        # through its URL. A test program, not a shipped executable.
+        webfront_add_test_program(automation_host AutomationHost.cpp DRIVER WITH_WEBTEST)
         # webfront_add_automation_test(<name> <profile> <timeout> <client script> <arguments>...): the client launches the
-        # agent and the driver, both native, on the display supplied to the whole test.
+        # application and the driver, both native, on the display supplied to the whole test.
         function(webfront_add_automation_test name profile timeout client)
             webfront_add_web_step(${name} TIMEOUT ${timeout} REQUIRES DeveloperFixtures
                 COMMAND ${_window_test_prefix} "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/tools/${client}" ${ARGN}
-                    --agent "$<TARGET_FILE:webfront-agent>" --driver "$<TARGET_FILE:webfront-wf>"
+                    --host "$<TARGET_FILE:automation_host>" --driver "$<TARGET_FILE:webfront-wf>"
                     --environment "${_fixtures}/environment.tgz" --provision "${_fixtures}/provision.json" --registry "${_registry}")
             webfront_use_own_profile(${name} ${profile})
         endfunction()
@@ -177,15 +177,12 @@ if(_browser_tests_available AND TARGET webfront-agent)
             string(REPLACE "|" ";" _entry "${_pair}")
             list(GET _entry 0 _scenario)
             list(GET _entry 1 _case)
-            # The session scenario closes several agents, each of which may use its own bound of about 9 s to exit.
-            webfront_add_automation_test(${_case} "automation-${_scenario}" 180 AutomationClient.py --scenario "${_scenario}"
+            webfront_add_automation_test(${_case} "automation-${_scenario}" 240 AutomationClient.py --scenario "${_scenario}"
                 --fixture "${_automation_project}" --work "${CMAKE_CURRENT_BINARY_DIR}/automation-${_scenario}")
         endforeach()
-        # A consumer application that opted in with enableAutomation (#501), driven by an agent attached from another process.
-        webfront_add_test_program(automation_consumer AutomationConsumer.cpp DRIVER WITH_WEBTEST)
-        webfront_add_automation_test(AutomationConsumerWindow automation-consumer 180 AutomationClient.py --scenario consumer
-            --consumer "$<TARGET_FILE:automation_consumer>" --fixture "${PROJECT_SOURCE_DIR}/test/fixtures/consumer-project"
-            --work "${CMAKE_CURRENT_BINARY_DIR}/automation-consumer")
+        # Two applications side by side, each driven through its own URL, with the application's own callback (#501, #632).
+        webfront_add_automation_test(AutomationConsumerWindow automation-consumer 240 AutomationClient.py --scenario consumer
+            --fixture "${PROJECT_SOURCE_DIR}/test/fixtures/consumer-project" --work "${CMAKE_CURRENT_BINARY_DIR}/automation-consumer")
         execute_process(COMMAND "${Python3_EXECUTABLE}" -c
             "import importlib.metadata; assert importlib.metadata.version('mcp') == '2.3.0'"
             RESULT_VARIABLE _sdk_available OUTPUT_QUIET ERROR_QUIET)

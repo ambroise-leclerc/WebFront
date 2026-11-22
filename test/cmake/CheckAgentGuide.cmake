@@ -1,4 +1,5 @@
-# What an agent meets first must state the development model and how it runs wf itself (#561): the README before its
+# What an agent meets first must state the development model and how it runs wf itself (#561), through the application's
+# own MCP URL, with no other program (#632): the README before its
 # tutorial, the guide written into consuming projects and starters, the configuration notice, and the public helper
 # webfront_write_agent_guide(), which never replaces a file.
 # Usage: cmake -DROOT=<checkout> -DWORK=<scratch directory> -P CheckAgentGuide.cmake
@@ -11,6 +12,13 @@ function(_require haystack needle description)
     string(FIND "${haystack}" "${needle}" position)
     if(position EQUAL -1)
         list(APPEND failures "${description}: missing '${needle}'")
+        set(failures "${failures}" PARENT_SCOPE)
+    endif()
+endfunction()
+function(_refuse haystack needle description)
+    string(FIND "${haystack}" "${needle}" position)
+    if(NOT position EQUAL -1)
+        list(APPEND failures "${description}: still mentions '${needle}'")
         set(failures "${failures}" PARENT_SCOPE)
     endif()
 endfunction()
@@ -33,21 +41,23 @@ else()
     string(SUBSTRING "${readme}" ${agents_at} -1 rest)
     string(FIND "${rest}" "\n## From C++ to a reactive UI" length)
     string(SUBSTRING "${rest}" 0 ${length} first_screen)
-    foreach(needle "`ui/`" "`wf dev`" "documentRoot" "webfront-agent" "-DWEBFRONT_BUILD_AUTOMATION=ON" "enableAutomation"
-            "--print-mcp-config" "\"mcpServers\"" "docs/DEVELOPING_WITH_AGENTS.md" "webfront_write_agent_guide()")
+    foreach(needle "`ui/`" "`wf dev`" "documentRoot" "enableAutomation" "\"mcpServers\"" "docs/DEVELOPING_WITH_AGENTS.md"
+            "webfront_write_agent_guide()" "http://127.0.0.1:PORT/mcp" "mcp.json" "webfront.start")
         _require("${first_screen}" "${needle}" "README first screen for agents")
     endforeach()
+    _refuse("${first_screen}" "webfront-agent" "README first screen for agents")
 endif()
 
 # The same facts in the file an agent reads in a consuming project, and in the page the tools point to.
 foreach(text guide page)
-    foreach(needle "ui/" "wf dev" "documentRoot" "app.bootstrap(\"developer\")" "-DWEBFRONT_BUILD_AUTOMATION=ON" "enableAutomation"
-            "webfront-agent --list" "--operation create --starter app" "--operation preview --entry ui/main.ts"
-            "--print-mcp-config" "webfront.start" "not\nthe name of your project")
+    foreach(needle "ui/" "wf dev" "documentRoot" "app.bootstrap(\"developer\")" "enableAutomation" "webfront.start"
+            "webfront.result" "not\nthe name of your project" "http://127.0.0.1:PORT/mcp" "mcp.json" "Bearer"
+            "webfront.cancel" "claude --mcp-config")
         string(REPLACE "\n" " " flat "${${text}}")
         string(REPLACE "\n" " " flat_needle "${needle}")
         _require("${flat}" "${flat_needle}" "${text}")
     endforeach()
+    _refuse("${${text}}" "webfront-agent" "${text}")
 endforeach()
 
 # The helper writes the guide once and leaves any existing file alone.
@@ -85,7 +95,7 @@ if(NOT owned STREQUAL "the project's own instructions\n")
 endif()
 _require("${output}" "owned/AGENTS.md exists and is left unchanged; the agent guide is " "existing file notice")
 _require("${output}" "TypeScript/TSX interface in ui/, developed with `wf dev`" "configuration notice: model")
-_require("${output}" "is not built: configure with -DWEBFRONT_BUILD_AUTOMATION=ON" "configuration notice: launcher option")
+_require("${output}" "serves MCP itself and prints its URL" "configuration notice: MCP")
 _require("${output}" "docs/DEVELOPING_WITH_AGENTS.md" "configuration notice: guide")
 string(REGEX MATCHALL "WebFront for agents:" notices "${output}")
 list(LENGTH notices count)

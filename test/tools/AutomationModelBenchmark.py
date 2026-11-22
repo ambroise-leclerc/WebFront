@@ -13,7 +13,7 @@ import time
 import urllib.parse
 import urllib.request
 
-from AutomationClient import Client
+from AutomationClient import Host
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -55,9 +55,11 @@ def run_task(args, model, task, repetition, integrity):
             raise RuntimeError(installed.stdout + installed.stderr)
         log_path = pathlib.Path(args.work) / f"model-{repetition}-{task}-{abs(hash(model))}.log"
         with log_path.open("w") as log:
-            client = Client([args.agent, *common, "--mcp", "--timeout", "120", "--allow", "check", "--allow", "test"], log,
-                            timeout=135)  # beyond the native 120 s operation deadline, so a long command is not cut short here
+            # The application serves MCP itself (ADR-025); the benchmark connects to its URL.
+            host = Host(args, project, root, "model", log, ["--grants", "check,test", "--timeout", "120"])
             try:
+                # Beyond the native 120 s operation deadline, so a long command is not cut short here.
+                client = host.client(timeout=135)
                 client.initialize()
                 catalog = client.send("tools/list")["tools"]
                 tools = [{"type": "function", "function": {"name": item["name"].replace(".", "_"),
@@ -137,12 +139,12 @@ def run_task(args, model, task, repetition, integrity):
                         "promptTokensAcrossTurns": prompt_tokens, "generatedTokens": generated_tokens,
                         "checkState": checked["state"], "testState": tested["state"], "verificationError": verification_error}
             finally:
-                client.close()
+                host.close()
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("agent", "driver", "environment", "provision", "registry", "fixture", "work", "report"):
+    for name in ("host", "driver", "environment", "provision", "registry", "fixture", "work", "report"):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--model", action="append", required=True, help="Already installed model; repeat to compare classes")
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434/api/chat")

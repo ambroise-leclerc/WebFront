@@ -1,43 +1,58 @@
-"""Real stdio MCP client driving an authorized developer window, with no third-party Python modules."""
+"""Real MCP client driving applications that serve MCP themselves (ADR-025), with no third-party Python modules.
+
+Each scenario launches automation_host, an application that called enableAutomation, reads its discovery record and its
+private mcp.json, and drives its window through its Streamable HTTP URL only."""
 import argparse
-import json
-import pathlib
-import queue
-import re
-import shutil
-import subprocess
-import socket
-import sys
-import os
 import base64
 import contextlib
 import hashlib
+import http.client
 import io
-import itertools
+import json
+import os
+import pathlib
+import re
+import shutil
+import socket
+import subprocess
+import sys
 import tarfile
 import tempfile
-import threading
 import time
-import signal
+import urllib.parse
 
 
 class Client:
-    def __init__(self, command, stderr, timeout=30, env=None):
+    """MCP over the Streamable HTTP listener of an application, from its private mcp.json."""
+
+    def __init__(self, configuration, timeout=30):
         self.timeout = timeout  # seconds for the session to become ready and for one operation to finish
-        self.log_path = pathlib.Path(stderr.name) if isinstance(getattr(stderr, "name", None), str) else None
-        self.child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                        stderr=stderr, text=True, encoding="utf-8", env=env)
-        self.messages = queue.Queue()
+        server = json.loads(pathlib.Path(configuration).read_text())["mcpServers"]["webfront"]
+        assert server["type"] == "http", server
+        self.url = urllib.parse.urlsplit(server["url"])
+        assert self.url.hostname == "127.0.0.1" and self.url.path == "/mcp", server["url"]
+        self.authorization = server["headers"]["Authorization"]
+        self.token = self.authorization[len("Bearer "):]
+        self.mcp_session = None
         self.counter = 0
-        def read():
-            for line in self.child.stdout:
-                try:
-                    self.messages.put(json.loads(line))
-                except Exception as error:
-                    self.messages.put(error)
-            self.messages.put(EOFError("MCP stdout closed"))
-        self.reader = threading.Thread(target=read, daemon=True)
-        self.reader.start()
+
+    def post(self, body, headers=None, method="POST"):
+        """One request on its own connection (the listener closes each one); returns (status, headers, body)."""
+        connection = http.client.HTTPConnection(self.url.hostname, self.url.port, timeout=30)
+        try:
+            sent = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream",
+                    "Authorization": self.authorization}
+            if self.mcp_session:
+                sent["Mcp-Session-Id"] = self.mcp_session
+                sent["MCP-Protocol-Version"] = "2025-11-25"
+            sent.update(headers or {})
+            for name in [name for name, value in sent.items() if value is None]:
+                del sent[name]
+            connection.request(method, self.url.path, body=body, headers=sent)
+            response = connection.getresponse()
+            return response.status, dict(response.getheaders()), response.read()
+        finally:
+            connection.close()
 
     def send(self, method, params=None, notification=False):
         self.counter += 1
@@ -46,16 +61,15 @@ class Client:
             request["params"] = params
         if not notification:
             request["id"] = self.counter
-        self.child.stdin.write(json.dumps(request) + "\n")
-        self.child.stdin.flush()
+        status, headers, body = self.post(json.dumps(request).encode())
         if notification:
+            assert status == 202 and not body, (status, body)
             return None
-        message = self.messages.get(timeout=30)
-        if isinstance(message, Exception):
-            if isinstance(message, EOFError):
-                details = self.log_path.read_text()[-2000:] if self.log_path and self.log_path.exists() else ""
-                raise EOFError(f"MCP stdout closed (status {self.child.poll()}); native stderr: {details}")
-            raise message
+        assert status == 200, (status, body)
+        assert headers.get("Content-Type") == "application/json", headers
+        if method == "initialize":
+            self.mcp_session = headers["Mcp-Session-Id"]
+        message = json.loads(body)
         assert message["id"] == self.counter, message
         assert "error" not in message, message
         return message["result"]
@@ -70,6 +84,7 @@ class Client:
         result = self.send("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
                                           "clientInfo": {"name": "WebFront-regression", "version": "1"}})
         assert result["protocolVersion"] == "2025-11-25", result
+        assert "webfront.session" in result["instructions"], result
         self.send("notifications/initialized", notification=True)
         assert len(self.send("tools/list")["tools"]) == 4
         end = time.monotonic() + self.timeout
@@ -104,23 +119,16 @@ class Client:
         return result["result"]
 
     def close(self):
-        if self.child.poll() is None:
-            self.child.stdin.close()
-            # The agent ends on its own within about 9 s when a browser does not close: 5 s of grace, then up to 2 s to
-            # end its processes and 2 s to remove its profile. Wait longer than that, so a loaded machine is not a failure.
-            try:
-                self.child.wait(timeout=30)
-            except subprocess.TimeoutExpired as error:
-                self.child.kill()
-                self.child.wait()
-                details = self.log_path.read_text()[-2000:] if self.log_path and self.log_path.exists() else ""
-                raise TimeoutError(f"The agent did not exit after its input closed; native stderr: {details}") from error
-        self.reader.join(timeout=2)
+        """Terminates the MCP session only: the application and its window stay."""
+        if self.mcp_session:
+            status, _, _ = self.post(None, {"Content-Type": None, "Accept": None}, method="DELETE")
+            assert status == 204, status
+            self.mcp_session = None
 
 
 @contextlib.contextmanager
 def profile_directory():
-    """A private directory in the system temporary directory, whose removal tolerates what the agent still removes.
+    """A private directory in the system temporary directory, whose removal tolerates what the browser still removes.
 
     tempfile.TemporaryDirectory takes ignore_cleanup_errors only from Python 3.10. On Linux, the directory is in /tmp
     rather than an inherited TMPDIR, which may be long: Chromium's singleton socket path must stay below sockaddr_un's
@@ -133,170 +141,106 @@ def profile_directory():
         shutil.rmtree(path, ignore_errors=True)
 
 
-def remaining_profiles(profiles, timeout=25, settle=2.5):
-    """The agent profiles left in `profiles`, once absent for `settle` seconds or after `timeout` more, with what
-    they contain.
-
-    On Linux, the CEF browser runs inside the agent and may write until it exits: the agent then leaves the
-    last removal to a process that waits for its exit and repeats it for 2 s against a helper relaunched meanwhile.
-    A profile is gone only once absent for longer than that."""
-    deadline = time.monotonic() + timeout + settle
-    absent_since = None
-    while True:
-        left = list(profiles.glob("webfront-agent-*"))
-        now = time.monotonic()
-        if left:
-            absent_since = None
-        elif absent_since is None:
-            absent_since = now
-        if (absent_since is not None and now - absent_since >= settle) or now >= deadline:
-            # os.walk skips a directory removed while it is listed: the removal may still be under way. Only the
-            # first 40 entries are walked.
-            contents = (str(pathlib.Path(directory, name).relative_to(profiles))
-                        for profile in left for directory, folders, files in os.walk(profile) for name in folders + files)
-            return left, list(itertools.islice(contents, 40))
-        time.sleep(0.05)
+def raw_request(port, text):
+    """Sends raw bytes to a loopback port and returns the status code of the answer."""
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as peer:
+        peer.sendall(text.encode())
+        answer = b""
+        while chunk := peer.recv(4096):
+            answer += chunk
+    return int(answer.split(b" ", 2)[1])
 
 
-def check_windows_profile_cleaner(agent, root):
-    """A locked file must be retried, including when its Unicode path contains shell metacharacters."""
-    if sys.platform != "win32":
-        return
-    import ctypes
-    from ctypes import wintypes
-    profile = root / "profile &%!^ 雪"
-    profile.mkdir()
-    file = profile / "locked"
-    file.write_text("locked")
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
-                                   wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
-    kernel.CreateFileW.restype = wintypes.HANDLE
-    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-    handle = kernel.CreateFileW(str(file), 0x80000000, 0, None, 3, 0, None)
-    if handle == wintypes.HANDLE(-1).value:
-        raise ctypes.WinError(ctypes.get_last_error())
-    try:
-        cleaner = subprocess.Popen([agent, "--cleanup-profile", str(profile)])
-        time.sleep(3)
-        assert cleaner.poll() is None, "Cleaner stopped while the profile was locked"
-    finally:
-        kernel.CloseHandle(handle)
-    assert cleaner.wait(timeout=10) == 0
-    assert not profile.exists(), "Cleaner left the profile behind"
+class Host:
+    """automation_host: an application that enabled automation, launched with its own browser profile."""
 
+    def __init__(self, args, project, root, name, log, extra=(), environment=None, integrity=None):
+        self.root, self.name, self.log = root, name, log
+        self.sessions = root / "sessions"
+        profile = root / f"{name}-profile"
+        self.base = ["--project", str(project), "--environment", environment or args.environment,
+                     "--integrity", integrity or json.loads(pathlib.Path(args.provision).read_text())["integrity"],
+                     "--registry-dir", args.registry]
+        env = dict(os.environ, XDG_DATA_HOME=str(profile / "data"), XDG_CACHE_HOME=str(profile / "cache"),
+                   WEBFRONT_TEST_CEF_PROFILE=str(profile / "cef"))
+        # Chromium puts its singleton Unix socket in TMPDIR: a short private directory keeps it below sockaddr_un's limit.
+        self.profiles = profile_directory()
+        temporary = self.profiles.__enter__()
+        env.update(TMPDIR=temporary, TEMP=temporary, TMP=temporary)
+        # Closing its standard input closes the application's window (stop()).
+        self.process = subprocess.Popen([args.host, *self.base, "--sessions", str(self.sessions), *extra],
+                                        stdin=subprocess.PIPE, stdout=log, stderr=log, text=True, env=env)
+        self.project = pathlib.Path(project).resolve()
 
-def check_startup_backoff(agent, root, ready_delay=0):
-    """The attach-only path needs no renderer and must not create 50 connections per second."""
-    endpoint = root / f"owner-{ready_delay}"
-    endpoint.mkdir(mode=0o700)
-    stopped = threading.Event()
-    calls = []
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        listener.listen()
-        listener.settimeout(0.1)
-        (endpoint / "endpoint.json").write_text(json.dumps({"version": 1, "port": listener.getsockname()[1], "token": "f" * 64}))
-        (endpoint / "endpoint.json").chmod(0o600)
-        def serve():
-            while not stopped.is_set():
-                try:
-                    peer, _ = listener.accept()
-                except socket.timeout:
-                    continue
-                with peer:
-                    peer.settimeout(2)
-                    message = b""
-                    while b"\n" not in message:
-                        chunk = peer.recv(4096)
-                        if not chunk:
-                            break
-                        message += chunk
-                    if b"\n" not in message:
-                        continue
-                    request = json.loads(message)
-                    calls.append(request["method"])
-                    if ready_delay and stopped.wait(ready_delay):
-                        continue
-                    state = "ready" if ready_delay else "starting"
-                    try:
-                        peer.sendall(json.dumps({"result": {"session": "starting", "state": state}}).encode() + b"\n")
-                    except OSError:
-                        pass  # A correctly bounded client already closed its socket.
-        worker = threading.Thread(target=serve, daemon=True)
-        worker.start()
+    def full_log(self):
+        return pathlib.Path(self.log.name).read_text(encoding="utf-8", errors="replace")
+
+    def logs(self):
+        """The end of the log, for diagnostics; assertions on its whole content use full_log()."""
+        return self.full_log()[-4000:]
+
+    def record(self, timeout=60):
+        """This instance's discovery record (published by this process), once its client configuration exists."""
+        deadline = time.monotonic() + timeout
+        while True:
+            for path in self.sessions.glob("*.json") if self.sessions.is_dir() else []:
+                with contextlib.suppress(ValueError, OSError):
+                    record = json.loads(path.read_text())
+                    if (record["pid"] == self.process.pid and pathlib.Path(record["project"]).resolve() == self.project
+                            and pathlib.Path(record["configuration"]).exists()):
+                        return record
+            assert self.process.poll() is None, f"{self.name} exited with {self.process.returncode}\n{self.logs()}"
+            assert time.monotonic() < deadline, f"{self.name} never published its MCP URL\n{self.logs()}"
+            time.sleep(0.05)
+
+    def client(self, timeout=30):
+        return Client(self.record()["configuration"], timeout)
+
+    def stop(self):
+        """Closes the window as its owner would; the application then exits with status 0."""
+        with contextlib.suppress(OSError):
+            self.process.stdin.close()
+
+    def wait(self, timeout=30):
         try:
-            began = time.monotonic()
-            result = subprocess.run([agent, "--attach", str(endpoint), "--operation", "build", "--startup-timeout", "1"],
-                                    capture_output=True, text=True, timeout=5)
-            assert result.returncode == 71, result.stdout + result.stderr
-            assert 1 <= len(calls) <= 6 and set(calls) == {"describe"}, calls
-            if ready_delay:
-                assert calls == ["describe"], calls
-            if ready_delay >= 2:
-                assert time.monotonic() - began < 1.8, "Transport exceeded the startup deadline"
-        finally:
-            stopped.set()
-            worker.join(timeout=3)
-            assert not worker.is_alive()
+            return self.process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            raise AssertionError(f"{self.name} did not exit\n{self.logs()}") from None
+
+    def close(self):
+        if self.process.poll() is None:
+            self.process.kill()
+            self.process.wait()
+        self.profiles.__exit__(None, None, None)
 
 
-def check_result_backoff(agent, root):
-    """One second of work should not need fifty new TCP connections."""
-    endpoint = root / "result-backoff"
-    endpoint.mkdir(mode=0o700)
-    stopped = threading.Event()
-    polls = []
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        listener.listen()
-        listener.settimeout(0.1)
-        (endpoint / "endpoint.json").write_text(json.dumps({"version": 1, "port": listener.getsockname()[1], "token": "f" * 64}))
-        (endpoint / "endpoint.json").chmod(0o600)
-        began = time.monotonic()
-        def serve():
-            while not stopped.is_set():
-                try:
-                    peer, _ = listener.accept()
-                except socket.timeout:
-                    continue
-                with peer:
-                    peer.settimeout(2)
-                    message = b""
-                    while b"\n" not in message:
-                        message += peer.recv(4096)
-                    method = json.loads(message)["method"]
-                    result = {"session": "owner", "state": "ready"}
-                    if method == "start":
-                        result = {"runId": "run-1"}
-                    elif method == "result":
-                        polls.append(time.monotonic())
-                        result = {"state": "running"} if time.monotonic() - began < 1 else {"state": "succeeded", "result": {"exitCode": 0, "output": "done"}}
-                    peer.sendall(json.dumps({"result": result}).encode() + b"\n")
-        worker = threading.Thread(target=serve, daemon=True)
-        worker.start()
-        try:
-            result = subprocess.run([agent, "--attach", str(endpoint), "--operation", "build"], capture_output=True, text=True, timeout=5)
-            assert result.returncode == 0, result.stdout + result.stderr
-            assert 2 <= len(polls) <= 6, polls
-        finally:
-            stopped.set()
-            worker.join(timeout=3)
-            assert not worker.is_alive()
+def check_withdrawn(record, port, sessions):
+    """After the application ended: no record in `sessions` (the host's --sessions), no private directory, no listener."""
+    sessions = pathlib.Path(sessions)
+    assert not pathlib.Path(record["endpoint"]).exists(), "The private directory outlived the application"
+    assert not (sessions / (record["session"] + ".json")).exists(), "The record outlived the application"
+    with contextlib.suppress(ConnectionRefusedError):
+        raw_request(port, "POST /mcp HTTP/1.1\r\n\r\n")
+        raise AssertionError("The MCP listener outlived the application")
+
+
+def install(args, project):
+    integrity = json.loads(pathlib.Path(args.provision).read_text())["integrity"]
+    command = ["--project", str(project), "--environment", args.environment, "--integrity", integrity, "--registry-dir", args.registry]
+    installed = subprocess.run([args.driver, *command, "--", "install"], capture_output=True, text=True, timeout=120)
+    assert installed.returncode == 0, installed.stdout + installed.stderr
 
 
 def watchdog(args):
     """Exercise native revocation with a real blocked renderer, without compiling Jasmine first.
 
-    Only the test archive replaces the operation body. The real signed callback, runner, native
-    deadline, window close grace, stdio EOF and endpoint cleanup remain on the production path.
-    The agent is driven through MCP, the way agents drive it; the CLI shares the same native
-    revocation, and its own exit statuses are checked by the failed relaunch below.
+    Only the test archive replaces the operation body. The real signed callback, runner, native deadline, window close
+    grace, unresponsive-window exit and the withdrawal of the listener, record and private directory stay on the
+    production path of enableAutomation. The application is driven through its MCP URL, the way agents drive it.
     """
     pathlib.Path(args.work).mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=args.work, prefix="watchdog-") as temporary:
         root = pathlib.Path(temporary)
-        check_windows_profile_cleaner(args.agent, root)
         project = root / "project"
         shutil.copytree(args.fixture, project)
         environment = root / "watchdog-environment.tgz"
@@ -330,36 +274,27 @@ def watchdog(args):
                     replaced = True
                 output.addfile(member, io.BytesIO(data) if data is not None else None)
         assert replaced
-        command = ["--project", str(project), "--environment", str(environment),
-                   "--integrity", "sha512-" + base64.b64encode(hashlib.sha512(environment.read_bytes()).digest()).decode(),
-                   "--registry-dir", args.registry, "--startup-timeout", "30", "--timeout", "2", "--allow", "build"]
-        endpoint = root / "forced-window"
-        # A private temporary directory isolates the native profile, which the forced exit must still remove. It is
-        # created in the system temporary directory, not under the work path: Chromium puts its singleton Unix socket
-        # there, and sockaddr_un limits that path to about 108 bytes whatever the checkout's depth.
-        with profile_directory() as profile_root:
-            profiles = pathlib.Path(profile_root).resolve()
-            forced_environment = dict(os.environ, TMPDIR=str(profiles), TEMP=str(profiles), TMP=str(profiles))
-            with (pathlib.Path(args.work) / "watchdog.log").open("w") as log:
-                client = Client([args.agent, *command, "--mcp", "--listen", str(endpoint)], log, env=forced_environment)
-                try:
-                    client.initialize()
-                    client.start("build")
-                    try:
-                        status = client.child.wait(timeout=30)
-                    except subprocess.TimeoutExpired:
-                        raise AssertionError(f"The forced exit did not happen\n{pathlib.Path(log.name).read_text()}") from None
-                    assert status == 71, f"exit {status}\n{pathlib.Path(log.name).read_text()}"
-                    assert isinstance(client.messages.get(timeout=2), EOFError), "A renderer retained MCP stdout"
-                finally:
-                    client.close()
-            assert (project / "renderer.started").is_file(), "The deadline expired before the renderer actually blocked"
-            assert not endpoint.exists(), "The forced exit left its attachment capability behind"
-            left, contents = remaining_profiles(profiles)
-            assert not left, f"The forced exit left its native profile behind: {left} {contents}\n{pathlib.Path(log.name).read_text()}"
-        # This same-path relaunch, through the CLI, must reach its authenticated page before the intentional error.
-        # It checks endpoint reuse and Unicode failure reporting in one process; normal builds
-        # are exercised by the functional MCP scenario.
+        integrity = "sha512-" + base64.b64encode(hashlib.sha512(environment.read_bytes()).digest()).decode()
+        directory = root / "forced-window"
+        options = ["--directory", str(directory), "--grants", "build", "--timeout", "2", "--startup-timeout", "30"]
+        with (pathlib.Path(args.work) / "watchdog.log").open("w") as log:
+            host = Host(args, project, root, "blocked", log, options, str(environment), integrity)
+            try:
+                record = host.record()
+                client = host.client()
+                client.initialize()
+                client.start("build")
+                status = host.wait(timeout=30)
+                # The deadline revokes the session and asks the window to close: a window that closes ends show() (71); one
+                # whose renderer keeps it open is ended by enableAutomation after its grace (72).
+                assert status in (71, 72), f"exit {status}\n{host.logs()}"
+            finally:
+                host.close()
+        assert (project / "renderer.started").is_file(), "The deadline expired before the renderer actually blocked"
+        check_withdrawn(record, client.url.port, host.sessions)
+        # A relaunch on the same private directory must reach its authenticated page before the intentional error. It
+        # checks the reuse of the directory and Unicode failure reporting in one process; normal builds are exercised by
+        # the functional scenario.
         failed_environment = root / "failed-bootstrap.tgz"
         # From the original archive: the blocked one also delays its startup by three seconds.
         with tarfile.open(args.environment, "r:gz") as archive, tarfile.open(failed_environment, "w:gz", compresslevel=1) as output:
@@ -371,152 +306,139 @@ def watchdog(args):
                     data += b"\n" + connect[0] + b"=()=>{throw new Error('B'+String.fromCodePoint(0xe9).repeat(1022)+String.fromCodePoint(0x1f600)+'tail');};"
                     member.size = len(data)
                 output.addfile(member, io.BytesIO(data) if data is not None else None)
-        failed_command = list(command)
-        failed_command[failed_command.index("--environment") + 1] = str(failed_environment)
-        failed_command[failed_command.index("--integrity") + 1] = "sha512-" + base64.b64encode(hashlib.sha512(failed_environment.read_bytes()).digest()).decode()
-        failed = subprocess.run([args.agent, *failed_command, "--listen", str(endpoint), "--operation", "build"],
-                                capture_output=True, text=True, encoding="utf-8", timeout=45)
-        assert failed.returncode == 70, (failed.returncode, failed.stdout, failed.stderr)
-        assert "Automation startup: B" + "é" * 511 + "\n" in failed.stderr, failed.stderr
-        assert not endpoint.exists()
-    print(f"{args.scenario}: blocked renderer, native deadline, EOF and private endpoint cleanup passed")
+        failed_integrity = "sha512-" + base64.b64encode(hashlib.sha512(failed_environment.read_bytes()).digest()).decode()
+        with (pathlib.Path(args.work) / "watchdog-failed.log").open("w", encoding="utf-8") as log:
+            host = Host(args, project, root, "failed", log, options, str(failed_environment), failed_integrity)
+            try:
+                assert host.wait(timeout=45) == 70, host.logs()
+            finally:
+                host.close()
+            assert "Automation startup: B" + "é" * 511 + "\n" in host.logs(), host.logs()
+        assert not directory.exists()
+    print(f"{args.scenario}: blocked renderer, native deadline, unresponsive window and private directory cleanup passed")
 
 
 def consumer(args):
-    """An application that opted in with enableAutomation (#501), driven from another process.
+    """Two applications that enabled automation, side by side (#501, ADR-025, #632).
 
-    The window and its `consumer.render` callback belong to automation_consumer; this process only attaches. The preview
-    runs in the application's own window, so its page reaches the application's C++ callback, which a window owned by
-    the agent never could."""
-    integrity = json.loads(pathlib.Path(args.provision).read_text())["integrity"]
+    Each serves MCP from its own process on its own loopback port. This process reads each instance's record and private
+    mcp.json and drives each window through its URL only. The preview runs in the application's own window, so its page
+    reaches the application's C++ callback."""
     pathlib.Path(args.work).mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=args.work, prefix="consumer-") as temporary:
         root = pathlib.Path(temporary)
-        project = root / "project"
-        shutil.copytree(args.fixture, project)
-        base = ["--project", str(project), "--environment", args.environment, "--integrity", integrity,
-                "--registry-dir", args.registry]
-        installed = subprocess.run([args.driver, *base, "--", "install"], capture_output=True, text=True, timeout=120)
-        assert installed.returncode == 0, installed.stdout + installed.stderr
-        endpoint, sessions, called = root / "endpoint", root / "sessions", root / "called.txt"
-        with profile_directory() as profile_root, (root / "consumer.log").open("w") as log:
-            owner_environment = dict(os.environ, TMPDIR=profile_root, TEMP=profile_root, TMP=profile_root)
-            owner = subprocess.Popen([args.consumer, *base, "--listen", str(endpoint), "--sessions", str(sessions),
-                                      "--called", str(called)],
-                                     stdin=subprocess.DEVNULL, stdout=log, stderr=log, text=True, env=owner_environment)
+        sessions = root / "sessions"
+        hosts = []
+        with (root / "consumers.log").open("w") as log:
             try:
-                deadline = time.monotonic() + 60
-                while not (endpoint / "endpoint.json").exists():
-                    assert owner.poll() is None, (root / "consumer.log").read_text()
-                    assert time.monotonic() < deadline, "The application never published its endpoint"
-                    time.sleep(0.05)
-                # The endpoint is published before the discovery record. Wait for the
-                # record as well, polling without the private attachment capability.
-                token = json.loads((endpoint / "endpoint.json").read_text())["token"]
-                while True:
-                    listed = subprocess.run([args.agent, "--list", "--sessions-dir", str(sessions)],
-                                            capture_output=True, text=True, timeout=10)
-                    assert listed.returncode == 0, listed.stderr
-                    assert token not in listed.stdout + listed.stderr
-                    entries = json.loads(listed.stdout)["sessions"]
-                    if entries:
+                for name in ("first", "second"):
+                    project = root / name
+                    shutil.copytree(args.fixture, project)
+                    install(args, project)
+                    host = Host(args, project, root, name, log, ["--called", str(root / f"{name}-called.txt")])
+                    host.called = root / f"{name}-called.txt"
+                    hosts.append(host)
+                # Discovery: each record names its project, its URL and its private configuration, never its token.
+                for host in hosts:
+                    host.entry = host.record()
+                    configuration = pathlib.Path(host.entry["configuration"])
+                    assert configuration.parent == pathlib.Path(host.entry["endpoint"]) == sessions / host.entry["session"], host.entry
+                    assert sorted(host.entry["allow"]) == sorted(["check", "build", "preview", "inspect", "interact", "call"]), host.entry
+                    assert host.entry["callbacks"] == ["consumer.render"], host.entry
+                    if os.name != "nt":
+                        assert configuration.stat().st_mode & 0o077 == 0 and configuration.parent.stat().st_mode & 0o077 == 0
+                        assert sessions.stat().st_mode & 0o077 == 0
+                    host.mcp = Client(configuration)
+                    assert host.mcp.url.geturl() == host.entry["mcp"], host.entry
+                records = "".join(path.read_text() for path in sessions.glob("*.json"))
+                for host in hosts:
+                    assert host.mcp.token not in records + host.full_log()
+                first, second = hosts
+                assert first.mcp.url.port != second.mcp.url.port
+                # The listener of the first refuses what a web page, a rebinding name or a wrong token sends.
+                port = first.mcp.url.port
+                body = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+                request = ("POST /mcp HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\n"
+                           "Accept: application/json\r\nContent-Length: {length}\r\n{extra}\r\n{body}")
+                def status(host=f"127.0.0.1:{port}", token=first.mcp.token, extra=""):
+                    return raw_request(port, request.format(host=host, token=token, extra=extra, length=len(body), body=body))
+                assert status(token=second.mcp.token) == 401
+                assert status(token="0" * 64) == 401
+                assert status(host=f"rebinding.example:{port}") == 421
+                assert status(extra="Origin: http://127.0.0.1:9002\r\n") == 403
+                assert status(extra="Sec-Fetch-Site: cross-site\r\n") == 403
+                assert raw_request(port, f"GET /WebFront.js HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n") == 404
+                # Each agent reaches its own instance: the session names that instance's project.
+                for host in hosts:
+                    host.mcp.initialize()
+                    assert pathlib.Path(host.mcp.tool("session")["project"]).resolve() == host.project
+                client = first.mcp
+                # The grants are the application's: the agent cannot widen them.
+                for operation in ("test", "init", "install", "embed"):
+                    client.tool("start", {"session": client.session, "operation": operation}, error=True)
+                client.tool("start", {"session": second.mcp.session, "operation": "check"}, error=True)
+                # Only the allow-listed callback can be called, and the page can never reach webfront.* ones.
+                for callback in ("consumer.secret", "webfront.developer.read", "consumer.render.extra"):
+                    client.tool("start", {"session": client.session, "operation": "call", "arguments": {"callback": callback}}, error=True)
+                client.run("check")
+                client.run("build")
+                assert (first.project / ".webfront/developer/build/app.js").is_file()
+                assert not (second.project / ".webfront/developer/build/app.js").exists()
+                client.run("preview")
+                for _ in range(100):
+                    run = client.wait(client.start("inspect"))
+                    if run["state"] == "succeeded" and any(item["id"] == "render" for item in run["result"]["data"]["elements"]):
                         break
-                    assert owner.poll() is None, (root / "consumer.log").read_text()
-                    assert time.monotonic() < deadline, f"The application never registered its session: {listed.stdout}"
-                    time.sleep(0.05)
-                assert len(entries) == 1 and entries[0]["state"] == "running", listed.stdout
-                assert sorted(entries[0]["allow"]) == sorted(["check", "build", "preview", "inspect", "interact", "call"]), entries
-                assert entries[0]["callbacks"] == ["consumer.render"], entries
-                assert pathlib.Path(entries[0]["endpoint"]).resolve() == endpoint.resolve(), entries
-                configuration = subprocess.run([args.agent, "--print-mcp-config", "--attach", str(endpoint)],
-                                               capture_output=True, text=True, timeout=10)
-                assert configuration.returncode == 0, configuration.stderr
-                server = json.loads(configuration.stdout)["mcpServers"]["webfront"]
-                assert server["args"][0] == "--attach" and server["args"][-1] == "--mcp"
-                assert token not in configuration.stdout
-                client = Client([args.agent, *server["args"]], log)
-                try:
-                    client.initialize()
-                    # The grants are the application's: the agent cannot widen them.
-                    for operation in ("test", "init", "install", "embed"):
-                        client.tool("start", {"session": client.session, "operation": operation}, error=True)
-                    # Only the allow-listed callback can be called, and the page can never reach webfront.* ones.
-                    for callback in ("consumer.secret", "webfront.developer.read", "consumer.render.extra"):
-                        client.tool("start", {"session": client.session, "operation": "call", "arguments": {"callback": callback}}, error=True)
-                    client.run("check")
-                    client.run("build")
-                    assert (project / ".webfront/developer/build/app.js").is_file()
-                    client.run("preview")
-                    for _ in range(100):
-                        run = client.wait(client.start("inspect"))
-                        if run["state"] == "succeeded" and any(item["id"] == "render" for item in run["result"]["data"]["elements"]):
-                            break
-                        time.sleep(0.1)
-                    snapshot = run["result"]["data"]
-                    assert any(item["id"] == "render" for item in snapshot["elements"]), run
-                    client.run("click", {"pageId": snapshot["pageId"], "elementId": "render"})
-                    for _ in range(100):
-                        updated = client.run("inspect")["data"]
-                        if any(item["id"] == "result" and item["text"] == "rendered:hello" for item in updated["elements"]):
-                            break
-                        time.sleep(0.1)
-                    else:
-                        raise AssertionError(updated)
-                    # The callback that answered is the application's own, in its own process.
-                    answered = client.run("call", {"callback": "consumer.render", "value": "from-agent"})
-                    assert answered["data"] == {"callback": "consumer.render", "result": "rendered:from-agent"}, answered
-                    assert called.read_text().split() == ["hello", "from-agent"], called.read_text()
-                finally:
-                    client.close()
-                assert owner.poll() is None, "Detaching an agent closed the application's window"
-                shutdown = subprocess.run([args.agent, "--attach", str(endpoint), "--shutdown"],
-                                          capture_output=True, text=True, timeout=10)
-                assert shutdown.returncode == 0, shutdown.stderr
-                status = owner.wait(timeout=30)
-                assert status == 0, f"exit {status}\n{(root / 'consumer.log').read_text()}"
-                assert not endpoint.exists() or not (endpoint / "endpoint.json").exists(), "The endpoint outlived the application"
-                assert json.loads(subprocess.run([args.agent, "--list", "--sessions-dir", str(sessions)],
-                                                 capture_output=True, text=True, timeout=10).stdout)["sessions"] == []
+                    time.sleep(0.1)
+                snapshot = run["result"]["data"]
+                assert any(item["id"] == "render" for item in snapshot["elements"]), run
+                client.run("click", {"pageId": snapshot["pageId"], "elementId": "render"})
+                for _ in range(100):
+                    updated = client.run("inspect")["data"]
+                    if any(item["id"] == "result" and item["text"] == "rendered:hello" for item in updated["elements"]):
+                        break
+                    time.sleep(0.1)
+                else:
+                    raise AssertionError(updated)
+                # The callback that answered is the application's own, in its own process.
+                answered = client.run("call", {"callback": "consumer.render", "value": "from-agent"})
+                assert answered["data"] == {"callback": "consumer.render", "result": "rendered:from-agent"}, answered
+                assert first.called.read_text().split() == ["hello", "from-agent"], first.called.read_text()
+                assert not second.called.exists()
+                second.mcp.run("check")
+                for host in hosts:
+                    host.mcp.close()
+                    assert host.process.poll() is None, "Ending an MCP session closed the application's window"
+                # Closing the applications withdraws their URLs, private directories and records.
+                for host in hosts:
+                    host.stop()
+                    status_code = host.wait()
+                    assert status_code == 0, f"exit {status_code}\n{host.logs()}"
+                    check_withdrawn(host.entry, host.mcp.url.port, host.sessions)
+                assert list(sessions.glob("*.json")) == []
             except BaseException:
-                print((root / "consumer.log").read_text(), flush=True)
+                print((root / "consumers.log").read_text(), flush=True)
                 raise
             finally:
-                if owner.poll() is None:
-                    owner.kill()
-                    owner.wait()
-    print("consumer: attach to an application's own window, its own callback, grants, discovery, shutdown passed")
+                for host in hosts:
+                    host.close()
+    print("consumer: two applications serve their own MCP URLs, refusals, grants, preview, callbacks and cleanup passed")
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    for name in ("agent", "driver", "environment", "provision", "registry", "fixture", "work"):
-        parser.add_argument("--" + name, required=True)
-    parser.add_argument("--scenario", choices=("session", "mcp-watchdog", "consumer"), default="session")
-    parser.add_argument("--consumer", help="the automation_consumer executable of the consumer scenario")
-    args = parser.parse_args()
-    if args.scenario == "consumer":
-        consumer(args)
-        return
-    if args.scenario != "session":
-        watchdog(args)
-        return
-    integrity = json.loads(pathlib.Path(args.provision).read_text())["integrity"]
+def session(args):
+    """The functional regression of one application window driven through its URL."""
     pathlib.Path(args.work).mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=args.work, prefix="session-") as temporary:
-        check_result_backoff(args.agent, pathlib.Path(temporary))
-        check_startup_backoff(args.agent, pathlib.Path(temporary))
-        check_startup_backoff(args.agent, pathlib.Path(temporary), ready_delay=1.25)
-        check_startup_backoff(args.agent, pathlib.Path(temporary), ready_delay=3)
-        project = pathlib.Path(temporary) / "project"
+        root = pathlib.Path(temporary)
+        project = root / "project"
         shutil.copytree(args.fixture, project)
-        command = ["--project", str(project), "--environment", args.environment, "--integrity", integrity,
-                   "--registry-dir", args.registry]
-        installed = subprocess.run([args.driver, *command, "--", "install"], capture_output=True, text=True, timeout=120)
-        assert installed.returncode == 0, installed.stdout + installed.stderr
-        with (pathlib.Path(temporary) / "agent.log").open("w") as log:
-            client = Client([args.agent, *command, "--mcp", "--timeout", "20",
-                             *sum((["--allow", op] for op in ("check", "build", "test", "preview", "inspect", "interact")), [])], log)
+        install(args, project)
+        with (root / "window.log").open("w") as log:
+            host = Host(args, project, root, "window", log,
+                        ["--grants", "check,build,test,preview,inspect,interact", "--timeout", "20"])
             try:
+                record = host.record()
+                client, other = host.client(), host.client()
                 client.initialize()
                 client.tool("start", {"session": "wrong", "operation": "build"}, error=True)
                 client.tool("start", {"session": client.session, "operation": "exec"}, error=True)
@@ -562,35 +484,45 @@ def main():
                 assert "secret-not-to-export" not in json.dumps(client.run("inspect"))
                 client.run("preview")
                 client.run("click", {"pageId": snapshot["pageId"], "elementId": "increment"}, state="failed")
+                # A second client of the same application shares its session, its runs and its busy/cancel rules.
+                other.initialize()
+                assert other.session == client.session
                 run = client.start("test", {"pattern": "waits for cancellation"})
-                # Wait for dispatch before cancellation; the unit suite also covers cancellation while queued.
                 for attempt in range(100):
                     if client.result(run)["state"] == "running":
                         break
                     time.sleep(0.02)
-                client.tool("cancel", {"session": client.session, "runId": run})
+                other.tool("start", {"session": other.session, "operation": "build"}, error=True)
+                other.tool("cancel", {"session": other.session, "runId": run})
                 cancelled = client.wait(run)
                 assert cancelled["state"] == "cancelled", f"Unexpected run state: {cancelled}"
                 client.run("test", {"pattern": "passes"})
-            finally:
+                other.close()
                 client.close()
-            assert client.child.returncode == 0, (client.child.returncode, pathlib.Path(log.name).read_text())
+                assert host.process.poll() is None, "Ending the MCP sessions closed the window"
+                host.stop()
+                assert host.wait(timeout=30) == 0, host.logs()
+                check_withdrawn(record, client.url.port, host.sessions)
+            except BaseException:
+                print(host.logs(), flush=True)
+                raise
+            finally:
+                host.close()
 
-        # An agent builds a project from nothing: the starter comes from the environment's manifest and is served by the launcher.
-        setup = pathlib.Path(temporary) / "setup-project"
+        # An agent builds a project from nothing: the starter comes from the environment's manifest, beside its archive.
+        setup = root / "setup-project"
         setup.mkdir()
-        setup_command = ["--project", str(setup), "--environment", args.environment, "--integrity", integrity,
-                         "--registry-dir", args.registry]
-        with (pathlib.Path(temporary) / "setup.log").open("w") as log:
-            client = Client([args.agent, *setup_command, "--mcp", "--timeout", "60", "--startup-timeout", "60",
-                             *sum((["--allow", op] for op in ("init", "create", "install", "restore", "embed")), [])], log)
+        with (root / "setup.log").open("w") as log:
+            host = Host(args, setup, root, "setup", log,
+                        ["--grants", "init,create,install,restore,embed", "--timeout", "60", "--startup-timeout", "60"])
             try:
+                client = host.client(timeout=60)
                 client.initialize()
                 missing = client.run("create", {"starter": "nonexistent"}, state="failed")
                 assert "Unknown pinned starter" in missing["output"], missing
                 client.run("create", {"starter": "life", "directory": "ui"})
                 assert (setup / "ui/main.tsx").is_file() and (setup / "ui/style.css").is_file()
-                assert "--print-mcp-config" in (setup / "ui/AGENTS.md").read_text(encoding="utf-8"), "The starter must explain how an agent attaches"
+                assert "mcp.json" in (setup / "ui/AGENTS.md").read_text(encoding="utf-8"), "The starter must explain how an agent connects"
                 again = client.run("create", {"starter": "life", "directory": "ui"}, state="failed")
                 assert (setup / "ui/main.tsx").is_file(), again
                 client.run("init")
@@ -601,90 +533,24 @@ def main():
                 client.run("embed", {"entry": "ui/main.tsx", "output": "generated/LifeUI.hpp"})
                 header = setup / "generated/LifeUI.hpp"
                 assert header.is_file() and b"class LifeUI" in header.read_bytes(), "embed did not write the provider"
-            finally:
                 client.close()
-            assert client.child.returncode == 0, (client.child.returncode, pathlib.Path(log.name).read_text())
-
-        # A human-owned window is already running before either agent attaches. Native grants remain the owner's.
-        endpoint = pathlib.Path(temporary) / "shared-window"
-        # Keep Chromium's temporary Unix socket paths below sockaddr_un's limit, independently
-        # of the checkout/work path length. The agent still creates its own private child profile.
-        with profile_directory() as profile_root, (pathlib.Path(temporary) / "shared.log").open("w") as log:
-            profiles = pathlib.Path(profile_root).resolve()
-            owner_environment = dict(os.environ, TMPDIR=str(profiles), TEMP=str(profiles), TMP=str(profiles))
-            owner = subprocess.Popen([args.agent, *command, "--serve", "--listen", str(endpoint),
-                                      "--allow", "build", "--allow", "test", "--timeout", "20"],
-                                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=log, text=True, env=owner_environment)
-            try:
-                deadline = time.monotonic() + 20
-                while not (endpoint / "endpoint.json").exists():
-                    assert owner.poll() is None, pathlib.Path(log.name).read_text()
-                    assert time.monotonic() < deadline
-                    time.sleep(0.02)
-                published = json.loads((endpoint / "endpoint.json").read_text())
-                if os.name != "nt":
-                    assert endpoint.stat().st_mode & 0o077 == 0
-                    assert (endpoint / "endpoint.json").stat().st_mode & 0o077 == 0
-                with socket.create_connection(("127.0.0.1", published["port"]), timeout=3) as peer:
-                    peer.sendall(b'GET / HTTP/1.1\r\n\r\n')
-                    response = peer.recv(4096)
-                    assert b'error' in response and published["token"].encode() not in response
-                bad = pathlib.Path(temporary) / "wrong-capability"
-                bad.mkdir(mode=0o700)
-                bad_endpoint = {**published, "token": "0" * 64}
-                (bad / "endpoint.json").write_text(json.dumps(bad_endpoint))
-                (bad / "endpoint.json").chmod(0o600)
-                denied = subprocess.run([args.agent, "--attach", str(bad), "--operation", "build"],
-                                        capture_output=True, text=True, timeout=10)
-                assert denied.returncode != 0 and published["token"] not in denied.stdout + denied.stderr
-                first = Client([args.agent, "--attach", str(endpoint), "--mcp"], log)
-                second = Client([args.agent, "--attach", str(endpoint), "--mcp"], log)
-                try:
-                    first.initialize()
-                    second.initialize()
-                    assert first.session == second.session
-                    first.run("build")
-                    first.tool("start", {"session": first.session, "operation": "preview"}, error=True)
-                    run = first.start("test", {"pattern": "waits for cancellation"})
-                    second.tool("start", {"session": second.session, "operation": "build"}, error=True)
-                    second.tool("cancel", {"session": second.session, "runId": run})
-                    cancelled = first.wait(run)
-                    assert cancelled["state"] == "cancelled", f"Unexpected run state: {cancelled}"
-                finally:
-                    first.close()
-                    second.close()
-                assert owner.poll() is None, "Detaching an agent closed the human's window"
-                cli = subprocess.run([args.agent, "--attach", str(endpoint), "--operation", "build"],
-                                     capture_output=True, text=True, timeout=30)
-                assert cli.returncode == 0 and json.loads(cli.stdout)["state"] == "succeeded", cli.stdout + cli.stderr
-                assert list(profiles.glob("webfront-agent-*")), "The test must observe the actual native profile"
-                if os.name == "posix":
-                    assert owner.poll() is None, f"Owner exited before SIGTERM: {owner.returncode}\n{pathlib.Path(log.name).read_text()}"
-                    owner.send_signal(signal.SIGTERM)
-                    status = owner.wait(timeout=15)
-                    assert status == 128 + signal.SIGTERM, f"exit {status}\n{pathlib.Path(log.name).read_text()}"
-                else:
-                    shutdown = subprocess.run([args.agent, "--attach", str(endpoint), "--shutdown"],
-                                              capture_output=True, text=True, timeout=10)
-                    assert shutdown.returncode == 0, shutdown.stderr
-                    # Before it exits, the owner waits up to 5 s for the WebView2 browser, ends it, then removes the profile.
-                    assert owner.wait(timeout=30) == 0, pathlib.Path(log.name).read_text()
-                # Only the owner removes the profile, at the latest just after it has exited.
-                left, contents = remaining_profiles(profiles)
-                assert not left, f"The owner left its native profile behind: {left} {contents}\n{pathlib.Path(log.name).read_text()}"
-                assert not endpoint.exists(), "The owner left its attachment capability behind"
-                unavailable = subprocess.run([args.agent, "--attach", str(endpoint), "--operation", "build"],
-                                             capture_output=True, text=True, timeout=5)
-                assert unavailable.returncode == 69, unavailable.stderr
+                host.stop()
+                assert host.wait(timeout=30) == 0, host.logs()
             except BaseException:
-                print(pathlib.Path(log.name).read_text(), flush=True)
+                print(host.logs(), flush=True)
                 raise
             finally:
-                if owner.poll() is None:
-                    owner.kill()
-                    owner.wait()
+                host.close()
+    print("MCP real-window regression passed: diagnostics/correction/check/build/test/preview/actions/cancellation/shared session/setup")
 
-    print("MCP real-window regression passed: diagnostics/correction/check/build/test/preview/actions/cancellation/authenticated shared-window attachment")
+
+def main():
+    parser = argparse.ArgumentParser()
+    for name in ("host", "driver", "environment", "provision", "registry", "fixture", "work"):
+        parser.add_argument("--" + name, required=True)
+    parser.add_argument("--scenario", choices=("session", "mcp-watchdog", "consumer"), default="session")
+    args = parser.parse_args()
+    {"session": session, "mcp-watchdog": watchdog, "consumer": consumer}[args.scenario](args)
 
 
 if __name__ == "__main__":

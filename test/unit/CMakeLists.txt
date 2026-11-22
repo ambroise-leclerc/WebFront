@@ -60,7 +60,7 @@ list(APPEND TESTS_LIST FormsTests.cpp ReactStoreTests.cpp DomDocumentTests.cpp D
 list(APPEND TESTS_LIST FileSystemTests.cpp NativeFSTests.cpp DownloadsTests.cpp StorageTests.cpp NativeStorageTests.cpp PtyTests.cpp)
 list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp ProfileLeaseTests.cpp SafePathTests.cpp UISubscribersTests.cpp)
 list(APPEND TESTS_LIST ReadBindingTests.cpp ViewAssociationTests.cpp BroadcastTests.cpp WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp)
-list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp AutomationTests.cpp AutomationChannelTests.cpp AutomationStdioTests.cpp AutomationDiscoveryTests.cpp JasmineConsumerTests.cpp HostTests.cpp LifeTests.cpp HostLoopTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp DeferredCallTests.cpp)
+list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp AutomationTests.cpp AutomationChannelTests.cpp AutomationDiscoveryTests.cpp AutomationMcpHttpTests.cpp JasmineConsumerTests.cpp HostTests.cpp LifeTests.cpp HostLoopTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp DeferredCallTests.cpp)
 list(APPEND TESTS_LIST Main.cpp ScenarioIsolation.cpp FrontendUrlTests.cpp ApplicationUrlTests.cpp FrontendContractTests.cpp UIExecutorTests.cpp NativeWindowTests.cpp CommandsTests.cpp EmbeddedCoreAssetsTests.cpp)
 if(WEBFRONT_USE_MDDLOG)
   list(APPEND TESTS_LIST MddlogLoggerTests.cpp MddlogTransportTests.cpp)
@@ -461,3 +461,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME HardwareWorkflows COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/tools/TestHardwareWorkflows.py")
     set_tests_properties(FuzzerConcurrency TestFlakeReport HardwareWorkflows PROPERTIES TIMEOUT 60 LABELS fast)
 endif()
+
+# Automation does not exist in a distribution build (ADR-025): Enable.hpp, which opens the MCP listener, refuses to compile
+# with WEBFRONT_DISTRIBUTION. The test builds that translation unit and expects the compiler to name the reason.
+add_library(automation_distribution_guard OBJECT EXCLUDE_FROM_ALL AutomationDistributionGuard.cpp)
+target_link_libraries(automation_distribution_guard PRIVATE WebFront WebFront_options)
+target_compile_definitions(automation_distribution_guard PRIVATE WEBFRONT_DISTRIBUTION=1)
+add_test(NAME AutomationAbsentFromDistribution
+         COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --target automation_distribution_guard --config $<CONFIG>)
+set_tests_properties(AutomationAbsentFromDistribution PROPERTIES PASS_REGULAR_EXPRESSION "does not exist in a distribution build")

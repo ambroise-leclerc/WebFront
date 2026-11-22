@@ -42,15 +42,20 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   covers the console, developer and embedded Game of Life stages; Hello World and the host loop
   (`examples/host-loop/`, a Boing Ball ray-traced by the host on the CPU or with optional CUDA; see
   [the host-loop example](HOST_LOOP_EXAMPLE.md) for its measurements and limits) are also in the default build.
-- **Developer automation (opt-in).** `webfront-agent` provides local stdio MCP and a JSON CLI
-  for an explicitly launched developer window. Native grants select check/build/test/preview,
-  bounded inspection and semantic actions. [Automation](AUTOMATION.md) documents provisioning,
-  lifecycle, limits and the supported MCP profile. It requires a compatible environment
-  (0.6.3 or later), supplied as a rebuilt archive or verified published distribution. Explicitly shared human windows support authenticated
-  native attachment. This does not discover arbitrary processes or isolate untrusted project code.
-  An application opts in to being driven with `automation::enableAutomation` (its own window and callbacks), shared sessions are
-  listed by `webfront-agent --list`, and `--print-mcp-config` generates the client configuration. The owner may allow-list application callbacks that an agent reaches through the `call` operation, and the terminal, `wf help` and
-  the starter's `AGENTS.md` announce automation (environment 0.6.6). Environment 0.6.6 is published; the release pin selects 0.9.2. First-contact guidance for agents (README section, `docs/DEVELOPING_WITH_AGENTS.md`, `webfront_write_agent_guide()`, configuration and startup notices) comes with the library; the `app` starter, `wf help agents` and the errors that give the next steps come with environment 0.9.2 (#561).
+- **Developer automation (opt-in).** An application that calls `automation::enableAutomation` serves MCP itself over
+  Streamable HTTP, on a loopback listener of its own with a session Bearer token, prints its URL and writes a private
+  `mcp.json` client configuration; no other program is built or launched ([ADR-025](adr/ADR-025-mcp-http-dans-l-application.md),
+  #632). Native grants select check/build/test/preview, bounded inspection, semantic actions, the setup operations and the
+  owner's allow-listed callbacks (`call`). Several instances run side by side, each with its own URL and discovery record.
+  Remote access is out of scope and automation does not compile with `WEBFRONT_DISTRIBUTION`. This does not isolate
+  untrusted project code. [Automation](AUTOMATION.md) documents the listener, lifecycle, limits and the supported MCP profile.
+  The `webfront-agent` launcher, its JSON CLI and MCP on stdio were removed. Known limitation until the next environment
+  release: the published environment 1.0.1 that the library pins still tells agents (`wf help agents`, the `AGENTS.md`
+  that `wf create` writes) to run `webfront-agent`, which no longer exists, so that agent path is not ready from a pinned
+  environment. The replacement texts, which name the application's MCP URL and its `mcp.json`, are in the sources
+  (environment 1.0.2) and in `docs/DEVELOPING_WITH_AGENTS.md`, which an agent should follow meanwhile. First-contact
+  guidance for agents (README section, `docs/DEVELOPING_WITH_AGENTS.md`, `webfront_write_agent_guide()`, configuration and
+  startup notices) comes with the library.
 - **Maintaining WebFront.** The repository is itself a `wf` project, selected with
   `--manifest-dir js/developer`. Build and publish its environment using
   [PUBLISHING](../js/developer/tools/PUBLISHING.md). Regenerate the core's versioned headers

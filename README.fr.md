@@ -94,20 +94,17 @@ Une application WebFront est un programme C++ dont l'interface TypeScript/TSX se
 
 Avec l'environnement épinglé, l'ordre est : `wf create app` (nom du starter, pas du projet), `wf init`, `wf install <paquet>` pour les dépendances navigateur, puis `wf dev ui/main.ts`. Terminez par `wf check`, `wf test` et `wf embed` selon la configuration du projet. `wf create life` fournit le starter React du parcours ci-dessous ; `wf help agents` décrit la marche à suivre.
 
-**L'agent exécute les commandes lui-même**, sans demander à l'utilisateur de les saisir. Configurez avec `-DWEBFRONT_BUILD_AUTOMATION=ON` pour construire `webfront-agent`. L'application partage sa session explicitement avec `webfront::automation::enableAutomation(app, {.grants = {...}, .listen = directory})` ; les autorisations restent choisies par son propriétaire.
+**L'agent exécute les commandes lui-même**, par MCP, sans demander à l'utilisateur de les saisir. Dans une build de développement, l'application active l'automatisation avec `webfront::automation::enableAutomation(app, {.grants = {...}})` ; les autorisations restent choisies par son propriétaire. L'application devient alors le serveur MCP : aucun autre programme n'est construit ni lancé. Elle affiche son URL et le chemin d'une configuration cliente privée (`mcp.json`, avec l'URL et un jeton Bearer, hors du projet) :
 
-```sh
-webfront-agent --list
-webfront-agent --attach DIRECTORY --operation create --starter app
-webfront-agent --attach DIRECTORY --operation preview --entry ui/main.ts
-webfront-agent --print-mcp-config --attach DIRECTORY > .mcp.json
+```text
+WebFront MCP (grants: check, build, preview): http://127.0.0.1:PORT/mcp - client configuration: .../sessions/SESSION/mcp.json
 ```
-
-Après chaque modification, l'agent utilise `preview` à la place de la session interactive `wf dev`. La même interface est disponible en MCP :
 
 ```json
-{"mcpServers": {"webfront": {"command": "/path/to/webfront-agent", "args": ["--attach", "/path/to/directory", "--mcp"]}}}
+{"mcpServers": {"webfront": {"type": "http", "url": "http://127.0.0.1:PORT/mcp", "headers": {"Authorization": "Bearer TOKEN"}}}}
 ```
+
+Donnez ce fichier au client MCP (`claude --mcp-config PATH/mcp.json`) et ne copiez jamais le jeton dans le projet. L'agent appelle ensuite `webfront.start` avec `create`, `preview` (après chaque modification, à la place de `wf dev`), `check`, `test` ou `embed`, et suit chaque exécution avec `webfront.result`.
 
 Dans un projet consommateur, `webfront_write_agent_guide()` écrit un `AGENTS.md` à la racine ; `wf create` le place à côté des sources du starter. Le [guide des agents](docs/DEVELOPING_WITH_AGENTS.md) détaille ce contrat.
 
@@ -346,7 +343,7 @@ La recompilation est explicite. L'application fonctionne ensuite hors ligne, san
 
 Un agent peut vérifier les types, construire, prévisualiser, inspecter et cliquer l'interface de **votre application**, dans sa fenêtre et avec ses callbacks C++. Rien n'est activé par défaut.
 
-<img src="docs/images/automation-agent.svg" width="100%" alt="Transcription animée : découverte de session, vérification, compilation, aperçu, clic et appel d'un callback autorisé ; refus d'un callback privé">
+<img src="docs/images/automation-agent.svg" width="100%" alt="Transcription animée : connexion à l'URL MCP de l'application, vérification, compilation, aperçu, clic et appel d'un callback autorisé ; refus d'un callback privé">
 
 *Transcription abrégée du test de régression `AutomationConsumerWindow`, exécuté sur une application réelle.*
 
@@ -360,17 +357,16 @@ app.bootstrap("developer");
 app.cppFunction("bf.render", render);
 auto automation = webfront::automation::enableAutomation(
     app, {.grants    = {"check", "build", "preview", "inspect", "interact", "call"},
-          .callbacks = {"bf.render"},
-          .listen    = privateEndpointDirectory});
+          .callbacks = {"bf.render"}});
 app.show(automation->launchPage());
 automation->close();
 app.shutdown();
 ```
 
-- **Visible.** Le terminal annonce les autorisations et la manière de se connecter.
-- **Découvrable.** `webfront-agent --list` liste les sessions partagées sans exposer leur secret de connexion ; `--print-mcp-config --attach <dir>` génère la configuration du client MCP. `--schema` et `--agent-help` décrivent le contrat.
+- **Visible.** L'application affiche son URL MCP, et le terminal annonce les autorisations.
+- **Découvrable.** Chaque instance en cours publie son URL et le chemin de son `mcp.json` privé dans un enregistrement par utilisateur, jamais le jeton ; `claude --mcp-config PATH/mcp.json` ou tout client MCP s'y connecte.
 - **Borné.** Chaque opération demande son autorisation ; seuls les callbacks nommément déclarés sont appelables. Des délais natifs arrêtent un renderer bloqué. Le code du projet conserve les droits de l'utilisateur : ce n'est pas un sandbox.
-- **Optionnel.** Sans `enableAutomation`, aucun endpoint n'est enregistré. `webfront_add_agent()` construit et installe le lanceur pour les consommateurs CMake.
+- **Optionnel.** Sans `enableAutomation`, rien n'est enregistré et aucun port n'est ouvert ; une build de distribution (`WEBFRONT_DISTRIBUTION`) refuse de le compiler.
 
 Le [guide d'automation](docs/AUTOMATION.md#automating-your-own-application) décrit permissions, découverte, délais et profil MCP.
 

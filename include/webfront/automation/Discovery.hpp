@@ -1,9 +1,10 @@
 /// @brief Per-user discovery of the automation sessions their owners chose to share.
 ///
-/// A shared session publishes one small record in a private per-user directory so that a human or an agent can ask
-/// `webfront-agent --list` instead of being told where to attach. A record names the project, the grants, the process and
-/// the private endpoint directory. It never holds the attachment capability, which stays in that endpoint directory:
-/// listing a session does not allow operating it. Records are removed on closure; one whose process is gone is dropped.
+/// An application that enables automation publishes one small record in a private per-user directory, so that a human or
+/// an agent finds the running instances instead of being told where they are. A record names the project, the grants, the
+/// process, the private directory, the MCP URL and the path of the client configuration. It never holds the token, which
+/// only that private configuration file contains: reading a record does not allow operating the session. Records are
+/// removed on closure; one whose process is gone is dropped by the next listing, with the private directory named after it.
 #pragma once
 #include "Platform.hpp"
 
@@ -15,6 +16,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -75,9 +77,12 @@ struct Entry {
     long        pid = 0;
     /// The JSON array of the application callbacks that `call` may invoke (empty unless the owner allow-listed some).
     std::string callbacks = "[]";
-    /// The JSON the CLI prints; the same members as the record, plus the observed state.
+    /// The MCP URL of the session (ADR-025) and the path of its private client configuration. Neither holds the token, which
+    /// only the configuration file contains.
+    std::string mcp{}, configuration{};
+    /// The record as it is written.
     std::string json() const {
-        return objectJson({
+        std::map<std::string, std::string> members{
             {"version",                                     "1"},
             {"session",                   webfront::json::quote(session)},
             {"pid",                              std::to_string(pid)},
@@ -86,7 +91,12 @@ struct Entry {
             {"callbacks",                                 callbacks},
             {"endpoint",                 webfront::json::quote(endpoint)},
             {"state",                       webfront::json::quote("running")},
-        });
+        };
+        if (!mcp.empty()) {
+            members.emplace("mcp", webfront::json::quote(mcp));
+            members.emplace("configuration", webfront::json::quote(configuration));
+        }
+        return objectJson(members);
     }
 };
 
@@ -146,30 +156,8 @@ inline void preparePrivateDirectory(const std::filesystem::path& directory) {
 #endif
 }
 
-/// Whether a failed removal may succeed shortly: on Windows, a reader that has the record open (`list` reads it without
-/// sharing deletion) makes it fail with a sharing or lock violation, or with an access denial while a deletion is pending.
-/// Nothing is transient on POSIX, where unlinking an open file succeeds.
-inline bool transientRemovalFailure([[maybe_unused]] const std::error_code& error) noexcept {
-#ifdef _WIN32
-    return error.category() == std::system_category()
-        && (error.value() == ERROR_SHARING_VIOLATION || error.value() == ERROR_LOCK_VIOLATION || error.value() == ERROR_ACCESS_DENIED);
-#else
-    return false;
-#endif
-}
-
-/// Removes a file. A transient failure (see `transientRemovalFailure`) is retried until a one second deadline, because
-/// giving up would leave a withdrawn session listed for as long as its process lives; any other failure is final.
-inline void removeWithRetry(const std::filesystem::path& file) noexcept {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
-    for (;;) {
-        std::error_code error;
-        std::filesystem::remove(file, error);
-        if (!error || !transientRemovalFailure(error) || std::chrono::steady_clock::now() >= deadline)
-            return;
-        std::this_thread::sleep_for(std::chrono::milliseconds{5});
-    }
-}
+using channel::removeWithRetry;
+using channel::transientRemovalFailure;
 
 /// The record of one shared session, present as long as this object lives.
 class Registration {
@@ -178,11 +166,15 @@ public:
     Registration(const std::filesystem::path& directory, const Entry& entry) {
         if (!validIdentifier(entry.session))
             throw std::invalid_argument("Invalid automation session identifier");
+        // A record readRecord would skip could be neither listed nor pruned: refuse it before publishing anything.
+        const auto content = entry.json();
+        if (content.size() > recordLimit)
+            throw std::invalid_argument("The automation discovery record exceeds " + std::to_string(recordLimit) + " bytes; use shorter paths");
         preparePrivateDirectory(directory);
         file = directory / (entry.session + ".json");
         std::error_code ignored;
         std::filesystem::remove(file, ignored);
-        channel::writeEndpoint(file, entry.json());
+        channel::writeEndpoint(file, content);
     }
     Registration(const Registration&)            = delete;
     Registration& operator=(const Registration&) = delete;
@@ -228,6 +220,8 @@ inline std::optional<Entry> readRecord(const std::filesystem::path& path) {
         entry.endpoint = record.string("endpoint");
         entry.allow    = record.raw("allow", "[]");
         entry.callbacks = record.raw("callbacks", "[]");
+        entry.mcp           = record.string("mcp");
+        entry.configuration = record.string("configuration");
         const auto pid = record.raw("pid", "0");
         entry.pid      = std::stol(pid);
         if (record.raw("version") != "1" || !validIdentifier(entry.session) || path.stem().string() != entry.session || entry.project.empty()
@@ -242,7 +236,7 @@ inline std::optional<Entry> readRecord(const std::filesystem::path& path) {
 }
 
 /// The live shared sessions, ordered by identifier. A record of a vanished process is removed when `prune` is true;
-/// malformed files and foreign names are ignored and never deleted. No record carries the attachment capability.
+/// malformed files and foreign names are ignored and never deleted. No record carries the automation token.
 inline std::vector<Entry> list(const std::filesystem::path& directory, bool prune = true) {
     std::vector<Entry> result;
     std::error_code    error;
@@ -264,6 +258,19 @@ inline std::vector<Entry> list(const std::filesystem::path& directory, bool prun
             if (prune) {
                 std::error_code ignored;
                 std::filesystem::remove(path, ignored);
+                // The private directory created beside the record (ADR-025) goes with it: only its known files, then the
+                // directory if it is empty. A directory elsewhere, named by the owner, is never touched. The record holds
+                // the resolved path (channel::outsideProject), so the discovery directory is resolved the same way, and
+                // the session's directory must be a real child of it, not a link put in its place.
+                std::error_code unresolved;
+                const auto      own = std::filesystem::weakly_canonical(std::filesystem::absolute(directory), unresolved) / entry->session;
+                const auto      kind = std::filesystem::symlink_status(own, unresolved);
+                if (!unresolved && std::filesystem::is_directory(kind)
+                    && std::filesystem::path(entry->endpoint).lexically_normal().generic_string() == own.lexically_normal().generic_string()) {
+                    for (const auto* name : {"endpoint.json", "endpoint.json.new", "mcp.json", "mcp.json.new"})
+                        std::filesystem::remove(own / name, ignored);
+                    std::filesystem::remove(own, ignored);
+                }
             }
             continue;
         }
@@ -273,22 +280,4 @@ inline std::vector<Entry> list(const std::filesystem::path& directory, bool prun
     return result;
 }
 
-inline std::string listJson(const std::vector<Entry>& entries) {
-    std::string result = "{\"version\":1,\"sessions\":[";
-    for (const auto& entry : entries)
-        result += (result.back() == '[' ? "" : ",") + entry.json();
-    return result + "]}";
-}
-
-/// A ready-to-use `.mcp.json` for a client: one stdio server attached to an endpoint directory. It holds neither
-/// grants (the owner's process fixes them) nor the capability (read from the endpoint at attach time).
-inline std::string mcpConfiguration(const std::filesystem::path& agent, const std::filesystem::path& endpoint, std::string_view name = "webfront") {
-    if (name.empty() || !std::ranges::all_of(name, [](char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_'; }))
-        throw std::invalid_argument("The MCP server name is letters, digits, '-' and '_'");
-    const auto server = objectJson({
-        {"command",                                                   webfront::json::quote(agent.generic_string())},
-        {   "args", stringArray({"--attach", endpoint.generic_string(), "--mcp"})},
-    });
-    return "{\n  \"mcpServers\": {\n    " + webfront::json::quote(name) + ": " + server + "\n  }\n}\n";
-}
 }  // namespace webfront::automation::discovery
