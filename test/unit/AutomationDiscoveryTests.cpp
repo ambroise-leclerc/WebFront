@@ -262,8 +262,12 @@ const Scenario consumerEnables{"A consumer enables automation explicitly, with f
             require(std::filesystem::equivalent(listed[0].endpoint, endpoint));
             require(listed[0].mcp == automation->mcpUrl());
             require(std::filesystem::exists(endpoint / "mcp.json"));
-            const auto token = read(endpoint / "mcp.json").substr(read(endpoint / "mcp.json").find("Bearer ") + 7, 64);
+            const Object configuration{read(endpoint / "mcp.json")};
+            const auto   authorization = Object(Object(Object(configuration.raw("mcpServers")).raw("webfront")).raw("headers")).string("Authorization");
+            require(authorization.starts_with("Bearer "));
+            const auto token = authorization.substr(7);
             require(token.size() == 64);
+            require(std::ranges::all_of(token, [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }));
             require(read(sessions / (listed[0].session + ".json")).find(token) == std::string::npos);
         });
         then("the launch page carries the single-use claim and the banner states the grants without a secret", [&] {

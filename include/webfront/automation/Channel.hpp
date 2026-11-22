@@ -7,6 +7,8 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <list>
 #include <thread>
@@ -150,6 +152,31 @@ inline std::filesystem::path outsideProject(const Session& controller, const std
     return destination;
 }
 
+/// Whether a failed removal may succeed shortly: on Windows, a reader that has the record open (discovery `list` and `readEndpoint`
+/// read files without sharing deletion) makes it fail with a sharing or lock violation, or with an access denial while a deletion is pending.
+/// Nothing is transient on POSIX, where unlinking an open file succeeds.
+inline bool transientRemovalFailure([[maybe_unused]] const std::error_code& error) noexcept {
+#ifdef _WIN32
+    return error.category() == std::system_category()
+        && (error.value() == ERROR_SHARING_VIOLATION || error.value() == ERROR_LOCK_VIOLATION || error.value() == ERROR_ACCESS_DENIED);
+#else
+    return false;
+#endif
+}
+
+/// Removes a file. A transient failure (see `transientRemovalFailure`) is retried until a one second deadline, because
+/// giving up would leave a withdrawn session listed for as long as its process lives; any other failure is final.
+inline void removeWithRetry(const std::filesystem::path& file) noexcept {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
+    for (;;) {
+        std::error_code error;
+        std::filesystem::remove(file, error);
+        if (!error || !transientRemovalFailure(error) || std::chrono::steady_clock::now() >= deadline)
+            return;
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+    }
+}
+
 class PrivateDirectory {
 public:
     explicit PrivateDirectory(std::filesystem::path requested) : path(std::filesystem::absolute(std::move(requested))) {
@@ -170,14 +197,20 @@ public:
     ~PrivateDirectory() {
         cleanup();
     }
-    void cleanup() const noexcept {
-        std::error_code ignored;
+    /// Removes the known files, then the directory. Only the first call acts: after it the path is no longer this object's,
+    /// and another instance may create the same directory again before this one is destroyed.
+    void cleanup() noexcept {
+        if (released.exchange(true))
+            return;
         // The known files only: the MCP listener's client configuration may share the directory (McpHttp.hpp).
         for (const auto* name : {"endpoint.json", "endpoint.json.new", "mcp.json", "mcp.json.new"})
-            std::filesystem::remove(path / name, ignored);
-        std::filesystem::remove(path, ignored);
+            removeWithRetry(path / name);
+        removeWithRetry(path);
     }
     const std::filesystem::path path;
+
+private:
+    std::atomic<bool> released{false};
 };
 inline void writeEndpoint(const std::filesystem::path& path, std::string_view content) {
     auto staged = path;

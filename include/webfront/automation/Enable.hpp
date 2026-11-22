@@ -113,7 +113,8 @@ public:
     ///         `directory` inside the project
     /// @throws std::runtime_error (including std::filesystem::filesystem_error) when the private or the discovery directory cannot
     ///         be created or is refused (an existing one that other users can read), std::system_error when the MCP port cannot
-    ///         be bound. Nothing stays registered in the application.
+    ///         be bound, std::invalid_argument when the discovery record would exceed `discovery::recordLimit` (paths too long).
+    ///         Nothing stays registered in the application.
     Automation(App& app, AutomationOptions options)
         : session(make(app, options)),
           discoveryDirectory(options.discovery.empty() ? discovery::defaultDirectory() : options.discovery),

@@ -7,6 +7,7 @@
 | 1.0 | 2026-11-21 | Proposée | Ambroise Leclerc | Issue #632, après #617 (instances simultanées) et #631 (TLS 1.3 intégré) : l'application sert elle-même le MCP en Streamable HTTP sur un écouteur loopback distinct, authentifié par un jeton Bearer de session ; accès distant exclu ; Host et Origin stricts ; découverte par instance ; automatisation refusée à la compilation d'une build de distribution ; ordre de migration et sort de `webfront-agent`. Amende l'ADR-019 (ligne « MCP Streamable HTTP local » du comparatif, section « CLI et MCP local stdio » et ligne « DNS rebinding » du modèle de menace). | — |
 | 1.1 | 2026-11-22 | Acceptée (livraison à faire) | Ambroise Leclerc | Décision acceptée avant le code de transport, comme l'exige #632. Précision d'implémentation du point 2 : l'écouteur reprend le modèle d'admission du canal actuel (file, délais, workers) et l'analyseur `http::Request` de `HTTPServer.hpp`, plutôt qu'une instance de `http::Server`, qui n'a ni file bornée ni délai de réception. | Issue #632. |
 | 1.2 | 2026-11-22 | Acceptée (livraison à faire) | Ambroise Leclerc | Étape 4, arbitrée par le propriétaire : le but de #632 est un seul exécutable, l'application de l'utilisateur. `webfront-agent` est retiré en entier (relais stdio, CLI JSON, `--serve`, `--attach`, `--list`, `--print-mcp-config`, `webfront_add_agent()`, `WEBFRONT_BUILD_AUTOMATION`), sans exemple `agent-host` ; le canal JSON-lines disparaît avec lui. HTTP devenant le seul transport, l'option `.http` est supprimée et `listen` devient `directory`, facultatif. Les régressions pilotent un programme de test (`automation_host`) qui appelle `enableAutomation`. Les statuts 70 et 71 du lanceur disparaissent avec lui ; le 72 d'`onUnresponsive` reste. | Issue #632. |
+| 1.3 | 2026-11-22 | Acceptée (livraison en cours) | Ambroise Leclerc | Revue de la PR #636 : `MCP-Protocol-Version` est aussi vérifié pour `DELETE` et pour les réponses du client, et un message refusé ne compte pas comme activité pour l'éviction ; une réponse du client doit être une réponse JSON-RPC 2.0 ; `Accept` est analysé par type de média et qualité ; la garde de distribution couvre l'inclusion de `Enable.hpp`, pas seulement l'appel. | PR #636. |
 
 ## État et portée
 
@@ -138,8 +139,11 @@ Profil Streamable HTTP de MCP **2025-11-25**, réduit :
   refusées ; pas de corps chunked (501), `Expect: 100-continue` honoré, limites du serveur actuel.
 - `Mcp-Session-Id` est attribué à `initialize` (128 bits de l'OS) ; il route, il n'authentifie pas. Une requête sans lui
   hors `initialize` reçoit 400, un identifiant inconnu ou terminé 404 ; `DELETE /mcp` termine la session MCP, pas la
-  session d'automatisation ni la fenêtre. Seize sessions MCP au plus ; la plus anciennement inactive est évincée.
-- `MCP-Protocol-Version` est vérifié après l'initialisation ; une version non prise en charge reçoit 400.
+  session d'automatisation ni la fenêtre. Seize sessions MCP au plus ; la plus anciennement inactive est évincée. Seul un
+  message accepté compte comme activité : un message refusé ne protège pas sa session de l'éviction.
+- `MCP-Protocol-Version` est vérifié après l'initialisation, pour tout message, réponse du client et `DELETE` compris ;
+  une version non prise en charge reçoit 400 et reste sans effet sur la session. Une réponse du client doit être une
+  réponse JSON-RPC 2.0 (un `id`, exactement un de `result` et `error`), sinon 400.
 - Le catalogue reste à quatre outils : `webfront.session`, `webfront.start`, `webfront.result`, `webfront.cancel`. Une
   opération longue se suit par interrogation de `webfront.result` ; aucune notification de progression n'est poussée.
 - La réponse à `initialize` porte des `instructions` courtes (celles de `Instructions.hpp`). Les ressources MCP
@@ -161,9 +165,10 @@ Profil Streamable HTTP de MCP **2025-11-25**, réduit :
 ### 8. Garde de compilation
 
 L'automatisation n'existe pas dans une build de distribution : `Enable.hpp`, et tout en-tête qui ouvre un écouteur MCP,
-produit une erreur de compilation si `WEBFRONT_DISTRIBUTION` vaut 1. C'est un durcissement : aujourd'hui, la documentation
-laisse ce choix à l'application (« gate the call »). Une application qui le faisait déjà n'est pas affectée ; une
-application qui l'oubliait ne compile plus en distribution, au lieu d'expédier un écouteur.
+produit une erreur de compilation si `WEBFRONT_DISTRIBUTION` vaut 1. C'est un durcissement voulu : aujourd'hui, la
+documentation laisse ce choix à l'application (« gate the call »). Protéger l'appel ne suffit plus : l'application place
+sous la même condition de distribution l'inclusion de `Enable.hpp`, l'appel à `enableAutomation` et tout code qui utilise
+l'automatisation. Une application qui oublie l'un d'eux ne compile plus en distribution, au lieu d'expédier un écouteur.
 
 ### 9. Démarrage par l'agent
 

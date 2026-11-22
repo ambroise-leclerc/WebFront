@@ -72,7 +72,10 @@ struct Answer {
             text += name + ": " + value + "\r\n";
         if (!body.empty())
             text += "Content-Type: application/json\r\n";
-        text += "Content-Length: " + std::to_string(body.size()) + "\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n";
+        // HTTP forbids Content-Length on a 204 answer, even a zero one (RFC 9110, 8.6).
+        if (status != 204)
+            text += "Content-Length: " + std::to_string(body.size()) + "\r\n";
+        text += "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n";
         return text + body;
     }
 };
@@ -103,6 +106,37 @@ inline std::optional<std::string> single(const http::Request& request, std::stri
 }
 inline bool present(const http::Request& request, std::string_view name) {
     return !request.getHeadersValues(name).empty();
+}
+/// Whether the `Accept` headers accept `application/json` itself: the exact media type (or `application/*`, `*/*`) with a
+/// quality above zero. `application/jsonp` and `application/json;q=0` do not.
+inline bool acceptsJson(const http::Request& request) {
+    for (const auto& header : request.getHeadersValues("Accept")) {
+        std::string_view rest{header};
+        while (!rest.empty()) {
+            const auto comma = rest.find(',');
+            const auto item  = rest.substr(0, comma);
+            rest             = comma == std::string_view::npos ? std::string_view{} : rest.substr(comma + 1);
+            const auto semi  = item.find(';');
+            const auto type  = lower(trimmed(item.substr(0, semi)));
+            if (type != "application/json" && type != "application/*" && type != "*/*")
+                continue;
+            bool refused = false;
+            for (auto parameters = semi == std::string_view::npos ? std::string_view{} : item.substr(semi + 1); !parameters.empty();) {
+                const auto next      = parameters.find(';');
+                const auto parameter = trimmed(parameters.substr(0, next));
+                parameters           = next == std::string_view::npos ? std::string_view{} : parameters.substr(next + 1);
+                const auto equals    = parameter.find('=');
+                if (equals == std::string::npos || lower(trimmed(std::string_view(parameter).substr(0, equals))) != "q")
+                    continue;
+                const auto quality = trimmed(std::string_view(parameter).substr(equals + 1));
+                // A quality is 0 to 1 with up to three decimals: any non-zero digit makes it acceptable.
+                refused = quality.find_first_of("123456789") == std::string::npos;
+            }
+            if (!refused)
+                return true;
+        }
+    }
+    return false;
 }
 }  // namespace detail
 
@@ -160,10 +194,7 @@ inline Screening screen(const http::Request& request, unsigned short port, std::
     const auto type = detail::single(request, "Content-Type");
     if (!type || lower(detail::trimmed(std::string_view(*type).substr(0, type->find(';')))) != "application/json")
         return {.refusal = refusal(415, "The body must be application/json")};
-    std::string accepted;
-    for (const auto& value : request.getHeadersValues("Accept"))
-        accepted += lower(value) + ",";
-    if (accepted.find("application/json") == std::string::npos)
+    if (!detail::acceptsJson(request))
         return {.refusal = refusal(406, "Accept must include application/json")};
     if (!length)
         return {.refusal = refusal(411, "Content-Length is required")};
@@ -183,9 +214,20 @@ public:
         const auto identifier = detail::single(request, "Mcp-Session-Id");
         if (!identifier)
             return refusal(400, "Mcp-Session-Id is repeated");
+        // Every message of an initialized session, its termination included, names a supported revision (or none, which
+        // MCP lets the server read as its default); a rejected one has no effect on the session.
+        const auto negotiated   = detail::single(request, "MCP-Protocol-Version");
+        const bool supportedVersion = negotiated && (negotiated->empty() || *negotiated == protocolVersion);
+        const auto unsupported  = [] {
+            return rpcError(400, -32600, "Unsupported MCP-Protocol-Version; this server supports " + std::string(protocolVersion));
+        };
         if (request.method == http::Request::Method::Delete) {
             if (identifier->empty())
                 return refusal(400, "DELETE needs Mcp-Session-Id");
+            if (!known(*identifier))
+                return refusal(404, "Unknown or terminated MCP session");
+            if (!supportedVersion)
+                return unsupported();
             const std::scoped_lock lock{mutex};
             if (conversations.erase(*identifier) == 0)
                 return refusal(404, "Unknown or terminated MCP session");
@@ -200,9 +242,17 @@ public:
             const Object message{body};
             method   = message.has("method") ? message.string("method") : std::string{};
             isRequest = message.has("id") && message.has("method");
-            if (!message.has("method"))
-                // A response of the client: this server sends no request, so there is nothing to route it to.
-                return identifier->empty() ? rpcError(400, -32600, "Missing Mcp-Session-Id") : known(*identifier) ? Answer{.status = 202} : refusal(404, "Unknown or terminated MCP session");
+            if (!message.has("method")) {
+                // A response of the client: this server sends no request, so there is nothing to route it to. It is
+                // still checked: a JSON-RPC 2.0 response with an id and exactly one of result and error.
+                if (message.string("jsonrpc") != "2.0" || !message.has("id") || message.has("result") == message.has("error"))
+                    return rpcError(400, -32600, "Expected a JSON-RPC 2.0 request, notification or response");
+                if (identifier->empty())
+                    return rpcError(400, -32600, "Missing Mcp-Session-Id");
+                if (!known(*identifier))
+                    return refusal(404, "Unknown or terminated MCP session");
+                return supportedVersion ? Answer{.status = 202} : unsupported();
+            }
         } catch (const std::exception& failure) {
             return rpcError(400, -32700, failure.what());
         }
@@ -213,8 +263,9 @@ public:
             auto response     = conversation->mcp.receive(body);
             if (!response)
                 return rpcError(400, -32600, "initialize is a request");
-            Answer answer{.status = 200, .headers = {}, .body = *response};
-            if (Object(*response).has("result")) {
+            Answer answer{.status = 200, .headers = {}, .body = std::move(*response)};
+            // The answer quotes the request's id and may exceed the request limit: success is read from the profile.
+            if (conversation->mcp.isInitialized()) {
                 const auto created = channel::nonce().substr(0, 32);
                 answer.headers.emplace_back("Mcp-Session-Id", created);
                 const std::scoped_lock lock{mutex};
@@ -232,12 +283,12 @@ public:
             const auto             found = conversations.find(*identifier);
             if (found == conversations.end())
                 return rpcError(404, -32600, "Unknown or terminated MCP session");
+            if (!supportedVersion)
+                return unsupported();
+            // Only an accepted message counts as activity for the eviction of the least recently used session.
             conversation       = found->second;
             conversation->used = std::chrono::steady_clock::now();
         }
-        const auto version = detail::single(request, "MCP-Protocol-Version");
-        if (!version || (!version->empty() && *version != protocolVersion))
-            return rpcError(400, -32600, "Unsupported MCP-Protocol-Version; this server supports " + std::string(protocolVersion));
         const std::scoped_lock lock{conversation->mutex};
         auto                   response = conversation->mcp.receive(body);
         if (!response)
@@ -367,10 +418,10 @@ private:
     };
 
     void withdraw() noexcept {
+        // A reader on Windows (readEndpoint does not share deletion) delays the removal briefly; it is retried.
         std::call_once(withdrawn, [this] {
-            std::error_code ignored;
-            std::filesystem::remove(file, ignored);
-            std::filesystem::remove(file.string() + ".new", ignored);
+            channel::removeWithRetry(file);
+            channel::removeWithRetry(file.string() + ".new");
         });
     }
     static void endWrites(channel::Handle socket) noexcept {

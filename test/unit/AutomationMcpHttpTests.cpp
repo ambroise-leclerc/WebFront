@@ -220,10 +220,19 @@ const Scenario mcpHttpScreening{"MCP HTTP requests are screened on their headers
             require(status(screened(basic)) == 401);
             require(status(screened(post(port, "{}", "Authorization: Bearer " + token + "\r\n"))) == 401);  // repeated
         });
-        then("an Accept without application/json is 406", [&] {
-            auto text = post(port, "{}");
-            text.replace(text.find("application/json, text/event-stream"), 35, "text/event-stream");
-            require(status(screened(text)) == 406);
+        then("an Accept without application/json is 406, a look-alike or a zero quality included", [&] {
+            const auto accepting = [&](std::string_view accept) {
+                auto text = post(port, "{}");
+                text.replace(text.find("application/json, text/event-stream"), 35, accept);
+                return status(screened(text));
+            };
+            require(accepting("text/event-stream") == 406);
+            require(accepting("application/jsonp") == 406);
+            require(accepting("application/json;q=0") == 406);
+            require(accepting("application/json; q=0.000, text/event-stream") == 406);
+            require(accepting("text/event-stream, Application/JSON;q=0.5") == 0);
+            require(accepting("application/*") == 0);
+            require(accepting("*/*;q=1") == 0);
         });
         then("chunked, unannounced, malformed and oversized bodies are refused before they are read", [&] {
             require(status(screened(post(port, "{}", "Transfer-Encoding: chunked\r\n"))) == 501);
@@ -295,27 +304,65 @@ const Scenario mcpHttpSessions{"MCP HTTP sessions follow the Streamable HTTP rul
             const auto described = handle(R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"webfront.session","arguments":{}}})", withSession);
             require(described.body.find(Object(controller->describe()).string("session")) != std::string::npos);
         });
-        then("a client response is accepted with 202", [&] {
+        then("a client response is accepted with 202, and anything else without a method is refused with 400", [&] {
             require(handle(R"({"jsonrpc":"2.0","id":7,"result":{}})", withSession).status == 202);
+            require(handle(R"({"jsonrpc":"2.0","id":7,"error":{"code":1,"message":"no"}})", withSession).status == 202);
+            require(handle("{}", withSession).status == 400);
+            require(handle(R"({"jsonrpc":"2.0","id":7})", withSession).status == 400);
+            require(handle(R"({"jsonrpc":"2.0","result":{}})", withSession).status == 400);
+            require(handle(R"({"jsonrpc":"2.0","id":7,"result":{},"error":{}})", withSession).status == 400);
+            require(handle(R"({"jsonrpc":"1.0","id":7,"result":{}})", withSession).status == 400);
         });
-        then("an unsupported MCP-Protocol-Version is refused with 400", [&] {
-            require(handle(listTools, withSession + "MCP-Protocol-Version: 2024-11-05\r\n").status == 400);
+        then("an unsupported MCP-Protocol-Version is refused with 400, for a response and a termination too", [&] {
+            const auto old = withSession + "MCP-Protocol-Version: 2024-11-05\r\n";
+            require(handle(listTools, old).status == 400);
+            require(handle(R"({"jsonrpc":"2.0","id":7,"result":{}})", old).status == 400);
+            auto removal = post(port, "");
+            removal.replace(0, 4, "DELETE");
+            removal.insert(removal.find("\r\n\r\n") + 2, old);
+            require(endpoint.handle(parsed(removal), {}).status == 400);
+            require(handle(listTools, withSession).status == 200);
         });
         then("an unknown session is 404, and DELETE terminates the session only", [&] {
             require(handle(listTools, "Mcp-Session-Id: " + std::string(32, '0') + "\r\n").status == 404);
             auto removal = post(port, "");
             removal.replace(0, 4, "DELETE");
             removal.insert(removal.find("\r\n\r\n") + 2, withSession);
-            require(endpoint.handle(parsed(removal), {}).status == 204);
+            const auto terminated = endpoint.handle(parsed(removal), {});
+            require(terminated.status == 204);
+            require(terminated.serialize().find("Content-Length") == std::string::npos);  // forbidden on 204
             require(handle(listTools, withSession).status == 404);
             require(endpoint.handle(parsed(removal), {}).status == 404);
             require(!controller->isClosed());
         });
     });
+    given("an initialize request whose id makes the answer larger than the request limit", [&] {
+        const auto id   = std::string(messageLimit - 300, 'i');
+        const auto body = R"({"jsonrpc":"2.0","id":")" + id + R"(","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}})";
+        then("the session is still created", [&] {
+            require(body.size() <= messageLimit);
+            const auto opened = handle(body);
+            require(opened.status == 200);
+            require(opened.body.size() > messageLimit);
+            require(endpoint.sessions() == 1);
+        });
+    });
     given("more sessions than the bound", [&] {
-        for (std::size_t index = 0; index < mcphttp::maxSessions + 4; ++index)
+        std::vector<std::string> identifiers;
+        for (std::size_t index = 0; index < mcphttp::maxSessions; ++index) {
+            const auto opened = handle(initialize);
+            require(opened.status == 200);
+            identifiers.push_back(opened.headers.front().second);
+            std::this_thread::sleep_for(std::chrono::milliseconds{2});
+        }
+        then("the least recently used are evicted, and a refused message does not count as activity", [&] {
+            const auto oldest = "Mcp-Session-Id: " + identifiers.front() + "\r\n";
+            require(handle(listTools, oldest + "MCP-Protocol-Version: 2024-11-05\r\n").status == 400);
             require(handle(initialize).status == 200);
-        then("the least recently used are evicted", [&] {
+            require(endpoint.sessions() == mcphttp::maxSessions);
+            require(handle(listTools, oldest).status == 404);
+            for (std::size_t index = 0; index < 4; ++index)
+                require(handle(initialize).status == 200);
             require(endpoint.sessions() == mcphttp::maxSessions);
         });
     });
@@ -482,11 +529,13 @@ const Scenario mcpHttpActivation{"An application that enables automation serves 
         });
     });
     given("a record of a vanished instance", [&] {
-        const auto        dead = std::string(64, 'd');
-        discovery::Entry  entry{.session = dead, .project = "/work/project", .endpoint = (sessions / dead).generic_string(), .allow = "[]", .pid = 2147483000L,
-                                .mcp = "http://127.0.0.1:1/mcp", .configuration = (sessions / dead / "mcp.json").generic_string()};
+        const auto dead = std::string(64, 'd');
         discovery::preparePrivateDirectory(sessions);
         std::filesystem::create_directory(sessions / dead);
+        // The record holds the resolved path, as channel::outsideProject gives it (the temporary root may be a link, as on macOS).
+        const auto       own = std::filesystem::weakly_canonical(sessions / dead);
+        discovery::Entry entry{.session = dead, .project = "/work/project", .endpoint = own.generic_string(), .allow = "[]", .pid = 2147483000L,
+                               .mcp = "http://127.0.0.1:1/mcp", .configuration = (own / "mcp.json").generic_string()};
         std::ofstream(sessions / dead / "mcp.json") << "{}";
         channel::writeEndpoint(sessions / (dead + ".json"), entry.json());
         then("listing removes the record with its own directory and known files", [&] {
@@ -499,6 +548,48 @@ const Scenario mcpHttpActivation{"An application that enables automation serves 
             require(!std::filesystem::exists(sessions / (dead + ".json")));
             require(!std::filesystem::exists(sessions / dead));
             require(discovery::list(sessions).size() == 1);
+        });
+    });
+#ifndef _WIN32
+    given("a vanished instance whose discovery directory is reached through a link", [&] {
+        const auto dead  = std::string(64, 'e');
+        const auto real  = root.path() / "real";
+        const auto alias = root.path() / "alias";
+        std::filesystem::create_directory(real);
+        std::filesystem::create_directory_symlink(real, alias);
+        const auto linked = alias / "sessions";
+        discovery::preparePrivateDirectory(linked);
+        std::filesystem::create_directory(linked / dead);
+        std::ofstream(linked / dead / "mcp.json") << "{}";
+        const auto       own = std::filesystem::weakly_canonical(linked / dead);
+        discovery::Entry entry{.session = dead, .project = "/work/project", .endpoint = own.generic_string(), .allow = "[]", .pid = 2147483000L,
+                               .mcp = "http://127.0.0.1:1/mcp", .configuration = (own / "mcp.json").generic_string()};
+        channel::writeEndpoint(linked / (dead + ".json"), entry.json());
+        then("listing through the alias still removes its private directory", [&] {
+            require(discovery::list(linked).empty());
+            require(!std::filesystem::exists(real / "sessions" / dead));
+        });
+        then("a session directory replaced by a link is left alone", [&] {
+            const auto elsewhere = root.path() / "elsewhere";
+            std::filesystem::create_directory(elsewhere);
+            std::ofstream(elsewhere / "mcp.json") << "{}";
+            std::filesystem::remove_all(linked / dead);
+            std::filesystem::create_directory_symlink(elsewhere, linked / dead);
+            require(discovery::list(linked).empty());
+            require(std::filesystem::exists(elsewhere / "mcp.json"));
+            std::filesystem::remove(linked / dead);
+        });
+    });
+#endif
+    given("paths so long that the record would exceed its limit", [&] {
+        then("the record is refused before anything is published", [&] {
+            const auto       session = std::string(64, 'f');
+            const auto       far     = "/" + std::string(discovery::recordLimit / 2, 'p');
+            discovery::Entry entry{.session = session, .project = far, .endpoint = far, .allow = "[]", .pid = discovery::currentProcess(),
+                                   .mcp = "http://127.0.0.1:1/mcp", .configuration = far + "/mcp.json"};
+            require(entry.json().size() > discovery::recordLimit);
+            requireThrows([&] { discovery::Registration refused{sessions, entry}; });
+            require(!std::filesystem::exists(sessions / (session + ".json")));
         });
     });
 }};

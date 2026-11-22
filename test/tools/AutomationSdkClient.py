@@ -14,8 +14,10 @@ import subprocess
 import sys
 import tempfile
 
+import httpx2
 from mcp import ClientSession
-from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
+from mcp.client.streamable_http import streamable_http_client
+from mcp.shared._httpx_utils import MCP_DEFAULT_SSE_READ_TIMEOUT, MCP_DEFAULT_TIMEOUT
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from AutomationClient import Host, check_withdrawn, install  # noqa: E402
@@ -23,7 +25,10 @@ from AutomationClient import Host, check_withdrawn, install  # noqa: E402
 
 async def exercise(configuration):
     server = json.loads(pathlib.Path(configuration).read_text())["mcpServers"]["webfront"]
-    async with create_mcp_http_client(headers=server["headers"]) as http, \
+    # The SDK's own factory lets HTTP_PROXY and similar variables apply: the token must never leave the loopback, so the
+    # client is built the same way without them (trust_env=False).
+    timeout = httpx2.Timeout(MCP_DEFAULT_TIMEOUT, read=MCP_DEFAULT_SSE_READ_TIMEOUT)
+    async with httpx2.AsyncClient(headers=server["headers"], timeout=timeout, trust_env=False) as http, \
             streamable_http_client(server["url"], http_client=http) as streams:
         reader, writer = streams[0], streams[1]
         async with ClientSession(reader, writer) as client:
@@ -83,7 +88,7 @@ async def main():
                 assert await asyncio.wait_for(exercise(record["configuration"]), 90) == first
                 host.stop()
                 assert host.wait(timeout=30) == 0, host.logs()
-                check_withdrawn(record, int(record["mcp"].rsplit(":", 1)[1].split("/")[0]))
+                check_withdrawn(record, int(record["mcp"].rsplit(":", 1)[1].split("/")[0]), host.sessions)
             finally:
                 host.close()
     print("Official MCP Python SDK 2.3.0: initialization, catalogue, refusal, build and reconnection over Streamable HTTP passed")

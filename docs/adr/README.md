@@ -61,13 +61,13 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-016](ADR-016-bootstrap-comme-socle.md) | The bootstrap environment as WebFront's foundation | Accepted | 2026-10-22 | 1.6 — 2026-10-26 |
 | [ADR-017](ADR-017-acces-direct-aux-frontends.md) | Direct access to embedded frontends, with HTML kept normative | Proposed | 2026-10-24 | 1.1 — 2026-10-25 |
 | [ADR-018](ADR-018-acces-au-dom.md) | DOM access from C++ through a bounded mutation stream, without contesting the DOM of UI libraries | Proposed, partially superseded, partially delivered | 2026-10-26 | 1.5 — 2026-10-30 |
-| [ADR-019](ADR-019-developpement-automatisable-et-agents.md) | Automating the developer environment through shared operations and an optional local MCP adapter | Accepted | 2026-10-28 | 1.2 — 2026-10-29 |
+| [ADR-019](ADR-019-developpement-automatisable-et-agents.md) | Automating the developer environment through shared operations and an optional local MCP adapter | Accepted (1.2); amendment 1.5 by ADR-025 proposed | 2026-10-28 | 1.5 — 2026-11-21 |
 | [ADR-020](ADR-020-services-systeme.md) | System services (files, clipboard, shell, notifications…) through optional C++ portals with per-connection backends, granting handles rather than paths | Proposed | 2026-10-31 | 1.8 — 2026-11-09 |
 | [ADR-021](ADR-021-publication-de-l-environnement-developpeur.md) | Simplifying the publication of the developer environment: automate the release, keep pinned hashes, no dedicated server | Accepted (domain delivered; phase 1 to implement) | 2026-11-02 | 1.0 — 2026-11-02 |
 | [ADR-022](ADR-022-profils-et-niveaux-de-support.md) | Compiler profiles, GCC 13 S2 minimum, exit clause and LTS build tools | Accepted | 2026-11-11 | 1.1 — 2026-11-11 |
 | [ADR-023](ADR-023-espace-de-noms-des-commandes-du-terminal.md) | Terminal command names: `wf` stays the prefix of project commands, read-only file commands (`ls`, `cat`, `tree`, `mounts`), file command names reserved ahead, dependency graph with `wf list --tree`, `wf why`, `wf info` | Accepted | 2026-11-14 | 1.0 — 2026-11-14 |
 | [ADR-024](ADR-024-tls-integre.md) | Optional integrated TLS 1.3 server | Proposed | 2026-11-21 | 1.0 |
-| [ADR-025](ADR-025-mcp-http-dans-l-application.md) | The application serves MCP over Streamable HTTP on its own loopback listener, with a session Bearer token, strict Host/Origin checks, per-instance discovery and no automation in distribution builds; the webfront-agent launcher is removed; amends ADR-019 | Accepted (delivery in progress) | 2026-11-21 | 1.2 — 2026-11-22 |
+| [ADR-025](ADR-025-mcp-http-dans-l-application.md) | The application serves MCP over Streamable HTTP on its own loopback listener, with a session Bearer token, strict Host/Origin checks, per-instance discovery and no automation in distribution builds; the webfront-agent launcher is removed; amends ADR-019 | Accepted (delivery in progress) | 2026-11-21 | 1.3 — 2026-11-22 |
 
 Numbering follows the reading topics; milestones and individual file histories provide
 the chronology, which does not follow the numerical order.

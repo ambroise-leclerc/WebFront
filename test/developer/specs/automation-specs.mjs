@@ -103,7 +103,9 @@ describe('Developer automation', () => {
             expect(text).toContain('C++ with a TypeScript/TSX interface in ui/, developed with wf dev');
             expect(text).toContain('wf create app                 a starter (starters: app, life), not the name of your project');
             expect(text).toMatch(/wf init[^]*wf dev ui\/main\.ts/);
-            expect(text).toContain('webfront.start {operation: "preview", arguments: {entry: "ui/main.ts"}}');
+            expect(text).toContain('webfront.session {}');
+            expect(text).toContain('webfront.start {session: S, operation: "preview", arguments: {entry: "ui/main.ts"}}');
+            expect(text).toContain('webfront.result {session: S, runId}');
             expect(text).toContain('mcp.json');
             expect(text).not.toContain('webfront-agent');
             expect(text).toContain('docs/DEVELOPING_WITH_AGENTS.md');

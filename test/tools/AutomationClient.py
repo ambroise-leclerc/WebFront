@@ -172,17 +172,22 @@ class Host:
                                         stdin=subprocess.PIPE, stdout=log, stderr=log, text=True, env=env)
         self.project = pathlib.Path(project).resolve()
 
+    def full_log(self):
+        return pathlib.Path(self.log.name).read_text(encoding="utf-8", errors="replace")
+
     def logs(self):
-        return pathlib.Path(self.log.name).read_text(encoding="utf-8", errors="replace")[-4000:]
+        """The end of the log, for diagnostics; assertions on its whole content use full_log()."""
+        return self.full_log()[-4000:]
 
     def record(self, timeout=60):
-        """This instance's discovery record, once its client configuration exists."""
+        """This instance's discovery record (published by this process), once its client configuration exists."""
         deadline = time.monotonic() + timeout
         while True:
             for path in self.sessions.glob("*.json") if self.sessions.is_dir() else []:
                 with contextlib.suppress(ValueError, OSError):
                     record = json.loads(path.read_text())
-                    if pathlib.Path(record["project"]).resolve() == self.project and pathlib.Path(record["configuration"]).exists():
+                    if (record["pid"] == self.process.pid and pathlib.Path(record["project"]).resolve() == self.project
+                            and pathlib.Path(record["configuration"]).exists()):
                         return record
             assert self.process.poll() is None, f"{self.name} exited with {self.process.returncode}\n{self.logs()}"
             assert time.monotonic() < deadline, f"{self.name} never published its MCP URL\n{self.logs()}"
@@ -209,9 +214,9 @@ class Host:
         self.profiles.__exit__(None, None, None)
 
 
-def check_withdrawn(record, port):
-    """After the application ended: no record, no private directory, no listener."""
-    sessions = pathlib.Path(record["endpoint"]).parent
+def check_withdrawn(record, port, sessions):
+    """After the application ended: no record in `sessions` (the host's --sessions), no private directory, no listener."""
+    sessions = pathlib.Path(sessions)
     assert not pathlib.Path(record["endpoint"]).exists(), "The private directory outlived the application"
     assert not (sessions / (record["session"] + ".json")).exists(), "The record outlived the application"
     with contextlib.suppress(ConnectionRefusedError):
@@ -286,7 +291,7 @@ def watchdog(args):
             finally:
                 host.close()
         assert (project / "renderer.started").is_file(), "The deadline expired before the renderer actually blocked"
-        check_withdrawn(record, client.url.port)
+        check_withdrawn(record, client.url.port, host.sessions)
         # A relaunch on the same private directory must reach its authenticated page before the intentional error. It
         # checks the reuse of the directory and Unicode failure reporting in one process; normal builds are exercised by
         # the functional scenario.
@@ -347,7 +352,7 @@ def consumer(args):
                     assert host.mcp.url.geturl() == host.entry["mcp"], host.entry
                 records = "".join(path.read_text() for path in sessions.glob("*.json"))
                 for host in hosts:
-                    assert host.mcp.token not in records + host.logs()
+                    assert host.mcp.token not in records + host.full_log()
                 first, second = hosts
                 assert first.mcp.url.port != second.mcp.url.port
                 # The listener of the first refuses what a web page, a rebinding name or a wrong token sends.
@@ -409,7 +414,7 @@ def consumer(args):
                     host.stop()
                     status_code = host.wait()
                     assert status_code == 0, f"exit {status_code}\n{host.logs()}"
-                    check_withdrawn(host.entry, host.mcp.url.port)
+                    check_withdrawn(host.entry, host.mcp.url.port, host.sessions)
                 assert list(sessions.glob("*.json")) == []
             except BaseException:
                 print((root / "consumers.log").read_text(), flush=True)
@@ -497,7 +502,7 @@ def session(args):
                 assert host.process.poll() is None, "Ending the MCP sessions closed the window"
                 host.stop()
                 assert host.wait(timeout=30) == 0, host.logs()
-                check_withdrawn(record, client.url.port)
+                check_withdrawn(record, client.url.port, host.sessions)
             except BaseException:
                 print(host.logs(), flush=True)
                 raise

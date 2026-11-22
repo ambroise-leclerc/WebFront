@@ -105,6 +105,11 @@ public:
         }
     }
 
+    /// Whether an `initialize` request succeeded; the transport creates its session on that, never on the size of the answer.
+    bool isInitialized() const noexcept {
+        return initialized;
+    }
+
 private:
     Backend&    session;
     bool        initialized = false, ready = false;

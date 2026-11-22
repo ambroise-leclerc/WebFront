@@ -75,7 +75,19 @@ from another thread: after `closeGrace` the listener, the files and the record a
 which by default ends the process with status 72. An application that prefers another way to stop sets `onUnresponsive`.
 
 Automation does not exist in a distribution build: `Enable.hpp` and `McpHttp.hpp` stop the compilation with an `#error` when
-`WEBFRONT_DISTRIBUTION` is 1, so gate the call out of the shipped configuration (for example behind a macro).
+`WEBFRONT_DISTRIBUTION` is 1, on purpose, so that no listener can ship. Gating the call alone is not enough: put the
+`#include <webfront/automation/Enable.hpp>`, the `enableAutomation` call and any code that uses automation under the same
+condition, for example:
+
+```cpp
+#if !WEBFRONT_DISTRIBUTION
+#include <webfront/automation/Enable.hpp>
+#endif
+// ...
+#if !WEBFRONT_DISTRIBUTION
+    auto automation = webfront::automation::enableAutomation(app, {.grants = {"check", "test"}});
+#endif
+```
 
 ### Calling the application's own callbacks
 
@@ -205,7 +217,9 @@ its bounded cancellation/cleanup before releasing ownership. A human `wf dev` ow
 while compiling/publishing, including when launched through `wf run` aliases, so agents can use
 the window while it waits for edits. The window displays the agent operation and a stop button.
 
-Poll the run ID until its state is `succeeded`, `failed`, `cancelled`, `timeout` or `disconnected`.
+Poll the run ID until its state is `succeeded`, `failed`, `cancelled`, `timeout` or `disconnected`. A `timeout` revokes the
+session at once, listener included, so the client may get a refused connection instead of reading that last state: it
+then stops polling and reports the outcome as unknown, without starting the mutation again.
 Exit code 130 means `cancelled` only after a native cancel request or an authenticated page
 report of an actual local abort; an unrequested script exit 130 is `failed`.
 The final `result` contains `{exitCode, output, report}`; top-level `output` becomes that final

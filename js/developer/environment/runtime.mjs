@@ -338,9 +338,10 @@ New interface, in order:
 An agent runs these itself, through MCP, once the application has called webfront::automation::enableAutomation:
 the application prints its MCP URL (http://127.0.0.1:PORT/mcp) and the path of its private mcp.json, which holds the URL
 and the Bearer token for the MCP client; never copy that file or its token into the project.
-  webfront.start {operation: "create", arguments: {starter: "app"}}
-  webfront.start {operation: "preview", arguments: {entry: "ui/main.ts"}}    after each edit, in place of wf dev
-  webfront.result {runId}                                                    until the run ends
+  webfront.session {}                                                        gives the session ID: S below
+  webfront.start {session: S, operation: "create", arguments: {starter: "app"}}
+  webfront.start {session: S, operation: "preview", arguments: {entry: "ui/main.ts"}}    after each edit, in place of wf dev
+  webfront.result {session: S, runId}                                        until the run ends
 Guide: docs/DEVELOPING_WITH_AGENTS.md`;
 function help([topic, ...extra] = [], {config} = {}) {
     if (extra.length) throw new Error(`Usage: ${usage.help}`);

@@ -156,30 +156,8 @@ inline void preparePrivateDirectory(const std::filesystem::path& directory) {
 #endif
 }
 
-/// Whether a failed removal may succeed shortly: on Windows, a reader that has the record open (`list` reads it without
-/// sharing deletion) makes it fail with a sharing or lock violation, or with an access denial while a deletion is pending.
-/// Nothing is transient on POSIX, where unlinking an open file succeeds.
-inline bool transientRemovalFailure([[maybe_unused]] const std::error_code& error) noexcept {
-#ifdef _WIN32
-    return error.category() == std::system_category()
-        && (error.value() == ERROR_SHARING_VIOLATION || error.value() == ERROR_LOCK_VIOLATION || error.value() == ERROR_ACCESS_DENIED);
-#else
-    return false;
-#endif
-}
-
-/// Removes a file. A transient failure (see `transientRemovalFailure`) is retried until a one second deadline, because
-/// giving up would leave a withdrawn session listed for as long as its process lives; any other failure is final.
-inline void removeWithRetry(const std::filesystem::path& file) noexcept {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
-    for (;;) {
-        std::error_code error;
-        std::filesystem::remove(file, error);
-        if (!error || !transientRemovalFailure(error) || std::chrono::steady_clock::now() >= deadline)
-            return;
-        std::this_thread::sleep_for(std::chrono::milliseconds{5});
-    }
-}
+using channel::removeWithRetry;
+using channel::transientRemovalFailure;
 
 /// The record of one shared session, present as long as this object lives.
 class Registration {
@@ -188,11 +166,15 @@ public:
     Registration(const std::filesystem::path& directory, const Entry& entry) {
         if (!validIdentifier(entry.session))
             throw std::invalid_argument("Invalid automation session identifier");
+        // A record readRecord would skip could be neither listed nor pruned: refuse it before publishing anything.
+        const auto content = entry.json();
+        if (content.size() > recordLimit)
+            throw std::invalid_argument("The automation discovery record exceeds " + std::to_string(recordLimit) + " bytes; use shorter paths");
         preparePrivateDirectory(directory);
         file = directory / (entry.session + ".json");
         std::error_code ignored;
         std::filesystem::remove(file, ignored);
-        channel::writeEndpoint(file, entry.json());
+        channel::writeEndpoint(file, content);
     }
     Registration(const Registration&)            = delete;
     Registration& operator=(const Registration&) = delete;
@@ -277,13 +259,14 @@ inline std::vector<Entry> list(const std::filesystem::path& directory, bool prun
                 std::error_code ignored;
                 std::filesystem::remove(path, ignored);
                 // The private directory created beside the record (ADR-025) goes with it: only its known files, then the
-                // directory if it is empty. A directory elsewhere, named by the owner, is never touched.
-                const auto own = directory / entry->session;
-                const auto spelled = [](const std::filesystem::path& value) {
-                    std::error_code unresolved;
-                    return std::filesystem::absolute(value, unresolved).lexically_normal().generic_string();
-                };
-                if (spelled(entry->endpoint) == spelled(own)) {
+                // directory if it is empty. A directory elsewhere, named by the owner, is never touched. The record holds
+                // the resolved path (channel::outsideProject), so the discovery directory is resolved the same way, and
+                // the session's directory must be a real child of it, not a link put in its place.
+                std::error_code unresolved;
+                const auto      own = std::filesystem::weakly_canonical(std::filesystem::absolute(directory), unresolved) / entry->session;
+                const auto      kind = std::filesystem::symlink_status(own, unresolved);
+                if (!unresolved && std::filesystem::is_directory(kind)
+                    && std::filesystem::path(entry->endpoint).lexically_normal().generic_string() == own.lexically_normal().generic_string()) {
                     for (const auto* name : {"endpoint.json", "endpoint.json.new", "mcp.json", "mcp.json.new"})
                         std::filesystem::remove(own / name, ignored);
                     std::filesystem::remove(own, ignored);
