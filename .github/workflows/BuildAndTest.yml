@@ -273,12 +273,27 @@ jobs:
         run: >-
           ctest --test-dir build -C ${{ matrix.build_type }} -L fast ${{ env.WEBFRONT_CONFIGURATION != 'true' && '-LE configuration' || '' }}
           --parallel 4 --output-on-failure --no-tests=error --output-junit "$PWD/build/fast-results.xml"
-      # Qualifies the apartment check of #638 under the load of the job; it runs before the suite, which stops at its first failed pass.
-      - name: Repeat the WebView2 repeated-show case
+      # Qualifies the apartment check of #638 under the load of the job: the case is repeated while the rest of the suite
+      # (everything that holds no browser window or port) runs again and again with the same --parallel 4. It runs before the
+      # complete suite, which stops at its first failed pass. Only the repetitions decide the step; the load is not judged.
+      - name: Repeat the WebView2 repeated-show case under load
         if: ${{ matrix.platform == 'windows-msvc-webview2' && github.event_name == 'workflow_dispatch' && inputs.webview2_show_repeats > 0 }}
-        run: >-
-          ctest --test-dir build -C ${{ matrix.build_type }} -R WebView2Lifecycle-repeated-show
-          --repeat until-fail:${{ inputs.webview2_show_repeats }} --output-on-failure --no-tests=error
+        shell: pwsh
+        run: |
+          $stop = Join-Path $env:RUNNER_TEMP 'stop-load'
+          Remove-Item $stop -ErrorAction SilentlyContinue
+          $load = Start-Job -ArgumentList $PWD.Path, $stop, '${{ matrix.build_type }}' -ScriptBlock {
+            param($root, $stop, $config)
+            while (-not (Test-Path $stop)) {
+              ctest --test-dir "$root/build" -C $config -LE 'web-integration|portability' --parallel 4 --no-tests=error *> $null
+            }
+          }
+          ctest --test-dir build -C ${{ matrix.build_type }} -R WebView2Lifecycle-repeated-show --repeat until-fail:${{ inputs.webview2_show_repeats }} --output-on-failure --no-tests=error
+          $status = $LASTEXITCODE
+          New-Item $stop -ItemType File -Force | Out-Null
+          Wait-Job $load -Timeout 300 | Out-Null
+          Stop-Job $load -ErrorAction SilentlyContinue
+          exit $status
       - name: Test C++ and native browser integration
         id: desktop_suite
         # The fast tier has just run: a single pass does not run it again; the three passes of the complete tier do.
