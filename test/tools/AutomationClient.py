@@ -126,6 +126,23 @@ class Client:
             self.mcp_session = None
 
 
+def remove_profile(path, attempts=20, delay=0.1, remove=shutil.rmtree):
+    """Removes a browser profile that a helper of the browser may still write into after the application exited (#642).
+
+    The helper can create a file between the walk of the directory and its removal (ENOTEMPTY): the removal is repeated
+    until the helper is gone, and what it still holds at the end is left to the system's temporary directory."""
+    for _ in range(attempts):
+        try:
+            remove(path)
+            return True
+        except FileNotFoundError:
+            return True
+        except OSError:
+            time.sleep(delay)
+    shutil.rmtree(path, ignore_errors=True)
+    return not os.path.exists(path)
+
+
 @contextlib.contextmanager
 def profile_directory():
     """A private directory in the system temporary directory, whose removal tolerates what the browser still removes.
@@ -138,7 +155,7 @@ def profile_directory():
     try:
         yield path
     finally:
-        shutil.rmtree(path, ignore_errors=True)
+        remove_profile(path)
 
 
 def raw_request(port, text):
@@ -157,15 +174,17 @@ class Host:
     def __init__(self, args, project, root, name, log, extra=(), environment=None, integrity=None):
         self.root, self.name, self.log = root, name, log
         self.sessions = root / "sessions"
-        profile = root / f"{name}-profile"
+        # The profile is outside the scenario's directory, whose strict cleanup a late write of a browser helper must not
+        # fail (#642): it lives in the private directory of profile_directory(), removed by remove_profile().
+        self.profiles = profile_directory()
+        temporary = self.profiles.__enter__()
+        profile = pathlib.Path(temporary) / f"{name}-profile"
         self.base = ["--project", str(project), "--environment", environment or args.environment,
                      "--integrity", integrity or json.loads(pathlib.Path(args.provision).read_text())["integrity"],
                      "--registry-dir", args.registry]
         env = dict(os.environ, XDG_DATA_HOME=str(profile / "data"), XDG_CACHE_HOME=str(profile / "cache"),
                    WEBFRONT_TEST_CEF_PROFILE=str(profile / "cef"))
         # Chromium puts its singleton Unix socket in TMPDIR: a short private directory keeps it below sockaddr_un's limit.
-        self.profiles = profile_directory()
-        temporary = self.profiles.__enter__()
         env.update(TMPDIR=temporary, TEMP=temporary, TMP=temporary)
         # Closing its standard input closes the application's window (stop()).
         self.process = subprocess.Popen([args.host, *self.base, "--sessions", str(self.sessions), *extra],
