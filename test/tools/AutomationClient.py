@@ -571,6 +571,16 @@ def stable(args):
         shutil.copytree(args.fixture, project)
         install(args, project)
         with (root / "stable.log").open("w") as log:
+            # Exercise the signal used by the retry with a port that is definitely occupied.
+            with socket.socket() as occupied:
+                occupied.bind(("127.0.0.1", 0))
+                occupied.listen(1)
+                host = Host(args, project, root, "occupied", log,
+                            ["--stable-mcp", "true", "--mcp-port", str(occupied.getsockname()[1])])
+                try:
+                    assert host.wait() == 73, host.logs()
+                finally:
+                    host.close()
             # The reservation must be released before the host binds; retry only a confirmed EADDRINUSE.
             for attempt in range(5):
                 with socket.socket() as reservation:
