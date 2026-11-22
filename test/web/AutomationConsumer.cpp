@@ -1,9 +1,12 @@
 // A consumer application that opts in to automation (#501): its own window and its own `cppFunction`, driven by
-// `webfront-agent --attach`. The browser regression (AutomationClient.py, scenario `consumer`) launches it and attaches
-// from another process; nothing here is a fake of the application the agent drives.
+// `webfront-agent --attach`, or, with `--transport http`, by any MCP client through the application's own MCP URL
+// (ADR-025). The browser regression (AutomationClient.py, scenarios `consumer` and `consumer-http`) launches it and
+// connects from another process; nothing here is a fake of the application the agent drives.
 //
 //   automation_consumer --project <dir> --environment <archive> --integrity <sha512-...> [--registry-dir <dir>]
-//                       --listen <new private dir> --sessions <dir> --called <file>
+//                       [--transport channel|http] [--listen <new private dir>] --sessions <dir> --called <file>
+// `--listen` is required with the channel transport; with http, the private directory defaults to one named after the
+// session in the sessions directory.
 #include "../driver/WfDriver.hpp"
 #include <webfront/automation/Enable.hpp>
 
@@ -34,7 +37,7 @@ int main(int argc, char** argv) {
         }
 #endif
         std::filesystem::path project, environment, registry, listen, sessions, called;
-        std::string           integrity;
+        std::string           integrity, transport = "channel";
         for (int i = 1; i + 1 < argc; i += 2) {
             const std::string_view name{argv[i]};
             const std::string      value{argv[i + 1]};
@@ -52,14 +55,17 @@ int main(int argc, char** argv) {
                 sessions = value;
             else if (name == "--called")
                 called = value;
+            else if (name == "--transport" && (value == "channel" || value == "http"))
+                transport = value;
             else {
                 std::cerr << "Unknown option " << name << '\n';
                 return 64;
             }
         }
-        if (project.empty() || environment.empty() || integrity.empty() || listen.empty() || sessions.empty() || called.empty()) {
+        const bool http = transport == "http";
+        if (project.empty() || environment.empty() || integrity.empty() || (listen.empty() && !http) || sessions.empty() || called.empty()) {
             std::cerr << "Usage: automation_consumer --project <dir> --environment <archive> --integrity <sha512> [--registry-dir <dir>] "
-                         "--listen <dir> --sessions <dir> --called <file>\n";
+                         "[--transport channel|http] [--listen <dir>] --sessions <dir> --called <file>\n";
             return 64;
         }
         webfront::testdriver::sources() = {std::filesystem::canonical(environment),
@@ -83,6 +89,7 @@ int main(int argc, char** argv) {
         auto automation = webfront::automation::enableAutomation(app,
                                                                  {.grants    = {"check", "build", "preview", "inspect", "interact", "call"},
                                                                   .callbacks = {"consumer.render"},
+                                                                  .http      = http,
                                                                   .listen    = listen,
                                                                   .discovery = sessions,
                                                                   .timeout   = std::chrono::seconds{30},

@@ -61,24 +61,14 @@ or later; 0.9.1 ignores the argument and prints the list). Declaring
 `"entries": {"main": "ui/main.ts"}` in `webfront.project.json` lets `wf dev`, `wf build` and `wf preview` run without
 argument. The [developer environment reference](DEVELOPER_ENVIRONMENT.md) has the details of each command.
 
-## Running wf yourself: JSON and MCP
+## Running wf yourself: MCP or JSON
 
-`webfront-agent` runs the same commands in the application's own window and answers in JSON, as a command line or as an MCP
-server on stdio. Three things are needed, none of which is on by default.
+The application runs the same commands in its own window and answers through MCP: it serves an MCP URL itself, in a
+development build. An MCP client connects to that URL; no second program is needed. `webfront-agent` remains the JSON command
+line for scripts and CI.
 
-**1. The launcher.** It is built when WebFront is configured with `-DWEBFRONT_BUILD_AUTOMATION=ON` and a native window
-engine is enabled, which is the default on a desktop where its dependencies are found. The configuration prints one
-`WebFront for agents:` line that says whether the launcher is built.
-
-```cmake
-set(WEBFRONT_BUILD_AUTOMATION ON)        # before add_subdirectory / FetchContent / CPM
-add_subdirectory(path/to/WebFront)
-webfront_add_agent()                     # checks the webfront-agent target; INSTALL installs it
-webfront_write_agent_guide()             # writes AGENTS.md at the root of your project, once
-```
-
-**2. The application opts in**, in a development build. The grants are the owner's decision, fixed in native code: an
-agent proposes this code and does not widen it.
+**1. The application opts in**, in a development build. The grants are the owner's decision, fixed in native code: an
+agent proposes this code and does not widen it. Automation does not compile in a distribution build (`WEBFRONT_DISTRIBUTION`).
 
 ```cpp
 #include <webfront/automation/Enable.hpp>
@@ -88,7 +78,7 @@ app.cppFunction("app.greet", greet);
 app.bootstrap("developer");
 auto automation = webfront::automation::enableAutomation(app,
     {.grants = {"create", "init", "install", "check", "build", "test", "preview", "embed", "inspect", "interact"},
-     .listen = privateDirectory});                  // a new directory outside the project
+     .http = true});                                // serve MCP at a loopback URL of this application
 app.show(automation->launchPage());
 automation->close();
 app.shutdown();
@@ -96,29 +86,50 @@ app.shutdown();
 
 Each operation needs its own grant, and only the owner of the application grants it: without `embed` in the list, `embed` is refused
 with `not_authorized`, and an agent asks the owner instead of widening the list. `embed` replaces its output header; grant it
-for a project whose output you accept to regenerate. The application prints the grants and the attach command on stderr and in its terminal.
+for a project whose output you accept to regenerate.
 
-**3. Attach.**
+**2. The application prints its URL** on stderr, and its terminal shows the grants:
 
-```sh
-webfront-agent --list                                              # the shared sessions and their endpoint directory
-webfront-agent --attach DIRECTORY --operation check                # one operation, one JSON result
-webfront-agent --print-mcp-config --attach DIRECTORY > .mcp.json   # for Claude Code or another MCP client
-webfront-agent --agent-help                                        # the rules; --schema prints the contract
+```text
+WebFront MCP (grants: check, build, ...): http://127.0.0.1:PORT/mcp - client configuration: /home/me/.local/state/webfront/sessions/SESSION/mcp.json
 ```
 
+Each running instance has its own port, so the URL is printed rather than known in advance. `mcp.json` is the client
+configuration of that instance, URL and Bearer token together, in a private directory outside the project:
+
 ```json
-{
-  "mcpServers": {
-    "webfront": {"command": "/path/to/webfront-agent", "args": ["--attach", "/path/to/private-directory", "--mcp"]}
-  }
-}
+{"mcpServers": {"webfront": {"type": "http", "url": "http://127.0.0.1:PORT/mcp", "headers": {"Authorization": "Bearer TOKEN"}}}}
+```
+
+**3. Connect an MCP client** to it: pass the file to a client that takes one (`claude --mcp-config PATH/mcp.json`), or
+copy the URL and the header into the client's **user** configuration. Never copy the token into the project, its `.mcp.json`
+included: the developer file bridge reads the project. The token ends with the session; a new run prints a new URL and file.
+The application must be running before the client connects. An agent with a shell can start it in the background and wait
+for its `mcp.json`, or read the records of the running instances (project, URL, configuration path, never the token) in the
+per-user sessions directory that `webfront-agent --list` also reads.
+
+**Without MCP: the JSON command line.** `webfront-agent` is built when WebFront is configured with
+`-DWEBFRONT_BUILD_AUTOMATION=ON` and a native window engine is enabled; the configuration prints one `WebFront for agents:`
+line that says whether it is built. It attaches to the directory that holds `mcp.json` (or to `.listen = directory`):
+
+```cmake
+set(WEBFRONT_BUILD_AUTOMATION ON)        # before add_subdirectory / FetchContent / CPM
+add_subdirectory(path/to/WebFront)
+webfront_add_agent()                     # checks the webfront-agent target; INSTALL installs it
+webfront_write_agent_guide()             # writes AGENTS.md at the root of your project, once
+```
+
+```sh
+webfront-agent --list                                              # the shared sessions and their directory
+webfront-agent --attach DIRECTORY --operation check                # one operation, one JSON result
+webfront-agent --print-mcp-config --attach DIRECTORY > .mcp.json   # MCP on stdio, for a client without HTTP
+webfront-agent --agent-help                                        # the rules; --schema prints the contract
 ```
 
 ### Each command, in the terminal, in JSON and in MCP
 
-The JSON column completes `webfront-agent --attach DIRECTORY`; the MCP column is the `operation` and `arguments` of the
-`webfront.start` tool, whose run is then read with `webfront.result`.
+The MCP column is the `operation` and `arguments` of the `webfront.start` tool, whose run is then read with
+`webfront.result`; the JSON column completes `webfront-agent --attach DIRECTORY`.
 
 | In the terminal | JSON command line | MCP `webfront.start` | Grant |
 | --- | --- | --- | --- |
@@ -152,11 +163,11 @@ security boundary. Project code runs with the user's rights; this is not a sandb
 
 | Where an agent looks | What it finds |
 | --- | --- |
-| The README, before the tutorial | The model, the three steps above and a `.mcp.json` |
+| The README, before the tutorial | The model, the three steps above and the client configuration |
 | `AGENTS.md` in the project | `wf create` writes it beside the starter's sources; `webfront_write_agent_guide()` writes it at the root of a CMake project, and never replaces an existing file |
 | The CMake configuration output | One `WebFront for agents:` line: the model, whether `webfront-agent` is built, and this page |
 | The terminal | The ready line names this page, `wf help` names `wf help agents` (environment 0.9.2); a missing manifest, a missing entry and an unknown starter answer with the next steps and the starters |
-| stderr of the application | One line when a document root is served without the developer environment |
+| stderr of the application | Its MCP URL and client configuration when automation is enabled; one line when a document root is served without the developer environment |
 | `webfront-agent --agent-help` | The rules of the contract, starting with the model |
 
 The terminal texts belong to the developer environment and reach an application with the environment its library pins:

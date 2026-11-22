@@ -42,8 +42,12 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   covers the console, developer and embedded Game of Life stages; Hello World and the host loop
   (`examples/host-loop/`, a Boing Ball ray-traced by the host on the CPU or with optional CUDA; see
   [the host-loop example](HOST_LOOP_EXAMPLE.md) for its measurements and limits) are also in the default build.
-- **Developer automation (opt-in).** `webfront-agent` provides local stdio MCP and a JSON CLI
-  for an explicitly launched developer window. Native grants select check/build/test/preview,
+- **Developer automation (opt-in).** An application that calls `automation::enableAutomation` with `.http = true` serves
+  MCP itself over Streamable HTTP, on a loopback listener of its own with a session Bearer token and a private `mcp.json`
+  client configuration ([ADR-025](adr/ADR-025-mcp-http-dans-l-application.md), #632); remote access is out of scope and
+  automation does not compile with `WEBFRONT_DISTRIBUTION`. The migration is in progress: `webfront-agent` still provides
+  local stdio MCP and a JSON CLI for an explicitly launched developer window, and its owned-window scenarios
+  (`AutomationMcpWindow`, `AutomationMcpWatchdog`, `AutomationSdkWindow`) still run over stdio. Native grants select check/build/test/preview,
   bounded inspection and semantic actions. [Automation](AUTOMATION.md) documents provisioning,
   lifecycle, limits and the supported MCP profile. It requires a compatible environment
   (0.6.3 or later), supplied as a rebuilt archive or verified published distribution. Explicitly shared human windows support authenticated

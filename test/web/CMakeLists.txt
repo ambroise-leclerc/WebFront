@@ -186,6 +186,10 @@ if(_browser_tests_available AND TARGET webfront-agent)
         webfront_add_automation_test(AutomationConsumerWindow automation-consumer 180 AutomationClient.py --scenario consumer
             --consumer "$<TARGET_FILE:automation_consumer>" --fixture "${PROJECT_SOURCE_DIR}/test/fixtures/consumer-project"
             --work "${CMAKE_CURRENT_BINARY_DIR}/automation-consumer")
+        # Two such applications side by side, each serving MCP over Streamable HTTP from its own process (ADR-025, #632).
+        webfront_add_automation_test(AutomationConsumerHttpWindow automation-consumer-http 240 AutomationClient.py --scenario consumer-http
+            --consumer "$<TARGET_FILE:automation_consumer>" --fixture "${PROJECT_SOURCE_DIR}/test/fixtures/consumer-project"
+            --work "${CMAKE_CURRENT_BINARY_DIR}/automation-consumer-http")
         execute_process(COMMAND "${Python3_EXECUTABLE}" -c
             "import importlib.metadata; assert importlib.metadata.version('mcp') == '2.3.0'"
             RESULT_VARIABLE _sdk_available OUTPUT_QUIET ERROR_QUIET)

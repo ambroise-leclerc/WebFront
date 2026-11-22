@@ -93,17 +93,23 @@ If you are a coding agent, or work with one, read this before anything else. The
 
 - **The model.** A WebFront application is a C++ program whose interface is TypeScript/TSX. The interface lives in **`ui/`** of the project directory (`ui/main.ts` or `ui/main.tsx`) and is developed with **`wf dev`**, in the terminal that `app.bootstrap("developer")` opens in the application's window. Pages of hand-written HTML and classic JavaScript served through `documentRoot` are not the development path: none of the tools apply to them.
 - **The sequence.** With the pinned developer environment: `wf create app` (the starter name, not your project's name), `wf init`, `wf install <package>` for browser dependencies, then `wf dev ui/main.ts`. Finish with `wf check`, `wf test` and `wf embed` using the project's configuration. Use `wf create life` for the React walkthrough. `wf help agents` prints the workflow.
-- **An agent runs `wf` itself, in JSON or MCP.** Do not ask a person to type the commands. Configure with `-DWEBFRONT_BUILD_AUTOMATION=ON` to build `webfront-agent`; the application opts in with `webfront::automation::enableAutomation(app, {.grants = {...}, .listen = directory})`, whose grants stay the owner's; then:
+- **An agent runs `wf` itself, through MCP or JSON.** Do not ask a person to type the commands. In a development build, the application opts in with `webfront::automation::enableAutomation(app, {.grants = {...}, .http = true})`, whose grants stay the owner's, and serves MCP itself: it prints its URL and the path of a private client configuration (`mcp.json`, URL and Bearer token, outside the project):
+
+```text
+WebFront MCP (grants: check, build, preview): http://127.0.0.1:PORT/mcp - client configuration: .../sessions/SESSION/mcp.json
+```
+
+```json
+{"mcpServers": {"webfront": {"type": "http", "url": "http://127.0.0.1:PORT/mcp", "headers": {"Authorization": "Bearer TOKEN"}}}}
+```
+
+Pass that file to the MCP client (`claude --mcp-config PATH/mcp.json`), never copy the token into the project. For scripts and CI, configure with `-DWEBFRONT_BUILD_AUTOMATION=ON` to build `webfront-agent`, the JSON command line of the same operations:
 
 ```sh
 webfront-agent --list                                              # the sessions shared with agents
 webfront-agent --attach DIRECTORY --operation create --starter app
 webfront-agent --attach DIRECTORY --operation preview --entry ui/main.ts   # after each edit, in place of wf dev
-webfront-agent --print-mcp-config --attach DIRECTORY > .mcp.json   # the same operations as an MCP server
-```
-
-```json
-{"mcpServers": {"webfront": {"command": "/path/to/webfront-agent", "args": ["--attach", "/path/to/directory", "--mcp"]}}}
+webfront-agent --print-mcp-config --attach DIRECTORY > .mcp.json   # MCP on stdio, for a client without HTTP
 ```
 
 In a project that embeds WebFront, `webfront_write_agent_guide()` writes these rules as `AGENTS.md` at its root, and `wf create` writes them beside the starter's sources.

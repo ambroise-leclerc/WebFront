@@ -461,3 +461,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME HardwareWorkflows COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/tools/TestHardwareWorkflows.py")
     set_tests_properties(FuzzerConcurrency TestFlakeReport HardwareWorkflows PROPERTIES TIMEOUT 60 LABELS fast)
 endif()
+
+# Automation does not exist in a distribution build (ADR-025): Enable.hpp, which opens the MCP listener, refuses to compile
+# with WEBFRONT_DISTRIBUTION. The test builds that translation unit and expects the compiler to name the reason.
+add_library(automation_distribution_guard OBJECT EXCLUDE_FROM_ALL AutomationDistributionGuard.cpp)
+target_link_libraries(automation_distribution_guard PRIVATE WebFront WebFront_options)
+target_compile_definitions(automation_distribution_guard PRIVATE WEBFRONT_DISTRIBUTION=1)
+add_test(NAME AutomationAbsentFromDistribution
+         COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --target automation_distribution_guard --config $<CONFIG>)
+set_tests_properties(AutomationAbsentFromDistribution PROPERTIES PASS_REGULAR_EXPRESSION "does not exist in a distribution build")

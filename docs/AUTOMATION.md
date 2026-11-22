@@ -1,13 +1,14 @@
 # Developer automation and local MCP
 
-WebFront's optional `webfront-agent` opens a developer window and exposes a bounded native
-controller through either a JSON CLI operation or MCP on stdio. The terminal remains available
-in the window. Both interfaces use the same wf dispatcher and reject overlapping commands.
-Normal applications and embedded distributions acquire no automation callbacks or listener.
+An application that opts in with `enableAutomation` exposes a bounded native controller of its own developer window. With
+`.http = true` it serves MCP itself, over Streamable HTTP on a loopback listener of its own ([ADR-025](adr/ADR-025-mcp-http-dans-l-application.md)).
+WebFront's optional `webfront-agent` gives the same operations as a JSON CLI, as MCP on stdio, or opens a window of its own.
+The terminal remains available in the window. All interfaces use the same wf dispatcher and reject overlapping commands.
+Normal applications acquire no automation callbacks or listener, and automation does not compile in a distribution build.
 
 The launcher can own a window or attach to a human-owned developer window explicitly opened for
-sharing. It does not discover arbitrary running applications, open an HTTP endpoint, or export the
-bridge as MCP. Applications can explicitly integrate `automation::Binding` with their own controller.
+sharing. It does not discover arbitrary running applications or export the bridge as MCP. Applications can explicitly
+integrate `automation::Binding` with their own controller.
 A session ID routes operations and prevents accidental cross-session requests; it is not an
 authentication secret. The opt-in native attachment channel uses a separate OS-generated capability.
 
@@ -201,8 +202,12 @@ webfront-agent --list
 webfront-agent --attach /absolute/private-endpoint --operation check
 ```
 
-A lost WebSocket does not prove the native window is gone (a navigation or a broken connection can leave it open, with `show()` still blocked): the record and endpoint are withdrawn at once, but the grace still runs until the application calls `close()` after `show()` returns, so call it promptly. A window that never claims the session (`startupTimeout`, 120 s from the activation) is revoked the same way, since no operation exists for the deadline to expire. The native deadline of an operation revokes the session and asks the window to close. A renderer stuck in a loop never runs that request, and `show()` cannot be interrupted from another thread: after `closeGrace` (five seconds) the endpoint and record are removed and `onUnresponsive` is called, which by default ends the process with status 72, as `webfront-agent` does. An application that prefers another way to stop sets `onUnresponsive`. Enabling automation in a
-distribution build is an application choice: gate the call (for example behind a macro) so that shipped binaries have none.
+With `.http = true`, `listen` may be omitted: the endpoint goes to a new private directory named after the session in the
+discovery directory, beside the client configuration of the MCP listener (see [Serving MCP from the application](#serving-mcp-from-the-application)).
+
+A lost WebSocket does not prove the native window is gone (a navigation or a broken connection can leave it open, with `show()` still blocked): the record and endpoint are withdrawn at once, but the grace still runs until the application calls `close()` after `show()` returns, so call it promptly. A window that never claims the session (`startupTimeout`, 120 s from the activation) is revoked the same way, since no operation exists for the deadline to expire. The native deadline of an operation revokes the session and asks the window to close. A renderer stuck in a loop never runs that request, and `show()` cannot be interrupted from another thread: after `closeGrace` (five seconds) the endpoint and record are removed and `onUnresponsive` is called, which by default ends the process with status 72, as `webfront-agent` does. An application that prefers another way to stop sets `onUnresponsive`. Automation does not exist in a distribution build:
+`Enable.hpp` and `McpHttp.hpp` stop the compilation with an `#error` when `WEBFRONT_DISTRIBUTION` is 1, so gate the call out
+of the shipped configuration (for example behind a macro).
 
 ### Calling the application's own callbacks
 
@@ -228,15 +233,59 @@ the application's own process with the application's authority: allow-list only 
 environment older than 0.6.6 cannot run `call`, and the native owner refuses the grant rather than ignore it. `call` is an
 operation of `webfront.start`, not one MCP tool per callback, so the tool list stays at four. A callback in progress cannot be interrupted: cancelling a `call` keeps the run, the session's lock and the native deadline until the callback returns, then reports it cancelled (its effect is not undone); a callback that never returns ends with the native deadline, which revokes the session.
 
+## Serving MCP from the application
+
+```cpp
+auto automation = webfront::automation::enableAutomation(app, {.grants = {"check", "build", "preview"}, .http = true});
+```
+
+The application then serves MCP itself; no other program runs between the client and the window. On stderr (unless
+`announce = false`) and through `automation->mcpUrl()` and `automation->clientConfiguration()`:
+
+```text
+WebFront MCP (grants: check, build, preview): http://127.0.0.1:PORT/mcp - client configuration: <private directory>/mcp.json
+```
+
+- **Address.** The listener binds `127.0.0.1` only, on a port the OS chooses, distinct from the page's port and never
+  served with TLS, whatever the application's own address and TLS listener. `mcpPort` chooses a port; a chosen port is never
+  replaced: when it is taken the activation throws a `std::system_error` that names the address, the port and the cause.
+  Each instance has its own URL, so several applications run side by side and the agent picks one by its URL.
+- **Token.** Every request carries `Authorization: Bearer <token>`, a 256-bit value from the OS, compared in constant time
+  before the body is parsed; otherwise 401 with `WWW-Authenticate: Bearer` (no OAuth server is announced). The token lives as
+  long as the session: closing it, a deadline, a lost window or a catchable signal closes the listener and removes the file.
+- **Client configuration.** `mcp.json` (mode 0600 in a 0700 directory on POSIX, owner-only ACL on Windows) holds the URL and
+  the header, ready for a client that takes a configuration file (`claude --mcp-config PATH/mcp.json`). The token appears in
+  no page, URL, command line, log, banner or discovery record. Never copy it into the project, its `.mcp.json` included: the
+  developer file bridge can read the project.
+- **Web pages.** A request whose `Host` is not exactly `127.0.0.1:PORT` or `localhost:PORT` gets 421 (DNS rebinding); any
+  `Origin`, the application's own included, or any `Sec-Fetch-*` header gets 403; a body that is not `application/json` gets
+  415, and a CORS preflight gets 405 without any `Access-Control-*` header. Only `/mcp` is served: every other path, the
+  page's files and the OAuth discovery paths included, is 404.
+- **Protocol.** MCP 2025-11-25 Streamable HTTP, reduced: `POST /mcp` with one JSON-RPC message (a batch is refused),
+  answered with `application/json`, never a server stream (`GET` is 405); `Accept` must include `application/json`. A
+  notification or a client response gets 202. `initialize` assigns `Mcp-Session-Id`, which routes and does not authenticate;
+  without it other requests get 400, an unknown or terminated one 404, and `DELETE /mcp` terminates the MCP session only,
+  not the window. 16 MCP sessions at most, the least recently used evicted. `MCP-Protocol-Version`, when sent, must be
+  2025-11-25 (400 otherwise). The body is bounded by `Content-Length` to 60,000 bytes (413), chunked bodies get 501, an
+  unannounced length 411, and `Expect: 100-continue` is answered once the headers are accepted, never before a refusal.
+- **Admission.** The same as the attachment channel: at most 64 unauthenticated peers, oldest evicted, each with two seconds
+  to send its headers and body; 32 workers for authenticated requests, which silent peers never hold; 30 seconds to send an
+  answer. Each connection carries one request (`Connection: close`).
+
+The application must be running before a client connects: an MCP client cannot start it as it starts a stdio server. An agent
+with a shell starts the application, then waits for its `mcp.json` or its discovery record. The attachment channel stays
+available in the same directory, so `webfront-agent --attach` still works on an application served over HTTP.
+
 ## Discovering shared sessions
 
 A session with an endpoint (`--serve --listen`, or `enableAutomation`) publishes `<session>.json` in a private per-user
 directory: `%LOCALAPPDATA%\WebFront\sessions` on Windows, `~/Library/Application Support/WebFront/sessions` on macOS,
 `$XDG_STATE_HOME/webfront/sessions` or `~/.local/state/webfront/sessions` elsewhere (`--sessions-dir` overrides it for the
 launcher and for `--list`). On POSIX it must be owned by the user and closed to others, otherwise it is not read. A missing directory is created private (0700); an existing one that others can read is refused and left untouched. The record has
-the project, grants, process identifier, API version and the endpoint directory, **never the capability**, which stays in the
-private endpoint: listing a session does not let anyone operate it. It is removed on closure and on catchable signals; one
-whose process is gone is dropped by the next `--list`. A recycled process identifier can keep a dead record for a while. Discovery is a convenience: if the directory cannot be used (no home, read-only, shared or owned by someone else), `webfront-agent --serve --listen` says so on stderr and serves the session unlisted, while `enableAutomation` throws, so that an application never believes it is listed when it is not.
+the project, grants, process identifier, API version and the endpoint directory, plus, for a session served over HTTP, its
+MCP URL (`mcp`) and the path of its client configuration (`configuration`); **never the capability nor the token**, which stay in the
+private directory: listing a session does not let anyone operate it. It is removed on closure and on catchable signals; one
+whose process is gone is dropped by the next `--list`, with the private directory named after its session, when it has one. A recycled process identifier can keep a dead record for a while. Discovery is a convenience: if the directory cannot be used (no home, read-only, shared or owned by someone else), `webfront-agent --serve --listen` says so on stderr and serves the session unlisted, while `enableAutomation` throws, so that an application never believes it is listed when it is not.
 
 ```sh
 webfront-agent --list                                        # {"version":1,"sessions":[{"session":...,"allow":[...],"endpoint":...}]}
@@ -255,7 +304,8 @@ operation. These need environment 0.6.6; an older one shows none of them and sti
 
 ## MCP profile and results
 
-The server supports protocol revision **2025-11-25**, initialization, ping and tools. It advertises
+The server supports protocol revision **2025-11-25**, initialization (with short `instructions`), ping and tools, on stdio
+(`webfront-agent`) and over Streamable HTTP (the application, see above). It advertises
 no prompts, resources, sampling, logging or experimental task capability. A client requesting
 another revision receives the supported revision and must decide whether it can continue, as
 specified by [MCP version negotiation](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle#version-negotiation).
@@ -380,10 +430,20 @@ not automatically written to disk. Audit entries carry the actual operation and 
 (empty for a denial before allocation), and omit arguments/output. Busy, not-ready, malformed requests with valid session authority
 and lifecycle completions do not evict those decisions. Retention,
 access to client-side transcripts and secret expurgation remain the caller's responsibility.
-Remote/multi-user access, HTTP, arbitrary uninstrumented window discovery and physical device
+The loopback MCP listener is decided by [ADR-025](adr/ADR-025-mcp-http-dans-l-application.md); its token protects it
+from other users and web pages, not from a process of the same user, which can read `mcp.json` as it can read the endpoint.
+Remote/multi-user access (including MCP over HTTPS), arbitrary uninstrumented window discovery and physical device
 control need their own reviewed authorization/isolation design.
 
 ## Validation
+
+`AutomationMcpHttpTests.cpp` covers the HTTP listener: screening of Host, Origin, Sec-Fetch, path, method, token, media
+types and lengths; MCP sessions, revisions, batches, notifications and eviction; real sockets with refusals read before a
+reset, `Expect: 100-continue`, silent peers, a taken port and revocation; two activations side by side and the cleanup of a
+vanished instance. `AutomationAbsentFromDistribution` checks that `Enable.hpp` does not compile with `WEBFRONT_DISTRIBUTION`.
+`AutomationConsumerHttpWindow` runs two real consumer applications served over HTTP side by side and drives each through
+its own URL with the standard library's HTTP client: refusals, grants, check, build, an allow-listed callback and cleanup.
+`webfront-agent` is not used to operate them, only to close them at the end through the attachment channel.
 
 The unit tests cover native grants, cross-session rejection, path/option refusal, cancellation races,
 deadline revocation, MCP lifecycle/IDs and hostile JSON. Browser Jasmine specs cover shared

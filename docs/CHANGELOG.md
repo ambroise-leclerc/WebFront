@@ -11,9 +11,11 @@ these entries stays in the GitHub releases and the Git history.
 ## Unreleased
 
 ### Breaking
+- `webfront/automation/Enable.hpp` no longer compiles with `WEBFRONT_DISTRIBUTION`: gate `enableAutomation` out of the distribution build, as the guide already advised (#632, ADR-025).
 - The CEF profile is now `cef_cache/<executable>`, not `cef_cache`: an application starts with an empty profile (localStorage, cookies); to keep the data, move the old contents of `cef_cache` into `cef_cache/<executable>` once (#617, `docs/HOST_INTEGRATION.md`).
 
 ### Added
+- Connect an MCP client to the application itself: `enableAutomation(app, {.grants = {...}, .http = true})` serves MCP over Streamable HTTP on a loopback port of its own, prints its URL and writes a private `mcp.json` with the URL and a session Bearer token; `webfront-agent` is no longer needed for MCP (#632, ADR-025, `docs/AUTOMATION.md`).
 - Use a custom network provider with `DeveloperAppWithNetwork`. The `BasicDeveloperApp` alias selects the existing TCP provider (#631).
 - Serve HTTPS and WSS with the optional header-only TLS 1.3 listener and reload its PEM identity after renewal (#631, `docs/TLS.md`).
 - Start an application with no port setting when `9002` is taken: an empty `WebFrontConfig::port` falls back to a free port, a chosen port is never replaced, and CEF and WebKitGTK give each live instance its own profile directory (#617, `docs/HOST_INTEGRATION.md`).

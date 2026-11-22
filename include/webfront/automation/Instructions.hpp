@@ -10,7 +10,9 @@ only for imported npm packages), then preview --entry ui/main.ts after each edit
 2. Run `webfront-agent --list` to see the sessions their owners shared (project, grants, endpoint directory; no secret),
    or ask the owner to launch a window with --serve --listen DIRECTORY and explicit --allow grants (an application can
    enable automation itself). Attach only to an endpoint that --list shows or the owner supplied; never read others.
-   `webfront-agent --print-mcp-config --attach DIRECTORY` prints a client configuration for it.
+   `webfront-agent --print-mcp-config --attach DIRECTORY` prints a stdio client configuration for it. A session whose
+   record has `mcp` is also served over HTTP by the application: its private `configuration` file (mcp.json) holds the URL
+   and the token for an MCP client; never copy that token into the project.
 3. Run `webfront-agent --attach DIRECTORY --operation check` or build/test/preview as authorized.
    Setup operations init, create, install, restore and embed need their own grants and plain arguments.
    Add --entry or --pattern only for the operation that accepts it. No shell string is interpreted.

@@ -49,27 +49,32 @@ wf install               # no package: writes the empty lock that wf preview and
 wf dev ui/main.ts        # then wf check, wf test and wf embed as above
 ```
 
-## Run wf yourself: JSON or MCP
+## Run wf yourself: MCP or JSON
 
-Do not ask a person to type these commands and paste their output. `webfront-agent` runs them in the application's window and
-answers in JSON, as a command line or as an MCP server on stdio.
+Do not ask a person to type these commands and paste their output. The application runs them in its own window and serves
+them over MCP at a URL of its own; `webfront-agent` gives the same operations as a JSON command line.
 
-1. **Get the launcher.** Configure WebFront with `-DWEBFRONT_BUILD_AUTOMATION=ON` (in a parent project,
-   `set(WEBFRONT_BUILD_AUTOMATION ON)` before adding WebFront) and build the `webfront-agent` target.
-2. **The application opts in**, in a development build. The grants belong to its owner: propose this code, do not widen it.
+1. **The application opts in**, in a development build (it does not compile with `WEBFRONT_DISTRIBUTION`). The grants belong
+   to its owner: propose this code, do not widen it.
 
    ```cpp
    #include <webfront/automation/Enable.hpp>
 
    auto automation = webfront::automation::enableAutomation(app,
        {.grants = {"create", "init", "install", "check", "build", "test", "preview", "embed", "inspect", "interact"},
-        .listen = privateDirectory});               // a new directory outside the project
+        .http = true});                             // serve MCP at a loopback URL of this application
    app.show(automation->launchPage());
    automation->close();
    app.shutdown();
    ```
-3. **Attach.** `webfront-agent --list` prints the shared sessions and their endpoint directory;
-   `webfront-agent --print-mcp-config --attach DIRECTORY > .mcp.json` configures an MCP client;
+2. **Connect.** The running application prints `WebFront MCP (grants: ...): http://127.0.0.1:PORT/mcp - client configuration:
+   .../mcp.json`. That private file holds the URL and the Bearer token: pass it to the MCP client (`claude --mcp-config
+   PATH/mcp.json`) or copy them into the client's user configuration, never into this project. The application must be
+   running first; each run has a new port and token.
+3. **Or the JSON command line.** Configure WebFront with `-DWEBFRONT_BUILD_AUTOMATION=ON` (in a parent project,
+   `set(WEBFRONT_BUILD_AUTOMATION ON)` before adding WebFront) and build the `webfront-agent` target. `webfront-agent --list`
+   prints the shared sessions and their directory; `webfront-agent --attach DIRECTORY --operation check` runs one operation;
+   `webfront-agent --print-mcp-config --attach DIRECTORY > .mcp.json` configures a client limited to stdio;
    `webfront-agent --agent-help` and `webfront-agent --schema` give the rules and the contract.
 
 | In the terminal | JSON: `webfront-agent --attach DIRECTORY ...` | MCP: `webfront.start` with |

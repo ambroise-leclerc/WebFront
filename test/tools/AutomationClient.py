@@ -1,5 +1,7 @@
-"""Real stdio MCP client driving an authorized developer window, with no third-party Python modules."""
+"""Real MCP clients (stdio and Streamable HTTP) driving an authorized developer window, with no third-party Python modules."""
 import argparse
+import http.client
+import urllib.parse
 import json
 import pathlib
 import queue
@@ -116,6 +118,64 @@ class Client:
                 details = self.log_path.read_text()[-2000:] if self.log_path and self.log_path.exists() else ""
                 raise TimeoutError(f"The agent did not exit after its input closed; native stderr: {details}") from error
         self.reader.join(timeout=2)
+
+
+class HttpClient(Client):
+    """The same MCP calls over the Streamable HTTP listener of an application (ADR-025), from its private mcp.json."""
+
+    def __init__(self, configuration, timeout=30):
+        self.timeout = timeout
+        server = json.loads(pathlib.Path(configuration).read_text())["mcpServers"]["webfront"]
+        assert server["type"] == "http", server
+        self.url = urllib.parse.urlsplit(server["url"])
+        assert self.url.hostname == "127.0.0.1" and self.url.path == "/mcp", server["url"]
+        self.authorization = server["headers"]["Authorization"]
+        self.mcp_session = None
+        self.counter = 0
+
+    def post(self, body, headers=None, method="POST"):
+        """One request on its own connection (the listener closes each one); returns (status, headers, body)."""
+        connection = http.client.HTTPConnection(self.url.hostname, self.url.port, timeout=30)
+        try:
+            sent = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream",
+                    "Authorization": self.authorization}
+            if self.mcp_session:
+                sent["Mcp-Session-Id"] = self.mcp_session
+                sent["MCP-Protocol-Version"] = "2025-11-25"
+            sent.update(headers or {})
+            for name in [name for name, value in sent.items() if value is None]:
+                del sent[name]
+            connection.request(method, self.url.path, body=body, headers=sent)
+            response = connection.getresponse()
+            return response.status, dict(response.getheaders()), response.read()
+        finally:
+            connection.close()
+
+    def send(self, method, params=None, notification=False):
+        self.counter += 1
+        request = {"jsonrpc": "2.0", "method": method}
+        if params is not None:
+            request["params"] = params
+        if not notification:
+            request["id"] = self.counter
+        status, headers, body = self.post(json.dumps(request).encode())
+        if notification:
+            assert status == 202 and not body, (status, body)
+            return None
+        assert status == 200, (status, body)
+        assert headers.get("Content-Type") == "application/json", headers
+        if method == "initialize":
+            self.mcp_session = headers["Mcp-Session-Id"]
+        message = json.loads(body)
+        assert message["id"] == self.counter, message
+        assert "error" not in message, message
+        return message["result"]
+
+    def close(self):
+        if self.mcp_session:
+            status, _, _ = self.post(None, {"Content-Type": None, "Accept": None}, method="DELETE")
+            assert status == 204, status
+            self.mcp_session = None
 
 
 @contextlib.contextmanager
@@ -487,15 +547,139 @@ def consumer(args):
     print("consumer: attach to an application's own window, its own callback, grants, discovery, shutdown passed")
 
 
+def raw_request(port, text):
+    """Sends raw bytes to a loopback port and returns the status code of the answer."""
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as peer:
+        peer.sendall(text.encode())
+        answer = b""
+        while chunk := peer.recv(4096):
+            answer += chunk
+    return int(answer.split(b" ", 2)[1])
+
+
+def consumer_http(args):
+    """Two applications that enabled automation with `.http = true`, side by side (ADR-025, #632).
+
+    Each serves MCP from its own process on its own loopback port. This process reads each instance's record and private
+    mcp.json, never runs webfront-agent to operate them, and drives each window through its URL only."""
+    integrity = json.loads(pathlib.Path(args.provision).read_text())["integrity"]
+    pathlib.Path(args.work).mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=args.work, prefix="consumer-http-") as temporary:
+        root = pathlib.Path(temporary)
+        sessions = root / "sessions"
+        instances = []
+        with profile_directory() as profile_root, (root / "consumers.log").open("w") as log:
+            try:
+                for name in ("first", "second"):
+                    project = root / name
+                    shutil.copytree(args.fixture, project)
+                    base = ["--project", str(project), "--environment", args.environment, "--integrity", integrity,
+                            "--registry-dir", args.registry]
+                    installed = subprocess.run([args.driver, *base, "--", "install"], capture_output=True, text=True, timeout=120)
+                    assert installed.returncode == 0, installed.stdout + installed.stderr
+                    # Each instance has its own browser profile, as two applications of a machine would.
+                    profile = pathlib.Path(profile_root) / name
+                    environment = dict(os.environ, TMPDIR=profile_root, TEMP=profile_root, TMP=profile_root,
+                                       XDG_DATA_HOME=str(profile / "data"), XDG_CACHE_HOME=str(profile / "cache"),
+                                       WEBFRONT_TEST_CEF_PROFILE=str(profile / "cef"))
+                    called = root / f"{name}-called.txt"
+                    owner = subprocess.Popen([args.consumer, *base, "--transport", "http", "--sessions", str(sessions),
+                                              "--called", str(called)],
+                                             stdin=subprocess.DEVNULL, stdout=log, stderr=log, text=True, env=environment)
+                    instances.append({"name": name, "project": project, "owner": owner, "called": called})
+                # Discovery: each record names its project, its URL and its private configuration, never its token.
+                deadline = time.monotonic() + 60
+                while True:
+                    records = [json.loads(path.read_text()) for path in sessions.glob("*.json")] if sessions.is_dir() else []
+                    if len(records) == 2 and all(pathlib.Path(record["configuration"]).exists() for record in records):
+                        break
+                    for instance in instances:
+                        assert instance["owner"].poll() is None, (root / "consumers.log").read_text()
+                    assert time.monotonic() < deadline, f"The applications never published their MCP URLs: {records}"
+                    time.sleep(0.05)
+                if os.name != "nt":
+                    assert sessions.stat().st_mode & 0o077 == 0
+                for instance in instances:
+                    record = next(record for record in records if pathlib.Path(record["project"]).resolve() == instance["project"].resolve())
+                    configuration = pathlib.Path(record["configuration"])
+                    assert configuration.parent == pathlib.Path(record["endpoint"]) == sessions / record["session"], record
+                    if os.name != "nt":
+                        assert configuration.stat().st_mode & 0o077 == 0 and configuration.parent.stat().st_mode & 0o077 == 0
+                    instance.update(record=record, client=HttpClient(configuration),
+                                    token=json.loads(configuration.read_text())["mcpServers"]["webfront"]["headers"]["Authorization"][7:])
+                    assert instance["client"].url.geturl() == record["mcp"], record
+                    assert instance["token"] not in json.dumps(records) + (root / "consumers.log").read_text()
+                first, second = instances
+                assert first["client"].url.port != second["client"].url.port
+                # The listener of the first refuses what a web page, a rebinding name or a wrong token sends.
+                port = first["client"].url.port
+                body = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+                request = ("POST /mcp HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\n"
+                           "Accept: application/json\r\nContent-Length: {length}\r\n{extra}\r\n{body}")
+                def status(host=f"127.0.0.1:{port}", token=first["token"], extra=""):
+                    return raw_request(port, request.format(host=host, token=token, extra=extra, length=len(body), body=body))
+                assert status(token=second["token"]) == 401
+                assert status(token="0" * 64) == 401
+                assert status(host=f"rebinding.example:{port}") == 421
+                assert status(extra="Origin: http://127.0.0.1:9002\r\n") == 403
+                assert status(extra="Sec-Fetch-Site: cross-site\r\n") == 403
+                assert raw_request(port, f"GET /WebFront.js HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n") == 404
+                # Each agent reaches its own instance: the session names that instance's project.
+                for instance in instances:
+                    client = instance["client"]
+                    client.initialize()
+                    assert pathlib.Path(client.tool("session")["project"]).resolve() == instance["project"].resolve()
+                client = first["client"]
+                for operation in ("test", "init", "install", "embed"):
+                    client.tool("start", {"session": client.session, "operation": operation}, error=True)
+                client.tool("start", {"session": second["client"].session, "operation": "check"}, error=True)
+                client.run("check")
+                client.run("build")
+                assert (first["project"] / ".webfront/developer/build/app.js").is_file()
+                assert not (second["project"] / ".webfront/developer/build/app.js").exists()
+                answered = client.run("call", {"callback": "consumer.render", "value": "from-http"})
+                assert answered["data"] == {"callback": "consumer.render", "result": "rendered:from-http"}, answered
+                assert first["called"].read_text().split() == ["from-http"]
+                assert not second["called"].exists()
+                second["client"].run("check")
+                for instance in instances:
+                    instance["client"].close()
+                    assert instance["owner"].poll() is None, "Ending an MCP session closed the application's window"
+                # Closing the applications withdraws their URLs, private directories and records.
+                for instance in instances:
+                    endpoint = instance["record"]["endpoint"]
+                    shutdown = subprocess.run([args.agent, "--attach", endpoint, "--shutdown"], capture_output=True, text=True, timeout=10)
+                    assert shutdown.returncode == 0, shutdown.stderr
+                    status_code = instance["owner"].wait(timeout=30)
+                    assert status_code == 0, f"exit {status_code}\n{(root / 'consumers.log').read_text()}"
+                    assert not pathlib.Path(endpoint).exists(), "The private directory outlived the application"
+                    with contextlib.suppress(ConnectionRefusedError):
+                        raw_request(instance["client"].url.port, "POST /mcp HTTP/1.1\r\n\r\n")
+                        raise AssertionError("The MCP listener outlived the application")
+                assert list(sessions.glob("*.json")) == []
+            except BaseException:
+                print((root / "consumers.log").read_text(), flush=True)
+                raise
+            finally:
+                for instance in instances:
+                    if instance["owner"].poll() is None:
+                        instance["owner"].kill()
+                        instance["owner"].wait()
+    print("consumer-http: two applications serve their own MCP URLs, refusals, operations, callbacks and cleanup passed")
+
+
 def main():
     parser = argparse.ArgumentParser()
     for name in ("agent", "driver", "environment", "provision", "registry", "fixture", "work"):
         parser.add_argument("--" + name, required=True)
-    parser.add_argument("--scenario", choices=("session", "mcp-watchdog", "consumer"), default="session")
+    parser.add_argument("--scenario", choices=("session", "mcp-watchdog", "consumer", "consumer-http"), default="session")
     parser.add_argument("--consumer", help="the automation_consumer executable of the consumer scenario")
     args = parser.parse_args()
     if args.scenario == "consumer":
         consumer(args)
+        return
+    if args.scenario == "consumer-http":
+        consumer_http(args)
         return
     if args.scenario != "session":
         watchdog(args)

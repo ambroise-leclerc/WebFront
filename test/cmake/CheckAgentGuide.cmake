@@ -1,4 +1,5 @@
-# What an agent meets first must state the development model and how it runs wf itself (#561): the README before its
+# What an agent meets first must state the development model and how it runs wf itself (#561), through the application's
+# own MCP URL first (#632): the README before its
 # tutorial, the guide written into consuming projects and starters, the configuration notice, and the public helper
 # webfront_write_agent_guide(), which never replaces a file.
 # Usage: cmake -DROOT=<checkout> -DWORK=<scratch directory> -P CheckAgentGuide.cmake
@@ -34,7 +35,8 @@ else()
     string(FIND "${rest}" "\n## From C++ to a reactive UI" length)
     string(SUBSTRING "${rest}" 0 ${length} first_screen)
     foreach(needle "`ui/`" "`wf dev`" "documentRoot" "webfront-agent" "-DWEBFRONT_BUILD_AUTOMATION=ON" "enableAutomation"
-            "--print-mcp-config" "\"mcpServers\"" "docs/DEVELOPING_WITH_AGENTS.md" "webfront_write_agent_guide()")
+            "--print-mcp-config" "\"mcpServers\"" "docs/DEVELOPING_WITH_AGENTS.md" "webfront_write_agent_guide()"
+            ".http = true" "http://127.0.0.1:PORT/mcp" "mcp.json")
         _require("${first_screen}" "${needle}" "README first screen for agents")
     endforeach()
 endif()
@@ -43,7 +45,8 @@ endif()
 foreach(text guide page)
     foreach(needle "ui/" "wf dev" "documentRoot" "app.bootstrap(\"developer\")" "-DWEBFRONT_BUILD_AUTOMATION=ON" "enableAutomation"
             "webfront-agent --list" "--operation create --starter app" "--operation preview --entry ui/main.ts"
-            "--print-mcp-config" "webfront.start" "not\nthe name of your project")
+            "--print-mcp-config" "webfront.start" "not\nthe name of your project"
+            ".http = true" "http://127.0.0.1:PORT/mcp" "mcp.json" "Bearer")
         string(REPLACE "\n" " " flat "${${text}}")
         string(REPLACE "\n" " " flat_needle "${needle}")
         _require("${flat}" "${flat_needle}" "${text}")
