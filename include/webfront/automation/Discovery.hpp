@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -75,9 +76,12 @@ struct Entry {
     long        pid = 0;
     /// The JSON array of the application callbacks that `call` may invoke (empty unless the owner allow-listed some).
     std::string callbacks = "[]";
+    /// The MCP URL of a session served over HTTP (ADR-025) and the path of its private client configuration; empty otherwise.
+    /// Neither holds the token, which only the configuration file contains.
+    std::string mcp{}, configuration{};
     /// The JSON the CLI prints; the same members as the record, plus the observed state.
     std::string json() const {
-        return objectJson({
+        std::map<std::string, std::string> members{
             {"version",                                     "1"},
             {"session",                   webfront::json::quote(session)},
             {"pid",                              std::to_string(pid)},
@@ -86,7 +90,12 @@ struct Entry {
             {"callbacks",                                 callbacks},
             {"endpoint",                 webfront::json::quote(endpoint)},
             {"state",                       webfront::json::quote("running")},
-        });
+        };
+        if (!mcp.empty()) {
+            members.emplace("mcp", webfront::json::quote(mcp));
+            members.emplace("configuration", webfront::json::quote(configuration));
+        }
+        return objectJson(members);
     }
 };
 
@@ -228,6 +237,8 @@ inline std::optional<Entry> readRecord(const std::filesystem::path& path) {
         entry.endpoint = record.string("endpoint");
         entry.allow    = record.raw("allow", "[]");
         entry.callbacks = record.raw("callbacks", "[]");
+        entry.mcp           = record.string("mcp");
+        entry.configuration = record.string("configuration");
         const auto pid = record.raw("pid", "0");
         entry.pid      = std::stol(pid);
         if (record.raw("version") != "1" || !validIdentifier(entry.session) || path.stem().string() != entry.session || entry.project.empty()
@@ -264,6 +275,18 @@ inline std::vector<Entry> list(const std::filesystem::path& directory, bool prun
             if (prune) {
                 std::error_code ignored;
                 std::filesystem::remove(path, ignored);
+                // The private directory created beside the record (ADR-025) goes with it: only its known files, then the
+                // directory if it is empty. A directory elsewhere, named by the owner, is never touched.
+                const auto own = directory / entry->session;
+                const auto spelled = [](const std::filesystem::path& value) {
+                    std::error_code unresolved;
+                    return std::filesystem::absolute(value, unresolved).lexically_normal().generic_string();
+                };
+                if (spelled(entry->endpoint) == spelled(own)) {
+                    for (const auto* name : {"endpoint.json", "endpoint.json.new", "mcp.json", "mcp.json.new"})
+                        std::filesystem::remove(own / name, ignored);
+                    std::filesystem::remove(own, ignored);
+                }
             }
             continue;
         }

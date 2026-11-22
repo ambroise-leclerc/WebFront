@@ -2,24 +2,30 @@
 ///
 /// `enableAutomation(app, options)` mounts the controller (`Session`), the page binding (`Binding`) and the private
 /// attachment endpoint on an application that already called `bootstrap("developer")`, then publishes a discovery
-/// record. `webfront-agent --attach <listen>` then drives that application's own window: check, build, test, preview,
-/// inspect and interact run in the page of the consumer, whose `cppFunction` callbacks stay registered. Nothing is
-/// registered unless this function is called, and the grants are fixed here by the native owner.
+/// record. With `.http = true` the application serves MCP itself, over Streamable HTTP on its own loopback listener
+/// (ADR-025): an MCP client connects to `mcpUrl()` with the private configuration `clientConfiguration()`. The
+/// `webfront-agent --attach <directory>` channel stays available beside it. Check, build, test, preview, inspect and
+/// interact run in the page of the consumer, whose `cppFunction` callbacks stay registered. Nothing is registered unless
+/// this function is called, and the grants are fixed here by the native owner. Automation does not exist in a
+/// distribution build: this header refuses to compile with `WEBFRONT_DISTRIBUTION`.
 ///
 /// ```cpp
 /// webfront::NativeApp app{project};
 /// app.bootstrap("developer");
 /// app.cppFunction("bf.render", render);
-/// auto automation = webfront::automation::enableAutomation(
-///     app, {.grants = {"check", "build", "inspect", "interact"}, .listen = privateDirectory});
+/// auto automation = webfront::automation::enableAutomation(app, {.grants = {"check", "build", "inspect", "interact"}, .http = true});
 /// app.show(automation->launchPage());
 /// automation->close();
 /// app.shutdown();
 /// ```
 #pragma once
+#if defined(WEBFRONT_DISTRIBUTION) && WEBFRONT_DISTRIBUTION
+    #error "WebFront automation does not exist in a distribution build (WEBFRONT_DISTRIBUTION, ADR-025): gate enableAutomation out of it"
+#endif
 #include "Binding.hpp"
 #include "Channel.hpp"
 #include "Discovery.hpp"
+#include "McpHttp.hpp"
 
 #include <atomic>
 #include <cstdlib>
@@ -71,7 +77,14 @@ struct AutomationOptions {
     /// pattern. The agent sees the names, gives them one string at most and reads a scalar or list back; `webfront.*` names are
     /// refused. Needs the `call` grant; without it nothing of the application can be called.
     std::vector<std::string> callbacks{};
-    /// A new private directory outside the project that receives the attachment endpoint.
+    /// Serve MCP over Streamable HTTP from this process, on a loopback listener of its own (ADR-025). `listen` may then stay
+    /// empty: a private directory named after the session is created in the discovery directory.
+    bool http = false;
+    /// The port of the MCP listener: 0 (the default) lets the OS choose; a chosen port is never replaced, its being taken
+    /// makes the activation throw.
+    unsigned short mcpPort = 0;
+    /// A new private directory outside the project that receives the attachment endpoint (and `mcp.json` with `http`).
+    /// Required without `http`.
     std::filesystem::path listen{};
     /// Where the discovery record goes; the per-user default when empty. Tests use their own.
     std::filesystem::path discovery{};
@@ -100,13 +113,17 @@ class Automation {
                   "Automation's Clock must return std::chrono::steady_clock::time_point");
 
 public:
-    /// @throws std::invalid_argument for an unknown grant, a non-positive `startupTimeout`, a negative `closeGrace`, an empty `listen` path, or a `listen` directory inside the project
+    /// @throws std::invalid_argument for an unknown grant, a non-positive `startupTimeout`, a negative `closeGrace`, an empty `listen` path
+    ///         without `http`, or a `listen` directory inside the project
     /// @throws std::runtime_error (including std::filesystem::filesystem_error) when the endpoint or the discovery directory cannot be
-    ///         created or is refused (an existing one that other users can read). Nothing stays registered in the application.
+    ///         created or is refused (an existing one that other users can read), std::system_error when the MCP port cannot be
+    ///         bound. Nothing stays registered in the application.
     Automation(App& app, AutomationOptions options)
         : session(make(app, options)),
-          channel(session, options.listen),
-          registration(options.discovery.empty() ? discovery::defaultDirectory() : options.discovery, record(*session, channel.directory())),
+          discoveryDirectory(options.discovery.empty() ? discovery::defaultDirectory() : options.discovery),
+          channel(session, privateDirectoryFor(options, discoveryDirectory, *session)),
+          mcp(options.http ? std::make_unique<mcphttp::Server<Session>>(session, channel.directory(), options.mcpPort) : nullptr),
+          registration(discoveryDirectory, record(*session, channel.directory(), mcp.get())),
           grants(std::move(options.grants)),
           callbackNames(std::move(options.callbacks)),
           endpointDirectory(channel.directory()),
@@ -161,6 +178,15 @@ public:
     std::string launchPage() const {
         return binding.launchPage();
     }
+    /// The MCP URL (`http://127.0.0.1:PORT/mcp`) with `http`; empty otherwise.
+    std::string mcpUrl() const {
+        return mcp ? mcp->url() : std::string{};
+    }
+    /// The private client configuration (`mcp.json`: URL and Bearer token) with `http`; empty otherwise. Never copy it into
+    /// the project: the developer file bridge can read the project.
+    std::filesystem::path clientConfiguration() const {
+        return mcp ? mcp->configuration() : std::filesystem::path{};
+    }
     /// The endpoint directory to give to `webfront-agent --attach`.
     const std::filesystem::path& endpoint() const {
         return endpointDirectory;
@@ -173,8 +199,10 @@ public:
         std::string names;
         for (const auto& callback : callbackNames)
             names += (names.empty() ? "" : ", ") + callback;
-        return "WebFront automation enabled (grants: " + (list.empty() ? std::string{"none"} : list) + (names.empty() ? "" : "; callbacks: " + names) + "). Attach with: webfront-agent --attach \""
-               + endpointDirectory.generic_string() + "\" --mcp";
+        const auto granted = "grants: " + (list.empty() ? std::string{"none"} : list) + (names.empty() ? "" : "; callbacks: " + names);
+        if (mcp)
+            return "WebFront MCP (" + granted + "): " + mcp->url() + " - client configuration: " + mcp->configuration().generic_string();
+        return "WebFront automation enabled (" + granted + "). Attach with: webfront-agent --attach \"" + endpointDirectory.generic_string() + "\" --mcp";
     }
     /// `base` marked as shared with an agent, for a window title: automation must be visible to the person using it.
     std::string windowTitle(std::string_view base) const {
@@ -201,10 +229,12 @@ private:
         if (std::exchange(revoked, true))
             return;
         registration.remove();
+        if (mcp)
+            mcp->stop();  // before the channel, which removes the private directory they share
         channel.stop();
     }
     static std::shared_ptr<Session> make(App& app, const AutomationOptions& options) {
-        if (options.listen.empty())
+        if (options.listen.empty() && !options.http)
             throw std::invalid_argument("Automation needs a new private `listen` directory for its endpoint");
         if (options.startupTimeout <= std::chrono::seconds::zero())
             throw std::invalid_argument("Automation startupTimeout must be positive");
@@ -212,18 +242,29 @@ private:
             throw std::invalid_argument("Automation closeGrace must not be negative");
         return std::make_shared<Session>(SessionOptions{.project = app.projectDirectory(), .allow = options.grants, .timeout = options.timeout, .callbacks = options.callbacks});
     }
-    static discovery::Entry record(const Session& session, const std::filesystem::path& endpoint) {
+    // `listen`, or with `http` and no `listen`, a new directory named after the session in the (private) discovery directory.
+    static std::filesystem::path privateDirectoryFor(const AutomationOptions& options, const std::filesystem::path& discoveryDirectory, const Session& session) {
+        if (!options.listen.empty())
+            return options.listen;
+        discovery::preparePrivateDirectory(discoveryDirectory);
+        return discoveryDirectory / Object(session.describe()).string("session");
+    }
+    static discovery::Entry record(const Session& session, const std::filesystem::path& endpoint, const mcphttp::Server<Session>* mcp) {
         const Object description{session.describe()};
-        return {.session  = description.string("session"),
-                .project  = description.string("project"),
-                .endpoint = endpoint.generic_string(),
-                .allow    = description.raw("allow"),
-                .pid      = discovery::currentProcess(),
-                .callbacks = description.raw("callbacks")};
+        return {.session       = description.string("session"),
+                .project       = description.string("project"),
+                .endpoint      = endpoint.generic_string(),
+                .allow         = description.raw("allow"),
+                .pid           = discovery::currentProcess(),
+                .callbacks     = description.raw("callbacks"),
+                .mcp           = mcp ? mcp->url() : std::string{},
+                .configuration = mcp ? mcp->configuration().generic_string() : std::string{}};
     }
 
     std::shared_ptr<Session>      session;
+    std::filesystem::path         discoveryDirectory;
     ChannelServer                 channel;
+    std::unique_ptr<mcphttp::Server<Session>> mcp;
     discovery::Registration       registration;
     std::vector<std::string>      grants;
     std::vector<std::string>      callbackNames;

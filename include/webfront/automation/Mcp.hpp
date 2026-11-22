@@ -1,5 +1,6 @@
-/// @brief Deliberately limited MCP stdio profile: lifecycle, ping and bounded developer tools.
+/// @brief Deliberately limited MCP profile, shared by stdio and Streamable HTTP: lifecycle, ping and bounded developer tools.
 #pragma once
+#include "Instructions.hpp"
 #include "Session.hpp"
 
 namespace webfront::automation {
@@ -49,7 +50,8 @@ public:
                 // Lifecycle version negotiation: offer our supported version when the requested one differs.
                 // A client that does not support it should disconnect, rather than use a mismatched profile.
                 return success(id,
-                               R"({"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"webfront-developer","version":"1.0.0"}})");
+                               R"({"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"webfront-developer","version":"1.0.0"},"instructions":)"
+                                   + json::quote(mcpInstructions) + "}");
             }
             if (!ready)
                 return error(id, -32600, "Initialize the MCP connection first");

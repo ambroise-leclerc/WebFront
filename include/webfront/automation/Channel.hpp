@@ -170,8 +170,9 @@ public:
     }
     void cleanup() const noexcept {
         std::error_code ignored;
-        std::filesystem::remove(path / "endpoint.json", ignored);
-        std::filesystem::remove(path / "endpoint.json.new", ignored);
+        // The known files only: the MCP listener's client configuration may share the directory (McpHttp.hpp).
+        for (const auto* name : {"endpoint.json", "endpoint.json.new", "mcp.json", "mcp.json.new"})
+            std::filesystem::remove(path / name, ignored);
         std::filesystem::remove(path, ignored);
     }
     const std::filesystem::path path;
@@ -209,8 +210,8 @@ struct Descriptor {
     Descriptor(const Descriptor&) = delete;
     explicit Descriptor(int descriptor) : value(descriptor) { }
 };
-inline std::string readEndpointFile(int directory) {
-    Descriptor  file{::openat(directory, "endpoint.json", O_RDONLY | O_NOFOLLOW | O_CLOEXEC)};
+inline std::string readEndpointFile(int directory, const char* name = "endpoint.json") {
+    Descriptor  file{::openat(directory, name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)};
     struct stat info{};
     if (file.value < 0 || ::fstat(file.value, &info) || !S_ISREG(info.st_mode) || info.st_uid != ::geteuid() || (info.st_mode & 0077) != 0)
         throw std::runtime_error("Attachment endpoint must be owned by this user with no group/other access");
@@ -231,7 +232,8 @@ inline std::string readEndpointFile(int directory) {
     return text;
 }
 #endif
-inline std::string readEndpoint(const std::filesystem::path& directory) {
+/// Reads `name` (a private file of at most 4096 bytes) from a private endpoint directory without following a swapped path.
+inline std::string readEndpoint(const std::filesystem::path& directory, const char* name = "endpoint.json") {
 #ifdef _WIN32
     struct FileHandle {
         HANDLE value;
@@ -252,7 +254,7 @@ inline std::string readEndpoint(const std::filesystem::path& directory) {
     if (parent.value == INVALID_HANDLE_VALUE || !GetFileInformationByHandle(parent.value, &parentInfo)
         || !(parentInfo.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || (parentInfo.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
         throw std::runtime_error("Attachment directory cannot be a reparse point");
-    const auto                 path = directory / "endpoint.json";
+    const auto                 path = directory / name;
     FileHandle                 file{CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr)};
     BY_HANDLE_FILE_INFORMATION info{};
     if (file.value == INVALID_HANDLE_VALUE || !GetFileInformationByHandle(file.value, &info)
@@ -268,7 +270,7 @@ inline std::string readEndpoint(const std::filesystem::path& directory) {
     struct stat info{};
     if (parent.value < 0 || ::fstat(parent.value, &info) || !S_ISDIR(info.st_mode) || info.st_uid != ::geteuid() || (info.st_mode & 0077) != 0)
         throw std::runtime_error("Attachment directory must be private and owned by this user");
-    return readEndpointFile(parent.value);
+    return readEndpointFile(parent.value, name);
 #endif
 }
 inline bool waitUntil(Handle socket, short events, std::chrono::steady_clock::time_point deadline) {
