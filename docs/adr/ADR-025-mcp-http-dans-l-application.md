@@ -78,7 +78,8 @@ Le port est celui que l'OS attribue (`0`), selon le mécanisme de #617 ; une opt
 
 Chaque activation tire un jeton de 256 bits de l'aléa de l'OS, distinct de la capacité du canal JSON-lines, du secret de
 lancement de la page et de l'identifiant de session. Chaque requête porte `Authorization: Bearer <jeton>` ; la comparaison
-est à temps constant et précède la lecture du JSON. Sinon : 401 avec `WWW-Authenticate: Bearer`, sans `resource_metadata`,
+parcourt tout le jeton à temps constant lorsque les longueurs sont égales. Une différence de longueur est rejetée immédiatement.
+La comparaison précède la lecture du JSON. Sinon : 401 avec `WWW-Authenticate: Bearer`, sans `resource_metadata`,
 car aucun serveur d'autorisation OAuth n'est annoncé. Le jeton vit autant que la session : il est révoqué à sa fermeture
 (fermeture normale, échéance native, fenêtre perdue, watchdog, signal que l'application intercepte pour fermer), l'écouteur est alors fermé, et une
 nouvelle activation tire un nouveau jeton. Pas de rotation pendant la session.
@@ -203,7 +204,7 @@ Les menaces, actifs et risques résiduels de l'ADR-019 restent valables. Ce qui 
 | Menace et gravité | Mesures | Risque résiduel |
 | --- | --- | --- |
 | Rebinding DNS, page web qui vise le port MCP — critique | Écouteur loopback distinct ; Host exact ; tout `Origin` et tout `Sec-Fetch-*` refusés ; `application/json` exigé ; aucun CORS ; jeton exigé en plus. | Un navigateur qui omettrait `Origin` sur un `POST` cross-origin et ignorerait la pré-vérification resterait sans jeton. |
-| Client local non autorisé — critique | Jeton de 256 bits, comparaison à temps constant, avant tout traitement ; fichier privé hors projet. | Un processus du même utilisateur peut lire `mcp.json`, comme il lisait le fichier du canal JSON-lines. |
+| Client local non autorisé — critique | Jeton de 256 bits, comparaison à temps constant à longueur égale, avant tout traitement ; fichier privé hors projet. | La longueur est observable ; un processus du même utilisateur peut lire `mcp.json`, comme il lisait le fichier du canal JSON-lines. |
 | Fuite du jeton — élevée | Jamais dans le projet, la page, l'URL, la ligne de commande, les journaux, l'affichage ou l'enregistrement ; vie limitée à la session. | Une personne qui copie le fichier dans le projet ou un dépôt l'expose ; la documentation l'interdit, aucun contrôle ne l'empêche. |
 | Exposition réseau — critique | Liaison 127.0.0.1 seule, indépendante de l'adresse et du TLS de l'application ; adresse non configurable. | Un transfert de port établi par l'utilisateur étend l'accès hors de cette décision. |
 | Automatisation expédiée — critique | Erreur de compilation sous `WEBFRONT_DISTRIBUTION`. | Une build qui ne définit pas cette macro n'est pas protégée par elle. |

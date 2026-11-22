@@ -136,8 +136,9 @@ operation of `webfront.start`, not one MCP tool per callback, so the tool list s
   served with TLS, whatever the application's own address and TLS listener. `mcpPort` chooses a port; a chosen port is never
   replaced: when it is taken the activation throws a `std::system_error` that names the address, the port and the cause.
   Each instance has its own URL, so several applications run side by side and the agent picks one by its URL.
-- **Token.** Every request carries `Authorization: Bearer <token>`, a 256-bit value from the OS, compared in constant time
-  before the body is parsed; otherwise 401 with `WWW-Authenticate: Bearer` (no OAuth server is announced). The token lives as
+- **Token.** By default every request carries `Authorization: Bearer <token>`, a 256-bit value from the OS. Before parsing the
+  body, the listener compares equal-length tokens in constant time and rejects a length mismatch immediately; a failed check gets
+  401 with `WWW-Authenticate: Bearer` (no OAuth server is announced). The token lives as
   long as the session by default: closing it, a deadline or a lost window closes the listener and removes the file. A supplied
   `mcpToken` remains valid across launches until the application changes it; authentication can be explicitly disabled.
 - **Client configuration.** `mcp.json` (mode 0600 in a 0700 directory on POSIX, owner-only ACL on Windows) holds the URL and

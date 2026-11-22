@@ -163,6 +163,8 @@ if(_browser_tests_available)
         # The cleanup of a browser profile that a helper still writes into after the application exited (#642).
         add_test(NAME AutomationProfileCleanup COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/tools/ProfileCleanupTest.py")
         set_tests_properties(AutomationProfileCleanup PROPERTIES LABELS fast TIMEOUT 30)
+        add_test(NAME AutomationClientRetry COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/tools/AutomationClientTest.py")
+        set_tests_properties(AutomationClientRetry PROPERTIES LABELS fast TIMEOUT 30)
     endif()
     if(Python3_Interpreter_FOUND AND _automation_windows_available)
         # An application that enabled automation, which serves MCP itself (ADR-025): the program every scenario drives

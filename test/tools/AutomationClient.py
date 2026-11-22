@@ -563,6 +563,14 @@ def session(args):
     print("MCP real-window regression passed: diagnostics/correction/check/build/test/preview/actions/cancellation/shared session/setup")
 
 
+def port_conflict_after_failure(process, timeout=1):
+    """Wait briefly for the host's collision status after discovery fails; other failures are not retried."""
+    try:
+        return process.wait(timeout=timeout) == 73
+    except subprocess.TimeoutExpired:
+        return False
+
+
 def stable(args):
     pathlib.Path(args.work).mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=args.work, prefix="stable-") as temporary:
@@ -593,7 +601,9 @@ def stable(args):
                         try:
                             path = pathlib.Path(host.record()["configuration"])
                         except AssertionError:
-                            if host.process.poll() == 73:
+                            # Allow a just-exiting host to publish its status; a still-running host or any other
+                            # exit code retains the original failure rather than being treated as a collision.
+                            if port_conflict_after_failure(host.process):
                                 # On either launch the port may have been taken in the gap; restart both launches
                                 # with a new port and client so each successful pair still uses one configuration.
                                 break
