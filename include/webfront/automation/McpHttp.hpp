@@ -157,7 +157,7 @@ struct Screening {
 
 /// Decides on the headers of a request, before its body is read: path, `Host`, `Origin` and `Sec-Fetch-*`, method,
 /// the Bearer token, then the media types and the announced length of a `POST`. `port` is the listener's own.
-inline Screening screen(const http::Request& request, unsigned short port, std::string_view token, bool authentication = true) {
+inline Screening screen(const http::Request& request, unsigned short port, std::string_view token, bool authentication) {
     using detail::lower;
     // DNS rebinding: a name that resolves to 127.0.0.1 still carries its own Host. Only the two loopback spellings pass.
     const auto host  = detail::single(request, "Host");
@@ -338,13 +338,20 @@ private:
 };
 
 /// The client configuration of an instance: its URL and its token. `name` names the server for the client.
-inline std::string clientConfiguration(std::string_view url, std::string_view token, std::string_view name = "webfront", bool authentication = true) {
+inline std::string clientConfiguration(std::string_view url, std::string_view token, std::string_view name, bool authentication) {
     std::map<std::string, std::string> fields{{"type", json::quote("http")}, {"url", json::quote(url)}};
     if (authentication)
         fields.emplace("headers", objectJson({{"Authorization", json::quote("Bearer " + std::string(token))}}));
     const auto server = objectJson(fields);
     return "{\n  \"mcpServers\": {\n    " + json::quote(name) + ": " + server + "\n  }\n}\n";
 }
+
+/// A failure to bind or listen on the requested MCP port; retains the native error code.
+class BindError : public std::system_error {
+public:
+    BindError(std::error_code cause, unsigned short port)
+        : std::system_error(cause, "WebFront cannot listen for MCP on 127.0.0.1:" + std::to_string(port)) { }
+};
 
 /// The loopback listener. It writes `mcp.json` into `directory` (an existing private directory outside the project) and
 /// removes it when it stops. Closing the session stops it; so does `stop()`.
@@ -466,7 +473,7 @@ private:
         auto address = channel::address(requested);
         if (::bind(socket.value, reinterpret_cast<const sockaddr*>(&address), sizeof address) || ::listen(socket.value, 16)) {
             const std::error_code cause{channel::socketError(), std::system_category()};
-            throw std::system_error(cause, "WebFront cannot listen for MCP on 127.0.0.1:" + std::to_string(requested));
+            throw BindError(cause, requested);
         }
 #ifdef _WIN32
         int size = sizeof address;

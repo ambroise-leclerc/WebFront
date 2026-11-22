@@ -180,14 +180,14 @@ int main(int argc, char** argv) {
         automation->close();
         app.shutdown();
         return status;
-    } catch (const std::system_error& error) {
+    } catch (const webfront::automation::mcphttp::BindError& error) {
         std::cerr << "automation_host: " << error.what() << '\n';
 #ifdef _WIN32
         const auto addressInUse = WSAEADDRINUSE;
 #else
         const auto addressInUse = EADDRINUSE;
 #endif
-        if (error.code().value() == addressInUse && std::string_view(error.what()).starts_with("WebFront cannot listen for MCP"))
+        if (error.code().value() == addressInUse)
             return 73;
         return 1;
     } catch (const std::exception& error) {

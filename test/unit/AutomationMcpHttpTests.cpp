@@ -146,7 +146,7 @@ struct HttpConsumerApp {
 const Scenario mcpHttpScreening{"MCP HTTP requests are screened on their headers before any body is read", [] {
     using namespace mcphttptests;
     constexpr unsigned short port = 4321;
-    const auto               screened = [&](std::string_view text) { return mcphttp::screen(parsed(text), port, token); };
+    const auto               screened = [&](std::string_view text) { return mcphttp::screen(parsed(text), port, token, true); };
     given("a well-formed authenticated POST", [&] {
         then("it is accepted with its announced length", [&] {
             const auto accepted = screened(post(port, "{}"));
@@ -471,7 +471,7 @@ const Scenario mcpHttpListener{"The MCP listener serves loopback HTTP with a pri
             try {
                 mcphttp::Server<Session> second{controller, other.path, port};
                 require(false);
-            } catch (const std::system_error& error) {
+            } catch (const mcphttp::BindError& error) {
                 require(std::string(error.what()).find("127.0.0.1:" + std::to_string(port)) != std::string::npos);
             }
             require(!std::filesystem::exists(other.path / mcphttp::configurationFile));
@@ -481,9 +481,18 @@ const Scenario mcpHttpListener{"The MCP listener serves loopback HTTP with a pri
         controller->close("Developer window closed");
         then("the listener closes and the configuration with its token is removed", [&] {
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
-            while (std::filesystem::exists(server.configuration()) && std::chrono::steady_clock::now() < deadline)
+            std::error_code error;
+            bool present = true;
+            do {
+                present = std::filesystem::exists(server.configuration(), error);
+                if (!error && !present)
+                    break;
+                if (error && !channel::transientRemovalFailure(error))
+                    break;
                 std::this_thread::sleep_for(std::chrono::milliseconds{10});
-            require(!std::filesystem::exists(server.configuration()));
+            } while (std::chrono::steady_clock::now() < deadline);
+            require(!error);
+            require(!present);
             [[maybe_unused]] channel::Runtime runtime;
             channel::Socket                   peer{channel::createSocket()};
             const auto                        address = channel::address(port);

@@ -792,6 +792,11 @@ checks the pinned header against the published archive. The headers of the core'
 `@webfront/developer-environment`, `@webfront/app-starter` and `@webfront/life-starter`. They are distributed as static
 GitHub Pages downloads; no npm publication or scope ownership is required.
 
+The version in `distribution.json` is the version built from the current sources (currently 1.0.3, not yet published).
+It can be ahead of `DeveloperReleaseData.hpp`, which pins the published 1.0.2 environment used by applications. The
+compatibility table above records that published pin, not the next source build. The pin changes only when a new
+distribution is published and adopted.
+
 The `SelfBuild*` CTest cases run the scripts on a copy of the sources, with the dependencies installed from the local
 registry: the build, a repeat build (same bytes), the checked-in bootstrap bundles and checksums rebuilt by wf alone (and the
 core headers rendered from them by CMake), the staging of the site (a second staging repeats the same bytes, a changed
