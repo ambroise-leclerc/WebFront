@@ -11,13 +11,15 @@
 // `consumer.secret` (never allow-listed by the tests). Closing its standard input closes the window, on every platform and
 // whatever the engine does with signals. The status is 0 after a normal closing, 70 when the developer environment failed
 // to start (its reason on stderr), 71 when the native deadline of an operation revoked the session; a window that does not
-// close after a deadline ends the process with enableAutomation's own status 72.
+// close after a deadline ends the process with enableAutomation's own status 72. An occupied MCP port exits with 73 so
+// the test client can retry a port lost between reservation and bind.
 #include "../driver/WfDriver.hpp"
 #include <webfront/automation/Enable.hpp>
 
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <system_error>
 #ifndef _WIN32
     #include <cerrno>
     #include <poll.h>
@@ -178,6 +180,16 @@ int main(int argc, char** argv) {
         automation->close();
         app.shutdown();
         return status;
+    } catch (const std::system_error& error) {
+        std::cerr << "automation_host: " << error.what() << '\n';
+#ifdef _WIN32
+        const auto addressInUse = WSAEADDRINUSE;
+#else
+        const auto addressInUse = EADDRINUSE;
+#endif
+        if (error.code().value() == addressInUse && std::string_view(error.what()).starts_with("WebFront cannot listen for MCP"))
+            return 73;
+        return 1;
     } catch (const std::exception& error) {
         std::cerr << "automation_host: " << error.what() << '\n';
         return 1;

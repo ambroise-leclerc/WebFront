@@ -570,28 +570,38 @@ def stable(args):
         project = root / "project"
         shutil.copytree(args.fixture, project)
         install(args, project)
-        with socket.socket() as reservation:
-            reservation.bind(("127.0.0.1", 0))
-            port = reservation.getsockname()[1]
-        client, original = None, None
         with (root / "stable.log").open("w") as log:
-            for run in range(2):
-                host = Host(args, project, root, f"stable-{run}", log, ["--stable-mcp", "true", "--mcp-port", str(port)])
-                try:
-                    path = pathlib.Path(host.record()["configuration"])
-                    if client is None:
-                        original = path.read_bytes()
-                        client = Client(path)
-                    else:
-                        assert path.read_bytes() == original
-                        client.mcp_session = None
-                    client.initialize()
-                    assert client.tool("session")["session"] == client.session
-                    client.close()
-                    host.stop()
-                    assert host.wait() == 0, host.logs()
-                finally:
-                    host.close()
+            # The reservation must be released before the host binds; retry only a confirmed EADDRINUSE.
+            for attempt in range(5):
+                with socket.socket() as reservation:
+                    reservation.bind(("127.0.0.1", 0))
+                    port = reservation.getsockname()[1]
+                client, original = None, None
+                for run in range(2):
+                    host = Host(args, project, root, f"stable-{attempt}-{run}", log, ["--stable-mcp", "true", "--mcp-port", str(port)])
+                    try:
+                        try:
+                            path = pathlib.Path(host.record()["configuration"])
+                        except AssertionError:
+                            if host.process.poll() == 73:
+                                break
+                            raise
+                        if client is None:
+                            original = path.read_bytes()
+                            client = Client(path)
+                        else:
+                            assert path.read_bytes() == original
+                            client.mcp_session = None
+                        client.initialize()
+                        assert client.tool("session")["session"] == client.session
+                        client.close()
+                        host.stop()
+                        assert host.wait() == 0, host.logs()
+                    finally:
+                        host.close()
+                else:
+                    return
+            raise AssertionError("MCP port was occupied on all five attempts")
 
 
 def main():

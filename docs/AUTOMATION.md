@@ -71,9 +71,11 @@ auto automation = webfront::automation::enableAutomation(
     app, {.grants = {"check", "build"}, .mcpPort = 19002, .mcpToken = std::string{token}});
 ```
 
-The application includes `<cstdlib>`, `<stdexcept>` and `<string>` for this example. A configured token must be 1–1024 visible ASCII characters without spaces. To opt in to an unauthenticated listener instead, use `.disableMcpAuthentication = true` and omit `mcpToken`; its client configuration has no Authorization header.
+The application includes `<cstdlib>`, `<stdexcept>` and `<string>` for this example. A configured token must be 32–1024 visible ASCII characters without spaces; length alone does not guarantee randomness. To opt in to an unauthenticated listener instead, use `.disableMcpAuthentication = true` and omit `mcpToken`; its client configuration has no Authorization header. In that mode any Authorization header, including an incorrect Bearer, is ignored.
 
 These options are for trusted development environments. A different local user can occupy the fixed port while the application is stopped and receive a durable Bearer sent by the client, then reuse it when the application starts. Without authentication, any local process that reaches the listener can exercise its grants. A fake server can also send misleading responses. Loopback, strict Host, Origin and Sec-Fetch checks remain enabled in both modes; they do not authenticate the server to the client.
+
+After a crash or forced termination, the private `mcp.json` can remain on disk with the durable token. Session discovery prunes known files in default session directories when it detects a dead process, but cleanup can be delayed or fail; an explicitly supplied `directory` is not pruned by discovery. Inspect and remove stale private files as needed, and rotate a token if it may have been exposed.
 
 All executable operations are denied unless granted. The setup grants write the manifest, the lock, the cache, a new starter
 directory or the generated provider header; grant them only for a project whose registry you trust. `install` and `restore`

@@ -357,8 +357,8 @@ public:
            std::optional<std::string> fixedToken = std::nullopt, bool authentication = true)
         : backend(std::move(controller)),
           endpoint(*backend),
-          listener(channel::createSocket()),
           token(selectToken(fixedToken, authentication)),
+          listener(channel::createSocket()),
           boundPort(bind(listener, port)),
           address("http://127.0.0.1:" + std::to_string(boundPort) + "/mcp"),
           file(directory / configurationFile), authenticate(authentication) {
@@ -402,8 +402,8 @@ private:
     [[maybe_unused]] channel::Runtime runtime;
     std::shared_ptr<Backend>          backend;
     Endpoint<Backend>                 endpoint;
-    channel::Socket                   listener;
     std::string                       token;
+    channel::Socket                   listener;
     unsigned short                    boundPort;
     std::string                       address;
     std::filesystem::path             file;
@@ -437,8 +437,8 @@ private:
             throw std::invalid_argument("A fixed MCP token cannot be combined with disabled authentication");
         if (!fixed)
             return authentication ? channel::nonce() : std::string{};
-        if (fixed->empty() || fixed->size() > 1024 || !std::ranges::all_of(*fixed, [](unsigned char c) { return c >= 0x21 && c <= 0x7e; }))
-            throw std::invalid_argument("MCP token must contain 1 to 1024 visible ASCII characters without spaces");
+        if (fixed->size() < 32 || fixed->size() > 1024 || !std::ranges::all_of(*fixed, [](unsigned char c) { return c >= 0x21 && c <= 0x7e; }))
+            throw std::invalid_argument("MCP token must contain 32 to 1024 visible ASCII characters without spaces");
         return *fixed;
     }
     void withdraw() noexcept {

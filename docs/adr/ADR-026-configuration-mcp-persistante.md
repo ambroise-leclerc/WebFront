@@ -18,6 +18,8 @@ Ces options concernent uniquement le développement : l'automatisation reste exc
 
 Un autre utilisateur local peut occuper le port pendant l'arrêt de l'application et récupérer un Bearer durable envoyé par le client : ce jeton restera utilisable jusqu'à rotation. Sans authentification, tout processus local pouvant joindre le port peut exercer les grants. Un serveur usurpé peut également renvoyer des réponses mensongères au client. Ces limites sont acceptées uniquement sur choix explicite. Host et Origin protègent contre les requêtes de pages web, pas contre ces processus. Un challenge non standard exigerait un client compatible ; le Bearer fonctionne avec les clients MCP ordinaires.
 
+Après un crash ou un arrêt forcé, le fichier privé de session peut rester sur disque avec le jeton durable. La découverte tente de nettoyer les répertoires de session par défaut lorsque le processus n'existe plus ; ce nettoyage peut être différé ou échouer, et ne touche pas un répertoire fourni explicitement. La fermeture propre retire la configuration. L'application ou son propriétaire doit gérer les fichiers résiduels et la rotation du secret si nécessaire.
+
 ## Validation
 
 Relancer l'application deux fois avec la même configuration cliente et appeler initialize puis webfront.session, avec le client HTTP du dépôt et le SDK 2.3.0 s'il est disponible. Vérifier les refus, les instances concurrentes, le conflit de port, l'absence de secret dans la découverte et les protections réseau dans les modes authentifié et sans authentification. Maintenir les guides et AgentGuidance.

@@ -178,6 +178,7 @@ const Scenario mcpHttpScreening{"MCP HTTP requests are screened on their headers
             require(status(screened(post(port, "{}", "Origin: http://127.0.0.1:9002\r\n"))) == 403);
             require(status(screened(post(port, "{}", "Origin: null\r\n"))) == 403);
             require(status(screened(post(port, "{}", "Sec-Fetch-Site: same-origin\r\n"))) == 403);
+            require(status(screened(post(port, "{}", "Sec-Fetch-Dest: document\r\n"))) == 403);
             require(status(screened(post(port, "{}", "Sec-Fetch-Mode: no-cors\r\n"))) == 403);
         });
         then("a CORS preflight and a GET get 405 and no Access-Control header", [&] {
@@ -642,9 +643,11 @@ const Scenario stableMcp{"A fixed MCP token and port survive activation and auth
     auto open = enableAutomation(app, {.mcpPort = port, .disableMcpAuthentication = true, .discovery = sessions, .announce = false});
     const Object configuration{channel::readEndpoint(open->directory(), "mcp.json")};
     require(!Object(Object(configuration.raw("mcpServers")).raw("webfront")).has("headers"));
+    require(channel::readEndpoint(open->directory(), "mcp.json").find(fixed) == std::string::npos);
     auto request = post(port, initialize);
     request.erase(request.find("Authorization:"), request.find("\r\n", request.find("Authorization:")) + 2 - request.find("Authorization:"));
     require(roundTrip(port, request).status == 200);
+    require(roundTrip(port, post(port, initialize, {}, "wrong-token")).status == 200);
     require(roundTrip(port, post(port, initialize, "Origin: http://evil.test\r\n")).status == 403);
     require(roundTrip(port, post(port, initialize, "Sec-Fetch-Mode: cors\r\n")).status == 403);
     require(roundTrip(port, post(port, initialize, "Sec-Fetch-Dest: document\r\n")).status == 403);
@@ -653,6 +656,11 @@ const Scenario stableMcp{"A fixed MCP token and port survive activation and auth
     require(roundTrip(port, hostile).status == 421);
     open->close();
     requireThrows([&] { enableAutomation(app, {.mcpToken = "", .discovery = sessions, .announce = false}); });
-    requireThrows([&] { enableAutomation(app, {.mcpToken = "abc\r\nInjected", .discovery = sessions, .announce = false}); });
+    requireThrows([&] { enableAutomation(app, {.mcpToken = "a", .discovery = sessions, .announce = false}); });
+    requireThrows([&] { enableAutomation(app, {.mcpToken = std::string(31, 'a'), .discovery = sessions, .announce = false}); });
+    requireThrows([&] { enableAutomation(app, {.mcpToken = std::string(1025, 'a'), .discovery = sessions, .announce = false}); });
+    requireThrows([&] { enableAutomation(app, {.mcpToken = std::string(32, 'a') + "\r\nInjected", .discovery = sessions, .announce = false}); });
     requireThrows([&] { enableAutomation(app, {.mcpToken = fixed, .disableMcpAuthentication = true, .discovery = sessions, .announce = false}); });
+    auto minimum = enableAutomation(app, {.mcpToken = std::string(32, 'a'), .discovery = sessions, .announce = false});
+    minimum->close();
 }};
