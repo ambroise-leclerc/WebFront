@@ -27,6 +27,7 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Fixed
 - Check the leftover STA of a WebView2 window only after a page that ran to its end, not after one that closes the window on a load failure, and record the apartment `WebView2Lifecycle-repeated-show` finds after each `show()`, so that a failure or a passing run says which page leaves one (#638, `docs/PROJECT_STATUS.md`).
+- Release the STA of `WebView2Frontend::open()` after a page that fails to load: the messages the runtime queued on the thread while the session closed are dispatched, bounded, between the destruction of the session and `CoUninitialize`, and `WebView2Lifecycle-repeated-show` now checks the apartment after every page that is not closed early (#638).
 - Pass the compiler analysis on the Windows pseudoterminal when it cannot prove the attribute list non-null (C6387), stop a unit test from opening the developer's real browser (the directory of its replacement opener was removed before the shell found it), and keep an accepted connection whose `TCP_NODELAY` the system refuses, as macOS does after a reset (#628).
 
 ## [1.1.0] - 2026-11-20

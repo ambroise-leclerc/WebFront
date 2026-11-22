@@ -626,7 +626,7 @@ int onFreshThread(const std::function<int()>& scenario) {
 
 // The apartment is checked only for a page that ran to its end (#638): a page that closes its window on a load failure can
 // close it while the runtime still starts, which leaves the runtime's own COM initialization on the thread (#564).
-int showTwice(std::string_view page, bool earlyClose = false, bool checksApartment = true) {
+int showTwice(std::string_view page, bool earlyClose = false) {
     // Repeated show() checks that WM_QUIT cannot poison the next loop.
     for (int iteration = 0; iteration < 2; ++iteration) {
         App               app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
@@ -644,9 +644,9 @@ int showTwice(std::string_view page, bool earlyClose = false, bool checksApartme
         if (earlyClose)
             require(closer.closeSent, "Native close was not sent during window creation");
         require(!connected, "Unexpected bridge connection");
-        // Closing while the runtime starts can leave the runtime's own COM initialization on the thread (#564): the frontend
-        // answers for its apartment (unit test of Apartment) and, here, for a session that ran to its end.
-        if (!earlyClose && checksApartment)
+        // Closing while the runtime starts can leave the runtime's own COM initialization on the thread (#564), so an early close is not
+        // judged; every page that ran or failed to load must leave the thread out of its STA, as open() drains the queue (#638).
+        if (!earlyClose)
             require(left.empty(),
                     "STA COM initialization was not released: " + left + " (page " + std::string(page) + ", iteration " + std::to_string(iteration) + ")");
     }
@@ -690,8 +690,8 @@ int run(std::string_view mode) {
          }                                                    },
         {          "repeated-show",
          [] {
-         onFreshThread([] { return showTwice("rejected-ready.html", false, false); });
-         onFreshThread([] { return showTwice("encoded path %23.html?x=1#example", false, false); });
+         onFreshThread([] { return showTwice("rejected-ready.html"); });
+         onFreshThread([] { return showTwice("encoded path %23.html?x=1#example"); });
          return onFreshThread([] { return showTwice("no-bridge.html"); });
          }                                                    },
         {  "navigation-diagnostic",
