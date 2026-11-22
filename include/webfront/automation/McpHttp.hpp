@@ -5,7 +5,7 @@
 /// headers before its body is read: exact `Host` (DNS rebinding), no `Origin` nor `Sec-Fetch-*` (web pages), then a
 /// session Bearer token compared in constant time, then the media types and the announced length. The token is written
 /// with the URL in `mcp.json`, a private client configuration in the instance's private directory, never in the project.
-/// Admission follows the native attachment channel: a bounded queue of unauthenticated peers with a two-second deadline,
+/// Admission bounds the peers that have not authenticated: a bounded queue of unauthenticated peers with a two-second deadline,
 /// and separate workers for the authenticated requests.
 #pragma once
 #if defined(WEBFRONT_DISTRIBUTION) && WEBFRONT_DISTRIBUTION

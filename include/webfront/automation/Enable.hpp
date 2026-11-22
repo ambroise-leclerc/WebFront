@@ -1,19 +1,18 @@
 /// @brief Opt-in automation of a consumer's own developer window.
 ///
-/// `enableAutomation(app, options)` mounts the controller (`Session`), the page binding (`Binding`) and the private
-/// attachment endpoint on an application that already called `bootstrap("developer")`, then publishes a discovery
-/// record. With `.http = true` the application serves MCP itself, over Streamable HTTP on its own loopback listener
-/// (ADR-025): an MCP client connects to `mcpUrl()` with the private configuration `clientConfiguration()`. The
-/// `webfront-agent --attach <directory>` channel stays available beside it. Check, build, test, preview, inspect and
-/// interact run in the page of the consumer, whose `cppFunction` callbacks stay registered. Nothing is registered unless
-/// this function is called, and the grants are fixed here by the native owner. Automation does not exist in a
-/// distribution build: this header refuses to compile with `WEBFRONT_DISTRIBUTION`.
+/// `enableAutomation(app, options)` mounts the controller (`Session`) and the page binding (`Binding`) on an application
+/// that already called `bootstrap("developer")`, then serves MCP from this process, over Streamable HTTP on a loopback
+/// listener of its own (ADR-025), and publishes a discovery record. An MCP client connects to `mcpUrl()` with the private
+/// configuration `clientConfiguration()`; no other program is involved. Check, build, test, preview, inspect and interact
+/// run in the page of the application, whose `cppFunction` callbacks stay registered. Nothing is registered unless this
+/// function is called, and the grants are fixed here by the native owner. Automation does not exist in a distribution
+/// build: this header refuses to compile with `WEBFRONT_DISTRIBUTION`.
 ///
 /// ```cpp
 /// webfront::NativeApp app{project};
 /// app.bootstrap("developer");
 /// app.cppFunction("bf.render", render);
-/// auto automation = webfront::automation::enableAutomation(app, {.grants = {"check", "build", "inspect", "interact"}, .http = true});
+/// auto automation = webfront::automation::enableAutomation(app, {.grants = {"check", "build", "inspect", "interact"}});
 /// app.show(automation->launchPage());
 /// automation->close();
 /// app.shutdown();
@@ -77,15 +76,12 @@ struct AutomationOptions {
     /// pattern. The agent sees the names, gives them one string at most and reads a scalar or list back; `webfront.*` names are
     /// refused. Needs the `call` grant; without it nothing of the application can be called.
     std::vector<std::string> callbacks{};
-    /// Serve MCP over Streamable HTTP from this process, on a loopback listener of its own (ADR-025). `listen` may then stay
-    /// empty: a private directory named after the session is created in the discovery directory.
-    bool http = false;
     /// The port of the MCP listener: 0 (the default) lets the OS choose; a chosen port is never replaced, its being taken
     /// makes the activation throw.
     unsigned short mcpPort = 0;
-    /// A new private directory outside the project that receives the attachment endpoint (and `mcp.json` with `http`).
-    /// Required without `http`.
-    std::filesystem::path listen{};
+    /// A new private directory outside the project that receives the client configuration (`mcp.json`). Empty (the
+    /// default), a directory named after the session is created in the discovery directory.
+    std::filesystem::path directory{};
     /// Where the discovery record goes; the per-user default when empty. Tests use their own.
     std::filesystem::path discovery{};
     /// Per-operation native deadline.
@@ -95,13 +91,13 @@ struct AutomationOptions {
     /// `seconds::max()` disables the delay.
     std::chrono::seconds startupTimeout{120};
     /// After a deadline revokes the session, how long the window may take to close on its own. `window.close()` cannot run
-    /// in a renderer stuck in a loop, so past this grace the endpoint and record are removed and `onUnresponsive` is called.
+    /// in a renderer stuck in a loop, so past this grace the listener and record are removed and `onUnresponsive` is called.
     /// Must not be negative; `milliseconds::max()` waits for the window without limit.
     std::chrono::milliseconds closeGrace{5000};
-    /// What to do with a window that did not close. By default the process ends with status 72 (as `webfront-agent`
-    /// does): `show()` cannot be interrupted from another thread. Set it to close the application another way.
+    /// What to do with a window that did not close. By default the process ends with status 72: `show()` cannot be
+    /// interrupted from another thread. Set it to close the application another way.
     std::function<void()> onUnresponsive{};
-    /// Whether to tell the human, on stderr, that an agent can attach and with which grants.
+    /// Whether to tell the human, on stderr, the MCP URL, the client configuration and the grants.
     bool announce = true;
 };
 
@@ -113,28 +109,27 @@ class Automation {
                   "Automation's Clock must return std::chrono::steady_clock::time_point");
 
 public:
-    /// @throws std::invalid_argument for an unknown grant, a non-positive `startupTimeout`, a negative `closeGrace`, an empty `listen` path
-    ///         without `http`, or a `listen` directory inside the project
-    /// @throws std::runtime_error (including std::filesystem::filesystem_error) when the endpoint or the discovery directory cannot be
-    ///         created or is refused (an existing one that other users can read), std::system_error when the MCP port cannot be
-    ///         bound. Nothing stays registered in the application.
+    /// @throws std::invalid_argument for an unknown grant, a non-positive `startupTimeout`, a negative `closeGrace`, or a
+    ///         `directory` inside the project
+    /// @throws std::runtime_error (including std::filesystem::filesystem_error) when the private or the discovery directory cannot
+    ///         be created or is refused (an existing one that other users can read), std::system_error when the MCP port cannot
+    ///         be bound. Nothing stays registered in the application.
     Automation(App& app, AutomationOptions options)
         : session(make(app, options)),
           discoveryDirectory(options.discovery.empty() ? discovery::defaultDirectory() : options.discovery),
-          channel(session, privateDirectoryFor(options, discoveryDirectory, *session)),
-          mcp(options.http ? std::make_unique<mcphttp::Server<Session>>(session, channel.directory(), options.mcpPort) : nullptr),
-          registration(discoveryDirectory, record(*session, channel.directory(), mcp.get())),
+          privateDirectory(channel::outsideProject(*session, privateDirectoryFor(options, discoveryDirectory, *session))),
+          mcp(session, privateDirectory.path, options.mcpPort),
+          registration(discoveryDirectory, record(*session, privateDirectory.path, mcp)),
           grants(std::move(options.grants)),
           callbackNames(std::move(options.callbacks)),
-          endpointDirectory(channel.directory()),
           grace(options.closeGrace),
           unresponsive(std::move(options.onUnresponsive)),
           launched(Clock::now()),
           startup(options.startupTimeout),
           // Last of the fallible steps: the binding registers callbacks in the application and cannot take them back, so
-          // everything that can refuse the activation (grants, endpoint, record) has been validated before it.
+          // everything that can refuse the activation (grants, directory, port, record) has been validated before it.
           binding(app, session) {
-        // The native deadline of a stuck operation revokes the session and asks the window to close, as the launcher does.
+        // The native deadline of a stuck operation revokes the session and asks the window to close.
         // A renderer in a loop never runs that request: after the grace the window is declared unresponsive.
         supervisor = std::jthread([this](std::stop_token stop) {
             while (!stop.stop_requested()) {
@@ -144,12 +139,12 @@ public:
                     // The grace starts when the window is asked to close, so a closeBrowser() that blocks does not extend it.
                     const auto deadline = deadlineAfter(Clock::now(), grace);
                     binding.closeBrowser();
-                    // Whatever revoked the session (a deadline, a signal, an attached client's --shutdown, the page's own failure
-                    // report, a lost WebSocket), the window was only asked to close: a stuck renderer ignores it, and a lost
+                    // Whatever revoked the session (a deadline, the page's own failure report, a lost WebSocket), the window was
+                    // only asked to close: a stuck renderer ignores it, and a lost
                     // connection cannot even carry the request. Only the application ending show() (close()) confirms that the
                     // native window is gone, so the grace always runs.
                     if (Object(session->describe()).string("failure") == "Developer window disconnected")
-                        revoke();  // the connection is gone: no endpoint nor running record may remain meanwhile
+                        revoke();  // the connection is gone: no listener nor running record may remain meanwhile
                     while (!stop.stop_requested() && Clock::now() < deadline)
                         std::this_thread::sleep_for(std::chrono::milliseconds{20});
                     if (!stop.stop_requested()) {
@@ -178,20 +173,20 @@ public:
     std::string launchPage() const {
         return binding.launchPage();
     }
-    /// The MCP URL (`http://127.0.0.1:PORT/mcp`) with `http`; empty otherwise.
-    std::string mcpUrl() const {
-        return mcp ? mcp->url() : std::string{};
+    /// The MCP URL, `http://127.0.0.1:PORT/mcp`.
+    const std::string& mcpUrl() const {
+        return mcp.url();
     }
-    /// The private client configuration (`mcp.json`: URL and Bearer token) with `http`; empty otherwise. Never copy it into
-    /// the project: the developer file bridge can read the project.
-    std::filesystem::path clientConfiguration() const {
-        return mcp ? mcp->configuration() : std::filesystem::path{};
+    /// The private client configuration (`mcp.json`: URL and Bearer token). Never copy it into the project: the developer
+    /// file bridge can read the project.
+    const std::filesystem::path& clientConfiguration() const {
+        return mcp.configuration();
     }
-    /// The endpoint directory to give to `webfront-agent --attach`.
-    const std::filesystem::path& endpoint() const {
-        return endpointDirectory;
+    /// The private directory that holds the client configuration.
+    const std::filesystem::path& directory() const {
+        return privateDirectory.path;
     }
-    /// What the human sees: the grants and how to attach. It contains no secret.
+    /// What the human sees: the grants, the URL and the client configuration. It contains no secret.
     std::string banner() const {
         std::string list;
         for (const auto& grant : grants)
@@ -200,15 +195,14 @@ public:
         for (const auto& callback : callbackNames)
             names += (names.empty() ? "" : ", ") + callback;
         const auto granted = "grants: " + (list.empty() ? std::string{"none"} : list) + (names.empty() ? "" : "; callbacks: " + names);
-        if (mcp)
-            return "WebFront MCP (" + granted + "): " + mcp->url() + " - client configuration: " + mcp->configuration().generic_string();
-        return "WebFront automation enabled (" + granted + "). Attach with: webfront-agent --attach \"" + endpointDirectory.generic_string() + "\" --mcp";
+        return "WebFront MCP (" + granted + "): " + mcp.url() + " - client configuration: " + mcp.configuration().generic_string();
     }
     /// `base` marked as shared with an agent, for a window title: automation must be visible to the person using it.
     std::string windowTitle(std::string_view base) const {
         return std::string{base} + " [automation]";
     }
-    /// Revokes the session, withdraws the discovery record and the endpoint. Idempotent; call after `show()` returns.
+    /// Revokes the session, closes the listener, withdraws the discovery record, the client configuration and the private
+    /// directory. Idempotent; call after `show()` returns.
     void close(const std::string& reason = "Developer window closed") {
         session->close(reason);
         revoke();
@@ -223,33 +217,32 @@ public:
     }
 
 private:
-    // Withdraws the record and the endpoint once, from whichever thread gets there first.
+    // Withdraws the record, the listener and the private directory once, from whichever thread gets there first.
     void revoke() {
         const std::scoped_lock lock{revocation};
         if (std::exchange(revoked, true))
             return;
         registration.remove();
-        if (mcp)
-            mcp->stop();  // before the channel, which removes the private directory they share
-        channel.stop();
+        mcp.stop();  // removes mcp.json, before the directory that holds it
+        privateDirectory.cleanup();
     }
     static std::shared_ptr<Session> make(App& app, const AutomationOptions& options) {
-        if (options.listen.empty() && !options.http)
-            throw std::invalid_argument("Automation needs a new private `listen` directory for its endpoint");
         if (options.startupTimeout <= std::chrono::seconds::zero())
             throw std::invalid_argument("Automation startupTimeout must be positive");
         if (options.closeGrace < std::chrono::milliseconds::zero())
             throw std::invalid_argument("Automation closeGrace must not be negative");
         return std::make_shared<Session>(SessionOptions{.project = app.projectDirectory(), .allow = options.grants, .timeout = options.timeout, .callbacks = options.callbacks});
     }
-    // `listen`, or with `http` and no `listen`, a new directory named after the session in the (private) discovery directory.
+    // `directory`, or a new directory named after the session in the (private) discovery directory. The records of the
+    // instances that ended without closing (a forced end) are removed first, with the private directories named after them.
     static std::filesystem::path privateDirectoryFor(const AutomationOptions& options, const std::filesystem::path& discoveryDirectory, const Session& session) {
-        if (!options.listen.empty())
-            return options.listen;
         discovery::preparePrivateDirectory(discoveryDirectory);
+        (void)discovery::list(discoveryDirectory);
+        if (!options.directory.empty())
+            return options.directory;
         return discoveryDirectory / Object(session.describe()).string("session");
     }
-    static discovery::Entry record(const Session& session, const std::filesystem::path& endpoint, const mcphttp::Server<Session>* mcp) {
+    static discovery::Entry record(const Session& session, const std::filesystem::path& endpoint, const mcphttp::Server<Session>& mcp) {
         const Object description{session.describe()};
         return {.session       = description.string("session"),
                 .project       = description.string("project"),
@@ -257,18 +250,17 @@ private:
                 .allow         = description.raw("allow"),
                 .pid           = discovery::currentProcess(),
                 .callbacks     = description.raw("callbacks"),
-                .mcp           = mcp ? mcp->url() : std::string{},
-                .configuration = mcp ? mcp->configuration().generic_string() : std::string{}};
+                .mcp           = mcp.url(),
+                .configuration = mcp.configuration().generic_string()};
     }
 
     std::shared_ptr<Session>      session;
     std::filesystem::path         discoveryDirectory;
-    ChannelServer                 channel;
-    std::unique_ptr<mcphttp::Server<Session>> mcp;
+    channel::PrivateDirectory     privateDirectory;
+    mcphttp::Server<Session>      mcp;
     discovery::Registration       registration;
     std::vector<std::string>      grants;
     std::vector<std::string>      callbackNames;
-    std::filesystem::path         endpointDirectory;
     std::chrono::milliseconds     grace;
     std::function<void()>         unresponsive;
     std::mutex                    revocation;

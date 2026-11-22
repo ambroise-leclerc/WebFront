@@ -1,9 +1,10 @@
 /// @brief Per-user discovery of the automation sessions their owners chose to share.
 ///
-/// A shared session publishes one small record in a private per-user directory so that a human or an agent can ask
-/// `webfront-agent --list` instead of being told where to attach. A record names the project, the grants, the process and
-/// the private endpoint directory. It never holds the attachment capability, which stays in that endpoint directory:
-/// listing a session does not allow operating it. Records are removed on closure; one whose process is gone is dropped.
+/// An application that enables automation publishes one small record in a private per-user directory, so that a human or
+/// an agent finds the running instances instead of being told where they are. A record names the project, the grants, the
+/// process, the private directory, the MCP URL and the path of the client configuration. It never holds the token, which
+/// only that private configuration file contains: reading a record does not allow operating the session. Records are
+/// removed on closure; one whose process is gone is dropped by the next listing, with the private directory named after it.
 #pragma once
 #include "Platform.hpp"
 
@@ -76,10 +77,10 @@ struct Entry {
     long        pid = 0;
     /// The JSON array of the application callbacks that `call` may invoke (empty unless the owner allow-listed some).
     std::string callbacks = "[]";
-    /// The MCP URL of a session served over HTTP (ADR-025) and the path of its private client configuration; empty otherwise.
-    /// Neither holds the token, which only the configuration file contains.
+    /// The MCP URL of the session (ADR-025) and the path of its private client configuration. Neither holds the token, which
+    /// only the configuration file contains.
     std::string mcp{}, configuration{};
-    /// The JSON the CLI prints; the same members as the record, plus the observed state.
+    /// The record as it is written.
     std::string json() const {
         std::map<std::string, std::string> members{
             {"version",                                     "1"},
@@ -253,7 +254,7 @@ inline std::optional<Entry> readRecord(const std::filesystem::path& path) {
 }
 
 /// The live shared sessions, ordered by identifier. A record of a vanished process is removed when `prune` is true;
-/// malformed files and foreign names are ignored and never deleted. No record carries the attachment capability.
+/// malformed files and foreign names are ignored and never deleted. No record carries the automation token.
 inline std::vector<Entry> list(const std::filesystem::path& directory, bool prune = true) {
     std::vector<Entry> result;
     std::error_code    error;
@@ -296,22 +297,4 @@ inline std::vector<Entry> list(const std::filesystem::path& directory, bool prun
     return result;
 }
 
-inline std::string listJson(const std::vector<Entry>& entries) {
-    std::string result = "{\"version\":1,\"sessions\":[";
-    for (const auto& entry : entries)
-        result += (result.back() == '[' ? "" : ",") + entry.json();
-    return result + "]}";
-}
-
-/// A ready-to-use `.mcp.json` for a client: one stdio server attached to an endpoint directory. It holds neither
-/// grants (the owner's process fixes them) nor the capability (read from the endpoint at attach time).
-inline std::string mcpConfiguration(const std::filesystem::path& agent, const std::filesystem::path& endpoint, std::string_view name = "webfront") {
-    if (name.empty() || !std::ranges::all_of(name, [](char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_'; }))
-        throw std::invalid_argument("The MCP server name is letters, digits, '-' and '_'");
-    const auto server = objectJson({
-        {"command",                                                   webfront::json::quote(agent.generic_string())},
-        {   "args", stringArray({"--attach", endpoint.generic_string(), "--mcp"})},
-    });
-    return "{\n  \"mcpServers\": {\n    " + webfront::json::quote(name) + ": " + server + "\n  }\n}\n";
-}
 }  // namespace webfront::automation::discovery

@@ -8,7 +8,7 @@ include_guard(GLOBAL)
 #
 # Writes the agent guide of a WebFront application (the same text `wf create` puts beside a starter's sources) as
 # AGENTS.md at the root of the calling project: the model (C++ with a TypeScript/TSX interface in ui/, developed with
-# `wf dev`) and how an agent runs wf itself in JSON or MCP. Coding agents read that file before anything else.
+# `wf dev`) and how an agent runs wf itself through the MCP URL of the application. Coding agents read that file first.
 #
 #   add_subdirectory(WebFront)              # or FetchContent / CPM
 #   webfront_write_agent_guide()            # <project>/AGENTS.md, once
@@ -47,8 +47,8 @@ function(webfront_write_agent_guide)
     message(STATUS "WebFront: wrote the agent guide ${destination}")
 endfunction()
 
-# One notice per configuration, for whoever reads the configure output first: the development model, the guide, and
-# either how to attach to the launcher that is built or the option that builds it.
+# One notice per configuration, for whoever reads the configure output first: the development model, the guide, and how an
+# application serves MCP to an agent.
 function(webfront_announce_agent_support)
     get_property(announced GLOBAL PROPERTY WEBFRONT_AGENT_SUPPORT_ANNOUNCED)
     if(announced)
@@ -57,14 +57,8 @@ function(webfront_announce_agent_support)
     set_property(GLOBAL PROPERTY WEBFRONT_AGENT_SUPPORT_ANNOUNCED ON)
     set(guide "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../docs/DEVELOPING_WITH_AGENTS.md")
     cmake_path(NORMAL_PATH guide)
-    if(TARGET webfront-agent)
-        set(launcher "the webfront-agent target runs wf for an agent in JSON or MCP (webfront-agent --agent-help)")
-    else()
-        set(launcher "webfront-agent, which runs wf for an agent in JSON or MCP, is not built: "
-            "configure with -DWEBFRONT_BUILD_AUTOMATION=ON")
-        string(JOIN "" launcher ${launcher})
-    endif()
     message(STATUS "WebFront for agents: an application is C++ with a TypeScript/TSX interface in ui/, developed with `wf dev` "
-        "(not pages served from documentRoot); ${launcher}. Guide: ${guide}"
+        "(not pages served from documentRoot); an application that calls webfront::automation::enableAutomation serves MCP "
+        "itself and prints its URL. Guide: ${guide}"
         "; webfront_write_agent_guide() writes it as AGENTS.md in your project.")
 endfunction()

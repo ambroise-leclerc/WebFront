@@ -1,27 +1,35 @@
-"""Optional real-window interoperability regression, using the official MCP Python SDK 2.3.0.
+"""Optional real-window interoperability regression, using the official MCP Python SDK 2.3.0 over Streamable HTTP.
 
-Install the pinned SDK in a separate test venv; neither configure nor this test downloads packages.
+An application that enabled automation (automation_host) serves MCP itself (ADR-025); the SDK connects to its URL with the
+Bearer token of its private mcp.json. Install the pinned SDK in a separate test venv; neither configure nor this test
+downloads packages.
 """
 import argparse
 import asyncio
 import importlib.metadata
 import json
-import os
 import pathlib
 import shutil
 import subprocess
+import sys
 import tempfile
 
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from mcp import ClientSession
+from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from AutomationClient import Host, check_withdrawn, install, interrupt_status  # noqa: E402
 
 
-async def exercise(command, log):
-    parameters = StdioServerParameters(command=command[0], args=command[1:], env=os.environ.copy())
-    async with stdio_client(parameters, errlog=log) as (reader, writer):
+async def exercise(configuration):
+    server = json.loads(pathlib.Path(configuration).read_text())["mcpServers"]["webfront"]
+    async with create_mcp_http_client(headers=server["headers"]) as http, \
+            streamable_http_client(server["url"], http_client=http) as streams:
+        reader, writer = streams[0], streams[1]
         async with ClientSession(reader, writer) as client:
             initialized = await client.initialize()
             assert initialized.protocol_version == "2025-11-25"
+            assert "webfront.session" in (initialized.instructions or "")
             assert {tool.name for tool in (await client.list_tools()).tools} == {
                 "webfront.session", "webfront.start", "webfront.result", "webfront.cancel"}
             for _ in range(600):
@@ -55,7 +63,7 @@ async def exercise(command, log):
 
 async def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("agent", "driver", "environment", "provision", "registry", "fixture", "work"):
+    for name in ("host", "driver", "environment", "provision", "registry", "fixture", "work"):
         parser.add_argument("--" + name, required=True)
     args = parser.parse_args()
     assert importlib.metadata.version("mcp") == "2.3.0", "Use the pinned optional SDK mcp==2.3.0"
@@ -64,33 +72,21 @@ async def main():
         root = pathlib.Path(temporary)
         project = root / "project"
         shutil.copytree(args.fixture, project)
-        integrity = json.loads(pathlib.Path(args.provision).read_text())["integrity"]
-        common = ["--project", str(project), "--environment", args.environment, "--integrity", integrity, "--registry-dir", args.registry]
-        installed = subprocess.run([args.driver, *common, "--", "install"], capture_output=True, text=True, timeout=120)
-        assert installed.returncode == 0, installed.stdout + installed.stderr
+        install(args, project)
         with (pathlib.Path(args.work) / "sdk-interop.log").open("w") as log:
-            await asyncio.wait_for(exercise([args.agent, *common, "--mcp", "--allow", "build"], log), 90)
-            endpoint = root / "endpoint"
-            owner = subprocess.Popen([args.agent, *common, "--serve", "--listen", str(endpoint), "--allow", "build"],
-                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log)
+            host = Host(args, project, root, "sdk", log, ["--grants", "build"])
             try:
-                for _ in range(600):
-                    assert owner.poll() is None, log.name
-                    if (endpoint / "endpoint.json").is_file():
-                        break
-                    await asyncio.sleep(0.05)
-                assert (endpoint / "endpoint.json").is_file()
-                await asyncio.wait_for(exercise([args.agent, "--attach", str(endpoint), "--mcp"], log), 90)
-                assert owner.poll() is None, "SDK detachment closed the human-owned window"
-                stopped = subprocess.run([args.agent, "--attach", str(endpoint), "--shutdown"], capture_output=True, text=True, timeout=15)
-                assert stopped.returncode == 0, stopped.stderr
-                assert owner.wait(timeout=15) == 0
-                assert not endpoint.exists()
+                record = host.record()
+                first = await asyncio.wait_for(exercise(record["configuration"]), 90)
+                # A second SDK client after the first one terminated its MCP session: the window and its session stay.
+                assert host.process.poll() is None, "Ending an SDK session closed the application's window"
+                assert await asyncio.wait_for(exercise(record["configuration"]), 90) == first
+                host.interrupt()
+                assert host.wait(timeout=30) == interrupt_status(), host.logs()
+                check_withdrawn(record, int(record["mcp"].rsplit(":", 1)[1].split("/")[0]))
             finally:
-                if owner.poll() is None:
-                    owner.kill()
-                    owner.wait()
-    print("Official MCP Python SDK 2.3.0: owned window and authenticated shared-window attachment passed")
+                host.close()
+    print("Official MCP Python SDK 2.3.0: initialization, catalogue, refusal, build and reconnection over Streamable HTTP passed")
 
 
 if __name__ == "__main__":

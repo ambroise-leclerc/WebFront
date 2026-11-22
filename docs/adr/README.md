@@ -67,7 +67,7 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-022](ADR-022-profils-et-niveaux-de-support.md) | Compiler profiles, GCC 13 S2 minimum, exit clause and LTS build tools | Accepted | 2026-11-11 | 1.1 — 2026-11-11 |
 | [ADR-023](ADR-023-espace-de-noms-des-commandes-du-terminal.md) | Terminal command names: `wf` stays the prefix of project commands, read-only file commands (`ls`, `cat`, `tree`, `mounts`), file command names reserved ahead, dependency graph with `wf list --tree`, `wf why`, `wf info` | Accepted | 2026-11-14 | 1.0 — 2026-11-14 |
 | [ADR-024](ADR-024-tls-integre.md) | Optional integrated TLS 1.3 server | Proposed | 2026-11-21 | 1.0 |
-| [ADR-025](ADR-025-mcp-http-dans-l-application.md) | The application serves MCP over Streamable HTTP on its own loopback listener, with a session Bearer token, strict Host/Origin checks, per-instance discovery and no automation in distribution builds; amends ADR-019 | Accepted (delivery in progress) | 2026-11-21 | 1.1 — 2026-11-22 |
+| [ADR-025](ADR-025-mcp-http-dans-l-application.md) | The application serves MCP over Streamable HTTP on its own loopback listener, with a session Bearer token, strict Host/Origin checks, per-instance discovery and no automation in distribution builds; the webfront-agent launcher is removed; amends ADR-019 | Accepted (delivery in progress) | 2026-11-21 | 1.2 — 2026-11-22 |
 
 Numbering follows the reading topics; milestones and individual file histories provide
 the chronology, which does not follow the numerical order.

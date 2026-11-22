@@ -103,8 +103,9 @@ describe('Developer automation', () => {
             expect(text).toContain('C++ with a TypeScript/TSX interface in ui/, developed with wf dev');
             expect(text).toContain('wf create app                 a starter (starters: app, life), not the name of your project');
             expect(text).toMatch(/wf init[^]*wf dev ui\/main\.ts/);
-            expect(text).toContain('webfront-agent --attach DIRECTORY --operation preview --entry ui/main.ts');
-            expect(text).toContain('webfront-agent --attach DIRECTORY --mcp');
+            expect(text).toContain('webfront.start {operation: "preview", arguments: {entry: "ui/main.ts"}}');
+            expect(text).toContain('mcp.json');
+            expect(text).not.toContain('webfront-agent');
             expect(text).toContain('docs/DEVELOPING_WITH_AGENTS.md');
         }
         expect(await execute(['help','create'],{config})).toMatch(/^wf create <starter> \[directory\]\n[^]*names a starter of this environment, not your project \(starters: app, life\)/);
@@ -119,12 +120,12 @@ describe('Developer automation', () => {
         delete globalThis.webfrontAutomationNotice;
         expect(await execute(['help'],{})).not.toContain('Automation:');
         const stop=onAutomationNotice(text => shown.push(text));
-        announceAutomation('WebFront automation enabled (grants: check). Attach with: webfront-agent --attach "/x" --mcp\u001b[2J\u0007');
+        announceAutomation('WebFront MCP (grants: check): http://127.0.0.1:1/mcp - client configuration: /x/mcp.json\u001b[2J\u0007');
         stop();
         expect(shown.length).toBe(1);
         expect(shown[0]).toContain('grants: check');
         expect(/[\u0000-\u001f\u007f-\u009f]/.test(shown[0])).toBeFalse();
-        expect(await execute(['help'],{})).toContain('\nAutomation: WebFront automation enabled (grants: check)');
+        expect(await execute(['help'],{})).toContain('\nAutomation: WebFront MCP (grants: check)');
         const late=[];
         onAutomationNotice(text => late.push(text))();
         expect(late).toEqual(shown);

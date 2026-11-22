@@ -433,22 +433,22 @@ const Scenario mcpHttpListener{"The MCP listener serves loopback HTTP with a pri
     });
 }};
 
-const Scenario mcpHttpActivation{"An application that enables automation with http serves its own MCP URL", [] {
+const Scenario mcpHttpActivation{"An application that enables automation serves its own MCP URL", [] {
     using namespace mcphttptests;
     webfront::test::TemporaryDirectory root;
     std::filesystem::create_directory(root.path() / "project");
     std::filesystem::create_directory(root.path() / "project2");
     HttpConsumerApp first{.project = root.path() / "project"}, second{.project = root.path() / "project2"};
     const auto      sessions = root.path() / "sessions";
-    given("two instances enabled with http and no listen directory", [&] {
-        auto one = enableAutomation(first, {.grants = {"check"}, .http = true, .discovery = sessions, .announce = false});
-        auto two = enableAutomation(second, {.grants = {"build"}, .http = true, .discovery = sessions, .announce = false});
+    given("two instances enabled with no private directory chosen", [&] {
+        auto one = enableAutomation(first, {.grants = {"check"}, .discovery = sessions, .announce = false});
+        auto two = enableAutomation(second, {.grants = {"build"}, .discovery = sessions, .announce = false});
         then("each has its own URL and private configuration, under a directory named after its session", [&] {
             require(one->mcpUrl() != two->mcpUrl());
             require(one->mcpUrl().starts_with("http://127.0.0.1:"));
-            require(one->clientConfiguration().parent_path() == one->endpoint());
-            require(one->endpoint().filename() == Object(one->controller()->describe()).string("session"));
-            require(bearer(one->endpoint()) != bearer(two->endpoint()));
+            require(one->clientConfiguration().parent_path() == one->directory());
+            require(one->directory().filename() == Object(one->controller()->describe()).string("session"));
+            require(bearer(one->directory()) != bearer(two->directory()));
         });
         then("the records list both instances with their URLs, never their tokens", [&] {
             const auto listed = discovery::list(sessions);
@@ -466,16 +466,16 @@ const Scenario mcpHttpActivation{"An application that enables automation with ht
             const auto banner = one->banner();
             require(banner.find(one->mcpUrl()) != std::string::npos);
             require(banner.find("mcp.json") != std::string::npos);
-            require(banner.find(bearer(one->endpoint())) == std::string::npos);
+            require(banner.find(bearer(one->directory())) == std::string::npos);
         });
         then("each URL answers with its own session only", [&] {
             const auto port   = static_cast<unsigned short>(std::stoi(one->mcpUrl().substr(one->mcpUrl().rfind(':') + 1)));
-            const auto opened = roundTrip(port, post(port, initialize, {}, bearer(one->endpoint())));
+            const auto opened = roundTrip(port, post(port, initialize, {}, bearer(one->directory())));
             require(opened.status == 200);
-            require(roundTrip(port, post(port, initialize, {}, bearer(two->endpoint()))).status == 401);
+            require(roundTrip(port, post(port, initialize, {}, bearer(two->directory()))).status == 401);
         });
         then("closing withdraws the record, the configuration and the private directory", [&] {
-            const auto directory = one->endpoint();
+            const auto directory = one->directory();
             one->close();
             require(!std::filesystem::exists(directory));
             require(discovery::list(sessions).size() == 1);
@@ -493,6 +493,12 @@ const Scenario mcpHttpActivation{"An application that enables automation with ht
             require(discovery::list(sessions).empty());
             require(!std::filesystem::exists(sessions / (dead + ".json")));
             require(!std::filesystem::exists(sessions / dead));
+        });
+        then("the next activation removes them too, before it publishes its own", [&] {
+            auto next = enableAutomation(first, {.grants = {"check"}, .discovery = sessions, .announce = false});
+            require(!std::filesystem::exists(sessions / (dead + ".json")));
+            require(!std::filesystem::exists(sessions / dead));
+            require(discovery::list(sessions).size() == 1);
         });
     });
 }};

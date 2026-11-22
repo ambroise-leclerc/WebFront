@@ -93,7 +93,7 @@ If you are a coding agent, or work with one, read this before anything else. The
 
 - **The model.** A WebFront application is a C++ program whose interface is TypeScript/TSX. The interface lives in **`ui/`** of the project directory (`ui/main.ts` or `ui/main.tsx`) and is developed with **`wf dev`**, in the terminal that `app.bootstrap("developer")` opens in the application's window. Pages of hand-written HTML and classic JavaScript served through `documentRoot` are not the development path: none of the tools apply to them.
 - **The sequence.** With the pinned developer environment: `wf create app` (the starter name, not your project's name), `wf init`, `wf install <package>` for browser dependencies, then `wf dev ui/main.ts`. Finish with `wf check`, `wf test` and `wf embed` using the project's configuration. Use `wf create life` for the React walkthrough. `wf help agents` prints the workflow.
-- **An agent runs `wf` itself, through MCP or JSON.** Do not ask a person to type the commands. In a development build, the application opts in with `webfront::automation::enableAutomation(app, {.grants = {...}, .http = true})`, whose grants stay the owner's, and serves MCP itself: it prints its URL and the path of a private client configuration (`mcp.json`, URL and Bearer token, outside the project):
+- **An agent runs `wf` itself, through MCP.** Do not ask a person to type the commands. In a development build, the application opts in with `webfront::automation::enableAutomation(app, {.grants = {...}})`, whose grants stay the owner's, and becomes the MCP server: no other program is built or launched. It prints its URL and the path of a private client configuration (`mcp.json`, URL and Bearer token, outside the project):
 
 ```text
 WebFront MCP (grants: check, build, preview): http://127.0.0.1:PORT/mcp - client configuration: .../sessions/SESSION/mcp.json
@@ -103,14 +103,7 @@ WebFront MCP (grants: check, build, preview): http://127.0.0.1:PORT/mcp - client
 {"mcpServers": {"webfront": {"type": "http", "url": "http://127.0.0.1:PORT/mcp", "headers": {"Authorization": "Bearer TOKEN"}}}}
 ```
 
-Pass that file to the MCP client (`claude --mcp-config PATH/mcp.json`), never copy the token into the project. For scripts and CI, configure with `-DWEBFRONT_BUILD_AUTOMATION=ON` to build `webfront-agent`, the JSON command line of the same operations:
-
-```sh
-webfront-agent --list                                              # the sessions shared with agents
-webfront-agent --attach DIRECTORY --operation create --starter app
-webfront-agent --attach DIRECTORY --operation preview --entry ui/main.ts   # after each edit, in place of wf dev
-webfront-agent --print-mcp-config --attach DIRECTORY > .mcp.json   # MCP on stdio, for a client without HTTP
-```
+Pass that file to the MCP client (`claude --mcp-config PATH/mcp.json`) and never copy the token into the project. The agent then calls `webfront.start` with `create`, `preview` (after each edit, in place of `wf dev`), `check`, `test` or `embed`, and reads each run with `webfront.result`.
 
 In a project that embeds WebFront, `webfront_write_agent_guide()` writes these rules as `AGENTS.md` at its root, and `wf create` writes them beside the starter's sources.
 
@@ -392,7 +385,7 @@ Your own application can select `webfront::NativeApp` or `webfront::NativeAppWit
 Your coding agent can type-check, build, preview, inspect and click the interface of **your own application**, in its own
 window and with its own C++ callbacks, while you keep the window and decide what the agent may do. Nothing is on by default.
 
-<img src="docs/images/automation-agent.svg" width="100%" alt="Animated transcript. On the left, an agent lists the shared session, checks, builds and previews the interface, clicks a button, calls the allow-listed C++ callback bf.render and is refused bf.secret. On the right, the application window shows the interface updating, and the C++ process logs only the callbacks that ran.">
+<img src="docs/images/automation-agent.svg" width="100%" alt="Animated transcript. On the left, an agent connects to the application's MCP URL, checks, builds and previews the interface, clicks a button, calls the allow-listed C++ callback bf.render and is refused bf.secret. On the right, the application window shows the interface updating, and the C++ process logs only the callbacks that ran.">
 
 *Abridged transcript of the `AutomationConsumerWindow` regression test, which runs these steps against a real application.*
 
@@ -406,17 +399,16 @@ app.bootstrap("developer");
 app.cppFunction("bf.render", render);                  // your callbacks stay yours
 auto automation = webfront::automation::enableAutomation(
     app, {.grants    = {"check", "build", "preview", "inspect", "interact", "call"},
-          .callbacks = {"bf.render"},                  // the only callback an agent may call
-          .listen    = privateEndpointDirectory});
+          .callbacks = {"bf.render"}});                // the only callback an agent may call
 app.show(automation->launchPage());
 automation->close();
 app.shutdown();
 ```
 
-- **Visible to you.** The window's terminal prints the grants and how to attach, `wf help` says so, and the window title can carry a marker.
-- **Found without being told.** `webfront-agent --list` shows the sessions their owners shared (never the capability), and `webfront-agent --print-mcp-config --attach <dir>` writes the `.mcp.json` for Claude Code or any MCP client. `wf create` adds an `AGENTS.md` that tells the agent how to attach.
+- **Visible to you.** The application prints its MCP URL, the window's terminal prints the grants, `wf help` says so, and the window title can carry a marker.
+- **Found without being told.** Each running instance writes its URL and the path of its private `mcp.json` (URL and token) to a per-user record, never the token itself; `claude --mcp-config PATH/mcp.json` or any MCP client connects to it. `wf create` adds an `AGENTS.md` that tells the agent how to connect.
 - **Bounded.** Each operation is a separate grant; a callback is reachable only by an exact name you listed; a stuck renderer is stopped by native deadlines; project code still runs with your rights (this is not a sandbox).
-- **Optional.** It lives in a separate launcher and one header; applications that do not call `enableAutomation` register nothing. `webfront_add_agent()` builds and installs the launcher for `add_subdirectory` and `FetchContent` consumers.
+- **Optional.** It lives in one header; applications that do not call `enableAutomation` register nothing and open no listener, and a distribution build (`WEBFRONT_DISTRIBUTION`) refuses to compile it.
 
 The [automation guide](docs/AUTOMATION.md#automating-your-own-application) covers grants, callbacks, discovery, deadlines and the MCP profile.
 

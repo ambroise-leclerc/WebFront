@@ -1,9 +1,9 @@
 # Developing a WebFront application with an agent
 
 This page is what a coding agent needs before it writes the first line of a WebFront application: the model, the
-development loop, and how to run every `wf` command itself, in JSON or through MCP, instead of asking a person to type it.
-`wf help agents`, the `AGENTS.md` that `wf create` and `webfront_write_agent_guide()` write, the CMake configuration notice
-and `webfront-agent --agent-help` all point here.
+development loop, and how to run every `wf` command itself, through MCP, instead of asking a person to type it.
+`wf help agents`, the `AGENTS.md` that `wf create` and `webfront_write_agent_guide()` write and the CMake configuration notice
+all point here.
 
 ## The model: C++ with a TypeScript interface
 
@@ -61,11 +61,10 @@ or later; 0.9.1 ignores the argument and prints the list). Declaring
 `"entries": {"main": "ui/main.ts"}` in `webfront.project.json` lets `wf dev`, `wf build` and `wf preview` run without
 argument. The [developer environment reference](DEVELOPER_ENVIRONMENT.md) has the details of each command.
 
-## Running wf yourself: MCP or JSON
+## Running wf yourself, through MCP
 
-The application runs the same commands in its own window and answers through MCP: it serves an MCP URL itself, in a
-development build. An MCP client connects to that URL; no second program is needed. `webfront-agent` remains the JSON command
-line for scripts and CI.
+The application runs the same commands in its own window and serves them over MCP: in a development build, it is the MCP
+server, at a URL of its own. An MCP client connects to that URL; no other program is built or launched.
 
 **1. The application opts in**, in a development build. The grants are the owner's decision, fixed in native code: an
 agent proposes this code and does not widen it. Automation does not compile in a distribution build (`WEBFRONT_DISTRIBUTION`).
@@ -77,8 +76,7 @@ webfront::NativeApp app{"my-project"};
 app.cppFunction("app.greet", greet);
 app.bootstrap("developer");
 auto automation = webfront::automation::enableAutomation(app,
-    {.grants = {"create", "init", "install", "check", "build", "test", "preview", "embed", "inspect", "interact"},
-     .http = true});                                // serve MCP at a loopback URL of this application
+    {.grants = {"create", "init", "install", "check", "build", "test", "preview", "embed", "inspect", "interact"}});
 app.show(automation->launchPage());
 automation->close();
 app.shutdown();
@@ -105,46 +103,31 @@ configuration of that instance, URL and Bearer token together, in a private dire
 copy the URL and the header into the client's **user** configuration. Never copy the token into the project, its `.mcp.json`
 included: the developer file bridge reads the project. The token ends with the session; a new run prints a new URL and file.
 The application must be running before the client connects. An agent with a shell can start it in the background and wait
-for its `mcp.json`, or read the records of the running instances (project, URL, configuration path, never the token) in the
-per-user sessions directory that `webfront-agent --list` also reads.
+for its `mcp.json`, or read the records of the running instances (project, grants, URL, path of `mcp.json`, never the token)
+in the per-user sessions directory: `~/.local/state/webfront/sessions` on Linux, `~/Library/Application Support/WebFront/sessions`
+on macOS, `%LOCALAPPDATA%\WebFront\sessions` on Windows.
 
-**Without MCP: the JSON command line.** `webfront-agent` is built when WebFront is configured with
-`-DWEBFRONT_BUILD_AUTOMATION=ON` and a native window engine is enabled; the configuration prints one `WebFront for agents:`
-line that says whether it is built. It attaches to the directory that holds `mcp.json` (or to `.listen = directory`):
+**4. Call the tools.** `webfront.session` gives the session ID, `webfront.start` starts an operation and returns its `runId`
+at once, `webfront.result` reads its state and output until it ends, and `webfront.cancel` stops it.
 
-```cmake
-set(WEBFRONT_BUILD_AUTOMATION ON)        # before add_subdirectory / FetchContent / CPM
-add_subdirectory(path/to/WebFront)
-webfront_add_agent()                     # checks the webfront-agent target; INSTALL installs it
-webfront_write_agent_guide()             # writes AGENTS.md at the root of your project, once
-```
+### Each command, in the terminal and in MCP
 
-```sh
-webfront-agent --list                                              # the shared sessions and their directory
-webfront-agent --attach DIRECTORY --operation check                # one operation, one JSON result
-webfront-agent --print-mcp-config --attach DIRECTORY > .mcp.json   # MCP on stdio, for a client without HTTP
-webfront-agent --agent-help                                        # the rules; --schema prints the contract
-```
+The MCP column is the `operation` and `arguments` of the `webfront.start` tool, whose run is then read with `webfront.result`.
 
-### Each command, in the terminal, in JSON and in MCP
-
-The MCP column is the `operation` and `arguments` of the `webfront.start` tool, whose run is then read with
-`webfront.result`; the JSON column completes `webfront-agent --attach DIRECTORY`.
-
-| In the terminal | JSON command line | MCP `webfront.start` | Grant |
-| --- | --- | --- | --- |
-| `wf create app` | `--operation create --starter app` | `create`, `{"starter": "app"}` | `create` |
-| `wf init` | `--operation init` | `init` | `init` |
-| `wf install react@19.3.1` | `--operation install --package react@19.3.1` | `install`, `{"package": "react@19.3.1"}` | `install` |
-| `wf restore` | `--operation restore` | `restore` | `restore` |
-| `wf dev ui/main.ts` | `--operation preview --entry ui/main.ts`, after each edit | `preview`, `{"entry": "ui/main.ts"}` | `preview` |
-| `wf check` | `--operation check` | `check` | `check` |
-| `wf test [pattern]` | `--operation test [--pattern text]` | `test`, `{"pattern": "text"}` | `test` |
-| `wf build [entry]` | `--operation build [--entry ui/main.ts]` | `build`, `{"entry": "ui/main.ts"}` | `build` |
-| `wf embed ui/main.ts --output generated/AppUI.hpp` | `--operation embed --entry ui/main.ts --output generated/AppUI.hpp` | `embed`, `{"entry": ..., "output": ...}` | `embed` |
-| look at the page | `--operation inspect` | `inspect` | `inspect` |
-| click, type | `--operation click --page-id ID --element-id ID`; `fill` adds `--value TEXT` | `click`, `fill` | `interact` |
-| call a C++ callback the owner listed | `--operation call --callback app.greet --value TEXT` | `call`, `{"callback": ..., "value": ...}` | `call` |
+| In the terminal | MCP `webfront.start` | Grant |
+| --- | --- | --- |
+| `wf create app` | `create`, `{"starter": "app"}` | `create` |
+| `wf init` | `init` | `init` |
+| `wf install react@19.3.1` | `install`, `{"package": "react@19.3.1"}` | `install` |
+| `wf restore` | `restore` | `restore` |
+| `wf dev ui/main.ts` | `preview`, `{"entry": "ui/main.ts"}`, after each edit | `preview` |
+| `wf check` | `check` | `check` |
+| `wf test [pattern]` | `test`, `{"pattern": "text"}` | `test` |
+| `wf build [entry]` | `build`, `{"entry": "ui/main.ts"}` | `build` |
+| `wf embed ui/main.ts --output generated/AppUI.hpp` | `embed`, `{"entry": ..., "output": ...}` | `embed` |
+| look at the page | `inspect` | `inspect` |
+| click, type | `click` `{"pageId", "elementId"}`, `fill` adds `"value"` | `interact` |
+| call a C++ callback the owner listed | `call`, `{"callback": ..., "value": ...}` | `call` |
 
 - **`wf dev` has no agent operation.** It is a watch for a person at the window. An agent edits the files with its own tools
   and runs `preview` again; a person's `wf dev` may stay running meanwhile, and both use the same window.
@@ -165,10 +148,10 @@ security boundary. Project code runs with the user's rights; this is not a sandb
 | --- | --- |
 | The README, before the tutorial | The model, the three steps above and the client configuration |
 | `AGENTS.md` in the project | `wf create` writes it beside the starter's sources; `webfront_write_agent_guide()` writes it at the root of a CMake project, and never replaces an existing file |
-| The CMake configuration output | One `WebFront for agents:` line: the model, whether `webfront-agent` is built, and this page |
+| The CMake configuration output | One `WebFront for agents:` line: the model, the MCP URL an application prints, and this page |
 | The terminal | The ready line names this page, `wf help` names `wf help agents` (environment 0.9.2); a missing manifest, a missing entry and an unknown starter answer with the next steps and the starters |
 | stderr of the application | Its MCP URL and client configuration when automation is enabled; one line when a document root is served without the developer environment |
-| `webfront-agent --agent-help` | The rules of the contract, starting with the model |
+| The MCP `initialize` answer | Short `instructions`: how to use the four tools |
 
 The terminal texts belong to the developer environment and reach an application with the environment its library pins:
 the ones described here are in environment 0.9.2 (the ready line, the README, the CMake helpers and the stderr note come with

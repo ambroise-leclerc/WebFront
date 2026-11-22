@@ -6,11 +6,12 @@
 | --- | --- | --- | --- | --- | --- |
 | 1.0 | 2026-11-21 | Proposée | Ambroise Leclerc | Issue #632, après #617 (instances simultanées) et #631 (TLS 1.3 intégré) : l'application sert elle-même le MCP en Streamable HTTP sur un écouteur loopback distinct, authentifié par un jeton Bearer de session ; accès distant exclu ; Host et Origin stricts ; découverte par instance ; automatisation refusée à la compilation d'une build de distribution ; ordre de migration et sort de `webfront-agent`. Amende l'ADR-019 (ligne « MCP Streamable HTTP local » du comparatif, section « CLI et MCP local stdio » et ligne « DNS rebinding » du modèle de menace). | — |
 | 1.1 | 2026-11-22 | Acceptée (livraison à faire) | Ambroise Leclerc | Décision acceptée avant le code de transport, comme l'exige #632. Précision d'implémentation du point 2 : l'écouteur reprend le modèle d'admission du canal actuel (file, délais, workers) et l'analyseur `http::Request` de `HTTPServer.hpp`, plutôt qu'une instance de `http::Server`, qui n'a ni file bornée ni délai de réception. | Issue #632. |
+| 1.2 | 2026-11-22 | Acceptée (livraison à faire) | Ambroise Leclerc | Étape 4, arbitrée par le propriétaire : le but de #632 est un seul exécutable, l'application de l'utilisateur. `webfront-agent` est retiré en entier (relais stdio, CLI JSON, `--serve`, `--attach`, `--list`, `--print-mcp-config`, `webfront_add_agent()`, `WEBFRONT_BUILD_AUTOMATION`), sans exemple `agent-host` ; le canal JSON-lines disparaît avec lui. HTTP devenant le seul transport, l'option `.http` est supprimée et `listen` devient `directory`, facultatif. Les régressions pilotent un programme de test (`automation_host`) qui appelle `enableAutomation`. Les statuts 70 et 71 du lanceur disparaissent avec lui ; le 72 d'`onUnresponsive` reste. | Issue #632. |
 
 ## État et portée
 
 **Acceptée le 2026-11-22**, avant tout code de transport (critère de #632) ; la livraison suit l'ordre de « Migration ». Elle remplace,
-une fois livrée, la partie « MCP local stdio » et « attachement » de l'[ADR-019](ADR-019-developpement-automatisable-et-agents.md) ;
+une fois livrée, les parties « CLI et MCP local stdio » et « Attachement à la même fenêtre » de l'[ADR-019](ADR-019-developpement-automatisable-et-agents.md) ;
 le contrat v1 (`Contract.hpp`), le contrôleur (`Session.hpp`), les grants natifs, la liste blanche de `call`, la liaison de page
 (`Binding.hpp`, secret de lancement, preuves HMAC) et le modèle de menace de l'ADR-019 restent en vigueur. Elle ne modifie pas
 le codec binaire (ADR-003), ni le contrôle d'origine du pont (ADR-008), ni le fournisseur TLS (ADR-024).
@@ -111,10 +112,9 @@ authentifie ; Host, Origin et Content-Type empêchent qu'une page web l'utilise 
 
 ### 5. Adresse, découverte et nettoyage
 
-Avec `.http = true`, `enableAutomation` n'exige plus de répertoire `listen` : il crée un répertoire privé neuf par instance
-sous le répertoire de découverte par utilisateur existant (`.../webfront/sessions/<session>/`, 0700), nommé par
-l'identifiant de session (128 bits de l'OS), donc sans collision entre des centaines d'instances. Un `listen` explicite
-reste accepté, aux conditions actuelles (neuf, hors projet). L'enregistrement `<session>.json` gagne l'URL MCP (sans jeton)
+`enableAutomation` n'exige pas de répertoire : il crée un répertoire privé neuf par instance sous le répertoire de
+découverte par utilisateur existant (`.../webfront/sessions/<session>/`, 0700), nommé par l'identifiant de session (aléa
+de l'OS), donc sans collision entre des centaines d'instances. Un `directory` explicite reste accepté (neuf, hors projet). L'enregistrement `<session>.json` gagne l'URL MCP (sans jeton)
 et le chemin de `mcp.json`. L'application affiche une ligne sur stderr (désactivable par `announce = false`) :
 
 ```text
@@ -122,7 +122,7 @@ WebFront MCP (grants: check, build): http://127.0.0.1:PORT/mcp — client config
 ```
 
 `Automation::mcpUrl()` et `Automation::clientConfiguration()` rendent la même information au code. À la fermeture, le
-répertoire, ses fichiers connus (`mcp.json`, `endpoint.json`) et l'enregistrement sont retirés, sans suppression récursive
+répertoire, ses fichiers connus (`mcp.json`) et l'enregistrement sont retirés, sans suppression récursive
 d'un contenu inconnu. Après un arrêt non interceptable, l'activation suivante et la liste des sessions retirent les
 enregistrements dont le processus n'existe plus, avec leurs fichiers connus. Un identifiant de processus recyclé peut
 retarder ce nettoyage ; le jeton d'une instance morte ne sert à rien, son port étant fermé.
@@ -173,15 +173,23 @@ shell peut la lancer en arrière-plan puis attendre l'apparition de `mcp.json` o
 `DEVELOPING_WITH_AGENTS.md` décrit cette attente. Un client qui ne peut que lancer des processus stdio n'est plus pris en
 charge après la migration.
 
-### 10. Sort de `webfront-agent`, de son CLI et de `--serve`
+### 10. Sort de `webfront-agent`, de son CLI et de `--serve` (version 1.2)
 
-- Le relais MCP stdio (`--mcp`, `--attach --mcp`) et `--print-mcp-config` sont retirés, remplacés par l'URL et `mcp.json`.
-- L'hôte prêt à l'emploi (`--serve`, fenêtre possédée, sans C++) devient un exemple, `examples/agent-host/`, qui appelle
-  `enableAutomation` avec `.http = true` ; le starter `app` montre l'appel derrière la garde de distribution.
-- Le CLI JSON (`--operation`, `--schema`, `--agent-help`) sert la CI, les tests et le banc de modèles. Les clients de test
-  Python (`AutomationClient.py`, `AutomationSdkClient.py`, `AutomationModelBenchmark.py`) passent au transport HTTP. La
-  décision de retirer l'exécutable `webfront-agent` est prise à l'étape 4, au vu de ce qui l'utilise encore ; le canal
-  JSON-lines disparaît avec lui.
+Le but de #632 est un seul exécutable : l'application de l'utilisateur est le serveur MCP. `webfront-agent` est retiré en
+entier, sans être transféré dans les exemples :
+
+- le relais MCP stdio (`--mcp`, `--attach --mcp`), `--print-mcp-config`, `--list`, `--serve`, le CLI JSON (`--operation`,
+  `--schema`, `--agent-help`), `webfront_add_agent()`, `WEBFRONT_BUILD_AUTOMATION` et `WEBFRONT_AUTOMATION_FRONTEND` ;
+  définir l'une de ces options n'a plus d'effet qu'un avertissement de configuration ;
+- le canal JSON-lines (`ChannelServer`, `ChannelClient`) et le lecteur stdio ; `Channel.hpp` ne garde que les sockets et les
+  fichiers privés de l'écouteur ;
+- l'option `.http`, puisque HTTP est le seul transport ; `listen` devient `directory`, facultatif ;
+- les statuts 70 (amorçage) et 71 (échéance) du lanceur ; `onUnresponsive` garde son statut 72 par défaut.
+
+Les régressions navigateur pilotent `automation_host`, un programme de test (non livré) qui appelle `enableAutomation` avec
+le provisionnement du pilote de test ; les clients Python (`AutomationClient.py`, `AutomationSdkClient.py`,
+`AutomationModelBenchmark.py`) parlent HTTP. Le profil temporaire et le nettoyage des processus du navigateur propres au
+lanceur disparaissent : une application garde son profil habituel (#617).
 
 ## Modèle de menace : ce qui change
 
@@ -190,7 +198,7 @@ Les menaces, actifs et risques résiduels de l'ADR-019 restent valables. Ce qui 
 | Menace et gravité | Mesures | Risque résiduel |
 | --- | --- | --- |
 | Rebinding DNS, page web qui vise le port MCP — critique | Écouteur loopback distinct ; Host exact ; tout `Origin` et tout `Sec-Fetch-*` refusés ; `application/json` exigé ; aucun CORS ; jeton exigé en plus. | Un navigateur qui omettrait `Origin` sur un `POST` cross-origin et ignorerait la pré-vérification resterait sans jeton. |
-| Client local non autorisé — critique | Jeton de 256 bits, comparaison à temps constant, avant tout traitement ; fichier privé hors projet. | Un processus du même utilisateur peut lire `mcp.json`, comme il lit aujourd'hui `endpoint.json`. |
+| Client local non autorisé — critique | Jeton de 256 bits, comparaison à temps constant, avant tout traitement ; fichier privé hors projet. | Un processus du même utilisateur peut lire `mcp.json`, comme il lisait le fichier du canal JSON-lines. |
 | Fuite du jeton — élevée | Jamais dans le projet, la page, l'URL, la ligne de commande, les journaux, l'affichage ou l'enregistrement ; vie limitée à la session. | Une personne qui copie le fichier dans le projet ou un dépôt l'expose ; la documentation l'interdit, aucun contrôle ne l'empêche. |
 | Exposition réseau — critique | Liaison 127.0.0.1 seule, indépendante de l'adresse et du TLS de l'application ; adresse non configurable. | Un transfert de port établi par l'utilisateur étend l'accès hors de cette décision. |
 | Automatisation expédiée — critique | Erreur de compilation sous `WEBFRONT_DISTRIBUTION`. | Une build qui ne définit pas cette macro n'est pas protégée par elle. |
@@ -206,13 +214,12 @@ Les menaces, actifs et risques résiduels de l'ADR-019 restent valables. Ce qui 
    et `AutomationSdkWindow` sur HTTP, plus un scénario à deux instances simultanées.
 3. **Documentation centrée sur l'URL** : `AUTOMATION.md`, `DEVELOPING_WITH_AGENTS.md`, README, `AGENTS.md` des starters,
    `webfront_write_agent_guide()`, `PROJECT_STATUS.md` et `CHANGELOG.md`.
-4. **Retrait** du stdio, de `--attach --mcp` et de `--print-mcp-config` ; exemple `agent-host` ; décision sur
-   l'exécutable `webfront-agent` et le canal JSON-lines.
+4. **Retrait** de `webfront-agent` en entier et du canal JSON-lines (point 10, version 1.2).
 
 ## Critères d'acceptation de la livraison
 
-- Une application qui fait `enableAutomation(app, {.grants = {...}, .http = true})` répond au MCP ; un client MCP standard
-  (SDK Python officiel) fait `initialize`, `tools/list` et une opération complète (`check`, `build`) sans `webfront-agent`.
+- Une application qui fait `enableAutomation(app, {.grants = {...}})` répond au MCP ; un client MCP standard (SDK Python
+  officiel) fait `initialize`, `tools/list` et une opération complète (`check`, `build`), sans autre programme.
 - Deux applications simultanées exposent chacune leur MCP sans collision, et l'agent désigne l'instance voulue par son URL
   et son `mcp.json`.
 - Les cas de sécurité de l'étape 2 sont couverts par des tests, et l'automatisation ne compile pas en distribution.

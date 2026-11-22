@@ -470,7 +470,7 @@ namespace detail {
 /// development path of an interface is not hand-written pages there but TypeScript/TSX in ui/ built by wf.
 inline constexpr std::string_view developmentPathNote =
   "WebFront: serving local files from documentRoot (development only). The intended development path is a TypeScript/TSX "
-  "interface in ui/, built with `wf dev` in the terminal of app.bootstrap(\"developer\"); an agent can run wf in JSON or MCP "
+  "interface in ui/, built with `wf dev` in the terminal of app.bootstrap(\"developer\"); an agent can run wf through MCP "
   "(docs/DEVELOPING_WITH_AGENTS.md).";
 
 /// Set once the process has written developmentPathNote.
