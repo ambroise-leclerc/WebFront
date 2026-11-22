@@ -606,6 +606,24 @@ std::string remainingApartment() {
     return "apartment type " + std::to_string(static_cast<int>(apartment)) + ", qualifier " + std::to_string(static_cast<int>(qualifier));
 }
 
+// Runs a scenario on a thread of its own: a COM initialization that a window leaves on its thread ends with that thread
+// and cannot be taken for the leftover of the scenario that follows (#638).
+int onFreshThread(const std::function<int()>& scenario) {
+    int                realised = 1;
+    std::exception_ptr failure;
+    std::thread        thread([&] {
+        try {
+            realised = scenario();
+        } catch (...) {
+            failure = std::current_exception();
+        }
+    });
+    thread.join();
+    if (failure)
+        std::rethrow_exception(failure);
+    return realised;
+}
+
 // The apartment is checked only for a page that ran to its end (#638): a page that closes its window on a load failure can
 // close it while the runtime still starts, which leaves the runtime's own COM initialization on the thread (#564).
 int showTwice(std::string_view page, bool earlyClose = false, bool checksApartment = true) {
@@ -669,9 +687,9 @@ int run(std::string_view mode) {
          }                                                    },
         {          "repeated-show",
          [] {
-         showTwice("rejected-ready.html", false, false);
-         showTwice("encoded path %23.html?x=1#example", false, false);
-         return showTwice("no-bridge.html");
+         onFreshThread([] { return showTwice("rejected-ready.html", false, false); });
+         onFreshThread([] { return showTwice("encoded path %23.html?x=1#example", false, false); });
+         return onFreshThread([] { return showTwice("no-bridge.html"); });
          }                                                    },
         {  "navigation-diagnostic",
          [] {

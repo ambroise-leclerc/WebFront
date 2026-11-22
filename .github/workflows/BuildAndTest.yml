@@ -34,7 +34,7 @@ on:
         type: number
         default: 3
       webview2_show_repeats:
-        description: 'Repeat WebView2Lifecycle-repeated-show this many times on the WebView2 job, before the complete suite (0 skips it)'
+        description: 'With repeat_desktop_tests, repeat WebView2Lifecycle-repeated-show this many times on the WebView2 job, before the complete suite (0 skips it; ignored without repeat_desktop_tests, which starts that job)'
         type: number
         default: 0
 
