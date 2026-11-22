@@ -133,13 +133,14 @@ struct HttpConsumerApp {
     };
     std::filesystem::path    project;
     std::vector<std::string> registered{};
+    mutable unsigned         projectReads = 0;
     template <typename Handler>
     void cppFunction(std::string_view name, Handler) {
         registered.emplace_back(name);
     }
     webfront::UISubscription subscribeUIStarted(std::function<void(UI)>) { return {}; }
     webfront::UISubscription subscribeUIClosed(std::function<void(UI)>) { return {}; }
-    const std::filesystem::path& projectDirectory() const { return project; }
+    const std::filesystem::path& projectDirectory() const { ++projectReads; return project; }
 };
 }  // namespace mcphttptests
 
@@ -153,6 +154,9 @@ const Scenario mcpHttpScreening{"MCP HTTP requests are screened on their headers
             require(!accepted.refusal);
             require(accepted.length == 2);
             require(!accepted.expectsContinue);
+            require(!mcphttp::screen(parsed(post(port, "{}")), port, token).refusal);
+            const Object defaults{mcphttp::clientConfiguration("http://127.0.0.1:4321/mcp", token)};
+            require(Object(Object(defaults.raw("mcpServers")).raw("webfront")).has("headers"));
             require(screened(post(port, "{}", "Expect: 100-continue\r\n")).expectsContinue);
         });
         then("localhost is the other accepted spelling, and the Bearer scheme is case-insensitive", [&] {
@@ -670,6 +674,15 @@ const Scenario stableMcp{"A fixed MCP token and port survive activation and auth
     requireThrows([&] { enableAutomation(app, {.mcpToken = std::string(1025, 'a'), .discovery = sessions, .announce = false}); });
     requireThrows([&] { enableAutomation(app, {.mcpToken = std::string(32, 'a') + "\r\nInjected", .discovery = sessions, .announce = false}); });
     requireThrows([&] { enableAutomation(app, {.mcpToken = fixed, .disableMcpAuthentication = true, .discovery = sessions, .announce = false}); });
+    HttpConsumerApp untouched{.project = root.path() / "project"};
+    const auto absent = root.path() / "never-created";
+    requireThrows([&] { enableAutomation(untouched, {.mcpToken = "short", .discovery = absent, .announce = false}); });
+    require(untouched.projectReads == 0);
+    require(untouched.registered.empty());
+    require(!std::filesystem::exists(absent));
+    requireThrows([&] { Automation<HttpConsumerApp> invalid{untouched, {.mcpToken = fixed, .disableMcpAuthentication = true, .discovery = absent, .announce = false}}; });
+    require(untouched.projectReads == 0);
+    require(!std::filesystem::exists(absent));
     auto minimum = enableAutomation(app, {.mcpToken = std::string(32, 'a'), .discovery = sessions, .announce = false});
     minimum->close();
 }};

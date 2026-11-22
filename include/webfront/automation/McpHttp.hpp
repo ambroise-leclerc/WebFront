@@ -157,7 +157,7 @@ struct Screening {
 
 /// Decides on the headers of a request, before its body is read: path, `Host`, `Origin` and `Sec-Fetch-*`, method,
 /// the Bearer token, then the media types and the announced length of a `POST`. `port` is the listener's own.
-inline Screening screen(const http::Request& request, unsigned short port, std::string_view token, bool authentication) {
+inline Screening screen(const http::Request& request, unsigned short port, std::string_view token, bool authentication = true) {
     using detail::lower;
     // DNS rebinding: a name that resolves to 127.0.0.1 still carries its own Host. Only the two loopback spellings pass.
     const auto host  = detail::single(request, "Host");
@@ -338,12 +338,20 @@ private:
 };
 
 /// The client configuration of an instance: its URL and its token. `name` names the server for the client.
-inline std::string clientConfiguration(std::string_view url, std::string_view token, std::string_view name, bool authentication) {
+inline std::string clientConfiguration(std::string_view url, std::string_view token, std::string_view name = "webfront", bool authentication = true) {
     std::map<std::string, std::string> fields{{"type", json::quote("http")}, {"url", json::quote(url)}};
     if (authentication)
         fields.emplace("headers", objectJson({{"Authorization", json::quote("Bearer " + std::string(token))}}));
     const auto server = objectJson(fields);
     return "{\n  \"mcpServers\": {\n    " + json::quote(name) + ": " + server + "\n  }\n}\n";
+}
+
+/// Validate the selected authentication options before creating session or listener resources.
+inline void validateTokenOptions(const std::optional<std::string>& fixed, bool authentication) {
+    if (!authentication && fixed)
+        throw std::invalid_argument("A fixed MCP token cannot be combined with disabled authentication");
+    if (fixed && (fixed->size() < 32 || fixed->size() > 1024 || !std::ranges::all_of(*fixed, [](unsigned char c) { return c >= 0x21 && c <= 0x7e; })))
+        throw std::invalid_argument("MCP token must contain 32 to 1024 visible ASCII characters without spaces");
 }
 
 /// A failure to bind or listen on the requested MCP port; retains the native error code.
@@ -440,12 +448,9 @@ private:
     };
 
     static std::string selectToken(const std::optional<std::string>& fixed, bool authentication) {
-        if (!authentication && fixed)
-            throw std::invalid_argument("A fixed MCP token cannot be combined with disabled authentication");
+        validateTokenOptions(fixed, authentication);
         if (!fixed)
             return authentication ? channel::nonce() : std::string{};
-        if (fixed->size() < 32 || fixed->size() > 1024 || !std::ranges::all_of(*fixed, [](unsigned char c) { return c >= 0x21 && c <= 0x7e; }))
-            throw std::invalid_argument("MCP token must contain 32 to 1024 visible ASCII characters without spaces");
         return *fixed;
     }
     void withdraw() noexcept {

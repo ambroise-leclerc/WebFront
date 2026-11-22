@@ -232,6 +232,7 @@ private:
         privateDirectory.cleanup();
     }
     static std::shared_ptr<Session> make(App& app, const AutomationOptions& options) {
+        mcphttp::validateTokenOptions(options.mcpToken, !options.disableMcpAuthentication);
         if (options.startupTimeout <= std::chrono::seconds::zero())
             throw std::invalid_argument("Automation startupTimeout must be positive");
         if (options.closeGrace < std::chrono::milliseconds::zero())
@@ -280,6 +281,7 @@ private:
 /// `shutdown()`.
 template <typename App>
 std::unique_ptr<Automation<App>> enableAutomation(App& app, AutomationOptions options) {
+    mcphttp::validateTokenOptions(options.mcpToken, !options.disableMcpAuthentication);
     return std::make_unique<Automation<App>>(app, std::move(options));
 }
 }  // namespace webfront::automation

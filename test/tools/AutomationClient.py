@@ -594,6 +594,8 @@ def stable(args):
                             path = pathlib.Path(host.record()["configuration"])
                         except AssertionError:
                             if host.process.poll() == 73:
+                                # On either launch the port may have been taken in the gap; restart both launches
+                                # with a new port and client so each successful pair still uses one configuration.
                                 break
                             raise
                         if client is None:

@@ -104,7 +104,7 @@ Avant l'authentification, et donc même avec un jeton valide :
 
 - **Host** doit valoir exactement `127.0.0.1:<port>` ou `localhost:<port>` ; sinon 421. Cela écarte le rebinding DNS.
 - **Origin** non vide : 403, quelle que soit sa valeur, y compris l'origine de l'application. Un client MCP natif n'envoie
-  pas d'`Origin` ; un navigateur l'envoie sur tout `POST`. `Sec-Fetch-Site` ou `Sec-Fetch-Mode` présent : 403 aussi.
+  pas d'`Origin` ; un navigateur l'envoie sur tout `POST`. Tout en-tête `Sec-Fetch-*` présent reçoit aussi 403.
 - **Content-Type** doit être `application/json` : une requête « simple » de formulaire est refusée (415), et la requête de
   pré-vérification `OPTIONS` reçoit 405 sans aucun en-tête CORS. Aucune réponse ne porte `Access-Control-Allow-*`.
 
