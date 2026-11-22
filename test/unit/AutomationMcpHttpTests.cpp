@@ -157,6 +157,12 @@ const Scenario mcpHttpScreening{"MCP HTTP requests are screened on their headers
             require(!mcphttp::screen(parsed(post(port, "{}")), port, token).refusal);
             const Object defaults{mcphttp::clientConfiguration("http://127.0.0.1:4321/mcp", token)};
             require(Object(Object(defaults.raw("mcpServers")).raw("webfront")).has("headers"));
+            const auto ordered = mcphttp::clientConfiguration("http://127.0.0.1:4321/mcp", token);
+            require(ordered.find("\"type\"") < ordered.find("\"url\""));
+            require(ordered.find("\"url\"") < ordered.find("\"headers\""));
+            const Object escaped{mcphttp::clientConfiguration("http://127.0.0.1:4321/mcp", "a\"b", "custom")};
+            const Object server{Object(escaped.raw("mcpServers")).raw("custom")};
+            require(Object(server.raw("headers")).string("Authorization") == "Bearer a\"b");
             require(screened(post(port, "{}", "Expect: 100-continue\r\n")).expectsContinue);
         });
         then("localhost is the other accepted spelling, and the Bearer scheme is case-insensitive", [&] {
@@ -626,48 +632,68 @@ const Scenario stableMcp{"A fixed MCP token and port survive activation and auth
     HttpConsumerApp app{.project = root.path() / "project"};
     const auto sessions = root.path() / "sessions";
     const std::string fixed(64, 'a');
-    auto first = enableAutomation(app, {.mcpToken = fixed, .discovery = sessions, .announce = false});
-    const auto port = static_cast<unsigned short>(std::stoi(first->mcpUrl().substr(first->mcpUrl().rfind(':') + 1)));
-    const auto config = channel::readEndpoint(first->directory(), "mcp.json");
-    first->close();
-    for (int run = 0; run < 2; ++run) {
-        auto instance = enableAutomation(app, {.mcpPort = port, .mcpToken = fixed, .discovery = sessions, .announce = false});
-        require(channel::readEndpoint(instance->directory(), "mcp.json") == config);
-        for (const auto& entry : discovery::list(sessions)) {
-            std::ifstream input(sessions / (entry.session + ".json"));
-            std::ostringstream record;
-            record << input.rdbuf();
-            require(record.str().find(fixed) == std::string::npos);
+    // A port selected by the OS can be claimed between launches. Retry only that bind error, keeping each
+    // successful pair on the same port and token; any other failure still fails the scenario.
+    for (int attempt = 0; ; ++attempt) {
+        try {
+            auto first = enableAutomation(app, {.mcpToken = fixed, .discovery = sessions, .announce = false});
+            require(first->banner().find("WARNING") == std::string::npos);
+            const auto port = static_cast<unsigned short>(std::stoi(first->mcpUrl().substr(first->mcpUrl().rfind(':') + 1)));
+            const auto config = channel::readEndpoint(first->directory(), "mcp.json");
+            first->close();
+            for (int run = 0; run < 2; ++run) {
+                auto instance = enableAutomation(app, {.mcpPort = port, .mcpToken = fixed, .discovery = sessions, .announce = false});
+                require(channel::readEndpoint(instance->directory(), "mcp.json") == config);
+                for (const auto& entry : discovery::list(sessions)) {
+                    std::ifstream input(sessions / (entry.session + ".json"));
+                    std::ostringstream record;
+                    record << input.rdbuf();
+                    require(record.str().find(fixed) == std::string::npos);
+                }
+                const auto opened = roundTrip(port, post(port, initialize, {}, fixed));
+                require(opened.status == 200);
+                require(roundTrip(port, post(port, initialize, {}, std::string(64, 'b'))).status == 401);
+                const auto extra = "MCP-Session-Id: " + opened.header("mcp-session-id") + "\r\nMCP-Protocol-Version: 2025-11-25\r\n";
+                require(roundTrip(port, post(port, initialized, extra, fixed)).status == 202);
+                const auto result = roundTrip(port, post(port, R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"webfront.session","arguments":{}}})", extra, fixed));
+                require(result.status == 200);
+                require(result.body.find("result") != std::string::npos);
+                requireThrows([&] { enableAutomation(app, {.mcpPort = port, .mcpToken = fixed, .discovery = sessions, .announce = false}); });
+                auto side = enableAutomation(app, {.discovery = sessions, .announce = false});
+                require(side->mcpUrl() != instance->mcpUrl());
+                side->close();
+                instance->close();
+            }
+            auto open = enableAutomation(app, {.mcpPort = port, .disableMcpAuthentication = true, .discovery = sessions, .announce = false});
+            require(open->banner().find("WARNING: MCP authentication disabled") != std::string::npos);
+            require(open->banner().find("local processes can use granted operations") != std::string::npos);
+            require(open->banner().find("WARNING") < open->banner().find("grants:"));
+            require(open->banner().ends_with(open->clientConfiguration().generic_string()));
+            const Object configuration{channel::readEndpoint(open->directory(), "mcp.json")};
+            require(!Object(Object(configuration.raw("mcpServers")).raw("webfront")).has("headers"));
+            require(channel::readEndpoint(open->directory(), "mcp.json").find(fixed) == std::string::npos);
+            auto request = post(port, initialize);
+            request.erase(request.find("Authorization:"), request.find("\r\n", request.find("Authorization:")) + 2 - request.find("Authorization:"));
+            require(roundTrip(port, request).status == 200);
+            require(roundTrip(port, post(port, initialize, {}, "wrong-token")).status == 200);
+            require(roundTrip(port, post(port, initialize, "Origin: http://evil.test\r\n")).status == 403);
+            require(roundTrip(port, post(port, initialize, "Sec-Fetch-Mode: cors\r\n")).status == 403);
+            require(roundTrip(port, post(port, initialize, "Sec-Fetch-Dest: document\r\n")).status == 403);
+            auto hostile = request;
+            hostile.replace(hostile.find("127.0.0.1"), 9, "evil.test");
+            require(roundTrip(port, hostile).status == 421);
+            open->close();
+            break;
+        } catch (const mcphttp::BindError& error) {
+#ifdef _WIN32
+            const auto addressInUse = WSAEADDRINUSE;
+#else
+            const auto addressInUse = EADDRINUSE;
+#endif
+            if (error.code().value() != addressInUse || attempt == 4)
+                throw;
         }
-        const auto opened = roundTrip(port, post(port, initialize, {}, fixed));
-        require(opened.status == 200);
-        require(roundTrip(port, post(port, initialize, {}, std::string(64, 'b'))).status == 401);
-        const auto extra = "MCP-Session-Id: " + opened.header("mcp-session-id") + "\r\nMCP-Protocol-Version: 2025-11-25\r\n";
-        require(roundTrip(port, post(port, initialized, extra, fixed)).status == 202);
-        const auto result = roundTrip(port, post(port, R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"webfront.session","arguments":{}}})", extra, fixed));
-        require(result.status == 200);
-        require(result.body.find("result") != std::string::npos);
-        requireThrows([&] { enableAutomation(app, {.mcpPort = port, .mcpToken = fixed, .discovery = sessions, .announce = false}); });
-        auto side = enableAutomation(app, {.discovery = sessions, .announce = false});
-        require(side->mcpUrl() != instance->mcpUrl());
-        side->close();
-        instance->close();
     }
-    auto open = enableAutomation(app, {.mcpPort = port, .disableMcpAuthentication = true, .discovery = sessions, .announce = false});
-    const Object configuration{channel::readEndpoint(open->directory(), "mcp.json")};
-    require(!Object(Object(configuration.raw("mcpServers")).raw("webfront")).has("headers"));
-    require(channel::readEndpoint(open->directory(), "mcp.json").find(fixed) == std::string::npos);
-    auto request = post(port, initialize);
-    request.erase(request.find("Authorization:"), request.find("\r\n", request.find("Authorization:")) + 2 - request.find("Authorization:"));
-    require(roundTrip(port, request).status == 200);
-    require(roundTrip(port, post(port, initialize, {}, "wrong-token")).status == 200);
-    require(roundTrip(port, post(port, initialize, "Origin: http://evil.test\r\n")).status == 403);
-    require(roundTrip(port, post(port, initialize, "Sec-Fetch-Mode: cors\r\n")).status == 403);
-    require(roundTrip(port, post(port, initialize, "Sec-Fetch-Dest: document\r\n")).status == 403);
-    auto hostile = request;
-    hostile.replace(hostile.find("127.0.0.1"), 9, "evil.test");
-    require(roundTrip(port, hostile).status == 421);
-    open->close();
     requireThrows([&] { enableAutomation(app, {.mcpToken = "", .discovery = sessions, .announce = false}); });
     requireThrows([&] { enableAutomation(app, {.mcpToken = "a", .discovery = sessions, .announce = false}); });
     requireThrows([&] { enableAutomation(app, {.mcpToken = std::string(31, 'a'), .discovery = sessions, .announce = false}); });
@@ -685,4 +711,20 @@ const Scenario stableMcp{"A fixed MCP token and port survive activation and auth
     require(!std::filesystem::exists(absent));
     auto minimum = enableAutomation(app, {.mcpToken = std::string(32, 'a'), .discovery = sessions, .announce = false});
     minimum->close();
+}};
+
+const Scenario unauthenticatedMcpBanner{"An unauthenticated MCP listener warns at startup", [] {
+    using namespace mcphttptests;
+    webfront::test::TemporaryDirectory root;
+    std::filesystem::create_directory(root.path() / "project");
+    HttpConsumerApp app{.project = root.path() / "project"};
+    std::ostringstream captured;
+    struct RestoreBuffer {
+        std::streambuf* previous;
+        ~RestoreBuffer() { std::cerr.rdbuf(previous); }
+    } restore{std::cerr.rdbuf(captured.rdbuf())};
+    auto automation = enableAutomation(app, {.disableMcpAuthentication = true, .discovery = root.path() / "sessions"});
+    require(captured.str().find("WARNING: MCP authentication disabled") != std::string::npos);
+    require(captured.str().find(automation->mcpUrl()) != std::string::npos);
+    automation->close();
 }};

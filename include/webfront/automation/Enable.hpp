@@ -127,6 +127,7 @@ public:
           registration(discoveryDirectory, record(*session, privateDirectory.path, mcp)),
           grants(std::move(options.grants)),
           callbackNames(std::move(options.callbacks)),
+          authenticationDisabled(options.disableMcpAuthentication),
           grace(options.closeGrace),
           unresponsive(std::move(options.onUnresponsive)),
           launched(Clock::now()),
@@ -199,7 +200,8 @@ public:
         std::string names;
         for (const auto& callback : callbackNames)
             names += (names.empty() ? "" : ", ") + callback;
-        const auto granted = "grants: " + (list.empty() ? std::string{"none"} : list) + (names.empty() ? "" : "; callbacks: " + names);
+        const auto granted = std::string{authenticationDisabled ? "WARNING: MCP authentication disabled; local processes can use granted operations; " : ""}
+                           + "grants: " + (list.empty() ? std::string{"none"} : list) + (names.empty() ? "" : "; callbacks: " + names);
         return "WebFront MCP (" + granted + "): " + mcp.url() + " - client configuration: " + mcp.configuration().generic_string();
     }
     /// `base` marked as shared with an agent, for a window title: automation must be visible to the person using it.
@@ -267,6 +269,7 @@ private:
     discovery::Registration       registration;
     std::vector<std::string>      grants;
     std::vector<std::string>      callbackNames;
+    bool                          authenticationDisabled;
     std::chrono::milliseconds     grace;
     std::function<void()>         unresponsive;
     std::mutex                    revocation;

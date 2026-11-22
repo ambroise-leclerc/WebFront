@@ -339,14 +339,15 @@ private:
 
 /// The client configuration of an instance: its URL and its token. `name` names the server for the client.
 inline std::string clientConfiguration(std::string_view url, std::string_view token, std::string_view name = "webfront", bool authentication = true) {
-    std::map<std::string, std::string> fields{{"type", json::quote("http")}, {"url", json::quote(url)}};
+    std::string server = "{\"type\":" + json::quote("http") + ",\"url\":" + json::quote(url);
     if (authentication)
-        fields.emplace("headers", objectJson({{"Authorization", json::quote("Bearer " + std::string(token))}}));
-    const auto server = objectJson(fields);
+        server += ",\"headers\":" + objectJson({{"Authorization", json::quote("Bearer " + std::string(token))}});
+    server += "}";
     return "{\n  \"mcpServers\": {\n    " + json::quote(name) + ": " + server + "\n  }\n}\n";
 }
 
-/// Validate the selected authentication options before creating session or listener resources.
+/// Validate options at each independent entry point: enableAutomation, direct Automation construction and direct Server
+/// construction. The outer checks precede allocation/session creation; Server must also protect its own callers.
 inline void validateTokenOptions(const std::optional<std::string>& fixed, bool authentication) {
     if (!authentication && fixed)
         throw std::invalid_argument("A fixed MCP token cannot be combined with disabled authentication");

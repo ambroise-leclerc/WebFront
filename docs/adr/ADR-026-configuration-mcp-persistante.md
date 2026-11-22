@@ -4,8 +4,8 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.0 | 2026-11-22 | Proposée | Ambroise Leclerc | Configuration persistante par projet (#637). | — |
-| 1.1 | 2026-11-22 | Acceptée, puis suspendue | Ambroise Leclerc | L'usurpation de l'écouteur révèle une exposition du jeton persistant. | — |
+| 1.0 | 2026-11-22 | Proposée | Ambroise Leclerc | Configuration persistante par projet (#637). | 110b138 (historique consigné ; pas de commit distinct) |
+| 1.1 | 2026-11-22 | Acceptée, puis suspendue | Ambroise Leclerc | L'usurpation de l'écouteur révèle une exposition du jeton persistant. | 110b138 (historique consigné ; pas de commit distinct) |
 | 1.2 | 2026-11-22 | Acceptée (livraison en cours) | Ambroise Leclerc | Mode explicite simplifié, compromis de sécurité acceptés ; issue #637 amendée. | #637 |
 
 ## Décision
@@ -16,7 +16,7 @@ Ces options concernent uniquement le développement : l'automatisation reste exc
 
 ## Conséquences
 
-Un autre utilisateur local peut occuper le port pendant l'arrêt de l'application et récupérer un Bearer durable envoyé par le client : ce jeton restera utilisable jusqu'à rotation. Sans authentification, tout processus local pouvant joindre le port peut exercer les grants. Un serveur usurpé peut également renvoyer des réponses mensongères au client. Ces limites sont acceptées uniquement sur choix explicite. Host et Origin protègent contre les requêtes de pages web, pas contre ces processus. Un challenge non standard exigerait un client compatible ; le Bearer fonctionne avec les clients MCP ordinaires.
+Un autre utilisateur local peut occuper le port pendant l'arrêt de l'application et récupérer un Bearer durable envoyé par le client : ce jeton restera utilisable jusqu'à rotation. Sans authentification, tout processus local pouvant joindre le port peut exercer les grants. Un serveur usurpé peut également renvoyer des réponses mensongères au client. Ces limites sont acceptées uniquement sur choix explicite. Host et Origin protègent contre les requêtes de pages web, pas contre ces processus. Une authentification par défi-réponse, où le client prouve la possession du secret en répondant à un aléa sans transmettre le secret lui-même, exigerait une prise en charge spécifique du client et n'authentifierait pas à elle seule le serveur ; le Bearer fonctionne avec les clients MCP ordinaires.
 
 Après un crash ou un arrêt forcé, le fichier privé de session peut rester sur disque avec le jeton durable. La découverte tente de nettoyer les répertoires de session par défaut lorsque le processus n'existe plus ; ce nettoyage peut être différé ou échouer, et ne touche pas un répertoire fourni explicitement. La fermeture propre retire la configuration. L'application ou son propriétaire doit gérer les fichiers résiduels et la rotation du secret si nécessaire.
 
