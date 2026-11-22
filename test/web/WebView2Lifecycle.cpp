@@ -636,16 +636,19 @@ int showTwice(std::string_view page, bool earlyClose = false, bool checksApartme
         });
         EarlyNativeClose closer(earlyClose);
         app.show(page);
+        // Always recorded, also where it is not judged, so that the log of a passing run tells which pages leave a COM
+        // initialization on their thread and in which iteration (#638). "none" is no apartment or the implicit MTA.
+        const auto left = remainingApartment();
+        std::cout << "apartment: page=" << page << " iteration=" << iteration << " early-close=" << earlyClose << " left="
+                  << (left.empty() ? "none" : left) << std::endl;
         if (earlyClose)
             require(closer.closeSent, "Native close was not sent during window creation");
         require(!connected, "Unexpected bridge connection");
         // Closing while the runtime starts can leave the runtime's own COM initialization on the thread (#564): the frontend
         // answers for its apartment (unit test of Apartment) and, here, for a session that ran to its end.
-        if (!earlyClose && checksApartment) {
-            const auto left = remainingApartment();
+        if (!earlyClose && checksApartment)
             require(left.empty(),
                     "STA COM initialization was not released: " + left + " (page " + std::string(page) + ", iteration " + std::to_string(iteration) + ")");
-        }
     }
     return 0;
 }

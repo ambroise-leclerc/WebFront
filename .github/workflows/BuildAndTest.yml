@@ -288,8 +288,12 @@ jobs:
               ctest --test-dir "$root/build" -C $config -LE 'web-integration|portability' --parallel 4 --no-tests=error *> $null
             }
           }
-          ctest --test-dir build -C ${{ matrix.build_type }} -R WebView2Lifecycle-repeated-show --repeat until-fail:${{ inputs.webview2_show_repeats }} --output-on-failure --no-tests=error
+          # -V keeps the "apartment:" line each show() records, so that a passing run says which pages leave a COM initialization.
+          $log = Join-Path $env:RUNNER_TEMP 'repeated-show.log'
+          ctest --test-dir build -C ${{ matrix.build_type }} -R WebView2Lifecycle-repeated-show --repeat until-fail:${{ inputs.webview2_show_repeats }} -V --no-tests=error | Tee-Object -FilePath $log
           $status = $LASTEXITCODE
+          Write-Host '--- apartment left after show(), by page, iteration and outcome ---'
+          Select-String -Path $log -Pattern 'apartment: page=' | ForEach-Object { $_.Line -replace '^.*apartment: ', '' } | Group-Object | Sort-Object Name | ForEach-Object { '{0,4} x {1}' -f $_.Count, $_.Name }
           New-Item $stop -ItemType File -Force | Out-Null
           Wait-Job $load -Timeout 300 | Out-Null
           Stop-Job $load -ErrorAction SilentlyContinue
