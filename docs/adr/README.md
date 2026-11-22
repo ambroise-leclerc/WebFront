@@ -1,7 +1,7 @@
 # WebFront architecture decision records
 
 This directory describes WebFront’s architectural choices and the constraints to preserve
-when making changes or generating code. It contains **25 ADRs**, with unique numbers.
+when making changes or generating code. It contains **26 ADRs**, with unique numbers.
 The accepted baseline corresponds to commit `b031ab5` dated **2026-10-19**;
 the developer environment proposals are dated **2026-10-20**, the direct frontend access proposal **2026-10-24**,
 the DOM access proposal **2026-10-26**, the developer automation proposal **2026-10-28**, accepted **2026-10-29**, the system services proposal **2026-10-31**, and the developer environment publication proposal **2026-11-02**. Each ADR is versioned
@@ -68,6 +68,7 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-023](ADR-023-espace-de-noms-des-commandes-du-terminal.md) | Terminal command names: `wf` stays the prefix of project commands, read-only file commands (`ls`, `cat`, `tree`, `mounts`), file command names reserved ahead, dependency graph with `wf list --tree`, `wf why`, `wf info` | Accepted | 2026-11-14 | 1.0 — 2026-11-14 |
 | [ADR-024](ADR-024-tls-integre.md) | Optional integrated TLS 1.3 server | Proposed | 2026-11-21 | 1.0 |
 | [ADR-025](ADR-025-mcp-http-dans-l-application.md) | The application serves MCP over Streamable HTTP on its own loopback listener, with a session Bearer token, strict Host/Origin checks, per-instance discovery and no automation in distribution builds; the webfront-agent launcher is removed; amends ADR-019 | Accepted (delivery in progress) | 2026-11-21 | 1.3 — 2026-11-22 |
+| [ADR-026](ADR-026-configuration-mcp-persistante.md) | Stable MCP client configuration with explicit development security modes | Accepted (delivery in progress) | 2026-11-22 | 1.2 — 2026-11-22 |
 
 Numbering follows the reading topics; milestones and individual file histories provide
 the chronology, which does not follow the numerical order.
@@ -113,7 +114,7 @@ Do not replace historical dates with the date of an editorial change to the docu
 Keep previous rows and update the current version in the index.
 
 - Use one `ADR-NNN-description.md` file per decision and one row in this index. The next number
-  is **ADR-026**. Retain historical numbers and files.
+  is **ADR-027**. Retain historical numbers and files.
 - For a new decision that has not been integrated, use **Proposée** (Proposed), its actual
   proposal date and validation criteria; do not assign an artificial historical commit date.
 - After integration, record the date and supporting commits, the accepted negative

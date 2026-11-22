@@ -79,6 +79,10 @@ struct AutomationOptions {
     /// The port of the MCP listener: 0 (the default) lets the OS choose; a chosen port is never replaced, its being taken
     /// makes the activation throw.
     unsigned short mcpPort = 0;
+    /// Optional durable Bearer token, supplied by the application; absent selects a random token per session.
+    std::optional<std::string> mcpToken{};
+    /// Explicitly allow local MCP clients without a token. Development only.
+    bool disableMcpAuthentication = false;
     /// A new private directory outside the project that receives the client configuration (`mcp.json`). Empty (the
     /// default), a directory named after the session is created in the discovery directory.
     std::filesystem::path directory{};
@@ -119,7 +123,7 @@ public:
         : session(make(app, options)),
           discoveryDirectory(options.discovery.empty() ? discovery::defaultDirectory() : options.discovery),
           privateDirectory(channel::outsideProject(*session, privateDirectoryFor(options, discoveryDirectory, *session))),
-          mcp(session, privateDirectory.path, options.mcpPort),
+          mcp(session, privateDirectory.path, options.mcpPort, options.mcpToken, !options.disableMcpAuthentication),
           registration(discoveryDirectory, record(*session, privateDirectory.path, mcp)),
           grants(std::move(options.grants)),
           callbackNames(std::move(options.callbacks)),

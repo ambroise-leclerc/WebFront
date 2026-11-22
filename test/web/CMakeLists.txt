@@ -185,6 +185,8 @@ if(_browser_tests_available)
             webfront_add_automation_test(${_case} "automation-${_scenario}" 240 AutomationClient.py --scenario "${_scenario}"
                 --fixture "${_automation_project}" --work "${CMAKE_CURRENT_BINARY_DIR}/automation-${_scenario}")
         endforeach()
+        webfront_add_automation_test(AutomationStableMcp automation-stable 240 AutomationClient.py --scenario stable
+            --fixture "${_automation_project}" --work "${CMAKE_CURRENT_BINARY_DIR}/automation-stable")
         # Two applications side by side, each driven through its own URL, with the application's own callback (#501, #632).
         webfront_add_automation_test(AutomationConsumerWindow automation-consumer 240 AutomationClient.py --scenario consumer
             --fixture "${PROJECT_SOURCE_DIR}/test/fixtures/consumer-project" --work "${CMAKE_CURRENT_BINARY_DIR}/automation-consumer")

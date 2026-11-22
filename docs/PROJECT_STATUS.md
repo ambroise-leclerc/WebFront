@@ -47,6 +47,8 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   `mcp.json` client configuration; no other program is built or launched ([ADR-025](adr/ADR-025-mcp-http-dans-l-application.md),
   #632). Native grants select check/build/test/preview, bounded inspection, semantic actions, the setup operations and the
   owner's allow-listed callbacks (`call`). Several instances run side by side, each with its own URL and discovery record.
+  A fixed MCP port and application-supplied token can keep a client configuration stable; authentication can also be
+  explicitly disabled for development, with the local-process risks described in [Automation](AUTOMATION.md) (#637).
   Remote access is out of scope and automation does not compile with `WEBFRONT_DISTRIBUTION`. This does not isolate
   untrusted project code. [Automation](AUTOMATION.md) documents the listener, lifecycle, limits and the supported MCP profile.
   The `webfront-agent` launcher, its JSON CLI and MCP on stdio were removed. Known limitation until the next environment

@@ -82,6 +82,8 @@ int main(int argc, char** argv) {
         std::filesystem::path project, environment, registry, directory, sessions, called;
         std::string           integrity, manifest, grants = "check,build,preview,inspect,interact,call", callbacks = "consumer.render";
         std::chrono::seconds  timeout{30}, startupTimeout{90};
+        unsigned short mcpPort = 0;
+        bool stableMcp = false;
         for (int i = 1; i + 1 < argc; i += 2) {
             const std::string_view name{argv[i]};
             const std::string      value{argv[i + 1]};
@@ -99,6 +101,10 @@ int main(int argc, char** argv) {
                 directory = value;
             else if (name == "--sessions")
                 sessions = value;
+            else if (name == "--mcp-port")
+                mcpPort = static_cast<unsigned short>(std::stoul(value));
+            else if (name == "--stable-mcp")
+                stableMcp = value == "true";
             else if (name == "--called")
                 called = value;
             else if (name == "--grants")
@@ -144,6 +150,8 @@ int main(int argc, char** argv) {
         auto automation = webfront::automation::enableAutomation(app,
                                                                  {.grants         = split(grants),
                                                                   .callbacks      = called.empty() ? std::vector<std::string>{} : split(callbacks),
+                                                                  .mcpPort        = mcpPort,
+                                                                  .mcpToken       = stableMcp ? std::optional<std::string>{std::string(64, 'a')} : std::nullopt,
                                                                   .directory      = directory,
                                                                   .discovery      = sessions,
                                                                   .timeout        = timeout,

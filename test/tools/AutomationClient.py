@@ -563,13 +563,44 @@ def session(args):
     print("MCP real-window regression passed: diagnostics/correction/check/build/test/preview/actions/cancellation/shared session/setup")
 
 
+def stable(args):
+    pathlib.Path(args.work).mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=args.work, prefix="stable-") as temporary:
+        root = pathlib.Path(temporary)
+        project = root / "project"
+        shutil.copytree(args.fixture, project)
+        install(args, project)
+        with socket.socket() as reservation:
+            reservation.bind(("127.0.0.1", 0))
+            port = reservation.getsockname()[1]
+        client, original = None, None
+        with (root / "stable.log").open("w") as log:
+            for run in range(2):
+                host = Host(args, project, root, f"stable-{run}", log, ["--stable-mcp", "true", "--mcp-port", str(port)])
+                try:
+                    path = pathlib.Path(host.record()["configuration"])
+                    if client is None:
+                        original = path.read_bytes()
+                        client = Client(path)
+                    else:
+                        assert path.read_bytes() == original
+                        client.mcp_session = None
+                    client.initialize()
+                    assert client.tool("session")["session"] == client.session
+                    client.close()
+                    host.stop()
+                    assert host.wait() == 0, host.logs()
+                finally:
+                    host.close()
+
+
 def main():
     parser = argparse.ArgumentParser()
     for name in ("host", "driver", "environment", "provision", "registry", "fixture", "work"):
         parser.add_argument("--" + name, required=True)
-    parser.add_argument("--scenario", choices=("session", "mcp-watchdog", "consumer"), default="session")
+    parser.add_argument("--scenario", choices=("session", "mcp-watchdog", "consumer", "stable"), default="session")
     args = parser.parse_args()
-    {"session": session, "mcp-watchdog": watchdog, "consumer": consumer}[args.scenario](args)
+    {"session": session, "mcp-watchdog": watchdog, "consumer": consumer, "stable": stable}[args.scenario](args)
 
 
 if __name__ == "__main__":

@@ -51,6 +51,8 @@ wf dev ui/main.ts        # then wf check, wf test and wf embed as above
 
 ## Run wf yourself, through MCP
 
+To configure a client once, the application can set a fixed `mcpPort` and provide the same `mcpToken` on each launch. Copy the first private `mcp.json` URL and Bearer header into the client user configuration, outside the project. Start the application before connecting. This opt-in accepts the local server impersonation risk described in `docs/AUTOMATION.md`; the default uses a fresh session token.
+
 Do not ask a person to type these commands and paste their output. The application runs them in its own window and serves
 them over MCP at a URL of its own: it is the MCP server, no other program is needed.
 

@@ -157,7 +157,7 @@ struct Screening {
 
 /// Decides on the headers of a request, before its body is read: path, `Host`, `Origin` and `Sec-Fetch-*`, method,
 /// the Bearer token, then the media types and the announced length of a `POST`. `port` is the listener's own.
-inline Screening screen(const http::Request& request, unsigned short port, std::string_view token) {
+inline Screening screen(const http::Request& request, unsigned short port, std::string_view token, bool authentication = true) {
     using detail::lower;
     // DNS rebinding: a name that resolves to 127.0.0.1 still carries its own Host. Only the two loopback spellings pass.
     const auto host  = detail::single(request, "Host");
@@ -166,7 +166,9 @@ inline Screening screen(const http::Request& request, unsigned short port, std::
         return {.refusal = refusal(421, "This listener answers 127.0.0.1 and localhost only")};
     // A browser sends Origin on every POST, and Sec-Fetch-* on every request it makes: no web page may reach the route,
     // the application's own page included. A native MCP client sends neither.
-    if (detail::present(request, "Origin") || detail::present(request, "Sec-Fetch-Site") || detail::present(request, "Sec-Fetch-Mode"))
+    if (detail::present(request, "Origin") || std::ranges::any_of(request.headers, [](const auto& header) {
+            return detail::lower(header.name).starts_with("sec-fetch-");
+        }))
         return {.refusal = refusal(403, "Requests from web pages are refused")};
     if (request.uri != "/mcp")
         return {.refusal = refusal(404, "Not found")};
@@ -178,8 +180,8 @@ inline Screening screen(const http::Request& request, unsigned short port, std::
         return {.refusal = std::move(answer)};
     }
     const auto authorization = detail::single(request, "Authorization");
-    bool       authorized    = false;
-    if (authorization && !authorization->empty()) {
+    bool       authorized    = !authentication;
+    if (authentication && authorization && !authorization->empty()) {
         const auto space = authorization->find(' ');
         if (space != std::string::npos && lower(authorization->substr(0, space)) == "bearer")
             authorized = channel::sameToken(detail::trimmed(std::string_view(*authorization).substr(space + 1)), token);
@@ -336,12 +338,11 @@ private:
 };
 
 /// The client configuration of an instance: its URL and its token. `name` names the server for the client.
-inline std::string clientConfiguration(std::string_view url, std::string_view token, std::string_view name = "webfront") {
-    const auto server = objectJson({
-        {   "type",                                                 json::quote("http")},
-        {    "url",                                                    json::quote(url)},
-        {"headers", objectJson({{"Authorization", json::quote("Bearer " + std::string(token))}})},
-    });
+inline std::string clientConfiguration(std::string_view url, std::string_view token, std::string_view name = "webfront", bool authentication = true) {
+    std::map<std::string, std::string> fields{{"type", json::quote("http")}, {"url", json::quote(url)}};
+    if (authentication)
+        fields.emplace("headers", objectJson({{"Authorization", json::quote("Bearer " + std::string(token))}}));
+    const auto server = objectJson(fields);
     return "{\n  \"mcpServers\": {\n    " + json::quote(name) + ": " + server + "\n  }\n}\n";
 }
 
@@ -352,16 +353,17 @@ class Server {
 public:
     /// @param port 0 (the default) lets the OS choose; a chosen port is never replaced: when it is taken the constructor throws
     /// @throws std::system_error naming the address, the port and the cause when the listener cannot be bound
-    Server(std::shared_ptr<Backend> controller, const std::filesystem::path& directory, unsigned short port = 0)
+    Server(std::shared_ptr<Backend> controller, const std::filesystem::path& directory, unsigned short port = 0,
+           std::optional<std::string> fixedToken = std::nullopt, bool authentication = true)
         : backend(std::move(controller)),
           endpoint(*backend),
           listener(channel::createSocket()),
-          token(channel::nonce()),
+          token(selectToken(fixedToken, authentication)),
           boundPort(bind(listener, port)),
           address("http://127.0.0.1:" + std::to_string(boundPort) + "/mcp"),
-          file(directory / configurationFile) {
+          file(directory / configurationFile), authenticate(authentication) {
         channel::nonblocking(listener.value);
-        channel::writeEndpoint(file, clientConfiguration(address, token));
+        channel::writeEndpoint(file, clientConfiguration(address, token, "webfront", authenticate));
         worker = std::jthread([this](std::stop_token stop) {
             try {
                 serve(stop);
@@ -405,6 +407,7 @@ private:
     unsigned short                    boundPort;
     std::string                       address;
     std::filesystem::path             file;
+    bool                              authenticate;
     std::once_flag                    withdrawn;
     std::jthread                      worker;
 
@@ -429,6 +432,15 @@ private:
         }
     };
 
+    static std::string selectToken(const std::optional<std::string>& fixed, bool authentication) {
+        if (!authentication && fixed)
+            throw std::invalid_argument("A fixed MCP token cannot be combined with disabled authentication");
+        if (!fixed)
+            return authentication ? channel::nonce() : std::string{};
+        if (fixed->empty() || fixed->size() > 1024 || !std::ranges::all_of(*fixed, [](unsigned char c) { return c >= 0x21 && c <= 0x7e; }))
+            throw std::invalid_argument("MCP token must contain 1 to 1024 visible ASCII characters without spaces");
+        return *fixed;
+    }
     void withdraw() noexcept {
         // A reader on Windows (readEndpoint does not share deletion) delays the removal briefly; it is retried.
         std::call_once(withdrawn, [this] {
@@ -488,7 +500,7 @@ private:
                 refuse(peer, refusal(400, "Malformed HTTP request"));
                 return false;
             }
-            auto screening = screen(peer.request, boundPort, token);
+            auto screening = screen(peer.request, boundPort, token, authenticate);
             if (screening.refusal) {
                 refuse(peer, *screening.refusal);
                 return false;
