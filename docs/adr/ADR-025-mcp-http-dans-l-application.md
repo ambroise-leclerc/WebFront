@@ -4,11 +4,12 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.0 | 2026-11-21 | Proposée | Ambroise Leclerc | Issue #632, après #617 (instances simultanées) et #631 (TLS 1.3 intégré) : l'application sert elle-même le MCP en Streamable HTTP sur un écouteur loopback distinct, authentifié par un jeton Bearer de session ; accès distant exclu ; Host et Origin stricts ; découverte par instance ; automatisation refusée à la compilation d'une build de distribution ; ordre de migration et sort de `webfront-agent`. Amende l'ADR-019 (ligne « MCP Streamable HTTP local » du comparatif, section « CLI et MCP local stdio » et ligne « DNS rebinding » du modèle de menace). | À renseigner après intégration. |
+| 1.0 | 2026-11-21 | Proposée | Ambroise Leclerc | Issue #632, après #617 (instances simultanées) et #631 (TLS 1.3 intégré) : l'application sert elle-même le MCP en Streamable HTTP sur un écouteur loopback distinct, authentifié par un jeton Bearer de session ; accès distant exclu ; Host et Origin stricts ; découverte par instance ; automatisation refusée à la compilation d'une build de distribution ; ordre de migration et sort de `webfront-agent`. Amende l'ADR-019 (ligne « MCP Streamable HTTP local » du comparatif, section « CLI et MCP local stdio » et ligne « DNS rebinding » du modèle de menace). | — |
+| 1.1 | 2026-11-22 | Acceptée (livraison à faire) | Ambroise Leclerc | Décision acceptée avant le code de transport, comme l'exige #632. Précision d'implémentation du point 2 : l'écouteur reprend le modèle d'admission du canal actuel (file, délais, workers) et l'analyseur `http::Request` de `HTTPServer.hpp`, plutôt qu'une instance de `http::Server`, qui n'a ni file bornée ni délai de réception. | Issue #632. |
 
 ## État et portée
 
-**Proposée.** Cette décision doit être relue et acceptée avant tout code de transport (critère de #632). Elle remplace,
+**Acceptée le 2026-11-22**, avant tout code de transport (critère de #632) ; la livraison suit l'ordre de « Migration ». Elle remplace,
 une fois livrée, la partie « MCP local stdio » et « attachement » de l'[ADR-019](ADR-019-developpement-automatisable-et-agents.md) ;
 le contrat v1 (`Contract.hpp`), le contrôleur (`Session.hpp`), les grants natifs, la liste blanche de `call`, la liaison de page
 (`Binding.hpp`, secret de lancement, preuves HMAC) et le modèle de menace de l'ADR-019 restent en vigueur. Elle ne modifie pas
@@ -64,8 +65,10 @@ chemin, y compris `/WebFront.js`, les fichiers, les routes de l'application et l
 reçoit 404. Il n'accepte aucune mise à niveau WebSocket. Le serveur qui sert la page n'a jamais de route `/mcp`. La page de
 l'application et une page étrangère sont donc sur une autre origine que le MCP, sans jeton, et soumises aux refus du point 4.
 
-L'implémentation réutilise l'analyseur de requêtes de `http::Server` (corps borné, `Expect: 100-continue`, refus 411/413/501)
-dans une instance limitée aux routes : ni fournisseur de fichiers, ni ressource embarquée, ni gestionnaire d'upgrade.
+L'implémentation réutilise l'analyseur `http::Request` et les aides de `HTTPServer.hpp` (longueur annoncée, `Expect:
+100-continue`, refus 411/413/501) dans le modèle d'admission du canal actuel (point 7), et non une instance de
+`http::Server` : celle-ci sert fichiers et ressources embarquées, et n'a ni file bornée de pairs ni délai de réception.
+L'écouteur MCP n'a ni fournisseur de fichiers, ni ressource embarquée, ni gestionnaire d'upgrade.
 Le port est celui que l'OS attribue (`0`), selon le mécanisme de #617 ; une option permet un port choisi, avec les règles de
 #617 (jamais remplacé, échec qui nomme l'adresse, le port et la cause). Aucune politique de port propre au MCP n'est introduite.
 
