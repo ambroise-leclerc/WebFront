@@ -33,6 +33,10 @@ on:
         description: 'Passes of the complete desktop suite when repeat_desktop_tests is set (20 qualifies a reliability fix)'
         type: number
         default: 3
+      webview2_show_repeats:
+        description: 'Repeat WebView2Lifecycle-repeated-show this many times on the WebView2 job, before the complete suite (0 skips it)'
+        type: number
+        default: 0
 
 permissions:
   contents: read
@@ -269,6 +273,12 @@ jobs:
         run: >-
           ctest --test-dir build -C ${{ matrix.build_type }} -L fast ${{ env.WEBFRONT_CONFIGURATION != 'true' && '-LE configuration' || '' }}
           --parallel 4 --output-on-failure --no-tests=error --output-junit "$PWD/build/fast-results.xml"
+      # Qualifies the apartment check of #638 under the load of the job; it runs before the suite, which stops at its first failed pass.
+      - name: Repeat the WebView2 repeated-show case
+        if: ${{ matrix.platform == 'windows-msvc-webview2' && github.event_name == 'workflow_dispatch' && inputs.webview2_show_repeats > 0 }}
+        run: >-
+          ctest --test-dir build -C ${{ matrix.build_type }} -R WebView2Lifecycle-repeated-show
+          --repeat until-fail:${{ inputs.webview2_show_repeats }} --output-on-failure --no-tests=error
       - name: Test C++ and native browser integration
         id: desktop_suite
         # The fast tier has just run: a single pass does not run it again; the three passes of the complete tier do.
