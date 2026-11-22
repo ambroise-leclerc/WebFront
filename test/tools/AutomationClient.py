@@ -622,6 +622,8 @@ def stable(args):
                     finally:
                         host.close()
                 else:
+                    # No break: both launches succeeded on this port, so the scenario is done. A break (port taken
+                    # in the gap) skips this and retries both launches with a new port.
                     return
             raise AssertionError("MCP port was occupied on all five attempts")
 

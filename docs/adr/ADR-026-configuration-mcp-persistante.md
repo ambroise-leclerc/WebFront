@@ -22,4 +22,4 @@ Après un crash ou un arrêt forcé, le fichier privé de session peut rester su
 
 ## Validation
 
-Relancer l'application deux fois avec la même configuration cliente et appeler initialize puis webfront.session, avec le client HTTP du dépôt et le SDK 2.3.0 s'il est disponible. Vérifier les refus, les instances concurrentes, le conflit de port, l'absence de secret dans la découverte et les protections réseau dans les modes authentifié et sans authentification. Maintenir les guides et AgentGuidance.
+Relancer l'application deux fois avec la même configuration cliente et appeler initialize puis webfront.session, avec le client HTTP du dépôt et le SDK 2.3.0 s'il est disponible. Vérifier les refus, les instances concurrentes, le conflit de port, l'absence de secret dans la découverte et les protections réseau dans les modes authentifié et sans authentification. Maintenir les guides et AgentGuidance. À la fusion, passer l'état à « Acceptée » et consigner les révisions Git réelles dans l'historique.

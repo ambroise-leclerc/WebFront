@@ -71,7 +71,7 @@ auto automation = webfront::automation::enableAutomation(
     app, {.grants = {"check", "build"}, .mcpPort = 19002, .mcpToken = std::string{token}});
 ```
 
-The application includes `<cstdlib>`, `<stdexcept>` and `<string>` for this example. A configured token must be 32–1024 visible ASCII characters without spaces; length alone does not guarantee randomness. To opt in to an unauthenticated listener instead, use `.disableMcpAuthentication = true` and omit `mcpToken`; its client configuration has no Authorization header. In that mode any Authorization header, including an incorrect Bearer, is ignored.
+The application includes `<cstdlib>`, `<stdexcept>` and `<string>` for this example; MSVC reports `std::getenv` as deprecated (C4996), so use `_dupenv_s` or define `_CRT_SECURE_NO_WARNINGS` there. A configured token must be 32–1024 visible ASCII characters without spaces; length alone does not guarantee randomness. To opt in to an unauthenticated listener instead, use `.disableMcpAuthentication = true` and omit `mcpToken`; its client configuration has no Authorization header. In that mode any Authorization header, including an incorrect Bearer, is ignored.
 
 The startup banner warns when authentication is disabled. It appears in the developer terminal and on stderr; as with the normal banner, `announce = false` suppresses the stderr copy.
 

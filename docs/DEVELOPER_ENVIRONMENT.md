@@ -794,8 +794,9 @@ GitHub Pages downloads; no npm publication or scope ownership is required.
 
 The version in `distribution.json` is the version built from the current sources (currently 1.0.3, not yet published).
 It can be ahead of `DeveloperReleaseData.hpp`, which pins the published 1.0.2 environment used by applications. The
-compatibility table above records that published pin, not the next source build. The pin changes only when a new
-distribution is published and adopted.
+compatibility table above records that published pin, not the next source build. The default branch receives a new
+pin only after the new distribution is published and its files are verified. Before the tag, the release branch carries
+the regenerated header, and `wf run build <directory> --refresh-bootstrap` rewrites it locally.
 
 The `SelfBuild*` CTest cases run the scripts on a copy of the sources, with the dependencies installed from the local
 registry: the build, a repeat build (same bytes), the checked-in bootstrap bundles and checksums rebuilt by wf alone (and the
