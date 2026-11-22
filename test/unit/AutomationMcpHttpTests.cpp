@@ -367,6 +367,11 @@ const Scenario mcpHttpSessions{"MCP HTTP sessions follow the Streamable HTTP rul
             require(handle(initialize).status == 200);
             require(endpoint.sessions() == mcphttp::maxSessions);
             require(handle(listTools, oldest).status == 404);
+            // Neither does a message with a supported revision but an invalid JSON-RPC envelope.
+            const auto next = "Mcp-Session-Id: " + identifiers[1] + "\r\nMCP-Protocol-Version: 2025-11-25\r\n";
+            require(handle(R"({"jsonrpc":"1.0","id":2,"method":"tools/list"})", next).status == 200);
+            require(handle(initialize).status == 200);
+            require(handle(listTools, next).status == 404);
             for (std::size_t index = 0; index < 4; ++index)
                 require(handle(initialize).status == 200);
             require(endpoint.sessions() == mcphttp::maxSessions);

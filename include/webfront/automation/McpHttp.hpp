@@ -293,12 +293,16 @@ public:
                 return rpcError(404, -32600, "Unknown or terminated MCP session");
             if (!supportedVersion)
                 return unsupported();
-            // Only an accepted message counts as activity for the eviction of the least recently used session.
-            conversation       = found->second;
-            conversation->used = std::chrono::steady_clock::now();
+            conversation = found->second;
         }
         const std::scoped_lock lock{conversation->mutex};
         auto                   response = conversation->mcp.receive(body);
+        // Only an accepted message counts as activity for the eviction of the least recently used session: a supported
+        // revision and a valid JSON-RPC envelope. `used` is only ever written and read under the registry's lock.
+        if (conversation->mcp.lastEnvelopeAccepted()) {
+            const std::scoped_lock registry{mutex};
+            conversation->used = std::chrono::steady_clock::now();
+        }
         if (!response)
             return {.status = 202};
         return {.status = 200, .headers = {}, .body = std::move(*response)};

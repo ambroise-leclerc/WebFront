@@ -105,7 +105,8 @@ describe('Developer automation', () => {
             expect(text).toMatch(/wf init[^]*wf dev ui\/main\.ts/);
             expect(text).toContain('webfront.session {}');
             expect(text).toContain('webfront.start {session: S, operation: "preview", arguments: {entry: "ui/main.ts"}}');
-            expect(text).toContain('webfront.result {session: S, runId}');
+            // Each run is read to its end before the next one starts: a second start while one runs is refused as busy.
+            expect(text).toMatch(/operation: "create"[^\n]*\n\s*webfront\.result \{session: S, runId\}[^\n]*until the run ends; one run at a time\n\s*webfront\.start \{session: S, operation: "preview"/);
             expect(text).toContain('mcp.json');
             expect(text).not.toContain('webfront-agent');
             expect(text).toContain('docs/DEVELOPING_WITH_AGENTS.md');
