@@ -297,6 +297,9 @@ jobs:
           New-Item $stop -ItemType File -Force | Out-Null
           Wait-Job $load -Timeout 300 | Out-Null
           Stop-Job $load -ErrorAction SilentlyContinue
+          # Nothing of the load may still run when the complete suite starts: stopping the job leaves its ctest and tests alive.
+          Get-Process -Name ctest -ErrorAction SilentlyContinue | ForEach-Object { taskkill /F /T /PID $_.Id | Out-Null }
+          Write-Host ('processes left by the load: ' + @(Get-Process -Name ctest -ErrorAction SilentlyContinue).Count)
           exit $status
       - name: Test C++ and native browser integration
         id: desktop_suite
