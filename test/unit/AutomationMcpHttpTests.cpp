@@ -233,6 +233,12 @@ const Scenario mcpHttpScreening{"MCP HTTP requests are screened on their headers
             require(accepting("text/event-stream, Application/JSON;q=0.5") == 0);
             require(accepting("application/*") == 0);
             require(accepting("*/*;q=1") == 0);
+            // The most specific matching range decides, whatever the order: an explicit refusal of JSON is not overridden.
+            require(accepting("application/json;q=0, */*;q=1") == 406);
+            require(accepting("*/*, application/json;q=0") == 406);
+            require(accepting("application/json;q=0, application/*") == 406);
+            require(accepting("application/*;q=0, application/json") == 0);
+            require(accepting("*/*;q=0, application/*;q=0.1") == 0);
         });
         then("chunked, unannounced, malformed and oversized bodies are refused before they are read", [&] {
             require(status(screened(post(port, "{}", "Transfer-Encoding: chunked\r\n"))) == 501);
@@ -584,9 +590,9 @@ const Scenario mcpHttpActivation{"An application that enables automation serves 
     given("paths so long that the record would exceed its limit", [&] {
         then("the record is refused before anything is published", [&] {
             const auto       session = std::string(64, 'f');
-            const auto       far     = "/" + std::string(discovery::recordLimit / 2, 'p');
-            discovery::Entry entry{.session = session, .project = far, .endpoint = far, .allow = "[]", .pid = discovery::currentProcess(),
-                                   .mcp = "http://127.0.0.1:1/mcp", .configuration = far + "/mcp.json"};
+            const auto       distant = "/" + std::string(discovery::recordLimit / 2, 'p');  // not "far", a Windows macro
+            discovery::Entry entry{.session = session, .project = distant, .endpoint = distant, .allow = "[]", .pid = discovery::currentProcess(),
+                                   .mcp = "http://127.0.0.1:1/mcp", .configuration = distant + "/mcp.json"};
             require(entry.json().size() > discovery::recordLimit);
             requireThrows([&] { discovery::Registration refused{sessions, entry}; });
             require(!std::filesystem::exists(sessions / (session + ".json")));

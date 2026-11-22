@@ -107,9 +107,12 @@ inline std::optional<std::string> single(const http::Request& request, std::stri
 inline bool present(const http::Request& request, std::string_view name) {
     return !request.getHeadersValues(name).empty();
 }
-/// Whether the `Accept` headers accept `application/json` itself: the exact media type (or `application/*`, `*/*`) with a
-/// quality above zero. `application/jsonp` and `application/json;q=0` do not.
+/// Whether the `Accept` headers accept `application/json`. As RFC 9110 (12.5.1) requires, the quality that applies is the one
+/// of the most specific matching range: `application/json`, then `application/*`, then `*/*`. A quality of zero refuses, so
+/// `application/json;q=0, */*` refuses JSON; `application/jsonp` matches nothing.
 inline bool acceptsJson(const http::Request& request) {
+    int  specificity = 0;  // of the range that applies so far: 3 exact, 2 application/*, 1 */*, 0 none
+    bool accepted    = false;
     for (const auto& header : request.getHeadersValues("Accept")) {
         std::string_view rest{header};
         while (!rest.empty()) {
@@ -118,7 +121,8 @@ inline bool acceptsJson(const http::Request& request) {
             rest             = comma == std::string_view::npos ? std::string_view{} : rest.substr(comma + 1);
             const auto semi  = item.find(';');
             const auto type  = lower(trimmed(item.substr(0, semi)));
-            if (type != "application/json" && type != "application/*" && type != "*/*")
+            const int  level = type == "application/json" ? 3 : type == "application/*" ? 2 : type == "*/*" ? 1 : 0;
+            if (level == 0)
                 continue;
             bool refused = false;
             for (auto parameters = semi == std::string_view::npos ? std::string_view{} : item.substr(semi + 1); !parameters.empty();) {
@@ -132,11 +136,15 @@ inline bool acceptsJson(const http::Request& request) {
                 // A quality is 0 to 1 with up to three decimals: any non-zero digit makes it acceptable.
                 refused = quality.find_first_of("123456789") == std::string::npos;
             }
-            if (!refused)
-                return true;
+            // A more specific range overrides a less specific one; between ranges of the same level, a refusal wins.
+            if (level > specificity) {
+                specificity = level;
+                accepted    = !refused;
+            } else if (level == specificity && refused)
+                accepted = false;
         }
     }
-    return false;
+    return accepted;
 }
 }  // namespace detail
 
