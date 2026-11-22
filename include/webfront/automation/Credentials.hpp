@@ -12,10 +12,10 @@ inline std::string nonce() {
     std::array<unsigned char, 32> bytes{};
 #ifdef _WIN32
     if (BCryptGenRandom(nullptr, bytes.data(), static_cast<ULONG>(bytes.size()), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0)
-        throw std::runtime_error("Cannot generate attachment capability");
+        throw std::runtime_error("Cannot generate automation token");
 #else
     if (getentropy(bytes.data(), bytes.size()))
-        throw std::runtime_error("Cannot generate attachment capability");
+        throw std::runtime_error("Cannot generate automation token");
 #endif
     constexpr std::string_view digits = "0123456789abcdef";
     std::string                result;

@@ -11,9 +11,15 @@ these entries stays in the GitHub releases and the Git history.
 ## Unreleased
 
 ### Breaking
+- `webfront/automation/Enable.hpp` no longer compiles with `WEBFRONT_DISTRIBUTION`: gate `enableAutomation` out of the distribution build, as the guide already advised (#632, ADR-025).
+- `webfront-agent` is removed with its JSON CLI, MCP on stdio, `--serve`, `--attach`, `--list` and `--print-mcp-config`, as are `WEBFRONT_BUILD_AUTOMATION`, `WEBFRONT_AUTOMATION_FRONTEND` and `webfront_add_agent()`: connect the MCP client to the URL the application prints (#632, ADR-025, `docs/AUTOMATION.md`).
+- `AutomationOptions::listen` becomes `directory` and may stay empty (a private directory named after the session is created), `Automation::endpoint()` becomes `directory()`, and the JSON-lines attachment channel (`ChannelServer`, `ChannelClient`) is gone (#632).
 - The CEF profile is now `cef_cache/<executable>`, not `cef_cache`: an application starts with an empty profile (localStorage, cookies); to keep the data, move the old contents of `cef_cache` into `cef_cache/<executable>` once (#617, `docs/HOST_INTEGRATION.md`).
 
 ### Added
+- Connect an MCP client to the application itself: `enableAutomation(app, {.grants = {...}})` serves MCP over Streamable HTTP on a loopback port of its own, prints its URL and writes a private `mcp.json` with the URL and a session Bearer token, so several applications run side by side with no other program (#632, ADR-025, `docs/AUTOMATION.md`).
+- Use a custom network provider with `DeveloperAppWithNetwork`. The `BasicDeveloperApp` alias selects the existing TCP provider (#631).
+- Serve HTTPS and WSS with the optional header-only TLS 1.3 listener and reload its PEM identity after renewal (#631, `docs/TLS.md`).
 - Start an application with no port setting when `9002` is taken: an empty `WebFrontConfig::port` falls back to a free port, a chosen port is never replaced, and CEF and WebKitGTK give each live instance its own profile directory (#617, `docs/HOST_INTEGRATION.md`).
 - Start several applications side by side: the default port follows `WEBFRONT_PORT` (a number from 0 to 65535, `0` asks for a free port, `9002` remains the default), the examples take `--port`, the server announces the port really bound, and a failed bind names the address, the port and the cause (#617, `docs/HOST_INTEGRATION.md`).
 - Run the MSVC code analysis in a pull request into `develop` that changes Windows code, and list the reruns each job needed before going green with `FlakeReport.py --days` (#628, `docs/TEST_TIERS.md`, `docs/TEST_PERFORMANCE.md`).

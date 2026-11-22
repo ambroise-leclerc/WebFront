@@ -1,10 +1,8 @@
 #include "TemporaryDirectory.hpp"
 #include "Bdd.hpp"
 #include <webfront/automation/Binding.hpp>
-#include <webfront/automation/ExitStatus.hpp>
 #include <webfront/automation/Mcp.hpp>
 #include <webfront/automation/PageAuthentication.hpp>
-#include <webfront/automation/Stdio.hpp>
 
 using namespace webfront::bdd;
 
@@ -40,37 +38,6 @@ struct BindingApp {
     }
 };
 using namespace webfront::automation;
-const Scenario failedAutomation{"A failed automation bootstrap retains exit 70 regardless of transport completion order", [] {
-    given("the transport reports the closed session before or after bootstrap failure", [&] {
-        then("the bootstrap failure is distinct from an operation failure in both orders", [&] {
-            for (const bool transportFirst : {false, true}) {
-                auto scope = info("transportFirst ", transportFirst);
-                std::atomic<int> status{0};
-                const auto       transportFailure = [&] {
-                    int expected = 0;
-                    status.compare_exchange_strong(expected, 1);
-                };
-                if (transportFirst)
-                    transportFailure();
-                recordBootstrapFailure(status);
-                if (!transportFirst)
-                    transportFailure();
-                require(status.load() == 70);
-            }
-        });
-    });
-    given("a native deadline or signal reports a more specific shutdown reason", [&] {
-        then("bootstrap reporting preserves each specific reason", [&] {
-            for (const int reason : {71, 72, 130, 143}) {
-                auto scope = info("reason ", reason);
-                std::atomic<int> status{reason};
-                recordBootstrapFailure(status);
-                require(status.load() == reason);
-            }
-        });
-    });
-}};
-
 Object command(const Session& session, std::string operation, std::string args = "{}") {
     return Object(objectJson({
         {  "session", webfront::json::quote(Object(session.describe()).string("session"))},
@@ -137,40 +104,6 @@ const Scenario pageCallback{"Page callback authentication matches RFC 4231 and r
     require(hmac(key, payload("3", "complete", {"a", "bc"})) != hmac(key, payload("3", "complete", {"ab", "c"})));
     require(hmac(key, payload("3", "reply:poll", {"null"})) != hmac(key, payload("3", "poll", {"null"})));
 }};
-
-#ifndef _WIN32
-const Scenario mCPStdin{"MCP stdin drains buffered lines and preserves a partial line through EOF", [] {
-    struct InputPipe {
-        int saved = ::dup(STDIN_FILENO);
-        int descriptors[2]{-1, -1};
-        ~InputPipe() {
-            if (saved >= 0) {
-                ::dup2(saved, STDIN_FILENO);
-                ::close(saved);
-            }
-            for (const int descriptor : descriptors)
-                if (descriptor >= 0)
-                    ::close(descriptor);
-        }
-    } pipe;
-    require(pipe.saved >= 0);
-    require(::pipe(pipe.descriptors) == 0);
-    require(::dup2(pipe.descriptors[0], STDIN_FILENO) == STDIN_FILENO);
-    require(::write(pipe.descriptors[1], "one\ntwo\npart", 12) == 12);
-    StdioInput  input;
-    std::string line;
-    require(input.read(line) == StdioInput::Status::line);
-    require(line == "one");
-    require(input.read(line) == StdioInput::Status::line);
-    require(line == "two");
-    require(input.read(line) == StdioInput::Status::waiting);
-    require(::close(pipe.descriptors[1]) == 0);
-    pipe.descriptors[1] = -1;
-    require(input.read(line) == StdioInput::Status::line);
-    require(line == "part");
-    require(input.read(line) == StdioInput::Status::closed);
-}};
-#endif
 
 const Scenario automationAuthorization{"Automation authorization stays native and binds requests to a project session", [] {
     webfront::test::TemporaryDirectory directory;

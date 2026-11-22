@@ -1006,13 +1006,13 @@ inline void openWindow(std::string url, webfront::detail::BoundContentPolicy con
         CefString(&settings.log_file).FromString((absoluteProfile / "cef_debug.log").string());
     }
     log::info("Attempting CEF initialization...");
-    CefRefPtr<SimpleCEFApp> app(new SimpleCEFApp);
+    CefRefPtr<CefApp> app(new SimpleCEFApp);
     #ifndef _WIN32
     struct sigaction previousInt{}, previousTerm{};
     if (preserveSignalHandlers && (::sigaction(SIGINT, nullptr, &previousInt) || ::sigaction(SIGTERM, nullptr, &previousTerm)))
         throw std::runtime_error("Cannot preserve native signal handlers");
     #endif
-    const bool initialized = CefInitialize(main_args, settings, app.get(), nullptr);
+    const bool initialized = CefInitialize(main_args, settings, std::move(app), nullptr);
     #ifndef _WIN32
     // Chrome's browser startup can install handlers independently of ContentMain's setting.
     // Restore the embedder's exact actions once all browser initialization has finished.
@@ -1085,8 +1085,8 @@ inline void closeBrowser(void* browser) {
 
 inline void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy = {},
                  const WindowOptions& window = {}, const ViewLaunch& launch = {}) {
-    detail::openWindow(frontend::detail::applicationUrl(address, port, file),
-                       webfront::detail::BoundContentPolicy{webfront::detail::applicationOrigin(address, port), policy},
+    detail::openWindow(frontend::detail::applicationUrl(address, port, file, launch.origin),
+                       webfront::detail::BoundContentPolicy{frontend::detail::applicationUrl(address, port, "", launch.origin), policy},
                        nullptr,
                        {},
                        window,

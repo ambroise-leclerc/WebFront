@@ -44,6 +44,8 @@
 #include <utility>
 #include <vector>
 
+namespace webfront::tls { class Credentials; }
+
 namespace webfront::http {
 
 class Headers {
@@ -875,10 +877,11 @@ private:
 template<networking::Features Net, fs::Provider FS, BuffersPolicyType Policy = DefaultBuffersPolicy, typename Decode = gzip::Decoder>
 class Server {
 public:
-    Server(std::string_view address, std::string_view port, std::filesystem::path docRoot = ".", ContentPolicy policy = {}, Decode decode = {})
+    Server(std::string_view address, std::string_view port, std::filesystem::path docRoot = ".", ContentPolicy policy = {}, Decode decode = {},
+           std::shared_ptr<tls::Credentials> credentials = {})
         : acceptor(ioContext),
-          listeningPort(bind(address, port)),
-          requestHandler(docRoot, detail::BoundContentPolicy{detail::applicationOrigin(address, listeningPort), std::move(policy)}),
+          listeningPort((configureTransport(std::move(credentials)), bind(address, port))),
+          requestHandler(docRoot, detail::BoundContentPolicy{detail::applicationOrigin(address, listeningPort, networking::secureTransport<Net>), std::move(policy)}),
           decodeExecutor(gzip::decodeLimits<Policy>(), std::move(decode)) {
         spawn(acceptConnections());
     }
@@ -1002,6 +1005,33 @@ private:
     BlockingWorker                              routeWorker{4};
     BlockingWorker                              fileWorker{2};
     std::function<void(typename Net::Socket&&)> upgradeHandler;
+
+    void configureTransport(std::shared_ptr<tls::Credentials> credentials) {
+        if constexpr (networking::secureTransport<Net>) {
+            if (!credentials)
+                throw std::invalid_argument("WebFront: missing TLS credentials");
+            acceptor.credentials = std::move(credentials);
+        } else if (credentials) {
+            throw std::invalid_argument("WebFront: TLS credentials require the HTTPS provider");
+        }
+    }
+
+    // Cancels a handshake that outlives Net::handshakeTimeout, unless `settled` ends the wait first.
+    networking::Task handshakeDeadline(std::shared_ptr<networking::ex::inplace_stop_source> expired,
+                                       std::shared_ptr<networking::ex::inplace_stop_source> settled) {
+        if constexpr (networking::secureTransport<Net>)
+            co_await networking::ex::write_env(Net::ResumeAfter(acceptor, Net::handshakeTimeout),
+                                               networking::ex::prop{networking::ex::get_stop_token, settled->get_token()});
+        expired->request_stop();
+    }
+
+    networking::Task closeResponse(typename Net::Socket& socket) {
+        if constexpr (networking::secureTransport<Net>)
+            co_await Net::Close(socket);
+        else
+            socket.shutdown(Net::Socket::shutdown_both);
+        co_return;
+    }
 
     std::string bind(std::string_view address, std::string_view requestedPort) {
         try {
@@ -1143,7 +1173,7 @@ private:
                             const auto wanted = std::min<std::size_t>(*length - body.size(), buffer.size());
                             const auto count  = co_await Net::Receive(socket, Net::Buffer(buffer.data(), wanted));
                             if (count == 0) {  // the client ended the connection before the announced length
-                                socket.shutdown(Net::Socket::shutdown_both);
+                                co_await closeResponse(socket);
                                 co_return;
                             }
                             body.append(buffer.data(), count);
@@ -1187,10 +1217,37 @@ private:
         if (head) response.content.clear();  // an error page keeps its Content-Length; HEAD never has a body
         co_await Net::Send(socket, response.toBuffers<Net>());
         if (streaming) co_await streamBody(routeWorker, socket, std::move(reply.body), reply.contentLength, match.route->prefix, match.route->secretPath);
-        socket.shutdown(Net::Socket::shutdown_both);
+        co_await closeResponse(socket);
     }
 
     networking::Task serve(typename Net::Socket socket) {
+        if constexpr (networking::secureTransport<Net>) {
+            // The deadline and the server's shutdown cancel the handshake through this source.
+            struct Forward {
+                networking::ex::inplace_stop_source& source;
+                void operator()() noexcept { source.request_stop(); }
+            };
+            const auto                                                        expired = std::make_shared<networking::ex::inplace_stop_source>();
+            const auto                                                        settled = std::make_shared<networking::ex::inplace_stop_source>();
+            networking::ex::stop_callback_for_t<networking::ex::inplace_stop_token, Forward> shutdown(tasks.stopToken(), Forward{*expired});
+            spawn(handshakeDeadline(expired, settled));
+            struct Settle {
+                networking::ex::inplace_stop_source& source;
+                ~Settle() { source.request_stop(); }
+            } settle{*settled};
+            try {
+                co_await networking::ex::stopped_as_error(
+                    networking::ex::write_env(Net::Handshake(socket, acceptor), networking::ex::prop{networking::ex::get_stop_token, expired->get_token()}),
+                    std::make_error_code(std::errc::timed_out));
+            } catch (const std::system_error& error) {
+                if (tasks.stopRequested()) co_return;  // interrupted by the server's shutdown, not a failed or expired handshake
+                log::debug("TLS handshake failed ({}:{}): {}", error.code().category().name(), error.code().value(), error.what());
+                co_return;
+            } catch (const std::exception& error) {
+                log::warn("TLS handshake failed: {}", error.what());
+                co_return;
+            }
+        }
         Request request;
         std::optional<typename gzip::DecodeExecutor<Decode>::Lease> lease;
         std::unique_ptr<fs::File> streamed;
@@ -1275,7 +1332,7 @@ private:
                 return read;
             }, streamLength, "File response");
         if (response.statusCode != Response::switchingProtocols || tasks.stopRequested())
-            socket.shutdown(Net::Socket::shutdown_both);  // a stopped server hands nothing over: its drain would never end
+            co_await closeResponse(socket);  // a stopped server hands nothing over: its drain would never end
         else if (upgradeHandler)
             upgradeHandler(std::move(socket));
     }

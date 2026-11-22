@@ -470,7 +470,7 @@ namespace detail {
 /// development path of an interface is not hand-written pages there but TypeScript/TSX in ui/ built by wf.
 inline constexpr std::string_view developmentPathNote =
   "WebFront: serving local files from documentRoot (development only). The intended development path is a TypeScript/TSX "
-  "interface in ui/, built with `wf dev` in the terminal of app.bootstrap(\"developer\"); an agent can run wf in JSON or MCP "
+  "interface in ui/, built with `wf dev` in the terminal of app.bootstrap(\"developer\"); an agent can run wf through MCP "
   "(docs/DEVELOPING_WITH_AGENTS.md).";
 
 /// Set once the process has written developmentPathNote.
@@ -559,6 +559,8 @@ struct WebFrontConfig {
     RemoteFileTransport   remoteFileTransport = RemoteFileTransport::refused;
     /// Allows the optional PtyPage component. Requires a literal loopback bind and a bridge policy limited to the application's Origin.
     bool                  allowPtyPages = false;
+    /// PEM identity for the optional HTTPS provider (webfront/tls/WebFront.hpp).
+    std::shared_ptr<tls::Credentials> tlsCredentials{};
 };
 
 namespace detail {
@@ -567,17 +569,17 @@ namespace detail {
 template <typename ServerType>
 ServerType makeHttpServer(const WebFrontConfig& config, std::string_view preferred = "9002") {
     if (!config.port.empty())
-        return ServerType(config.address, config.port, config.documentRoot, config.contentPolicy);
+        return ServerType(config.address, config.port, config.documentRoot, config.contentPolicy, {}, config.tlsCredentials);
     const auto chosen = environmentPort();
     if (chosen)
-        return ServerType(config.address, *chosen, config.documentRoot, config.contentPolicy);
+        return ServerType(config.address, *chosen, config.documentRoot, config.contentPolicy, {}, config.tlsCredentials);
     try {
-        return ServerType(config.address, std::string(preferred), config.documentRoot, config.contentPolicy);
+        return ServerType(config.address, std::string(preferred), config.documentRoot, config.contentPolicy, {}, config.tlsCredentials);
     } catch (const std::system_error& error) {
         if (error.code() != std::errc::address_in_use)
             throw;
     }
-    return ServerType(config.address, "0", config.documentRoot, config.contentPolicy);
+    return ServerType(config.address, "0", config.documentRoot, config.contentPolicy, {}, config.tlsCredentials);
 }
 }  // namespace detail
 
@@ -682,9 +684,12 @@ inline WebFrontConfig checkedPtyPageConfig(WebFrontConfig config) {
 }
 
 /// The read binding of a configuration, which is refused here, before anything is bound, if its declaration is false.
-inline std::shared_ptr<ReadBinding> makeReadBinding(const WebFrontConfig& config) {
+inline std::shared_ptr<ReadBinding> makeReadBinding(const WebFrontConfig& config, bool secure = false) {
     checkedAddress(config);
-    return std::make_shared<ReadBinding>(config.remoteFileTransport);
+    if (secure && !isLoopbackName(config.address))
+        std::cerr << "WebFront: TLS listener outside loopback. Handshake cryptography runs on the I/O thread, "
+                     "and bursts can delay established connections or cause denial of service. See docs/TLS.md.\n";
+    return std::make_shared<ReadBinding>(ReadBinding::Options{.remote = config.remoteFileTransport, .secure = secure});
 }
 }  // namespace detail
 
@@ -705,7 +710,7 @@ public:
 private:
     struct CheckedConfig {};
     BasicWF(WebFrontConfig config, CheckedConfig)
-        : readBinding(detail::makeReadBinding(config)),
+        : readBinding(detail::makeReadBinding(config, networking::secureTransport<Net>)),
           httpServer((detail::ensureFrontendInitialized<Frontend>(), detail::makeHttpServer<http::Server<Net, Filesystem, Policy>>(config))),
           httpAddress(config.address),
           httpPort(httpServer.port()),
@@ -1137,8 +1142,13 @@ public:
             if (!showing.owns)
                 throw std::logic_error("webfront::BasicWF::show(): another application is already showing a window through this frontend");
         }
-        if constexpr (requires(const ViewLaunch& launch) { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, launch); })
-            Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, ViewLaunch{viewSecret, detail::browserOrigin(httpAddress, httpPort)});
+        constexpr bool acceptsViewLaunch = requires(const ViewLaunch& launch) {
+            Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, launch);
+        };
+        if constexpr (networking::secureTransport<Net>)
+            static_assert(acceptsViewLaunch, "An HTTPS frontend must accept ViewLaunch in open()");
+        if constexpr (acceptsViewLaunch)
+            Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, ViewLaunch{viewSecret, detail::browserOrigin(httpAddress, httpPort, networking::secureTransport<Net>)});
         else if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions); })
             Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions);
         else if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy); })
@@ -1216,19 +1226,28 @@ public:
      * which show() does not give them either (ADR-020).
      */
     void start(std::string_view page = "index.html") {
-        static_assert(requires { Frontend::launch(std::string_view{}, std::string_view{}, std::string_view{}); },
-                      "webfront::BasicWF::start(): this frontend opens its window inside the loop of show(), which keeps the "
-                      "calling thread. Call show() on the interface thread and end it with requestClose(), or run the "
-                      "application in a webfront::UIThread when the frontend allows a secondary thread "
-                      "(docs/HOST_INTEGRATION.md).");
-        if constexpr (requires { Frontend::launch(std::string_view{}, std::string_view{}, std::string_view{}); }) {
+        constexpr bool secure = networking::secureTransport<Net>;
+        constexpr bool canLaunch = secure
+            ? requires { Frontend::launchHttps(std::string_view{}, std::string_view{}, std::string_view{}); }
+            : requires { Frontend::launch(std::string_view{}, std::string_view{}, std::string_view{}); };
+        if constexpr (secure)
+            static_assert(canLaunch, "webfront::BasicWF::start(): an HTTPS frontend must provide launchHttps(address, port, page)");
+        else
+            static_assert(canLaunch,
+                          "webfront::BasicWF::start(): this frontend opens its window inside the loop of show(), which keeps the "
+                          "calling thread. Call show() on the interface thread and end it with requestClose(), or run the "
+                          "application in a webfront::UIThread when the frontend allows a secondary thread "
+                          "(docs/HOST_INTEGRATION.md).");
+        if constexpr (canLaunch) {
             if (shown || serverThread.joinable() || launched.exchange(true))
                 throw std::logic_error("webfront::BasicWF::start(): the application is already started; call start() once, instead of show()");
             if (!httpDocRoot.empty() && !developerEnvironment)
                 detail::noteDevelopmentPath();
             startServerThread();
             try {
-                if constexpr (requires { Frontend::launch(httpAddress, httpPort, page, contentPolicy); })
+                if constexpr (secure)
+                    Frontend::launchHttps(httpAddress, httpPort, page);
+                else if constexpr (requires { Frontend::launch(httpAddress, httpPort, page, contentPolicy); })
                     Frontend::launch(httpAddress, httpPort, page, contentPolicy);
                 else
                     Frontend::launch(httpAddress, httpPort, page);

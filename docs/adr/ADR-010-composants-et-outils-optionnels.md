@@ -45,6 +45,8 @@ Le terminal édite les lignes dans le navigateur et appelle les commandes C++. L
 navigateur peuvent traiter une commande ou la laisser continuer côté C++. Leurs interruptions
 ne promettent pas d’arrêter une commande C++.
 
+Le TLS serveur est un composant hors du cœur ([ADR-024](ADR-024-tls-integre.md)).
+
 Pour `wf`, HTTPS et vérification SHA-512 se font dans le navigateur. C++ valide les chemins,
 reçoit les chunks séquentiels et installe via staging puis commit. `ToolStore` conserve
 `webfront-tools.lock.json` et les fichiers sous `.webfront/tools/`. `PackageFS` utilise le même
@@ -56,7 +58,7 @@ l’autorité du bridge de l’application ; c’est une fonction de développem
 
 - Étendre le protocole pour chaque composant : évité, réutiliser les types du bridge.
 - Écraser le handler UI global : remplacé par des abonnements à durée de vie explicite.
-- Implémenter TLS ou un registre de paquets C++ dans le cœur : le navigateur fournit HTTPS
+- Implémenter un registre de paquets C++ dans le cœur : le navigateur fournit HTTPS
   et npm fournit métadonnées et distribution.
 - Installer directement dans le répertoire final : rejeté au profit de transactions pour
   préserver la version installée en cas d’échec.

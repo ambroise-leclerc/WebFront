@@ -955,7 +955,7 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
     // One window per process: a second open() on the main thread is refused before it creates a window.
     if (uiExecutorHostOf<WebKitGTKHost>().executor().available())
         throw std::logic_error("WebKitGTKFrontend: open() is already running; a process opens one window at a time");
-    Session session(webfront::detail::BoundContentPolicy{webfront::detail::applicationOrigin(address, port), options.contentPolicy}, options.window);
+    Session session(webfront::detail::BoundContentPolicy{applicationUrl(address, port, "", options.launch.origin), options.contentPolicy}, options.window);
     session.launch = options.launch;
     session.create(mode);
     if (options.configure)
@@ -984,7 +984,7 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
             host.close();
         }
     } closing{host, windowHost};
-    session.run(applicationUrl(address, port, file));
+    session.run(applicationUrl(address, port, file, options.launch.origin));
 }
 
 }  // namespace webfront::frontend::detail::webkitgtk

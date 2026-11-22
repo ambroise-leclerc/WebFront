@@ -1,5 +1,6 @@
 #include "Mocks.hpp"
 #include "Bdd.hpp"
+#include "TemporaryDirectory.hpp"
 #include <webfront/networking/NetworkingMock.hpp>
 #include <webfront/UIThread.hpp>
 #include <webfront/WebFront.hpp>
@@ -14,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <mutex>
+#include <sstream>
 #include <stdexcept>
 #include <thread>
 
@@ -1290,6 +1292,47 @@ const Scenario systemBrowserLoop{"The system browser's loop ignores a close requ
 }};
 
 #if !defined(_WIN32)
+#if defined(__linux__) || defined(__APPLE__)
+const Scenario systemBrowserShowsHttp{"The default browser's show() opens the original HTTP page URL", {"fast"}, [] {
+    if (browser::isWSL()) {
+        succeed("WSL uses a PowerShell opener outside PATH");
+        return;
+    }
+    namespace fs = std::filesystem;
+    const webfront::test::TemporaryDirectory directory;
+#if defined(__APPLE__)
+    const auto opener = directory.path() / "open";
+#else
+    const auto opener = directory.path() / "xdg-open";
+#endif
+    std::ofstream(opener) << "#!/bin/sh\nprintf '%s\\n' \"$1\" > \"$0.url\"\n";
+    fs::permissions(opener, fs::perms::owner_all);
+
+    const auto* currentPath = std::getenv("PATH");
+    std::istringstream enter{"\n"};
+    struct Restore {
+        std::optional<std::string> path;
+        std::streambuf* input;
+        ~Restore() {
+            std::cin.rdbuf(input);
+            if (path) ::setenv("PATH", path->c_str(), 1);
+            else ::unsetenv("PATH");
+        }
+    } restore{currentPath ? std::optional<std::string>{currentPath} : std::nullopt, std::cin.rdbuf(enter.rdbuf())};
+    require(::setenv("PATH", directory.path().c_str(), 1) == 0);
+
+    WebFront app({.port = "0"});
+    app.show("folder/a b.html?x=1#result");
+    app.shutdown();
+    then("the opener receives the legacy URL with the bound port, query and fragment", [&] {
+        std::ifstream capture(opener.string() + ".url");
+        std::string url;
+        require(static_cast<bool>(std::getline(capture, url)));
+        require(url == "http://127.0.0.1:" + std::string(app.port()) + "/folder/a%20b.html?x=1#result");
+    });
+}};
+#endif
+
 const Scenario systemBrowserLoopUp{"The system browser's loop is up while its opener is still running", [] {
     given("an opener that lives longer than the close request", [&] {
         namespace fs = std::filesystem;

@@ -109,12 +109,12 @@ const Scenario sharedSession{"A shared session is listed with its grants and nev
                     require(listed[0].allow == "[\"check\",\"build\"]");
                     require(listed[0].pid == discovery::currentProcess());
                 });
-                then("the printed JSON has the contract's members and no secret", [&] {
-                    const Object printed{discovery::listJson(listed), 64000};
+                then("the record has the contract's members and no secret", [&] {
+                    const Object printed{listed[0].json(), 64000};
                     require(printed.raw("version") == "1");
-                    require(printed.raw("sessions").find("\"state\":\"running\"") != std::string::npos);
-                    require(printed.raw("sessions").find("token") == std::string::npos);
-                    require(printed.raw("sessions").find("capability") == std::string::npos);
+                    require(printed.string("state") == "running");
+                    require(listed[0].json().find("token") == std::string::npos);
+                    require(listed[0].json().find("capability") == std::string::npos);
                 });
             });
         }
@@ -219,25 +219,6 @@ const Scenario discoveryDirectory{"A discovery directory only lists live, well-f
     });
 }};
 
-const Scenario clientConfiguration{"A client configuration attaches to an endpoint without grants or secrets", [] {
-    given("an agent and an endpoint directory", [&] {
-        const auto text = discovery::mcpConfiguration("/tools/webfront-agent", "/run/session", "bf");
-        then("it is a stdio server configuration whose arguments only attach", [&] {
-            const Object config{text};
-            const Object servers{config.raw("mcpServers")};
-            const Object server{servers.raw("bf")};
-            require(server.string("command") == "/tools/webfront-agent");
-            require(server.raw("args") == "[\"--attach\",\"/run/session\",\"--mcp\"]");
-            require(text.find("--allow") == std::string::npos);
-            require(text.find("token") == std::string::npos);
-        });
-        then("a server name that could break the JSON or a command line is refused", [&] {
-            for (const auto* name : {"", "a b", "a\"b", "../x"})
-                requireThrows<std::invalid_argument>([&] { discovery::mcpConfiguration("agent", "dir", name); });
-        });
-    });
-}};
-
 const Scenario consumerEnables{"A consumer enables automation explicitly, with fixed grants and a visible endpoint", [] {
     webfront::test::TemporaryDirectory root;
     std::filesystem::create_directory(root.path() / "project");
@@ -249,48 +230,52 @@ const Scenario consumerEnables{"A consumer enables automation explicitly, with f
         });
     });
     given("a refused configuration", [&] {
-        then("a missing endpoint directory, an unknown grant and an endpoint inside the project are all refused", [&] {
-            requireThrows<std::invalid_argument>([&] { enableAutomation(app, {.grants = {"check"}, .discovery = sessions, .announce = false}); });
-            requireThrows<std::invalid_argument>([&] { enableAutomation(app, {.grants = {"shell"}, .listen = root.path() / "endpoint", .discovery = sessions, .announce = false}); });
-            requireThrows<std::invalid_argument>([&] { enableAutomation(app, {.grants = {"check"}, .listen = root.path() / "project" / "endpoint", .discovery = sessions, .announce = false}); });
+        then("an unknown grant and a private directory inside the project are both refused", [&] {
+            requireThrows<std::invalid_argument>([&] { enableAutomation(app, {.grants = {"shell"}, .directory = root.path() / "endpoint", .discovery = sessions, .announce = false}); });
+            requireThrows<std::invalid_argument>([&] { enableAutomation(app, {.grants = {"check"}, .directory = root.path() / "project" / "endpoint", .discovery = sessions, .announce = false}); });
             require(!std::filesystem::exists(root.path() / "endpoint"));
             require(discovery::list(sessions).empty());
             // A refused activation leaves nothing behind in the application: no callback without an object to close them.
             require(app.registered.empty());
         });
-        then("a discovery directory that is refused after the endpoint was accepted registers nothing either", [&] {
+        then("a discovery directory that is refused after the private directory was accepted registers nothing either", [&] {
 #ifndef _WIN32
             const auto shared = root.path() / "shared";
             std::filesystem::create_directory(shared);
             require(::chmod(shared.c_str(), 0755) == 0);
-            requireThrows([&] { enableAutomation(app, {.grants = {"check"}, .listen = root.path() / "endpoint2", .discovery = shared, .announce = false}); });
+            requireThrows([&] { enableAutomation(app, {.grants = {"check"}, .directory = root.path() / "endpoint2", .discovery = shared, .announce = false}); });
             require(app.registered.empty());
 #endif
         });
     });
     given("automation enabled with check and inspect", [&] {
         const auto endpoint   = root.path() / "endpoint";
-        auto       automation = enableAutomation(app, {.grants = {"check", "inspect"}, .listen = endpoint, .discovery = sessions, .announce = false});
+        auto       automation = enableAutomation(app, {.grants = {"check", "inspect"}, .directory = endpoint, .discovery = sessions, .announce = false});
         then("the application's own callbacks stay and the automation ones are added", [&] {
             require(std::ranges::find(app.registered, "webfront.automation.claim") != app.registered.end());
             require(std::ranges::find(app.registered, "webfront.automation.poll") != app.registered.end());
         });
-        then("the session is discoverable and names the endpoint and the grants", [&] {
+        then("the session is discoverable and names its directory, its URL and the grants", [&] {
             const auto listed = discovery::list(sessions);
             require(listed.size() == 1);
             require(listed[0].allow == "[\"check\",\"inspect\"]");
             require(std::filesystem::equivalent(listed[0].endpoint, endpoint));
-            require(std::filesystem::exists(endpoint / "endpoint.json"));
-            const auto capability = Object(read(endpoint / "endpoint.json")).string("token");
-            require(capability.size() >= 32);
-            require(read(sessions / (listed[0].session + ".json")).find(capability) == std::string::npos);
+            require(listed[0].mcp == automation->mcpUrl());
+            require(std::filesystem::exists(endpoint / "mcp.json"));
+            const Object configuration{read(endpoint / "mcp.json")};
+            const auto   authorization = Object(Object(Object(configuration.raw("mcpServers")).raw("webfront")).raw("headers")).string("Authorization");
+            require(authorization.starts_with("Bearer "));
+            const auto token = authorization.substr(7);
+            require(token.size() == 64);
+            require(std::ranges::all_of(token, [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }));
+            require(read(sessions / (listed[0].session + ".json")).find(token) == std::string::npos);
         });
         then("the launch page carries the single-use claim and the banner states the grants without a secret", [&] {
             const auto page = automation->launchPage();
             require(page.starts_with("webfront-bootstrap.html#webfront-automation="));
             const auto banner = automation->banner();
             require(banner.find("check, inspect") != std::string::npos);
-            require(banner.find("--attach") != std::string::npos);
+            require(banner.find(automation->mcpUrl()) != std::string::npos);
             require(banner.find(page.substr(page.find('=') + 1)) == std::string::npos);
             require(automation->windowTitle("Board").find("automation") != std::string::npos);
         });
@@ -304,12 +289,12 @@ const Scenario consumerEnables{"A consumer enables automation explicitly, with f
             requireThrows<OperationError>([&] { automation->controller()->start(request); });
             require(automation->controller()->describe().find("\"denied\"") != std::string::npos);
         });
-        then("closing revokes the session and withdraws the record and the endpoint, once or repeatedly", [&] {
+        then("closing revokes the session and withdraws the record and the private directory, once or repeatedly", [&] {
             automation->close();
             automation->close();
             require(automation->controller()->isClosed());
             require(discovery::list(sessions).empty());
-            require(!std::filesystem::exists(endpoint / "endpoint.json"));
+            require(!std::filesystem::exists(endpoint));
         });
     });
 }};
@@ -377,7 +362,7 @@ const Scenario windowIgnores{"A window that ignores the deadline's close request
         return std::make_unique<Automation<ConsumerApp, SupervisorClock>>(
             app,
             AutomationOptions{.grants         = {"check"},
-                              .listen         = root.path() / ("endpoint" + std::to_string(grace.count())),
+                              .directory      = root.path() / ("endpoint" + std::to_string(grace.count())),
                               .discovery      = sessions,
                               .timeout        = std::chrono::seconds{1},
                               .startupTimeout = startup,
@@ -405,7 +390,7 @@ const Scenario windowIgnores{"A window that ignores the deadline's close request
             });
             require(automation->controller()->isClosed());
             require(discovery::list(sessions).empty());
-            require(!std::filesystem::exists(automation->endpoint() / "endpoint.json"));
+            require(!std::filesystem::exists(automation->directory() / "mcp.json"));
         });
     });
     given("a window that does close within the grace after the deadline", [&] {
@@ -452,7 +437,7 @@ const Scenario windowIgnores{"A window that ignores the deadline's close request
             });
             require(automation->controller()->isClosed());
             require(discovery::list(sessions).empty());
-            require(!std::filesystem::exists(automation->endpoint() / "endpoint.json"));
+            require(!std::filesystem::exists(automation->directory() / "mcp.json"));
         });
     });
     given("a window that claims the session before the startup deadline", [&] {
@@ -474,7 +459,7 @@ const Scenario windowIgnores{"A window that ignores the deadline's close request
             // Windows refuses to look at a file whose removal is pending: that is the withdrawal under way, not a failure.
             requireEventually([&] {
                 std::error_code pending;
-                return !std::filesystem::exists(automation->endpoint() / "endpoint.json", pending);
+                return !std::filesystem::exists(automation->directory() / "mcp.json", pending);
             });
             automation->close();
             require(unresponsive.load() == 0);
@@ -503,7 +488,7 @@ const Scenario defaultAutomation{"The default automation clock supervises a rend
     ConsumerApp       app{.project = root.path() / "project"};
     std::atomic<bool> unresponsive{false};
     auto              automation = enableAutomation(app,
-                                                    {.listen         = root.path() / "endpoint",
+                                                    {.directory      = root.path() / "endpoint",
                                                      .discovery      = root.path() / "sessions",
                                                      .startupTimeout = std::chrono::seconds{1},
                                                      .closeGrace     = std::chrono::milliseconds{10},
@@ -567,7 +552,7 @@ const Scenario unboundedDelaysKeepTheSession{"Unbounded startup and grace option
     std::atomic<int> unresponsive{0};
     const auto       options = [&](std::chrono::seconds startup, std::chrono::milliseconds grace) {
         return AutomationOptions{.grants         = {"check"},
-                                 .listen         = root.path() / "endpoint",
+                                 .directory      = root.path() / "endpoint",
                                  .discovery      = root.path() / "sessions",
                                  .startupTimeout = startup,
                                  .closeGrace     = grace,

@@ -557,3 +557,93 @@ const Scenario webLinkNever{"WebLink never logs the payload of an incoming messa
     require(logged.find("QQQQ") == string::npos);
     require(logged.find("51 51") == string::npos);
 }};
+
+namespace {
+struct SecureCloseTestNetwork : InjectableNetworking {
+    static constexpr bool secure = true;
+    static inline unsigned alerts = 0;
+
+    static networking::Task Close(Socket&) {
+        ++alerts;
+        co_return;
+    }
+};
+}
+
+const Scenario securePeerCloseResumesWriters{"A secure peer Close releases writers during backpressure", [] {
+    InjectableSocket::reset();
+    SecureCloseTestNetwork::alerts = 0;
+    InlineTaskScope scope;
+    using Link = WebLink<SecureCloseTestNetwork>;
+    vector<WebLinkEvent::Code> events;
+    auto link = make_shared<Link>(InjectableSocket{}, WebLinkId{54}, [&](WebLinkEvent event) { events.push_back(event.code); }, scope);
+    InjectableSocket::deferWrites();
+    link->sendError(1, "in flight");
+    link->sendError(2, "queued before Close");
+    bool waiting = false;
+    networking::Spawn(scope, networking::ex::inline_scheduler{}, waitWrites(webfront::detail::WritesAtMost<Link>{link, 0}, waiting));
+    given("a blocked writer and a peer Close frame", [&] {
+        require(!waiting);
+        InjectableSocket::receive(std::array{byte{0x88}, byte{0x80}, byte{1}, byte{2}, byte{3}, byte{4}});
+        require(waiting);
+        require(events == vector{WebLinkEvent::Code::closed});
+        link->sendError(3, "queued after Close");
+        bool last = false;
+        networking::Spawn(scope, networking::ex::inline_scheduler{}, waitWrites(webfront::detail::WritesAtMost<Link>{link, 0}, last));
+        then("the terminal frame drains the queue and wakes a late waiter", [&] {
+            require(!last);
+            require(SecureCloseTestNetwork::alerts == 0);
+            while (InjectableSocket::completeDeferredWrites() != 0) {}
+            require(last);
+            require(link->pendingWrites() == 0);
+            require(SecureCloseTestNetwork::alerts == 1);
+            require(InjectableSocket::wrote("in flight"));
+            require(!InjectableSocket::wrote("queued before Close"));
+            require(!InjectableSocket::wrote("queued after Close"));
+        });
+    });
+    InjectableSocket::deferWrites(false);
+    InjectableSocket::reset();
+}};
+
+namespace {
+struct SecureDeadlineNetwork : SecureCloseTestNetwork {
+    static inline ManualSender::Completion timer;
+    static inline unsigned                 timers = 0;
+
+    static ManualSender ResumeAfter(Socket&, std::chrono::seconds) {
+        return ManualSender([](ManualSender::Completion completion) {
+            ++timers;
+            timer = std::move(completion);
+        });
+    }
+};
+}
+
+const Scenario securePeerEofBoundsBlockedWrite{"A secure peer EOF cannot hold a blocked write for ever", [] {
+    InjectableSocket::reset();
+    SecureDeadlineNetwork::alerts = 0;
+    SecureDeadlineNetwork::timers = 0;
+    SecureDeadlineNetwork::timer  = {};
+    InlineTaskScope scope;
+    using Link = WebLink<SecureDeadlineNetwork>;
+    vector<WebLinkEvent::Code> events;
+    auto link = make_shared<Link>(InjectableSocket{}, WebLinkId{55}, [&](WebLinkEvent event) { events.push_back(event.code); }, scope);
+    InjectableSocket::deferWrites();
+    link->sendError(1, "in flight");
+    given("a write blocked by backpressure and a peer close_notify", [&] {
+        require(link->pendingWrites() == 1);
+        InjectableSocket::fail({});
+        require(events == vector{WebLinkEvent::Code::closed});
+        then("the wait for the writer is bounded by the close deadline", [&] {
+            require(SecureDeadlineNetwork::timers == 1);
+            require(link->pendingWrites() == 1);
+            require(SecureDeadlineNetwork::alerts == 0);
+            require(SecureDeadlineNetwork::timer.complete);
+            SecureDeadlineNetwork::timer.complete({}, 0);
+            require(link->pendingWrites() == 0);
+        });
+    });
+    InjectableSocket::deferWrites(false);
+    InjectableSocket::reset();
+}};

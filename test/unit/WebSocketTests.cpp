@@ -42,6 +42,35 @@ const Scenario stoppedWebSocket{"A stopped WebSocket does not read again", [] {
     });
 }};
 
+namespace {
+struct SecureTestNetwork : InjectableNetworking {
+    static constexpr bool secure = true;
+
+    static networking::Task Close(Socket&) { co_return; }
+};
+}
+
+const Scenario secureWriteBeforeStart{"A secure WebSocket queues a frame written before start() and drops one written after stop()", [] {
+    InjectableSocket::reset();
+    webfront::testing::InlineTaskScope scope;
+    auto                               ws = websocket::WebSocket<SecureTestNetwork>::create(InjectableSocket{}, scope);
+
+    given("a frame written before start(), as with the TCP provider", [&] {
+        ws->write("before start");
+        ws->start();
+
+        then("it reaches the network", [&] { require(InjectableSocket::wrote("before start")); });
+
+        when("the WebSocket is stopped", [&] {
+            ws->stop();
+            ws->write("after stop");
+
+            then("a later frame is dropped", [&] { require(!InjectableSocket::wrote("after stop")); });
+        });
+    });
+    InjectableSocket::reset();
+}};
+
 const Scenario failedWrite{"A failed write closes the WebSocket", [] {
     InjectableSocket::reset();
     int closeHandlerCalls = 0;
