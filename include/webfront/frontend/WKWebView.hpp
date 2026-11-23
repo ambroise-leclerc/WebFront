@@ -347,6 +347,9 @@ struct Session {
     id                                   previousDelegate = nullptr, previousMenu = nullptr;
     long                                 previousActivationPolicy = 0;
     bool                                 installed = false, running = false, closed = false, loaded = false;
+    bool                                 secondary = false;
+    id                                   sharedDataStore = nullptr;
+    std::function<void()>                closedHook;
     bool                                 receivedResponse = false, committed = false;
     std::exception_ptr                   error;
     std::shared_ptr<CaptureTarget>       captureTarget = std::make_shared<CaptureTarget>();
@@ -459,7 +462,19 @@ struct Session {
     }
 
     void close() noexcept {
+        if (secondary && closed)
+            return;  // the primary window repeats its stop request: the loop may have started since the first call
         closed = true;
+        if (secondary) {
+            if (window)
+                send<void>(window, "orderOut:", static_cast<id>(nullptr));
+            if (closedHook) {
+                try {
+                    closedHook();
+                } catch (...) {}
+            }
+            return;
+        }
         if (!running)
             return;
         send<void>(app, "stop:", static_cast<id>(nullptr));
@@ -534,21 +549,26 @@ struct Session {
 
     void create() {
         app = send(type("NSApplication"), "sharedApplication");
-        if (send<BOOL>(app, "isRunning"))
+        if (!secondary && send<BOOL>(app, "isRunning"))
             throw std::runtime_error("WKWebView: open() owns the AppKit event loop; call it outside an existing NSApplication run loop");
-        previousDelegate         = send(send(app, "delegate"), "retain");
-        previousMenu             = send(send(app, "mainMenu"), "retain");
-        previousActivationPolicy = send<long>(app, "activationPolicy");
-        delegate                 = send(reinterpret_cast<id>(delegateClass()), "new");
-        attach(delegate, this);
-        installed = true;
-        send<void>(app, "setDelegate:", delegate);
-        send<BOOL>(app, "setActivationPolicy:", options.visible ? applicationActivationPolicy() : 2L);
-        installMenu();
-        send<void>(app, "finishLaunching");
+        if (!secondary) {
+            previousDelegate         = send(send(app, "delegate"), "retain");
+            previousMenu             = send(send(app, "mainMenu"), "retain");
+            previousActivationPolicy = send<long>(app, "activationPolicy");
+            delegate                 = send(reinterpret_cast<id>(delegateClass()), "new");
+            attach(delegate, this);
+            installed = true;
+            send<void>(app, "setDelegate:", delegate);
+            send<BOOL>(app, "setActivationPolicy:", options.visible ? applicationActivationPolicy() : 2L);
+            installMenu();
+            send<void>(app, "finishLaunching");
+        } else {
+            delegate = send(reinterpret_cast<id>(delegateClass()), "new");
+            attach(delegate, this);
+        }
 
         Object configuration(send(type("WKWebViewConfiguration"), "new"));
-        send<void>(configuration.get(), "setWebsiteDataStore:", send(type("WKWebsiteDataStore"), "nonPersistentDataStore"));
+        send<void>(configuration.get(), "setWebsiteDataStore:", sharedDataStore ? sharedDataStore : send(type("WKWebsiteDataStore"), "nonPersistentDataStore"));
         // Hidden content otherwise suspends once its load event completes. Use the public macOS 14+ preference
         // so asynchronous bridge/Worker work and close requests keep progressing without a visible native window.
         if (!options.visible) {
@@ -577,7 +597,8 @@ struct Session {
         attach(view, this);
         captureTarget->view = view;
         captureTarget->pending.open();
-        captureRegistration = CaptureRegistration{captureProvider(captureTarget)};
+        if (!secondary)
+            captureRegistration = CaptureRegistration{captureProvider(captureTarget)};
         send<void>(view, "setAutoresizingMask:", 18UL);  // NSViewWidthSizable | NSViewHeightSizable
         send<void>(view, "setInspectable:", static_cast<BOOL>(options.contentPolicy.devToolsEnabled));
         send<void>(view, "setNavigationDelegate:", delegate);
@@ -1177,6 +1198,88 @@ inline Class viewClass() {
     return cls;
 }
 
+// All windows belong to the active AppKit session and are used on the main thread.
+struct Windows {
+    Session*                                        primary = nullptr;
+    std::map<std::string, std::unique_ptr<Session>> secondary;
+    std::vector<std::unique_ptr<Session>>           finished;
+
+    static Windows& instance() {
+        static Windows windows;
+        return windows;
+    }
+    void retire(const std::string& page) {
+        const auto found = secondary.find(page);
+        if (found == secondary.end())
+            return;
+        // run() returned long ago for this window, so nothing else can report a page that failed to load.
+        if (found->second->error) {
+            try {
+                std::rethrow_exception(found->second->error);
+            } catch (const std::exception& failure) {
+                std::fprintf(stderr, "WKWebViewFrontend: the secondary window of '%s' closed: %s\n", page.c_str(), failure.what());
+            } catch (...) {}
+        }
+        finished.push_back(std::move(found->second));
+        secondary.erase(found);
+        dispatch_async_f(
+            dispatch_get_main_queue(),
+            nullptr,
+            +[](void*) {
+                auto retired = std::move(instance().finished);
+                retired.clear();
+            });
+    }
+    void clear() {
+        secondary.clear();
+        finished.clear();
+        primary = nullptr;
+    }
+};
+
+inline void openSecondary(std::string_view address, std::string_view port, std::string_view page, WKWebViewOptions options) {
+    auto& windows = Windows::instance();
+    // A first window that closed still runs its loop until the pass ends: a window built now would be destroyed with it.
+    if (!windows.primary || windows.primary->closed)
+        throw std::logic_error("WKWebView: no application window is open");
+    std::string key(page);
+    if (const auto found = windows.secondary.find(key); found != windows.secondary.end()) {
+        // A hidden window stays hidden: ordering it to the front would show it.
+        if (found->second->options.visible)
+            send<void>(found->second->window, "makeKeyAndOrderFront:", static_cast<id>(nullptr));
+        return;
+    }
+    // The first window's visibility and startup delay: a hidden application never shows a window or takes the focus.
+    options.visible        = windows.primary->options.visible;
+    options.startupTimeout = windows.primary->options.startupTimeout;
+    auto child             = std::make_unique<Session>(applicationUrl(address, port, page, options.launch.origin), std::move(options));
+    child->secondary       = true;
+    child->sharedDataStore = send(send(windows.primary->view, "configuration"), "websiteDataStore");
+    child->create();
+    child->closedHook = [key] {
+        Windows::instance().retire(key);
+    };
+    // Registered only once started: a window whose start throws is not left in the table, and its page can be opened again.
+    // One that closed during start() already retired itself from a table that did not hold it yet, without a word: the
+    // caller is still waiting, so the failure is thrown to it.
+    child->start();
+    if (child->closed) {
+        if (child->error)
+            std::rethrow_exception(child->error);
+        throw std::runtime_error("WKWebView: the secondary window of '" + key + "' closed while it started");
+    }
+    windows.secondary[key] = std::move(child);
+}
+
+inline bool closeSecondary(std::string_view page) {
+    auto&      windows = Windows::instance();
+    const auto found   = windows.secondary.find(std::string(page));
+    if (found == windows.secondary.end() || found->second->closed)
+        return false;
+    found->second->close();
+    return true;
+}
+
 inline void open(std::string_view address, std::string_view port, std::string_view file, const WKWebViewOptions& options) {
     initialize();
     if (opening)
@@ -1211,6 +1314,14 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
             host.close();
         }
     } closing{host, windowHost};
+    auto& windows   = Windows::instance();
+    windows.primary = &window;
+    struct Others {
+        Windows& windows;
+        ~Others() {
+            windows.clear();
+        }
+    } others{windows};
     window.run();
 }
 
@@ -1236,6 +1347,40 @@ struct WKWebViewFrontend {
         return detail::requestWindowClose(uiExecutor(), nativeWindow(), [](const NativeWindowHandle& window) {
             detail::wkwebview::requestSessionClose(window.pointer);
         }, session);
+#else
+        return false;
+#endif
+    }
+
+    static void openSecondaryWindow([[maybe_unused]] std::string_view     address,
+                                    [[maybe_unused]] std::string_view     port,
+                                    [[maybe_unused]] std::string_view     page,
+                                    [[maybe_unused]] const ContentPolicy& policy,
+                                    [[maybe_unused]] const WindowOptions& window,
+                                    [[maybe_unused]] const ViewLaunch&    launch) {
+#if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
+        try {
+            invokeOnUIThread(uiExecutor(), [&] {
+                detail::wkwebview::openSecondary(address, port, page, WKWebViewOptions{.contentPolicy = policy, .window = window, .launch = launch});
+            });
+        } catch (const UIExecutorUnavailable&) {
+            throw std::logic_error("WKWebView: no application window is open");
+        }
+#else
+        initialize();
+#endif
+    }
+    static bool closeSecondaryWindow([[maybe_unused]] std::string_view page) {
+#if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
+        bool closed = false;
+        try {
+            invokeOnUIThread(uiExecutor(), [&] {
+                closed = detail::wkwebview::closeSecondary(page);
+            });
+        } catch (const UIExecutorUnavailable&) {
+            return false;
+        }
+        return closed;
 #else
         return false;
 #endif

@@ -15,16 +15,19 @@
 #include "../networking/Tasks.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <exception>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -397,6 +400,85 @@ template <typename Tag>
 [[nodiscard]] UIExecutorHost& uiExecutorHostOf() {
     static UIExecutorHost host;
     return host;
+}
+
+/// @brief Thrown on the interface thread by a frontend's `openSecondaryWindow` while its first window cannot host another
+/// yet (WebView2 creates its environment after open() started). invokeOnUIThreadWhenReady() tries again from another
+/// thread; on the interface thread it reaches the caller, as the std::logic_error it is.
+class WindowNotReady : public std::logic_error {
+public:
+    explicit WindowNotReady(const std::string& message) : std::logic_error(message) { }
+};
+
+namespace detail {
+
+/// One blocking invocation (invokeOnUIThread): deletes itself when its operation completes, whatever the outcome.
+template <typename Function>
+struct UIInvocation {
+    struct Receiver {
+        using receiver_concept = ex::receiver_tag;
+        UIInvocation* self;
+        void          finish(std::exception_ptr error) noexcept {
+            auto completion = std::move(self->done);
+            delete self;
+            completion.set_value(std::move(error));
+        }
+        void set_value() noexcept {
+            std::exception_ptr error;
+            try {
+                self->function();
+            } catch (...) {
+                error = std::current_exception();
+            }
+            finish(std::move(error));
+        }
+        void set_error(std::exception_ptr) noexcept {
+            finish(std::make_exception_ptr(UIExecutorUnavailable{}));
+        }
+        void set_stopped() noexcept {
+            finish(std::make_exception_ptr(UIExecutorUnavailable{}));
+        }
+    };
+    Function                         function;
+    std::promise<std::exception_ptr> done;
+    ex::connect_result_t<decltype(std::declval<const UIExecutor&>().schedule()), Receiver> operation;
+    UIInvocation(const UIExecutor& loop, Function work) : function(std::move(work)), operation(ex::connect(loop.schedule(), Receiver{this})) { }
+};
+
+}  // namespace detail
+
+/// @brief Runs `function` on the interface thread and waits for it, from any other thread (#616). Called on the interface
+/// thread itself it runs the function at once (waiting there would never end). An exception of the function is rethrown to
+/// the caller; `UIExecutorUnavailable` is thrown when no loop runs, or when it closes before the function started.
+/// Never call it from a thread the interface thread waits for.
+template <typename Function>
+void invokeOnUIThread(const UIExecutor& executor, Function function) {
+    if (executor.onUIThread()) {
+        function();
+        return;
+    }
+    auto* invocation = new detail::UIInvocation<Function>(executor, std::move(function));
+    auto  answer     = invocation->done.get_future();
+    ex::start(invocation->operation);
+    if (auto error = answer.get())
+        std::rethrow_exception(error);
+}
+
+/// @brief invokeOnUIThread(), run again every 10 ms while `function` throws WindowNotReady (#646). The interface thread
+/// cannot wait for itself: there, WindowNotReady reaches the caller. The frontend bounds the wait: a first window that
+/// never becomes ready closes, and the call then fails as invokeOnUIThread() does.
+template <typename Function>
+void invokeOnUIThreadWhenReady(const UIExecutor& executor, Function function) {
+    for (;;) {
+        try {
+            invokeOnUIThread(executor, function);
+            return;
+        } catch (const WindowNotReady&) {
+            if (executor.onUIThread())
+                throw;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
 }
 
 }  // namespace webfront::frontend

@@ -1184,6 +1184,262 @@ const Scenario nativeOrBrowserFrontendForwards{"NativeOrBrowserFrontend forwards
     });
 }};
 
+namespace {
+struct SecondaryContractFrontend : SharedWindowFrontend<true> {
+    static inline int opened = 0;
+    static inline int closed = 0;
+    /// Run once, when BasicWF asks for the executor: after it has captured the session of its show().
+    static inline std::function<void()> beforeExecutor;
+    [[nodiscard]] static frontend::UIExecutor uiExecutor() {
+        if (auto hook = std::exchange(beforeExecutor, {}))
+            hook();
+        return SharedWindowFrontend<true>::uiExecutor();
+    }
+    static void openSecondaryWindow(std::string_view, std::string_view, std::string_view, const ContentPolicy&, const WindowOptions&, const ViewLaunch&) {
+        ++opened;
+    }
+    static bool closeSecondaryWindow(std::string_view) {
+        ++closed;
+        return true;
+    }
+};
+}
+
+const Scenario secondaryOwnership{"Only the owner can operate secondary windows", [] {
+    given("two applications sharing a frontend", [&] {
+        using Shared = SecondaryContractFrontend;
+        Shared::opened = 0;
+        Shared::closed = 0;
+        HostApp<Shared> owner;
+        const auto state = ContractIoContext::current;
+        HostApp<Shared> other;
+        std::atomic<bool> done{false};
+        std::atomic<bool> success{false};
+        Shared::insideOpen = [&] {
+            try {
+                owner.openSecondaryWindow("one.html");
+                const bool closed = owner.requestClose("one.html");
+                bool refused = false;
+                try { other.openSecondaryWindow("one.html"); } catch (const std::logic_error&) { refused = true; }
+                success = closed && refused && !other.requestClose("one.html");
+            } catch (...) { }
+            ContractIoContext::current = state;
+            done = true;
+        };
+        std::jthread showing([&] { owner.show(); });
+        requireEventually([&] { return done.load(); });
+        then("only the owning application reaches the frontend", [&] {
+            check(success);
+            check(Shared::opened == 1);
+            check(Shared::closed == 1);
+        });
+        requireEventually([&] { return windowOpen(state); });
+        {
+            std::lock_guard lock(state->mutex);
+            state->closeWindow = true;
+            state->changed.notify_all();
+        }
+        showing.join();
+        Shared::insideOpen = nullptr;
+    });
+}};
+
+const Scenario secondaryStaleSession{"A secondary window is never opened in a session that started after the call did", [] {
+    given("a call made during the show() of one application, whose show() ends and another starts before it is delivered", [&] {
+        using Shared = SecondaryContractFrontend;
+        Shared::opened = 0;
+        Shared::closed = 0;
+        HostApp<Shared> owner;
+        const auto      ownerState = ContractIoContext::current;
+        HostApp<Shared> later;
+        const auto      laterState = ContractIoContext::current;
+        ContractIoContext::current = ownerState;
+        std::jthread    ownerShow([&] { owner.show(); });
+        requireEventually([&] { return windowOpen(ownerState); });
+        std::jthread laterShow;
+        Shared::beforeExecutor = [&] {
+            {
+                std::lock_guard lock(ownerState->mutex);
+                ownerState->closeWindow = true;
+                ownerState->changed.notify_all();
+            }
+            ownerShow.join();
+            ContractIoContext::current = laterState;
+            laterShow                  = std::jthread([&] { later.show(); });
+            requireEventually([&] { return windowOpen(laterState); });
+        };
+        bool refused = false;
+        try {
+            owner.openSecondaryWindow("one.html");
+        } catch (const std::logic_error&) {
+            refused = true;
+        }
+        then("the call is refused and the later session received nothing", [&] {
+            check(refused);
+            check(Shared::opened == 0);
+            check(!owner.requestClose("one.html"));
+            check(Shared::closed == 0);
+        });
+        {
+            std::lock_guard lock(laterState->mutex);
+            laterState->closeWindow = true;
+            laterState->changed.notify_all();
+        }
+    });
+}};
+
+namespace {
+// A frontend whose first window cannot host a second one for its first `refusals` attempts, as WebView2 while its
+// environment is being created (#646). Its loop drains the interface-thread executor until the test closes the window.
+struct NotReadyFrontend : ContractFrontend<frontend::Action::closeServerAfterOpen> {
+    static inline std::atomic<int>      refusals = 0;
+    static inline std::atomic<int>      attempts = 0;
+    static inline std::atomic<int>      opened   = 0;
+    static inline std::function<void()> insideOpen;  // run on the interface thread once the session exists
+
+    [[nodiscard]] static frontend::UIExecutor uiExecutor() {
+        return frontend::uiExecutorHostOf<NotReadyFrontend>().executor();
+    }
+    static void open(std::string_view, std::string_view) {
+        auto& host = frontend::uiExecutorHostOf<NotReadyFrontend>();
+        host.attach([] { });
+        struct Detach {
+            ~Detach() {
+                frontend::uiExecutorHostOf<NotReadyFrontend>().close();
+            }
+        } detach;
+        const auto state = ContractIoContext::current;
+        {
+            std::lock_guard lock(state->mutex);
+            state->openThread      = std::this_thread::get_id();
+            state->frontendEntered = true;
+            state->windowCreated   = true;
+            state->changed.notify_all();
+        }
+        if (insideOpen)
+            insideOpen();
+        for (;;) {
+            host.drain();
+            std::unique_lock lock(state->mutex);
+            if (state->changed.wait_for(lock, std::chrono::milliseconds(1), [&] { return state->closeWindow; }))
+                return;
+        }
+    }
+    static void openSecondaryWindow(std::string_view, std::string_view, std::string_view, const ContentPolicy&, const WindowOptions&, const ViewLaunch&) {
+        ++attempts;
+        if (refusals > 0) {
+            --refusals;
+            throw frontend::WindowNotReady("the first window is not ready");
+        }
+        ++opened;
+    }
+    static bool closeSecondaryWindow(std::string_view) {
+        return false;
+    }
+};
+}  // namespace
+
+const Scenario secondaryWaitsForFirstWindow{"A second window requested while the first is not ready waits for it (#646)", [] {
+    given("an application whose first window refuses a second one for its first attempts", [&] {
+        using Frontend = NotReadyFrontend;
+        Frontend::attempts = 0;
+        Frontend::opened   = 0;
+        HostApp<Frontend> app;
+        static_assert(HostApp<Frontend>::supportsSecondaryWindow);
+        const auto state = ContractIoContext::current;
+        bool       refusedOnInterfaceThread = false;
+        Frontend::insideOpen = [&] {
+            Frontend::refusals = 1;
+            try {
+                app.openSecondaryWindow("one.html");
+            } catch (const frontend::WindowNotReady&) {
+                refusedOnInterfaceThread = true;
+            }
+            Frontend::refusals = 3;
+        };
+        // Closes the window on every exit, also by a failed requirement, so that show() returns before the join.
+        struct CloseWindow {
+            std::shared_ptr<LoopState> state;
+            ~CloseWindow() {
+                std::lock_guard lock(state->mutex);
+                state->closeWindow = true;
+                state->changed.notify_all();
+                Frontend::insideOpen = nullptr;
+            }
+        };
+        std::jthread showing([&] { app.show(); });
+        CloseWindow  close{state};
+        requireEventually([&] { return windowOpen(state); });
+        when("another thread asks for a second window", [&] {
+            app.openSecondaryWindow("one.html");
+            then("the call tries again until the window opens; the interface thread, which cannot wait, is refused", [&] {
+                check(refusedOnInterfaceThread);
+                check(Frontend::opened == 1);
+                check(Frontend::attempts == 5);  // one on the interface thread, three refused and the one that opened
+            });
+        });
+    });
+}};
+
+const Scenario secondWindowRefused{"A frontend without a second window refuses openSecondaryWindow with an exception", [] {
+    given("an application whose frontend shows one window", [&] {
+        HostApp<HostFrontend<>> app;
+        static_assert(!HostApp<HostFrontend<>>::supportsSecondaryWindow);
+        then("the call is refused before and while a window is open, and no close request finds a window", [&] {
+            requireThrows<std::logic_error>([&] { app.openSecondaryWindow("other.html"); });
+            check(!app.requestClose("other.html"));
+            const auto state = ContractIoContext::current;
+            std::jthread show([&] { app.show(); });
+            requireEventually([&] { return windowOpen(state); });
+            requireThrows<std::logic_error>([&] { app.openSecondaryWindow("other.html"); });
+            check(!app.requestClose("other.html"));
+            check(app.requestClose());
+        });
+    });
+    given("the native-or-browser frontend whose native window cannot show a second one", [&] {
+        using Either = frontend::NativeOrBrowserFrontendFor<HostFrontend<>, DeafFrontend>;
+        // It does not claim a capacity its native frontend lacks (#646).
+        static_assert(!HostApp<Either>::supportsSecondaryWindow);
+        then("the application reports that it cannot show one", [&] {
+            check(!HostApp<Either>::canShowSecondaryWindow());
+        });
+    });
+}};
+
+namespace {
+// Native frontends that can show a second window; the second cannot initialize, so the system browser replaces it.
+struct SecondaryNative : NotReadyFrontend { };
+struct UnavailableSecondaryNative : NotReadyFrontend {
+    static void initialize() {
+        throw std::runtime_error("no display");
+    }
+};
+}  // namespace
+
+const Scenario secondaryAvailability{"Whether a second window can be shown follows the frontend chosen at run time (#646)", [] {
+    given("a native-or-browser frontend whose native window can show a second one", [&] {
+        using Native   = frontend::NativeOrBrowserFrontendFor<SecondaryNative, DeafFrontend>;
+        using Fallback = frontend::NativeOrBrowserFrontendFor<UnavailableSecondaryNative, DeafFrontend>;
+        static_assert(HostApp<Native>::supportsSecondaryWindow && HostApp<Fallback>::supportsSecondaryWindow);
+        Native::initialize();
+        Fallback::initialize();
+        then("it can when the native window is used, and cannot once it fell back to the system browser", [&] {
+            check(Native::usesNativeWindow());
+            check(HostApp<Native>::canShowSecondaryWindow());
+            check(!Fallback::usesNativeWindow());
+            check(!HostApp<Fallback>::canShowSecondaryWindow());
+            requireThrows<std::logic_error>([&] { Fallback::openSecondaryWindow("127.0.0.1", "9002", "other.html", ContentPolicy{}, WindowOptions{}, ViewLaunch{}); });
+            check(!Fallback::closeSecondaryWindow("other.html"));
+        });
+    });
+    given("frontends without a choice at run time", [&] {
+        then("a frontend that shows a second window can, one that cannot does not", [&] {
+            check(HostApp<NotReadyFrontend>::canShowSecondaryWindow());
+            check(!HostApp<HostFrontend<>>::canShowSecondaryWindow());
+        });
+    });
+}};
+
 const Scenario uIThreadStop{"UIThread::stop reports a window that does not close", [] {
     given("a window that ignores close requests", [&] {
         UIThread<HostApp<DeafFrontend>> ui(WebFrontConfig{}, [](auto&) { });

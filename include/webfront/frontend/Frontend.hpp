@@ -60,6 +60,9 @@ namespace webfront::frontend {
  * closed the window; it returns false when nothing is open to receive the request. BasicWF::requestClose() forwards it.
  * A frontend that publishes its interface thread (uiExecutor()) declares `requestClose(std::optional<UISession>)` instead:
  * BasicWF passes the session it owns, and the request is dropped on the interface thread if another loop runs by then.
+ * Optional static openSecondaryWindow() and closeSecondaryWindow() show a second window of the application (#616). An
+ * optional static bool secondaryWindowsAvailable() tells at run time whether that frontend, as initialized, can show one
+ * (NativeOrBrowserFrontend cannot once it fell back to the system browser); undeclared means it always can.
  * An optional static constexpr bool requiresMainThread tells that open() belongs to the process main thread
  * (frontend::requiresMainThread<Frontend>); webfront::UIThread refuses such a frontend at compile time.
  * An optional open(address, port, file) overload receives the configured address; build URLs with
@@ -367,6 +370,31 @@ struct NativeOrBrowserFrontendFor {
             std::cerr << "WebFront: opening the system browser instead of a native window: " << *s.reason << '\n';
             Browser::initialize();
         }
+    }
+
+    /// A second window beside the first (#616): the native window's, or a refusal when the system browser was chosen. The
+    /// system browser is never asked to open one: it would be an external browser, without the proof of an embedded view.
+    /// Offered only when the native frontend offers it; secondaryWindowsAvailable() tells which way initialize() decided.
+    static void openSecondaryWindow(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy,
+                                    const WindowOptions& window, const ViewLaunch& launch)
+        requires requires { Native::openSecondaryWindow(address, port, file, policy, window, launch); }
+    {
+        if (!usesNativeWindow())
+            throw std::logic_error("the system browser cannot show a second window of the application");
+        Native::openSecondaryWindow(address, port, file, policy, window, launch);
+    }
+    [[nodiscard]] static bool closeSecondaryWindow(std::string_view file)
+        requires requires { { Native::closeSecondaryWindow(file) } -> std::same_as<bool>; }
+    {
+        return usesNativeWindow() && Native::closeSecondaryWindow(file);
+    }
+    /// Whether openSecondaryWindow() can open a window: false once initialize() chose the system browser.
+    [[nodiscard]] static bool secondaryWindowsAvailable()
+        requires requires(std::string_view text, const ContentPolicy& policy, const WindowOptions& window, const ViewLaunch& launch) {
+            Native::openSecondaryWindow(text, text, text, policy, window, launch);
+        }
+    {
+        return usesNativeWindow();
     }
 
     static void open(std::string_view port, std::string_view file) {

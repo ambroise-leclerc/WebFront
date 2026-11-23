@@ -1136,7 +1136,7 @@ public:
                 }
             }
         } showing{*this};
-        // A frontend that can be asked to close shows one window at a time: a show() that did not take the ownership must
+        // A frontend that can be asked to close has one primary session at a time: a show() that did not take the ownership must
         // not open one that nobody could close (the first may end before this one attaches, and the frontend would accept it).
         if constexpr (frontend::endsOnRequest<Frontend>) {
             if (!showing.owns)
@@ -1297,6 +1297,109 @@ public:
                 return Frontend::requestClose();
             else
                 return Frontend::requestClose(std::nullopt);  // only the form that takes a session, and none is published
+        } else {
+            return false;
+        }
+    }
+
+    /// Whether the frontend type can show a second window of the application (see openSecondaryWindow()). A frontend that
+    /// chooses at run time, as NativeOrBrowserFrontend does, may still refuse it: canShowSecondaryWindow() tells.
+    static constexpr bool supportsSecondaryWindow =
+        requires(std::string_view text, const ContentPolicy& policy, const WindowOptions& window, const ViewLaunch& launch) {
+            Frontend::openSecondaryWindow(text, text, text, policy, window, launch);
+            { Frontend::uiExecutor() } -> std::same_as<frontend::UIExecutor>;
+        };
+
+    /** @brief Whether openSecondaryWindow() can open a window with the frontend chosen at run time, once show() runs: false
+     * when the frontend type cannot (supportsSecondaryWindow), and for NativeOrBrowserFrontend once it fell back to the system
+     * browser (the frontend is initialized when the first application is constructed). Use it to offer the action or not.
+     */
+    [[nodiscard]] static bool canShowSecondaryWindow() {
+        if constexpr (!supportsSecondaryWindow)
+            return false;
+        else if constexpr (requires { { Frontend::secondaryWindowsAvailable() } -> std::convertible_to<bool>; })
+            return Frontend::secondaryWindowsAvailable();
+        else
+            return true;
+    }
+
+    /** @brief Opens `page` in a second native window beside the one show() runs, served by the same server (#616).
+     *
+     * The page reaches the same `cppFunction`s and the same `jsFunction` subscribers as the first one (each window is
+     * one more connected browser: `onUIStarted` and `subscribeUIStarted` see it), and receives the same view-association
+     * proof, so it is an embedded view of this application and not an external browser. The title, the size and the
+     * background come from `options` (an empty background takes the application's). Opening a page that a secondary
+     * window already shows brings that window to the front instead of opening another. A window is identified by the page
+     * string exactly as given, query included: "a.html?x=1" and "a.html?x=2" are two windows, and requestClose(page) takes
+     * the string that opened it. Closing the window of show() closes the others with it; closing a secondary window leaves
+     * the rest running. A window that cannot start (its view refuses the navigation) throws the failure to the caller; a page
+     * that fails to load later closes its window and the failure is written to stderr: this call has returned by then, so
+     * nothing can throw it. The window follows the first one's visibility: a hidden application shows none.
+     *
+     * Callable from any thread while show() runs, and it waits for the interface thread: it returns once the window exists
+     * (on the interface thread itself it runs at once). Called from a `cppFunction` callback, it holds the server's thread
+     * until then, and with it every exchange of the application, also while a modal dialog keeps the interface thread busy;
+     * there, run it on the interface thread instead (an operation scheduled with `app.uiExecutor()`), where it does not wait.
+     * Under WebView2, a call made just after show() started waits until the first window's browser is created; on the
+     * interface thread that call throws std::logic_error instead. Throws std::logic_error when this application is not
+     * showing a window (also once the first window has closed), and when the frontend cannot show a second window (today the
+     * WebKitGTK, WKWebView and WebView2 frontends can; the system browser and CEF refuse; canShowSecondaryWindow() tells it
+     * beforehand). Window placement is left to the toolkit.
+     */
+    void openSecondaryWindow(std::string_view page, WindowOptions options = {}) {
+        if constexpr (supportsSecondaryWindow) {
+            // One read: its parity and the session this call is bound to are those of the same instant. A second read could
+            // land in a show() that started after the first one ended, and bind the call to a session it was not made for.
+            const auto epoch = showEpoch.load();
+            if (epoch % 2 == 0)
+                throw std::logic_error("webfront::BasicWF::openSecondaryWindow(): this application is not showing a window; call show() first");
+            const auto executor = Frontend::uiExecutor();
+            const auto session = executor.session();
+            if (!session || session->thread != showThread.load() || showEpoch.load() != epoch)
+                throw std::logic_error("webfront::BasicWF::openSecondaryWindow(): this application has no active interface session");
+            if (options.background.empty())
+                options.background = windowOptions.background;
+            try {
+                // Called on the interface thread, the frontend cannot wait for its first window to become ready: a caller on
+                // another thread tries again while it is not (WebView2 just after show() started).
+                frontend::invokeOnUIThreadWhenReady(executor, [&] {
+                    if (showEpoch.load() != epoch || executor.session() != session)
+                        throw std::logic_error("webfront::BasicWF::openSecondaryWindow(): the interface session has ended");
+                    Frontend::openSecondaryWindow(httpAddress, httpPort, page, contentPolicy, options,
+                                                  ViewLaunch{viewSecret, detail::browserOrigin(httpAddress, httpPort, networking::secureTransport<Net>)});
+                });
+            } catch (const frontend::UIExecutorUnavailable&) {
+                throw std::logic_error("webfront::BasicWF::openSecondaryWindow(): the interface session has ended");
+            }
+        } else {
+            throw std::logic_error("webfront::BasicWF::openSecondaryWindow(): this frontend cannot show a second window of the application");
+        }
+    }
+
+    /** @brief Asks the secondary window showing `page` to close, as if the user had closed it; callable from any thread.
+     * Returns false when no such window is open (or the frontend has none). The window of show() ends with
+     * requestClose(). Unlike requestClose(), it waits for the interface thread, as openSecondaryWindow() does: from a
+     * `cppFunction` callback, run it on the interface thread instead.
+     */
+    bool requestClose(std::string_view page) {
+        if constexpr (supportsSecondaryWindow && requires { { Frontend::closeSecondaryWindow(page) } -> std::same_as<bool>; }) {
+            const auto epoch = showEpoch.load();
+            if (epoch % 2 == 0)
+                return false;
+            const auto executor = Frontend::uiExecutor();
+            const auto session = executor.session();
+            if (!session || session->thread != showThread.load() || showEpoch.load() != epoch)
+                return false;
+            bool closed = false;
+            try {
+                frontend::invokeOnUIThread(executor, [&] {
+                    if (showEpoch.load() == epoch && executor.session() == session)
+                        closed = Frontend::closeSecondaryWindow(page);
+                });
+            } catch (const frontend::UIExecutorUnavailable&) {
+                return false;
+            }
+            return closed;
         } else {
             return false;
         }

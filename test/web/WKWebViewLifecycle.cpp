@@ -253,6 +253,33 @@ void hiddenScheduling() {
     session.run();
 }
 
+// A secondary window of a hidden application stays hidden, also when its page is opened again (which brings a visible
+// window to the front).
+void hiddenSecondary() {
+    Object  pool(send(type("NSAutoreleasePool"), "new"));
+    Object  configuration(send(type("WKWebViewConfiguration"), "new"));
+    if (!send<BOOL>(send(configuration.get(), "preferences"), "respondsToSelector:", sel_registerName("setInactiveSchedulingPolicy:")))
+        return;  // hidden sessions require macOS 14 (see hidden-scheduling)
+    Session primary("http://127.0.0.1:0/", {.visible = false});
+    primary.create();
+    auto& windows   = Windows::instance();
+    windows.primary = &primary;
+    struct Clear {
+        Windows& windows;
+        ~Clear() {
+            windows.clear();
+        }
+    } clear{windows};
+    openSecondary("127.0.0.1", "0", "editor.html", {});
+    const auto found = windows.secondary.find("editor.html");
+    require(found != windows.secondary.end(), "The secondary window was not opened");
+    require(!found->second->options.visible, "The secondary window does not follow the hidden first window");
+    require(!send<BOOL>(found->second->window, "isVisible"), "The secondary window of a hidden application was shown");
+    openSecondary("127.0.0.1", "0", "editor.html", {});
+    require(windows.secondary.size() == 1, "Opening the same page again opened another window");
+    require(!send<BOOL>(found->second->window, "isVisible"), "Opening the same page again showed a hidden window");
+}
+
 void missingResponse() {
     Object  pool(send(type("NSAutoreleasePool"), "new"));
     Session session("http://127.0.0.1:0/", {.visible = webfront::testdriver::visibleWindows});
@@ -663,6 +690,7 @@ int main(int argc, char** argv) {
             {      "redirect-policy",       redirectPolicy},
             {             "settings",             settings},
             {    "hidden-scheduling",     hiddenScheduling},
+            {     "hidden-secondary",      hiddenSecondary},
             {"translucent-background", translucentBackground},
             {"navigation-diagnostic", navigationDiagnostic},
             {     "missing-response",      missingResponse},
