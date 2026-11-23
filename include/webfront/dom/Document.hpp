@@ -396,7 +396,7 @@ class EventOperationState : public EventWaiter, public std::enable_shared_from_t
         {
             std::lock_guard lock(mutex);
             nameIndex = index;
-            ended = outcome != Outcome::pending;
+            ended     = outcome != Outcome::pending;
         }
         if (ended)
             state->drop({node, index}, this->weak_from_this());  // stopped from another thread while subscribing
@@ -404,7 +404,7 @@ class EventOperationState : public EventWaiter, public std::enable_shared_from_t
 
 public:
     EventOperationState(Receiver r, std::weak_ptr<State> document, std::uint32_t id, std::string name, EventOptions flags)
-        : receiver(std::move(r)), owner(std::move(document)), node(id), event(std::move(name)), options(flags) { }
+        : receiver(std::move(r)), owner(std::move(document)), node(id), event(std::move(name)), options(flags) {}
     void start() noexcept {
         // Completion is deferred until subscription is finished: registering a stopped token invokes OnStop inline.
         try {
@@ -456,7 +456,7 @@ class EventSender {
 
     public:
         using operation_state_concept = networking::ex::operation_state_tag;
-        explicit Operation(std::shared_ptr<EventOperationState<Receiver>> value) : state(std::move(value)) { }
+        explicit Operation(std::shared_ptr<EventOperationState<Receiver>> value) : state(std::move(value)) {}
         Operation(const Operation&)            = delete;
         Operation(Operation&&)                 = delete;
         Operation& operator=(const Operation&) = delete;
@@ -469,10 +469,10 @@ class EventSender {
 
 public:
     using sender_concept        = networking::ex::sender_tag;
-    using completion_signatures = networking::ex::completion_signatures<networking::ex::set_value_t(std::string), networking::ex::set_error_t(std::exception_ptr),
-                                                                        networking::ex::set_stopped_t()>;
+    using completion_signatures = networking::ex::
+        completion_signatures<networking::ex::set_value_t(std::string), networking::ex::set_error_t(std::exception_ptr), networking::ex::set_stopped_t()>;
     EventSender(std::weak_ptr<State> document, std::uint32_t id, std::string name, EventOptions flags)
-        : owner(std::move(document)), node(id), event(std::move(name)), options(flags) { }
+        : owner(std::move(document)), node(id), event(std::move(name)), options(flags) {}
     template <typename Receiver>
     auto connect(Receiver receiver) const {
         // Not make_shared: an obsolete weak entry must not keep the receiver's storage allocated.
@@ -488,7 +488,7 @@ class Node {
     std::uint32_t                identifier{};
     template <typename UI>
     friend class Document;
-    Node(std::shared_ptr<detail::State> state, std::uint32_t id) : owner(std::move(state)), identifier(id) { }
+    Node(std::shared_ptr<detail::State> state, std::uint32_t id) : owner(std::move(state)), identifier(id) {}
     std::shared_ptr<detail::State> state() const {
         auto shared = owner.lock();
         if (!shared)
@@ -624,7 +624,7 @@ class Document {
     std::shared_ptr<detail::State> state;
 
 public:
-    explicit Document(UI browser) : ui(browser), state(browser.domState()) { }
+    explicit Document(UI browser) : ui(browser), state(browser.domState()) {}
     /// Whether this document is live and usable on the calling thread.
     bool valid() const noexcept {
         return state && state->validOnCurrentThread();

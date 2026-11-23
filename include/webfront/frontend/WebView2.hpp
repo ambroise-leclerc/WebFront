@@ -2,15 +2,15 @@
 
 #include "../ContentPolicy.hpp"
 #include "../tooling/Logger.hpp"
+#include "../ViewAssociation.hpp"
 #include "Action.hpp"
 #include "Capture.hpp"
 #include "CloseRequest.hpp"
 #include "DefaultBrowser.hpp"
 #include "EmbeddedFrontend.hpp"
-#include "../ViewAssociation.hpp"
+#include "NativeWindow.hpp"
 #include "ScriptDialogs.hpp"
 #include "StartupTrace.hpp"
-#include "NativeWindow.hpp"
 #include "UIExecutor.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
@@ -46,7 +46,7 @@ using WebView2Options = ViewOptions;
     #include <memory>
     #include <mutex>
     #include <optional>
-#include <string>
+    #include <string>
     #include <vector>
 
     #include <shlobj.h>
@@ -155,7 +155,7 @@ inline constexpr UINT captureMessage = WM_APP + 0x4C1;
 inline constexpr UINT drainMessage   = WM_APP + 0x4C3;  // UIExecutor: run what the interface thread was asked
 inline constexpr UINT reapMessage    = WM_APP + 0x4C4;  // secondary windows (#616): destroy those that closed
 
-inline void reapSecondaryWindows();  // defined with the registry of the windows, after Session
+inline void reapSecondaryWindows();                     // defined with the registry of the windows, after Session
 
 struct CaptureJob {
     std::promise<CaptureResult> done;
@@ -177,8 +177,8 @@ public:
     /// Refuses further requests and returns those still waiting or started but unanswered, to be answered by the caller.
     std::deque<std::shared_ptr<CaptureJob>> close() {
         std::scoped_lock lock{mutex};
-        opened = false;
-        window = nullptr;
+        opened    = false;
+        window    = nullptr;
         auto jobs = std::exchange(pending, {});
         jobs.insert(jobs.end(), inflight.begin(), inflight.end());
         inflight.clear();
@@ -215,17 +215,17 @@ public:
     }
 
 private:
-    std::mutex                              mutex;
-    HWND                                    window = nullptr;
-    bool                                    opened = false;
-    std::deque<std::shared_ptr<CaptureJob>> pending;
+    std::mutex                               mutex;
+    HWND                                     window = nullptr;
+    bool                                     opened = false;
+    std::deque<std::shared_ptr<CaptureJob>>  pending;
     std::vector<std::shared_ptr<CaptureJob>> inflight;
 };
 
 inline void answer(CaptureJob& job, CaptureResult result) noexcept {
     try {
         job.done.set_value(std::move(result));
-    } catch (...) { }
+    } catch (...) {}
 }
 
 // The PNG that CapturePreview wrote to its memory stream.
@@ -281,21 +281,21 @@ public:
     webfront::detail::BoundContentPolicy             contentPolicy;
     ViewLaunch                                       viewLaunch;
     // Internal adapter observer, used by lifecycle probes after a successful native cancellation.
-    std::function<void()>                            navigationCancelled;
+    std::function<void()> navigationCancelled;
     // Internal adapter observer: the browser exists and nothing is loaded yet (the transport benchmark of ADR-017 registers
     // its message channel here).
-    std::function<void()>                            viewReady;
+    std::function<void()> viewReady;
     // Internal adapter injection (issue #452): answers alert, confirm, prompt and beforeunload without a dialog. Unset keeps
     // WebView2's own dialogs, which the runtime attaches to the window.
-    ScriptDialogHandler                              answerScriptDialog;
-    bool                                             closed       = false;
-    UINT_PTR                                         startupTimer = 0;
+    ScriptDialogHandler answerScriptDialog;
+    bool                closed       = false;
+    UINT_PTR            startupTimer = 0;
     // A window opened beside the application's own (#616): it shares the environment (profile, browser process) of the first,
     // runs no loop of its own and reports its closing to closedHook, once, instead of ending the session.
-    bool                                             secondary    = false;
-    std::function<void()>                            closedHook;
-    std::shared_ptr<CaptureQueue>                    captureQueue = std::make_shared<CaptureQueue>();
-    CaptureRegistration                              captureRegistration;
+    bool                          secondary = false;
+    std::function<void()>         closedHook;
+    std::shared_ptr<CaptureQueue> captureQueue = std::make_shared<CaptureQueue>();
+    CaptureRegistration           captureRegistration;
 
     ~Session() {
         close();
@@ -369,7 +369,7 @@ public:
             auto hook = std::exchange(closedHook, {});
             try {
                 hook();
-            } catch (...) { }
+            } catch (...) {}
         }
     }
 
@@ -423,7 +423,9 @@ public:
         windowClass.hCursor       = LoadCursor(nullptr, IDC_ARROW);
         windowClass.lpszClassName = className.c_str();
         if (const auto color = frontend::detail::parseBackground(windowOptions.background)) {
-            const auto byte = [](float value) { return static_cast<BYTE>(value * 255.0f + 0.5f); };
+            const auto byte = [](float value) {
+                return static_cast<BYTE>(value * 255.0f + 0.5f);
+            };
             backgroundBrush = CreateSolidBrush(RGB(byte((*color)[0]), byte((*color)[1]), byte((*color)[2])));
             if (!backgroundBrush)
                 throw std::runtime_error("WebView2: cannot create background brush");
@@ -433,23 +435,24 @@ public:
             throw std::runtime_error("WebView2: cannot register window class");
         registered = true;
         window     = CreateWindowExW(visible ? WS_EX_LAYERED : 0,
-                                     className.c_str(),
-                                     utf16(windowOptions.title).c_str(),
-                                     WS_OVERLAPPEDWINDOW,
-                                     CW_USEDEFAULT,
-                                     CW_USEDEFAULT,
-                                     windowOptions.width,
-                                     windowOptions.height,
-                                     nullptr,
-                                     nullptr,
-                                     windowClass.hInstance,
-                                     this);
+                                 className.c_str(),
+                                 utf16(windowOptions.title).c_str(),
+                                 WS_OVERLAPPEDWINDOW,
+                                 CW_USEDEFAULT,
+                                 CW_USEDEFAULT,
+                                 windowOptions.width,
+                                 windowOptions.height,
+                                 nullptr,
+                                 nullptr,
+                                 windowClass.hInstance,
+                                 this);
         if (!window)
             throw std::runtime_error("WebView2: cannot create window");
         // Bounds initialization errors and an unresponsive runtime must not leave an empty window forever.
         // A secondary window is not pumped by a session of its own: its watchdog belongs to the window, whose procedure runs
         // whichever loop dispatches it.
-        startupTimer = secondary ? SetTimer(window, startupTimerId, startupTimeoutMilliseconds, nullptr) : SetTimer(nullptr, 0, startupTimeoutMilliseconds, nullptr);
+        startupTimer = secondary ? SetTimer(window, startupTimerId, startupTimeoutMilliseconds, nullptr)
+                                 : SetTimer(nullptr, 0, startupTimeoutMilliseconds, nullptr);
         if (!startupTimer)
             throw std::runtime_error("WebView2: cannot start startup timer");
         if (visible) {
@@ -495,18 +498,18 @@ public:
     }
 
 private:
-    std::wstring className;
-    HBRUSH   backgroundBrush = nullptr;
-    bool     visibleWindow = false;
+    std::wstring                   className;
+    HBRUSH                         backgroundBrush = nullptr;
+    bool                           visibleWindow   = false;
     frontend::detail::Presentation presentation;
-    UINT_PTR presentTimer = 0;
+    UINT_PTR                       presentTimer = 0;
     frontend::detail::StartupTrace trace;
 
     // Bound to the window and handled by its procedure, so that the delay also runs during the system's modal loops
     // (moving or resizing by the title bar), which dispatch window messages without going through dispatchNextMessage().
     static constexpr UINT_PTR presentTimerId = 0x5746;
     static constexpr UINT_PTR startupTimerId = 0x5747;
-    void stopPresentTimer() noexcept {
+    void                      stopPresentTimer() noexcept {
         if (presentTimer && window)
             KillTimer(window, presentTimer);
         presentTimer = 0;
@@ -521,9 +524,9 @@ private:
         }
     }
     WindowOptions windowOptions;
-    bool         registered                 = false;
-    bool         initialNavigationPending   = true;
-    UINT         startupTimeoutMilliseconds = 30'000;
+    bool          registered                 = false;
+    bool          initialNavigationPending   = true;
+    UINT          startupTimeoutMilliseconds = 30'000;
 
     void requestWindowClose() noexcept {
         // Navigation cancelled by the page's own close request is a normal shutdown.
@@ -618,7 +621,9 @@ private:
             if (const auto color = frontend::detail::parseBackground(windowOptions.background)) {
                 Microsoft::WRL::ComPtr<ICoreWebView2Controller2> controller2;
                 check(created->QueryInterface(IID_PPV_ARGS(&controller2)), "getting background color controller");
-                const auto byte = [](float value) { return static_cast<BYTE>(value * 255.0f + 0.5f); };
+                const auto byte = [](float value) {
+                    return static_cast<BYTE>(value * 255.0f + 0.5f);
+                };
                 // WebView2 supports only fully transparent or fully opaque alpha.
                 COREWEBVIEW2_COLOR native{byte((*color)[3]) == 0 ? BYTE{0} : BYTE{255}, byte((*color)[0]), byte((*color)[1]), byte((*color)[2])};
                 check(controller2->put_DefaultBackgroundColor(native), "setting background color");
@@ -690,25 +695,26 @@ private:
                 check(CreateStreamOnHGlobal(nullptr, TRUE, &stream), "creating the capture stream");
                 captureQueue->started(job);
                 // The handler keeps the job and the stream until the engine answers.
-                check(view->CapturePreview(COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
-                                           stream.Get(),
-                                           Microsoft::WRL::Callback<ICoreWebView2CapturePreviewCompletedHandler>([job, stream, queue = captureQueue](HRESULT result) -> HRESULT {
-                                               queue->finished(job);
-                                               try {
-                                                   answer(*job, pngBytes(result, stream.Get()));
-                                               } catch (...) {
-                                                   try {
-                                                       job->done.set_exception(std::current_exception());
-                                                   } catch (...) { }
-                                               }
-                                               return S_OK;
-                                           }).Get()),
+                check(view->CapturePreview(
+                          COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
+                          stream.Get(),
+                          Microsoft::WRL::Callback<ICoreWebView2CapturePreviewCompletedHandler>([job, stream, queue = captureQueue](HRESULT result) -> HRESULT {
+                              queue->finished(job);
+                              try {
+                                  answer(*job, pngBytes(result, stream.Get()));
+                              } catch (...) {
+                                  try {
+                                      job->done.set_exception(std::current_exception());
+                                  } catch (...) {}
+                              }
+                              return S_OK;
+                          }).Get()),
                       "starting the capture");
             } catch (...) {
                 captureQueue->finished(job);
                 try {
                     job->done.set_exception(std::current_exception());
-                } catch (...) { }
+                } catch (...) {}
             }
         }
     }
@@ -826,7 +832,8 @@ private:
                   &token),
               "registering window close handler");
         check(view->add_WebMessageReceived(
-                  Microsoft::WRL::Callback<ICoreWebView2WebMessageReceivedEventHandler>([weak](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
+                  Microsoft::WRL::Callback<ICoreWebView2WebMessageReceivedEventHandler>([weak](ICoreWebView2*,
+                                                                                               ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
                       LPWSTR raw = nullptr;
                       if (SUCCEEDED(args->TryGetWebMessageAsString(&raw)) && raw) {
                           const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> message(raw, CoTaskMemFree);
@@ -881,15 +888,16 @@ private:
               "registering popup policy");
         if (answerScriptDialog) {
             check(settings->put_AreDefaultScriptDialogsEnabled(FALSE), "disabling the default script dialogs");
-            check(view->add_ScriptDialogOpening(
-                      Microsoft::WRL::Callback<ICoreWebView2ScriptDialogOpeningEventHandler>([weak](ICoreWebView2*,
-                                                                                                   ICoreWebView2ScriptDialogOpeningEventArgs* args) -> HRESULT {
-                          if (const auto self = weak.lock())
-                              self->scriptDialogOpening(args);
-                          return S_OK;
-                      }).Get(),
-                      &token),
-                  "registering script dialog handler");
+            check(
+                view->add_ScriptDialogOpening(
+                    Microsoft::WRL::Callback<ICoreWebView2ScriptDialogOpeningEventHandler>([weak](ICoreWebView2*,
+                                                                                                  ICoreWebView2ScriptDialogOpeningEventArgs* args) -> HRESULT {
+                        if (const auto self = weak.lock())
+                            self->scriptDialogOpening(args);
+                        return S_OK;
+                    }).Get(),
+                    &token),
+                "registering script dialog handler");
         }
     }
 
@@ -901,10 +909,18 @@ private:
             check(args->get_Kind(&kind), "reading the script dialog kind");
             ScriptDialog dialog;
             switch (kind) {
-                case COREWEBVIEW2_SCRIPT_DIALOG_KIND_CONFIRM: dialog.kind = ScriptDialog::Kind::confirm; break;
-                case COREWEBVIEW2_SCRIPT_DIALOG_KIND_PROMPT: dialog.kind = ScriptDialog::Kind::prompt; break;
-                case COREWEBVIEW2_SCRIPT_DIALOG_KIND_BEFOREUNLOAD: dialog.kind = ScriptDialog::Kind::beforeUnload; break;
-                default: dialog.kind = ScriptDialog::Kind::alert; break;
+                case COREWEBVIEW2_SCRIPT_DIALOG_KIND_CONFIRM:
+                    dialog.kind = ScriptDialog::Kind::confirm;
+                    break;
+                case COREWEBVIEW2_SCRIPT_DIALOG_KIND_PROMPT:
+                    dialog.kind = ScriptDialog::Kind::prompt;
+                    break;
+                case COREWEBVIEW2_SCRIPT_DIALOG_KIND_BEFOREUNLOAD:
+                    dialog.kind = ScriptDialog::Kind::beforeUnload;
+                    break;
+                default:
+                    dialog.kind = ScriptDialog::Kind::alert;
+                    break;
             }
             LPWSTR message = nullptr;
             if (SUCCEEDED(args->get_Message(&message)) && message) {
@@ -924,8 +940,7 @@ private:
             if (dialog.kind == ScriptDialog::Kind::prompt)
                 check(args->put_ResultText(utf16(reply.text).c_str()), "setting the prompt result");
             check(args->Accept(), "accepting the script dialog");
-        } catch (...) {
-        }
+        } catch (...) {}
     }
 
     void configure() {
@@ -961,7 +976,8 @@ public:
     }
 
     static std::string firstFrameScript() {
-        return "(()=>{if(window.top!==window)return;function frames(){requestAnimationFrame(()=>requestAnimationFrame(()=>{try{window.chrome.webview.postMessage('webfront:first-frame')}catch(e){}}));}"
+        return "(()=>{if(window.top!==window)return;function "
+               "frames(){requestAnimationFrame(()=>requestAnimationFrame(()=>{try{window.chrome.webview.postMessage('webfront:first-frame')}catch(e){}}));}"
                "if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',frames,{once:true});else frames();})();";
     }
 
@@ -973,7 +989,8 @@ public:
             const auto script = utf16(source);
             check(browser->AddScriptToExecuteOnDocumentCreated(
                       script.c_str(),
-                      Microsoft::WRL::Callback<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler>([weak, browser](HRESULT result, LPCWSTR) -> HRESULT {
+                      Microsoft::WRL::Callback<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler>([weak, browser](HRESULT result,
+                                                                                                                                 LPCWSTR) -> HRESULT {
                           if (const auto self = weak.lock(); self && !self->closed) {
                               try {
                                   check(result, "installing the view association script");
@@ -1001,7 +1018,7 @@ struct WindowHooks {
         if (windows.primary && windows.primary->window)
             PostMessageW(windows.primary->window, reapMessage, 0, 0);
     }
-    void cancelReap() { }  // nothing is pending that clear() must withdraw: a late reap() finds the registry empty
+    void cancelReap() {}  // nothing is pending that clear() must withdraw: a late reap() finds the registry empty
     void present(Session& session) {
         // A hidden window stays hidden and does not take the focus.
         if (const auto handle = session.window; handle && IsWindowVisible(handle)) {
@@ -1039,11 +1056,12 @@ inline void openSecondary(std::string_view address, std::string_view port, std::
             if (!primary.environment)
                 throw WindowNotReady("WebView2Frontend: the first window is not ready (its browser is being created); call it later");
             // The first window's delay, which the application configured (WebView2FrontendWithOptions), not this call's default.
-            auto session           = std::make_shared<Session>(primary.startupTimeout());
-            session->secondary     = true;
-            session->contentPolicy = webfront::detail::BoundContentPolicy{frontend::detail::applicationUrl(address, port, "", options.launch.origin), options.contentPolicy};
-            session->viewLaunch    = options.launch;
-            session->url           = utf16(frontend::detail::applicationUrl(address, port, page, options.launch.origin));
+            auto session                = std::make_shared<Session>(primary.startupTimeout());
+            session->secondary          = true;
+            session->contentPolicy      = webfront::detail::BoundContentPolicy{frontend::detail::applicationUrl(address, port, "", options.launch.origin),
+                                                                          options.contentPolicy};
+            session->viewLaunch         = options.launch;
+            session->url                = utf16(frontend::detail::applicationUrl(address, port, page, options.launch.origin));
             session->answerScriptDialog = primary.answerScriptDialog;
             session->createWindow(primary.shown(), options.window);
             return session;
@@ -1058,12 +1076,13 @@ inline bool closeSecondary(const std::string& page) {
     return Windows::instance().close(page);
 }
 
-inline void open(std::string_view address,
-                 std::string_view port,
-                 std::string_view file,
-                 const WebView2Options& options,
+inline void open(std::string_view                     address,
+                 std::string_view                     port,
+                 std::string_view                     file,
+                 const WebView2Options&               options,
                  const std::function<void(Session&)>& prepare = {}) {
-    auto contentPolicy = webfront::detail::BoundContentPolicy{frontend::detail::applicationUrl(address, port, "", options.launch.origin), options.contentPolicy};
+    auto contentPolicy = webfront::detail::BoundContentPolicy{frontend::detail::applicationUrl(address, port, "", options.launch.origin),
+                                                              options.contentPolicy};
     // One window per process: a second open() on the interface thread is refused before it creates anything.
     frontend::detail::InterfaceSession<Windows>::refuseSecond(uiExecutorHostOf<WebView2Frontend>(), WindowHooks::name);
     Apartment                                                apartment;
@@ -1073,10 +1092,10 @@ inline void open(std::string_view address,
     if (FAILED(available) || !version)
         throw std::runtime_error("WebView2 runtime not found. Install Microsoft Edge WebView2 Evergreen Runtime: "
                                  "https://developer.microsoft.com/microsoft-edge/webview2/");
-    auto session       = std::make_shared<Session>(options.startupTimeout);
-    session->contentPolicy = std::move(contentPolicy);
-    session->viewLaunch    = options.launch;
-    session->url       = utf16(frontend::detail::applicationUrl(address, port, file, options.launch.origin));
+    auto session                = std::make_shared<Session>(options.startupTimeout);
+    session->contentPolicy      = std::move(contentPolicy);
+    session->viewLaunch         = options.launch;
+    session->url                = utf16(frontend::detail::applicationUrl(address, port, file, options.launch.origin));
     session->answerScriptDialog = options.answerScriptDialog;
     if (prepare)
         prepare(*session);
@@ -1088,16 +1107,16 @@ inline void open(std::string_view address,
     // the host then fails the operations that relied on that notification instead of leaving them waiting. The session
     // is declared after the apartment and before run(), so the host closes on every exit, also by exception. The window
     // is published on the interface thread (this one) and withdrawn before the session destroys it.
-    frontend::detail::InterfaceSession<Windows> interfaceSession(
-        uiExecutorHostOf<WebView2Frontend>(),
-        nativeWindowHostOf<WebView2Frontend>(),
-        Windows::instance(),
-        *session,
-        [window = session->window] {
-            if (!PostMessageW(window, drainMessage, 0, 0))
-                throw std::runtime_error("WebView2: cannot wake the interface thread (the message queue is full)");
-        },
-        {.kind = NativeWindowKind::win32, .pointer = session->window, .portalParent = {}});
+    frontend::detail::InterfaceSession<Windows> interfaceSession(uiExecutorHostOf<WebView2Frontend>(),
+                                                                 nativeWindowHostOf<WebView2Frontend>(),
+                                                                 Windows::instance(),
+                                                                 *session,
+                                                                 [window = session->window] {
+                                                                     if (!PostMessageW(window, drainMessage, 0, 0))
+                                                                         throw std::runtime_error(
+                                                                             "WebView2: cannot wake the interface thread (the message queue is full)");
+                                                                 },
+                                                                 {.kind = NativeWindowKind::win32, .pointer = session->window, .portalParent = {}});
     session->run();
 }
 
@@ -1110,18 +1129,18 @@ struct WebView2Frontend;  // names the executor's host (UIExecutor.hpp)
 
 /** @brief What WebView2Frontend and WebView2FrontendWithOptions share: the WebView2 calls the facade needs. */
 struct WebView2Native {
-    static constexpr bool             requiresMainThread = false;  // open() makes its calling thread an STA and pumps its messages there
-    static constexpr bool             secondaryWindows   = true;
-    static constexpr bool             waitsForFirstWindow = true;  // just after show() started, the first environment is being created
-    static constexpr std::string_view name               = "WebView2Frontend";
-    static constexpr std::string_view enable             = "Configure on Windows with -DWEBFRONT_EMBED_WEBVIEW2=ON";
+    static constexpr bool             requiresMainThread  = false;  // open() makes its calling thread an STA and pumps its messages there
+    static constexpr bool             secondaryWindows    = true;
+    static constexpr bool             waitsForFirstWindow = true;   // just after show() started, the first environment is being created
+    static constexpr std::string_view name                = "WebView2Frontend";
+    static constexpr std::string_view enable              = "Configure on Windows with -DWEBFRONT_EMBED_WEBVIEW2=ON";
     using Host    = WebView2Frontend;  // the hosts are those of WebView2Frontend whichever options provider configures it
     using Options = WebView2Options;
     /// Nothing to initialize: the COM apartment belongs to each open(), so a build without the engine fails there.
-    static void initializeNative() { }
+    static void initializeNative() {}
 #if defined(WEBFRONT_EMBED_WEBVIEW2) && defined(_WIN32)
     static constexpr bool compiled = true;
-    static void openNative(std::string_view address, std::string_view port, std::string_view file, const Options& options) {
+    static void           openNative(std::string_view address, std::string_view port, std::string_view file, const Options& options) {
         detail::webview2::open(address, port, file, options);
     }
     static void closeNative(const NativeWindowHandle& window) {
@@ -1139,7 +1158,7 @@ struct WebView2Native {
 };
 
 /** @brief Optional Windows embedded frontend. open() owns an STA and blocks until the window closes. */
-struct WebView2Frontend : WebView2Native, EmbeddedFrontend<WebView2Frontend> { };
+struct WebView2Frontend : WebView2Native, EmbeddedFrontend<WebView2Frontend> {};
 
 /** @brief Configured WebView2 frontend. OptionsProvider::get() returns per-opening WebView2Options. */
 template <typename OptionsProvider>

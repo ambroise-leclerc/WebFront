@@ -12,20 +12,19 @@
 #include <cstdint>
 #include <exception>
 #include <future>
+#include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string_view>
 #include <type_traits>
 
-#include <iostream>
-
 namespace webfront {
 
 namespace detail {
 struct IgnoreJsResult {};
-}
+}  // namespace detail
 
-template<typename WebFront, typename Result = detail::IgnoreJsResult>
+template <typename WebFront, typename Result = detail::IgnoreJsResult>
 class JsFunction {
 public:
     JsFunction(std::string_view functionName, WebFront& wf, WebLinkId linkId, WebLinkGeneration connectionGeneration)
@@ -58,10 +57,10 @@ public:
     }
 
 private:
-    std::string name;
-    WebFront& webFront;
-    WebLinkId webLinkId;
+    std::string       name;
+    WebFront&         webFront;
+    WebLinkId         webLinkId;
     WebLinkGeneration generation;
 };
 
-} // namespace webfront
+}  // namespace webfront

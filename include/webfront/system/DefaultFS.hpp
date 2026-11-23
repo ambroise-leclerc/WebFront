@@ -19,8 +19,10 @@ public:
     explicit ProtectedWebFrontJsFS(std::filesystem::path /*docRoot*/) {}
 
     static std::optional<File> open(std::filesystem::path file) {
-        if (file.relative_path().string() == "WebFront.js") return File{IndexFS::WebFrontJs{}};
-        if (file.relative_path().string() == "webfront-dom.mjs") return IndexFS::open(file);
+        if (file.relative_path().string() == "WebFront.js")
+            return File{IndexFS::WebFrontJs{}};
+        if (file.relative_path().string() == "webfront-dom.mjs")
+            return IndexFS::open(file);
         return {};
     }
 };
@@ -32,9 +34,11 @@ public:
     explicit OptionalDevRootFS(std::filesystem::path docRoot) : root(std::move(docRoot)) {}
 
     std::optional<File> open(std::filesystem::path file) const {
-        if (root.empty()) return {};
+        if (root.empty())
+            return {};
         std::ifstream stream(root / file, std::ios::binary);
-        if (stream.is_open()) return File{std::move(stream)};
+        if (stream.is_open())
+            return File{std::move(stream)};
         return {};
     }
 
@@ -42,7 +46,7 @@ private:
     std::filesystem::path root;
 };
 
-} // namespace detail
+}  // namespace detail
 
 /// Precedence (Multi<> serves the first provider that returns a file):
 ///  1. The embedded, version-matched WebFront.js and webfront-dom.mjs - never overridable.
@@ -57,4 +61,4 @@ using DefaultFS = Multi<detail::ProtectedWebFrontJsFS, detail::OptionalDevRootFS
 template <Provider... Extra>
 using DefaultFSWith = Multi<detail::ProtectedWebFrontJsFS, Extra..., detail::OptionalDevRootFS, IndexFS>;
 
-} // namespace webfront::fs
+}  // namespace webfront::fs

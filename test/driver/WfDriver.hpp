@@ -71,16 +71,18 @@ struct DriverCEFFrontend : frontend::CEFFrontend {
     static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy = {}) {
         open(address, port, page, policy, {}, {});
     }
-    static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy,
-                     const WindowOptions& window, const ViewLaunch& launch) {
+    static void open(std::string_view     address,
+                     std::string_view     port,
+                     std::string_view     page,
+                     const ContentPolicy& policy,
+                     const WindowOptions& window,
+                     const ViewLaunch&    launch) {
 #if defined(WEBFRONT_EMBED_CEF) && defined(__linux__)
         const auto* profile = std::getenv("WEBFRONT_TEST_CEF_PROFILE");
         if (!profile || !*profile)
             throw std::runtime_error("CEF test driver requires an isolated WEBFRONT_TEST_CEF_PROFILE");
         const auto url = frontend::detail::applicationUrl(address, port, page, launch.origin);
-        cef::detail::openWindow(url, webfront::detail::BoundContentPolicy{url, policy},
-                                nullptr,
-                                std::filesystem::path(profile), window, false, launch);
+        cef::detail::openWindow(url, webfront::detail::BoundContentPolicy{url, policy}, nullptr, std::filesystem::path(profile), window, false, launch);
 #else
         frontend::CEFFrontend::open(address, port, page, policy, window, launch);
 #endif
@@ -407,7 +409,7 @@ struct PlainSetup {
 template <typename Frontend, typename Setup = PlainSetup>
 int run(const Options& options, Setup&& setup = {}) {
     using Configuration = std::remove_reference_t<Setup>;
-    using App = typename decltype([] {
+    using App           = typename decltype([] {
         if constexpr (requires { typename Configuration::Application; })
             return std::type_identity<typename Configuration::Application>{};
         else
@@ -427,16 +429,16 @@ int run(const Options& options, Setup&& setup = {}) {
         sources().registry = std::filesystem::canonical(*sources().registry);
 
     const auto started = std::chrono::steady_clock::now();
-    const auto  phase      = [&](std::string_view name) {
+    const auto phase   = [&](std::string_view name) {
         std::cout << "driver " << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count() << "ms " << name << std::endl;
     };
-    DriverDeadline deadlines{options.timeout};
-    Outcome        outcome;
+    DriverDeadline           deadlines{options.timeout};
+    Outcome                  outcome;
     webfront::WebFrontConfig config{.port = "0", .remoteFileTransport = webfront::RemoteFileTransport::loopbackAttested};
     if constexpr (requires { setup.configureApplication(config); })
         setup.configureApplication(config);
-    App app{options.project, std::move(config)};
-    bool           commandStarted = false;
+    App  app{options.project, std::move(config)};
+    bool commandStarted = false;
     app.cppFunction("wf.commandStarted", [&] {
         if (std::exchange(commandStarted, true))
             throw std::runtime_error("Unexpected single-command start");

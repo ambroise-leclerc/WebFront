@@ -84,7 +84,7 @@ inline void discard(const dom::Node& root) noexcept {
     try {
         if (root.valid())
             root.remove();
-    } catch (...) { }
+    } catch (...) {}
 }
 
 }  // namespace detail
@@ -106,7 +106,7 @@ class Form {
 
 public:
     /// Built by forms::form().
-    Form(std::shared_ptr<detail::FormState<T>> s, dom::Node r) : state(std::move(s)), root(r) { }
+    Form(std::shared_ptr<detail::FormState<T>> s, dom::Node r) : state(std::move(s)), root(r) {}
     /// The `form` element, to remove or move the whole form.
     dom::Node node() const {
         return root;
@@ -145,7 +145,7 @@ Form<T> form(const dom::Document<UI>& doc, dom::Node parent, std::shared_ptr<T> 
     try {
         root.attribute("class", "wf-form");
         // Enter in a text input submits the form: the page must not navigate.
-        root.listen("submit", [](std::string) { }, {.preventDefault = true, .stopPropagation = false});
+        root.listen("submit", [](std::string) {}, {.preventDefault = true, .stopPropagation = false});
         for (std::size_t i = 0; i < state->description.fields.size(); ++i) {
             const auto& field = state->description.fields[i];
             auto        row   = doc.element("label");
@@ -202,7 +202,7 @@ class Inspector {
 
 public:
     /// Built by forms::inspector().
-    Inspector(std::shared_ptr<detail::InspectorState<T>> s, dom::Node r) : state(std::move(s)), root(r) { }
+    Inspector(std::shared_ptr<detail::InspectorState<T>> s, dom::Node r) : state(std::move(s)), root(r) {}
     /// The `table` element.
     dom::Node node() const {
         return root;

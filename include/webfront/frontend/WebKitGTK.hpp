@@ -2,6 +2,7 @@
 
 #include "../ContentPolicy.hpp"
 #include "../tooling/Logger.hpp"
+#include "../ViewAssociation.hpp"
 #include "Action.hpp"
 #include "Capture.hpp"
 #include "CloseRequest.hpp"
@@ -14,10 +15,9 @@
 #include "StartupTrace.hpp"
 #include "UIExecutor.hpp"
 #include "Url.hpp"
+#include "WebKitGTKPolicy.hpp"
 #include "Window.hpp"
 #include "WindowRegistry.hpp"
-#include "../ViewAssociation.hpp"
-#include "WebKitGTKPolicy.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -27,8 +27,8 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <stdexcept>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -131,37 +131,39 @@ public:
     void (*bytesUnref)(Object)                                  = symbol<decltype(bytesUnref)>("g_bytes_unref");
     void (*errorFree)(Error*)                                   = symbol<decltype(errorFree)>("g_error_free");
     // GLib resolves the folder from user-dirs.dirs (a user may have moved it), not only from the environment.
-    const char* (*homeDirectory)() = symbol<decltype(homeDirectory)>("g_get_home_dir");
-    const char* (*userDirectory)(int) = symbol<decltype(userDirectory)>("g_get_user_special_dir");  // G_USER_DIRECTORY_DOWNLOAD = 2
-    void (*downloadDestination)(Object, const char*)            = symbol<decltype(downloadDestination)>("webkit_download_set_destination");
-    void (*downloadCancel)(Object)                              = symbol<decltype(downloadCancel)>("webkit_download_cancel");
-    const char* (*downloadGetDestination)(Object)               = symbol<decltype(downloadGetDestination)>("webkit_download_get_destination");
-    void (*chooserSelect)(Object, const char* const*)           = symbol<decltype(chooserSelect)>("webkit_file_chooser_request_select_files");
-    void (*chooserCancel)(Object)                               = symbol<decltype(chooserCancel)>("webkit_file_chooser_request_cancel");
+    const char* (*homeDirectory)()                    = symbol<decltype(homeDirectory)>("g_get_home_dir");
+    const char* (*userDirectory)(int)                 = symbol<decltype(userDirectory)>("g_get_user_special_dir");  // G_USER_DIRECTORY_DOWNLOAD = 2
+    void (*downloadDestination)(Object, const char*)  = symbol<decltype(downloadDestination)>("webkit_download_set_destination");
+    void (*downloadCancel)(Object)                    = symbol<decltype(downloadCancel)>("webkit_download_cancel");
+    const char* (*downloadGetDestination)(Object)     = symbol<decltype(downloadGetDestination)>("webkit_download_get_destination");
+    void (*chooserSelect)(Object, const char* const*) = symbol<decltype(chooserSelect)>("webkit_file_chooser_request_select_files");
+    void (*chooserCancel)(Object)                     = symbol<decltype(chooserCancel)>("webkit_file_chooser_request_cancel");
     // WEBKIT_SCRIPT_DIALOG_ALERT = 0, CONFIRM = 1, PROMPT = 2, BEFORE_UNLOAD_CONFIRM = 3.
-    int (*dialogType)(Object)                                   = symbol<decltype(dialogType)>("webkit_script_dialog_get_dialog_type");
-    const char* (*dialogMessage)(Object)                        = symbol<decltype(dialogMessage)>("webkit_script_dialog_get_message");
-    void (*dialogConfirm)(Object, int)                          = symbol<decltype(dialogConfirm)>("webkit_script_dialog_confirm_set_confirmed");
-    const char* (*dialogDefault)(Object)                        = symbol<decltype(dialogDefault)>("webkit_script_dialog_prompt_get_default_text");
-    void (*dialogPromptText)(Object, const char*)               = symbol<decltype(dialogPromptText)>("webkit_script_dialog_prompt_set_text");
+    int (*dialogType)(Object)                     = symbol<decltype(dialogType)>("webkit_script_dialog_get_dialog_type");
+    const char* (*dialogMessage)(Object)          = symbol<decltype(dialogMessage)>("webkit_script_dialog_get_message");
+    void (*dialogConfirm)(Object, int)            = symbol<decltype(dialogConfirm)>("webkit_script_dialog_confirm_set_confirmed");
+    const char* (*dialogDefault)(Object)          = symbol<decltype(dialogDefault)>("webkit_script_dialog_prompt_get_default_text");
+    void (*dialogPromptText)(Object, const char*) = symbol<decltype(dialogPromptText)>("webkit_script_dialog_prompt_set_text");
     // User scripts: WebKitUserContentInjectedFrames TOP_FRAME = 1 and WebKitUserScriptInjectionTime START = 0.
-    Object (*contextNew)() = symbol<decltype(contextNew)>("webkit_web_context_new");
-    Object (*contentManager)(Object)                            = symbol<decltype(contentManager)>("webkit_web_view_get_user_content_manager");
+    Object (*contextNew)()           = symbol<decltype(contextNew)>("webkit_web_context_new");
+    Object (*contentManager)(Object) = symbol<decltype(contentManager)>("webkit_web_view_get_user_content_manager");
     Object (*scriptNew)(const char*, int, int, const char* const*, const char* const*) = symbol<decltype(scriptNew)>("webkit_user_script_new");
-    void (*scriptAdd)(Object, Object)                           = symbol<decltype(scriptAdd)>("webkit_user_content_manager_add_script");
-    void (*scriptUnref)(Object)                                 = symbol<decltype(scriptUnref)>("webkit_user_script_unref");
+    void (*scriptAdd)(Object, Object)                                                  = symbol<decltype(scriptAdd)>("webkit_user_content_manager_add_script");
+    void (*scriptUnref)(Object)                                                        = symbol<decltype(scriptUnref)>("webkit_user_script_unref");
     // Script messages (WebKitGTK 2.40 added the world name; an extra null argument is harmless to older callers' ABI).
-    int (*registerMessage)(Object, const char*, const char*)    = symbol<decltype(registerMessage)>("webkit_user_content_manager_register_script_message_handler");
-    void (*viewBackground)(Object, const float*)                = symbol<decltype(viewBackground)>("webkit_web_view_set_background_color");
+    int (*registerMessage)(Object, const char*, const char*) = symbol<decltype(registerMessage)>("webkit_user_content_manager_register_script_message_handler");
+    void (*viewBackground)(Object, const float*)             = symbol<decltype(viewBackground)>("webkit_web_view_set_background_color");
     // Portal identifier of the window (ADR-020): the backend's own symbols exist only when GTK was built with it, so each is
     // optional and a missing one leaves the identifier empty.
-    Object (*nativeSurface)(Object)                             = optionalSymbol<decltype(nativeSurface)>("gtk_native_get_surface");
-    int (*instanceIsA)(Object, std::uintptr_t)                  = optionalSymbol<decltype(instanceIsA)>("g_type_check_instance_is_a");
-    std::uintptr_t (*x11SurfaceType)()                          = optionalSymbol<decltype(x11SurfaceType)>("gdk_x11_surface_get_type");
-    unsigned long (*x11Xid)(Object)                             = optionalSymbol<decltype(x11Xid)>("gdk_x11_surface_get_xid");
-    std::uintptr_t (*waylandToplevelType)()                     = optionalSymbol<decltype(waylandToplevelType)>("gdk_wayland_toplevel_get_type");
-    int (*waylandExport)(Object, void (*)(Object, const char*, void*), void*, void (*)(void*)) =
-        optionalSymbol<decltype(waylandExport)>("gdk_wayland_toplevel_export_handle");
+    Object (*nativeSurface)(Object)            = optionalSymbol<decltype(nativeSurface)>("gtk_native_get_surface");
+    int (*instanceIsA)(Object, std::uintptr_t) = optionalSymbol<decltype(instanceIsA)>("g_type_check_instance_is_a");
+    std::uintptr_t (*x11SurfaceType)()         = optionalSymbol<decltype(x11SurfaceType)>("gdk_x11_surface_get_type");
+    unsigned long (*x11Xid)(Object)            = optionalSymbol<decltype(x11Xid)>("gdk_x11_surface_get_xid");
+    std::uintptr_t (*waylandToplevelType)()    = optionalSymbol<decltype(waylandToplevelType)>("gdk_wayland_toplevel_get_type");
+    int (*waylandExport)(Object,
+                         void (*)(Object, const char*, void*),
+                         void*,
+                         void (*)(void*))      = optionalSymbol<decltype(waylandExport)>("gdk_wayland_toplevel_export_handle");
 };
 
 inline Api& api() {
@@ -229,7 +231,7 @@ inline std::filesystem::path profileDirectory(const char* variable, const char* 
 /// outlives the window finds it null.
 struct CaptureJob;
 struct CaptureTarget {
-    Api::Object                             view = nullptr;
+    Api::Object                 view = nullptr;
     PendingCaptures<CaptureJob> pending;  // Requests nobody has answered yet, queued or in flight.
 };
 
@@ -242,7 +244,7 @@ struct CaptureJob {
 inline void answer(CaptureJob& job, CaptureResult result) noexcept {
     try {
         job.done.set_value(std::move(result));
-    } catch (...) { }  // Already answered: a closing window may have answered before the engine did.
+    } catch (...) {}  // Already answered: a closing window may have answered before the engine did.
 }
 
 /// The window is going away: no pending request waits for an answer that will never come.
@@ -282,7 +284,7 @@ inline void finishCapture(Api::Object view, Api::Object result, void* owner) noe
     } catch (...) {
         try {
             (*job)->done.set_exception(std::current_exception());
-        } catch (...) { }
+        } catch (...) {}
     }
 }
 
@@ -341,7 +343,7 @@ struct Session : FailureState {
     WindowOptions                        windowOptions;
     std::function<void()>                navigationCancelled;
     /// Per-launch proof of this view (ADR-020), given at the start of the top-level documents of the application's origin.
-    ViewLaunch launch;
+    ViewLaunch                launch;
     std::chrono::milliseconds startupTimeout{30000};  // the initial document must load within this interval
     /// A window opened beside the application's own (#616): it shares the network session (cookies, storage and downloads)
     /// of the first one, runs no loop of its own and reports its closing to `closedHook` instead of ending the loop.
@@ -365,26 +367,26 @@ struct Session : FailureState {
         std::vector<unsigned long> handlers;
         std::filesystem::path      reserved;  // The destination given to this download, until it ends.
     };
-    DownloadReservations reservations;
-    std::vector<Download> downloads;
-    unsigned long         downloadStartedHandler = 0;
-    bool                                 closed            = false;
-    bool                                 initialNavigation = true;
-    unsigned                             navigationTimer   = 0;
-    unsigned                             presentTimer      = 0;  // presents the window anyway when the first frame is late
-    bool                                 firstNotified     = false;  // the page's first notification of the session came, whenever it did
-    frontend::detail::Presentation       presentation;
-    frontend::detail::StartupTrace       trace;
-    unsigned                             portalTimer       = 0;  // retries the Wayland export until the toplevel can be exported
-    int                                  portalAttempts    = 0;
-    std::uint64_t                        portalGeneration  = 0;  // the publication this session's identifier belongs to
-    unsigned long                        windowHandler     = 0;
-    std::vector<unsigned long>           viewHandlers;
+    DownloadReservations           reservations;
+    std::vector<Download>          downloads;
+    unsigned long                  downloadStartedHandler = 0;
+    bool                           closed                 = false;
+    bool                           initialNavigation      = true;
+    unsigned                       navigationTimer        = 0;
+    unsigned                       presentTimer           = 0;      // presents the window anyway when the first frame is late
+    bool                           firstNotified          = false;  // the page's first notification of the session came, whenever it did
+    frontend::detail::Presentation presentation;
+    frontend::detail::StartupTrace trace;
+    unsigned                       portalTimer      = 0;  // retries the Wayland export until the toplevel can be exported
+    int                            portalAttempts   = 0;
+    std::uint64_t                  portalGeneration = 0;  // the publication this session's identifier belongs to
+    unsigned long                  windowHandler    = 0;
+    std::vector<unsigned long>     viewHandlers;
     /// Profile files of the GStreamer opt-out (`WindowOptions::media == false`); empty otherwise.
-    std::filesystem::path                mediaPlugins, mediaRegistry;
-    unsigned long                        messageHandler = 0;  // on the content manager, not on the view
-    std::shared_ptr<CaptureTarget>       captureTarget = std::make_shared<CaptureTarget>();
-    CaptureRegistration                  captureRegistration;
+    std::filesystem::path          mediaPlugins, mediaRegistry;
+    unsigned long                  messageHandler = 0;  // on the content manager, not on the view
+    std::shared_ptr<CaptureTarget> captureTarget  = std::make_shared<CaptureTarget>();
+    CaptureRegistration            captureRegistration;
 
 
     explicit Session(webfront::detail::BoundContentPolicy rules, WindowOptions settings = {})
@@ -458,8 +460,7 @@ struct Session : FailureState {
         if (first && closedHook) {
             try {
                 closedHook();
-            } catch (...) {
-            }
+            } catch (...) {}
         }
     }
     void failAndClose(std::string_view message) noexcept {
@@ -485,7 +486,7 @@ struct Session : FailureState {
 
     /// The environment WebKit's processes inherit when the application has no media: GStreamer finds no plugin to scan.
     std::optional<ScopedEnvironment> mediaScope;  // set from the first load until the page's load starts
-    ScopedEnvironment mediaEnvironment() const {
+    ScopedEnvironment                mediaEnvironment() const {
         ScopedEnvironment environment;
         if (!mediaPlugins.empty()) {
             environment.set("GST_PLUGIN_SYSTEM_PATH_1_0", mediaPlugins.string());
@@ -547,7 +548,7 @@ struct Session : FailureState {
     void presentHidden() {
         a.widgetOpacity(window, 0.01);  // GTK does not draw a widget at 0, and WebKit would wait for a frame forever
         a.windowPresent(window);
-        if (!secondary)  // the portal identifier is that of the application's own window
+        if (!secondary)                 // the portal identifier is that of the application's own window
             startPortalExport();
     }
     /// Shows the window once the page painted its first frame, or when the delay expired.
@@ -592,7 +593,8 @@ struct Session : FailureState {
         a.scriptAdd(a.contentManager(view), script);
         a.scriptUnref(script);
         a.registerMessage(a.contentManager(view), name, nullptr);
-        messageHandler = a.connect(a.contentManager(view), "script-message-received::webfrontFirstFrame", reinterpret_cast<Api::Callback>(onFirstFrame), this, nullptr, 0);
+        messageHandler =
+            a.connect(a.contentManager(view), "script-message-received::webfrontFirstFrame", reinterpret_cast<Api::Callback>(onFirstFrame), this, nullptr, 0);
     }
 
     void installViewAssociation() {
@@ -746,7 +748,7 @@ struct Session : FailureState {
     }
     static void onLoadChanged(Api::Object, int event, Session* self) noexcept {
         self->mediaScope.reset();  // the web process was launched with the opt-out
-        if (event == 2)  // WEBKIT_LOAD_COMMITTED: slow subresources are not a startup failure.
+        if (event == 2)            // WEBKIT_LOAD_COMMITTED: slow subresources are not a startup failure.
             self->guard([self] {
                 self->navigationCommitted();
             });
@@ -810,7 +812,7 @@ struct Session : FailureState {
             return 0;  // The system dialog, attached to the window by WebKitGTK.
         }
         try {
-            const auto              files = self->chooseFiles();
+            const auto               files = self->chooseFiles();
             std::vector<const char*> pointers;
             for (const auto& file : files)
                 pointers.push_back(file.c_str());
@@ -833,10 +835,18 @@ struct Session : FailureState {
         auto&        a = api();
         ScriptDialog description;
         switch (a.dialogType(dialog)) {
-            case 1: description.kind = ScriptDialog::Kind::confirm; break;
-            case 2: description.kind = ScriptDialog::Kind::prompt; break;
-            case 3: description.kind = ScriptDialog::Kind::beforeUnload; break;
-            default: description.kind = ScriptDialog::Kind::alert; break;
+            case 1:
+                description.kind = ScriptDialog::Kind::confirm;
+                break;
+            case 2:
+                description.kind = ScriptDialog::Kind::prompt;
+                break;
+            case 3:
+                description.kind = ScriptDialog::Kind::beforeUnload;
+                break;
+            default:
+                description.kind = ScriptDialog::Kind::alert;
+                break;
         }
         if (const auto* message = a.dialogMessage(dialog))
             description.message = message;
@@ -901,7 +911,7 @@ struct Session : FailureState {
             self->portalTimer = 0;
             return 0;  // done, or given up: the identifier stays empty and a dialog is simply not parented
         }
-        return 1;  // not ready yet (no surface, no xdg role): try again in 100 ms
+        return 1;      // not ready yet (no surface, no xdg role): try again in 100 ms
     }
     void startPortalExport() {
         // open() published this session's window just before run(): that is the generation current now.
@@ -917,7 +927,7 @@ struct Session : FailureState {
         if (closed)
             return;
         navigationTimer = a.timeoutAdd(frontend::detail::timerMilliseconds(startupTimeout, "WebKitGTKFrontend"), onNavigationTimeout, this);
-        presentTimer = a.timeoutAdd(frontend::detail::Presentation::maximumDelayMs, onPresentTimeout, this);
+        presentTimer    = a.timeoutAdd(frontend::detail::Presentation::maximumDelayMs, onPresentTimeout, this);
         presentHidden();
         trace("load started");
         a.load(view, url.c_str());
@@ -962,7 +972,7 @@ inline OpenOptions openOptionsOf(const ViewOptions& view) {
 
 /// What the registry of the secondary windows (WindowRegistry.hpp) asks of GTK: reaping is an idle callback.
 struct WindowHooks {
-    static constexpr std::string_view name = "WebKitGTKFrontend";
+    static constexpr std::string_view name   = "WebKitGTKFrontend";
     unsigned                          reaper = 0;
 
     template <typename Registry>
@@ -1004,9 +1014,11 @@ inline void openSecondary(const std::string& address, const std::string& port, c
     Windows::instance().open(
         file,
         [&](Session& primary) {
-            auto session = std::make_shared<Session>(webfront::detail::BoundContentPolicy{applicationUrl(address, port, "", options.launch.origin), options.contentPolicy}, options.window);
-            session->secondary     = true;
-            session->sharedNetwork = primary.network;
+            auto session = std::make_shared<Session>(
+                webfront::detail::BoundContentPolicy{applicationUrl(address, port, "", options.launch.origin), options.contentPolicy},
+                options.window);
+            session->secondary          = true;
+            session->sharedNetwork      = primary.network;
             session->launch             = options.launch;
             session->startupTimeout     = primary.startupTimeout;  // the first window's delay and test injections
             session->chooseFiles        = primary.chooseFiles;
@@ -1026,7 +1038,8 @@ inline bool closeSecondary(const std::string& file) {
     return Windows::instance().close(file);
 }
 
-inline void open(std::string_view address, std::string_view port, std::string_view file, const OpenOptions& options = {}, SandboxMode mode = SandboxMode::development) {
+inline void
+open(std::string_view address, std::string_view port, std::string_view file, const OpenOptions& options = {}, SandboxMode mode = SandboxMode::development) {
     initialize(mode);
     // One window per process: a second open() on the main thread is refused before it creates a window.
     frontend::detail::InterfaceSession<Windows>::refuseSecond(uiExecutorHostOf<WebKitGTKHost>(), WindowHooks::name);
@@ -1043,24 +1056,23 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
         options.configure(session);
     // g_idle_add_full is thread-safe and wakes the main context the loop of run() iterates. GTK realizes the window at
     // present(): run() then sets the X11 identifier, and the Wayland one arrives later.
-    auto& host = uiExecutorHostOf<WebKitGTKHost>();
-    frontend::detail::InterfaceSession<Windows> interfaceSession(
-        host,
-        nativeWindowHostOf<WebKitGTKHost>(),
-        Windows::instance(),
-        session,
-        [&host] {
-            constexpr int defaultIdle = 200;  // G_PRIORITY_DEFAULT_IDLE
-            api().idleAddFull(
-                defaultIdle,
-                +[](void* data) -> int {
-                    static_cast<UIExecutorHost*>(data)->drain();
-                    return 0;  // G_SOURCE_REMOVE
-                },
-                &host,
-                nullptr);
-        },
-        {.kind = NativeWindowKind::gtk, .pointer = session.window, .portalParent = {}});
+    auto&                                       host = uiExecutorHostOf<WebKitGTKHost>();
+    frontend::detail::InterfaceSession<Windows> interfaceSession(host,
+                                                                 nativeWindowHostOf<WebKitGTKHost>(),
+                                                                 Windows::instance(),
+                                                                 session,
+                                                                 [&host] {
+                                                                     constexpr int defaultIdle = 200;  // G_PRIORITY_DEFAULT_IDLE
+                                                                     api().idleAddFull(
+                                                                         defaultIdle,
+                                                                         +[](void* data) -> int {
+                                                                             static_cast<UIExecutorHost*>(data)->drain();
+                                                                             return 0;  // G_SOURCE_REMOVE
+                                                                         },
+                                                                         &host,
+                                                                         nullptr);
+                                                                 },
+                                                                 {.kind = NativeWindowKind::gtk, .pointer = session.window, .portalParent = {}});
     session.run(applicationUrl(address, port, file, options.launch.origin));
 }
 
@@ -1072,7 +1084,7 @@ namespace webfront::frontend {
 /** @brief Optional Linux WebKitGTK 6.0 window. Construct and open on the process main thread. */
 template <detail::webkitgtk::SandboxMode Mode>
 struct BasicWebKitGTKFrontend : EmbeddedFrontend<BasicWebKitGTKFrontend<Mode>> {
-    static constexpr detail::webkitgtk::SandboxMode sandboxMode = Mode;
+    static constexpr detail::webkitgtk::SandboxMode sandboxMode        = Mode;
     static constexpr bool                           requiresMainThread = true;  // GTK is initialized and run on the process main thread
     static constexpr bool                           secondaryWindows   = true;  // they share the first window's network session
     static constexpr std::string_view               name               = "WebKitGTKFrontend";
@@ -1083,7 +1095,7 @@ struct BasicWebKitGTKFrontend : EmbeddedFrontend<BasicWebKitGTKFrontend<Mode>> {
     static constexpr bool compiled = false;
 #endif
     using Options = ViewOptions;
-    using Host = WebKitGTKHost;
+    using Host    = WebKitGTKHost;
 
 #if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
     static void initializeNative() {

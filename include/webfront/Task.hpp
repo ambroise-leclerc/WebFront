@@ -41,7 +41,7 @@ struct StopTask {
 struct TaskRegistration {
     TaskHandle                                                                        handle;
     networking::ex::stop_callback_for_t<networking::ex::inplace_stop_token, StopTask> stop;
-    TaskRegistration(TaskHandle value, networking::ex::inplace_stop_token parent) : handle(std::move(value)), stop(parent, StopTask{handle}) { }
+    TaskRegistration(TaskHandle value, networking::ex::inplace_stop_token parent) : handle(std::move(value)), stop(parent, StopTask{handle}) {}
 };
 
 inline Task ownedTask(Task task, std::unique_ptr<TaskRegistration> registration) {

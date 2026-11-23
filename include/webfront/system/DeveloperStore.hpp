@@ -1,10 +1,10 @@
 /// @brief Explicit development project access and staged publication, without shell access.
 #pragma once
 
-#include "DeveloperFiles.hpp"
-#include "DeveloperJournal.hpp"
 #include "../utils/Json.hpp"
 #include "../utils/Sha256.hpp"
+#include "DeveloperFiles.hpp"
+#include "DeveloperJournal.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -35,8 +35,7 @@ public:
     /// the previous process stopped and abandons the others. A publication that cannot be completed
     /// does not prevent opening the project: state() and commitGroup() retry it and report why it fails,
     /// and recoveryFailure() describes it meanwhile. The hook is for tests only.
-    explicit Store(std::filesystem::path project, std::chrono::steady_clock::duration abandoned = defaultAbandonedAfter,
-                   StepHook stepHook = {})
+    explicit Store(std::filesystem::path project, std::chrono::steady_clock::duration abandoned = defaultAbandonedAfter, StepHook stepHook = {})
         : root(canonicalDirectory(project)), abandonedAfter(abandoned), hook(std::move(stepHook)) {
         if (!std::filesystem::is_directory(root))
             throw std::invalid_argument("Developer project must be a directory");
@@ -58,9 +57,9 @@ public:
     }
 
     std::vector<std::uint8_t> read(std::string path, std::uint64_t offset) const {
-        std::scoped_lock lock(mutex);
-        const auto       source = projectPath(root, path);
-        std::ifstream    file   = openForReading(source, path, offset);
+        std::scoped_lock          lock(mutex);
+        const auto                source = projectPath(root, path);
+        std::ifstream             file   = openForReading(source, path, offset);
         std::vector<std::uint8_t> bytes(chunkSize);
         file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
         if (file.bad())
@@ -127,7 +126,8 @@ public:
         const auto resolved = std::filesystem::weakly_canonical(target);
         requireFreeDestination(resolved, std::filesystem::weakly_canonical(stagingRoot));
         const auto [id, staging] = createStaging(stagingRoot);
-        transactions.emplace(id, Transaction{staging, target, resolved, std::move(destination), directory, replace, 0, {}, {}, std::chrono::steady_clock::now()});
+        transactions.emplace(id,
+                             Transaction{staging, target, resolved, std::move(destination), directory, replace, 0, {}, {}, std::chrono::steady_clock::now()});
         return id;
     }
 
@@ -198,7 +198,7 @@ public:
     /// IncompletePublication and the next state(), commitGroup() or opening of the project completes it.
     void commitGroup(const std::vector<std::string>& ids, const std::vector<std::string>& paths, const std::string& expected) {
         std::scoped_lock lock(mutex);
-        const auto directory = projectPath(root, journalDirectory);
+        const auto       directory = projectPath(root, journalDirectory);
         // Before the commit point: the journal directory must itself survive a power cut.
         createDirectoriesDurably(root, directory);
         // From here to the end, no other process recovers, checks the precondition or publishes.
@@ -266,20 +266,21 @@ private:
         if (!std::filesystem::is_directory(source, error) || std::filesystem::is_symlink(source, error))
             throw std::runtime_error("Cannot list project directory: " + directory);
         std::vector<std::filesystem::directory_entry> sorted;
-        for (std::filesystem::directory_iterator entries(source, error); !error && entries != std::filesystem::directory_iterator{};
-             entries.increment(error))
+        for (std::filesystem::directory_iterator entries(source, error); !error && entries != std::filesystem::directory_iterator{}; entries.increment(error))
             sorted.push_back(*entries);
         if (error)
             throw std::runtime_error("Cannot list project directory: " + directory);
-        std::ranges::sort(sorted, {}, [](const auto& entry) { return entry.path().filename(); });
+        std::ranges::sort(sorted, {}, [](const auto& entry) {
+            return entry.path().filename();
+        });
         for (const auto& entry : sorted) {
             const auto name   = entry.path().filename().generic_string();
             const auto path   = directory.empty() ? name : directory + "/" + name;
             const auto key    = json::quote(prefix + name);
             const auto status = entry.symlink_status(error);
             if (error || (!std::filesystem::is_regular_file(status) && !std::filesystem::is_directory(status))) {
-                text  += (text.size() > 1 ? "," : "") + key + ":\"" + (std::filesystem::is_symlink(status) ? "link" : "other") + "\"";
-                error  = {};
+                text += (text.size() > 1 ? "," : "") + key + ":\"" + (std::filesystem::is_symlink(status) ? "link" : "other") + "\"";
+                error = {};
                 continue;
             }
             if (std::filesystem::is_directory(status)) {
@@ -341,7 +342,7 @@ private:
     std::optional<std::string> listedName(const std::string& directory, const std::string& name) const {
         std::error_code error;
         try {
-            const auto resolved = projectPath(root, directory.empty() ? name : directory + "/" + name);
+            const auto resolved    = projectPath(root, directory.empty() ? name : directory + "/" + name);
             const bool isDirectory = std::filesystem::is_directory(resolved, error);
             if (error && error != std::errc::no_such_file_or_directory)
                 return std::nullopt;
@@ -441,7 +442,8 @@ private:
     }
 
     // Completes the committed publications, recording why one cannot be completed.
-    template<typename Recovery> void recordRecovery(Recovery recovery) {
+    template <typename Recovery>
+    void recordRecovery(Recovery recovery) {
         try {
             recovery(root, hook);
             pendingRecovery.reset();
@@ -463,15 +465,15 @@ private:
     }
 
     struct Transaction {
-        std::filesystem::path                staging;
-        std::filesystem::path                target;
-        std::filesystem::path                resolved;
-        std::string                          destination;
-        bool                                 directory;
-        bool                                 replace;
-        std::uint64_t                        size;
-        std::map<std::string, std::uint64_t> files;
-        std::set<std::string>                folded;
+        std::filesystem::path                 staging;
+        std::filesystem::path                 target;
+        std::filesystem::path                 resolved;
+        std::string                           destination;
+        bool                                  directory;
+        bool                                  replace;
+        std::uint64_t                         size;
+        std::map<std::string, std::uint64_t>  files;
+        std::set<std::string>                 folded;
         std::chrono::steady_clock::time_point lastUse;
     };
     Transaction& transaction(const std::string& id) {
@@ -519,7 +521,9 @@ private:
     // Two paths differing only by case are one file on Windows and macOS: refuse them instead of concatenating.
     static void requireDistinctCase(Transaction& tx, const std::string& key) {
         std::string lowered = key;
-        std::ranges::transform(lowered, lowered.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        std::ranges::transform(lowered, lowered.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
         if (tx.files.contains(key))
             return;
         if (!tx.folded.insert(lowered).second)
@@ -541,12 +545,12 @@ private:
         return relative;
     }
 
-    std::filesystem::path                    root;
-    std::chrono::steady_clock::duration      abandonedAfter;
-    StepHook                                 hook;
-    std::optional<std::string>               pendingRecovery;
-    mutable std::mutex                       mutex;
-    std::map<std::string, Transaction>       transactions;
+    std::filesystem::path               root;
+    std::chrono::steady_clock::duration abandonedAfter;
+    StepHook                            hook;
+    std::optional<std::string>          pendingRecovery;
+    mutable std::mutex                  mutex;
+    std::map<std::string, Transaction>  transactions;
 };
 
 }  // namespace webfront::developer

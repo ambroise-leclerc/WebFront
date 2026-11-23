@@ -59,7 +59,7 @@ class DirectChannel : public std::enable_shared_from_this<DirectChannel> {
             const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> owned(raw, CoTaskMemFree);
             // "id\nname\ntext"
             const std::wstring_view message(raw);
-            const auto              idEnd = message.find(L'\n');
+            const auto              idEnd   = message.find(L'\n');
             const auto              nameEnd = idEnd == message.npos ? idEnd : message.find(L'\n', idEnd + 1);
             if (nameEnd == message.npos)
                 return;
@@ -187,7 +187,7 @@ class DirectChannel : public std::enable_shared_from_this<DirectChannel> {
     }
 
 public:
-    DirectChannel(ComPtr<ICoreWebView2> browser, ComPtr<ICoreWebView2Environment> factory) : view(std::move(browser)), environment(std::move(factory)) { }
+    DirectChannel(ComPtr<ICoreWebView2> browser, ComPtr<ICoreWebView2Environment> factory) : view(std::move(browser)), environment(std::move(factory)) {}
     DirectChannel(const DirectChannel&)            = delete;
     DirectChannel& operator=(const DirectChannel&) = delete;
     ~DirectChannel() {

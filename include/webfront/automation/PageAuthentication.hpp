@@ -1,7 +1,7 @@
 /// @brief Authenticate page callbacks without putting a reusable secret on their wire messages.
 #pragma once
-#include "Channel.hpp"
 #include "../utils/Sha256.hpp"
+#include "Channel.hpp"
 
 #include <bit>
 #include <limits>

@@ -11,17 +11,18 @@
 
 #if defined(_WIN32)
     #include "../system/WindowsCompat.hpp"
+
     #include <windows.h>
 #elif defined(__APPLE__)
     #include <sys/sysctl.h>
     #include <sys/time.h>
     #include <unistd.h>
 #elif defined(__linux__)
-    #include <unistd.h>
-
     #include <fstream>
     #include <sstream>
     #include <string>
+
+    #include <unistd.h>
 #endif
 
 namespace webfront::frontend::detail {
@@ -35,9 +36,9 @@ namespace webfront::frontend::detail {
         return -1;
     GetSystemTimeAsFileTime(&now);
     ULARGE_INTEGER start{}, current{};
-    start.LowPart   = creation.dwLowDateTime;
-    start.HighPart  = creation.dwHighDateTime;
-    current.LowPart = now.dwLowDateTime;
+    start.LowPart    = creation.dwLowDateTime;
+    start.HighPart   = creation.dwHighDateTime;
+    current.LowPart  = now.dwLowDateTime;
     current.HighPart = now.dwHighDateTime;
     return static_cast<long long>((current.QuadPart - start.QuadPart) / 10000);
 #elif defined(__APPLE__)
@@ -67,8 +68,7 @@ namespace webfront::frontend::detail {
                 uptime >> seconds;
                 return static_cast<long long>((seconds - std::stod(field) / static_cast<double>(sysconf(_SC_CLK_TCK))) * 1000.0);
             }
-    } catch (...) {
-    }
+    } catch (...) {}
     return -1;
 #else
     return -1;
@@ -96,7 +96,10 @@ class StartupTrace {
 public:
     void operator()(const char* milestone) const noexcept {
         if (enabled())
-            std::fprintf(stderr, "WebFront startup: %s at %lld ms (session %lld ms)\n", milestone, millisecondsSinceProcessStart(),
+            std::fprintf(stderr,
+                         "WebFront startup: %s at %lld ms (session %lld ms)\n",
+                         milestone,
+                         millisecondsSinceProcessStart(),
                          static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - created).count()));
     }
 };

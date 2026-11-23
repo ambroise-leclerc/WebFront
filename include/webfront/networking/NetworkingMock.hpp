@@ -23,7 +23,9 @@ struct StoppedSender {
     template <typename Receiver>
     struct Operation {
         Receiver receiver;
-        void start() noexcept { ex::set_stopped(std::move(receiver)); }
+        void     start() noexcept {
+            ex::set_stopped(std::move(receiver));
+        }
     };
 
     template <typename Receiver>
@@ -34,7 +36,7 @@ struct StoppedSender {
 
 class IoContextMock {
 public:
-    void run() {}
+    void        run() {}
     std::size_t run_one() {
         return 0;
     }
@@ -47,7 +49,9 @@ class EndpointMock {
 
 public:
     EndpointMock(std::string_view address, std::string_view port) : originalAddress(address), originalPort(port) {}
-    auto protocol() const { return originalPort; }
+    auto protocol() const {
+        return originalPort;
+    }
 };
 
 class SocketBaseMock {
@@ -56,14 +60,21 @@ public:
     struct reuse_address {
         bool isSet;
 
-        explicit reuse_address(bool reuse)
-            : isSet(reuse) {}
+        explicit reuse_address(bool reuse) : isSet(reuse) {}
 
-        bool value() const { return isSet; }
+        bool value() const {
+            return isSet;
+        }
     };
-    void set_option(reuse_address option) { log::debug("SocketBaseMock::set_option(reuse_address({}))", option.value()); }
-    void bind(const EndpointMock&) { log::debug("SocketBaseMock::bind()"); }
-    void listen(int backlog = max_connections) { log::debug("SocketBaseMock::listen({})", backlog); }
+    void set_option(reuse_address option) {
+        log::debug("SocketBaseMock::set_option(reuse_address({}))", option.value());
+    }
+    void bind(const EndpointMock&) {
+        log::debug("SocketBaseMock::bind()");
+    }
+    void listen(int backlog = max_connections) {
+        log::debug("SocketBaseMock::listen({})", backlog);
+    }
 
 public:
     static const int max_connections = 2;
@@ -72,7 +83,7 @@ public:
 class SocketMock : public SocketBaseMock {
 public:
     inline static std::array<std::byte, 8192> debugBuffer;
-    inline static size_t bufferIndex = 0;
+    inline static size_t                      bufferIndex = 0;
 
     enum shutdown_type { shutdown_receive, shutdown_send, shutdown_both };
 
@@ -88,43 +99,58 @@ public:
         return inputBuffer.size();
     }
 
-    void close() { log::debug("SocketMock::close()"); }
-    void shutdown(shutdown_type type) { log::debug("SocketMock::shutdown({})", static_cast<int>(type)); }
+    void close() {
+        log::debug("SocketMock::close()");
+    }
+    void shutdown(shutdown_type type) {
+        log::debug("SocketMock::shutdown({})", static_cast<int>(type));
+    }
 };
 
 class AcceptorMock : public SocketBaseMock {
     bool isOpen = false;
 
 public:
-    AcceptorMock(IoContextMock){};
+    AcceptorMock(IoContextMock) {};
     void open(auto protocol) {
         log::debug("AcceptorMock::open({})", protocol);
         isOpen = true;
     }
-    bool is_open() const { return isOpen; }
+    bool is_open() const {
+        return isOpen;
+    }
 };
 
 class NetworkingMock : public BasicNetworking<> {
 public:
-    using Acceptor = AcceptorMock;
-    using Endpoint = EndpointMock;
+    using Acceptor  = AcceptorMock;
+    using Endpoint  = EndpointMock;
     using IoContext = IoContextMock;
-    using Socket = SocketMock;
+    using Socket    = SocketMock;
     using super::ConstBuffer;
     using super::MutableBuffer;
 
-    static EndpointMock Resolve(std::string_view address, std::string_view port) { return {address, port}; }
-    static auto Scheduler(auto&) { return ex::inline_scheduler{}; }
+    static EndpointMock Resolve(std::string_view address, std::string_view port) {
+        return {address, port};
+    }
+    static auto Scheduler(auto&) {
+        return ex::inline_scheduler{};
+    }
 
     /// Nothing is ever received or accepted: the tasks awaiting these operations end at once.
-    static StoppedSender<std::size_t> Receive(Socket&, MutableBuffer) { return {}; }
-    static StoppedSender<Socket> Accept(auto&) { return {}; }
+    static StoppedSender<std::size_t> Receive(Socket&, MutableBuffer) {
+        return {};
+    }
+    static StoppedSender<Socket> Accept(auto&) {
+        return {};
+    }
     static auto Send(Socket& socket, const auto& buffers) {
         std::error_code ec;
-        std::size_t bytesTransferred = 0;
-        for (const auto& buffer : buffers) bytesTransferred += socket.write_some(buffer, ec);
+        std::size_t     bytesTransferred = 0;
+        for (const auto& buffer : buffers)
+            bytesTransferred += socket.write_some(buffer, ec);
         return ex::just(bytesTransferred);
     }
 };
 
-} // namespace webfront::networking
+}  // namespace webfront::networking

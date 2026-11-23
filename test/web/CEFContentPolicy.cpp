@@ -64,7 +64,7 @@ struct Probe {
 class DevToolsClient : public CefClient, public CefLifeSpanHandler {
 public:
     DevToolsClient(Probe& state, CefRefPtr<CefBrowser> opener, CefRefPtr<CefClient> client)
-        : probe(state), parent(std::move(opener)), delegate(std::move(client)) { }
+        : probe(state), parent(std::move(opener)), delegate(std::move(client)) {}
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override {
         return this;
     }
@@ -94,7 +94,7 @@ private:
 
 class MenuDelegate : public CefMenuModelDelegate {
 public:
-    void ExecuteCommand(CefRefPtr<CefMenuModel>, int, cef_event_flags_t) override { }
+    void ExecuteCommand(CefRefPtr<CefMenuModel>, int, cef_event_flags_t) override {}
 
 private:
     IMPLEMENT_REFCOUNTING(MenuDelegate);
@@ -108,7 +108,7 @@ public:
               "http://127.0.0.1:9002",
               {.devToolsEnabled = false, .contextMenusEnabled = false}
     }),
-          probe(state) { }
+          probe(state) {}
     void OnBeforeDevToolsPopup(CefRefPtr<CefBrowser>          browser,
                                CefWindowInfo&                 info,
                                CefRefPtr<CefClient>&          client,

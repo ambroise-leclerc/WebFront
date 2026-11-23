@@ -12,8 +12,11 @@
 namespace webfront::testdriver {
 // Markers of the lines the HTTP layer logs for a request (HTTPServer.hpp). Rename a message there and update this
 // list: LoggerTests checks the filter against the server's current wording.
-inline constexpr std::array<std::string_view, 5> requestMarkers{
-    "Received request ", "responding http ", "HTTP asset request ", "ended its response early", "Route "};
+inline constexpr std::array<std::string_view, 5> requestMarkers{"Received request ",
+                                                                "responding http ",
+                                                                "HTTP asset request ",
+                                                                "ended its response early",
+                                                                "Route "};
 
 inline bool isRequestLine(std::string_view line) {
     // An allow-list: a tagged warning or error is kept, and an Info line only when it describes a request. A line with no

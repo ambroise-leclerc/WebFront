@@ -17,12 +17,12 @@
 #include <vector>
 
 #ifdef _WIN32
+    #include "../system/WindowsArguments.hpp"
     #include "../system/WindowsCompat.hpp"
 
     #include <cwchar>
 
     #include <windows.h>
-    #include "../system/WindowsArguments.hpp"
 #else
     #include <cerrno>
     #include <csignal>

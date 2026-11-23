@@ -64,7 +64,7 @@ class BrowserCallSender {
         std::optional<ex::stop_callback_for_t<Token, OnStop>>                   stopCallback;
 
         State(Receiver r, std::weak_ptr<Registry> calls, std::weak_ptr<Socket> ws, std::vector<std::byte> data)
-            : receiver(std::move(r)), pending(std::move(calls)), socket(std::move(ws)), payload(std::move(data)) { }
+            : receiver(std::move(r)), pending(std::move(calls)), socket(std::move(ws)), payload(std::move(data)) {}
 
         void start() noexcept {
             // Completion is deferred until callback construction and dispatch are finished:
@@ -97,11 +97,11 @@ class BrowserCallSender {
             id        = calls->add({.complete =
                                         [self](const msg::FunctionReturn<Policy>& result) {
                                      self->complete(result);
-                                        },
+                                 },
                                     .reject =
                                         [self](std::exception_ptr e) {
                                      self->finish(Outcome::error, std::move(e));
-                                        },
+                                 },
                                     .owner = this});
         }
 
@@ -198,12 +198,12 @@ class BrowserCallSender {
 
     public:
         using operation_state_concept = ex::operation_state_tag;
-        explicit Operation(std::shared_ptr<State<Receiver>> value) : state(std::move(value)) { }
-        Operation(const Operation&)                                  = delete;
-        Operation(Operation&&)                                       = delete;
-        Operation&                       operator=(const Operation&) = delete;
-        Operation&                       operator=(Operation&&)      = delete;
-        void                             start() noexcept {
+        explicit Operation(std::shared_ptr<State<Receiver>> value) : state(std::move(value)) {}
+        Operation(const Operation&)            = delete;
+        Operation(Operation&&)                 = delete;
+        Operation& operator=(const Operation&) = delete;
+        Operation& operator=(Operation&&)      = delete;
+        void       start() noexcept {
             auto keepAlive = state;  // receiver completion may destroy this operation inline
             keepAlive->start();
         }
@@ -214,7 +214,7 @@ public:
     using completion_signatures = typename CallCompletions<R>::type;
 
     BrowserCallSender(std::weak_ptr<Registry> calls, std::weak_ptr<Socket> ws, std::vector<std::byte> data)
-        : pending(std::move(calls)), socket(std::move(ws)), payload(std::move(data)) { }
+        : pending(std::move(calls)), socket(std::move(ws)), payload(std::move(data)) {}
 
     template <typename Receiver>
     auto connect(Receiver receiver) && {
@@ -249,7 +249,7 @@ public:
     auto operator()(auto&&... arguments) const {
         msg::FunctionCall<Policy> command;
         const auto                frame = detail::encodeCall<Net>(command, name, std::forward<decltype(arguments)>(arguments)...);
-        std::vector<std::byte> payload;
+        std::vector<std::byte>    payload;
         payload.reserve(frame.size());
         auto buffers = frame.toBuffers();
         for (std::size_t i = 1; i < buffers.size(); ++i) {

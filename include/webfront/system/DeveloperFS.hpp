@@ -160,7 +160,7 @@ private:
             if (stream)
                 return File{std::move(stream)};
 #endif
-        } catch (const std::exception&) { }
+        } catch (const std::exception&) {}
         return std::nullopt;
     }
 

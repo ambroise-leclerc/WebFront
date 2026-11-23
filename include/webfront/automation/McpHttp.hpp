@@ -46,24 +46,42 @@ struct Answer {
 
     static std::string_view reason(int status) {
         switch (status) {
-            case 100: return "Continue";
-            case 200: return "OK";
-            case 202: return "Accepted";
-            case 204: return "No Content";
-            case 400: return "Bad Request";
-            case 401: return "Unauthorized";
-            case 403: return "Forbidden";
-            case 404: return "Not Found";
-            case 405: return "Method Not Allowed";
-            case 406: return "Not Acceptable";
-            case 411: return "Length Required";
-            case 413: return "Content Too Large";
-            case 415: return "Unsupported Media Type";
-            case 421: return "Misdirected Request";
-            case 431: return "Request Header Fields Too Large";
-            case 501: return "Not Implemented";
-            case 503: return "Service Unavailable";
-            default: return "Internal Server Error";
+            case 100:
+                return "Continue";
+            case 200:
+                return "OK";
+            case 202:
+                return "Accepted";
+            case 204:
+                return "No Content";
+            case 400:
+                return "Bad Request";
+            case 401:
+                return "Unauthorized";
+            case 403:
+                return "Forbidden";
+            case 404:
+                return "Not Found";
+            case 405:
+                return "Method Not Allowed";
+            case 406:
+                return "Not Acceptable";
+            case 411:
+                return "Length Required";
+            case 413:
+                return "Content Too Large";
+            case 415:
+                return "Unsupported Media Type";
+            case 421:
+                return "Misdirected Request";
+            case 431:
+                return "Request Header Fields Too Large";
+            case 501:
+                return "Not Implemented";
+            case 503:
+                return "Service Unavailable";
+            default:
+                return "Internal Server Error";
         }
     }
     std::string serialize() const {
@@ -94,7 +112,9 @@ inline std::string trimmed(std::string_view text) {
     return std::string(text);
 }
 inline std::string lower(std::string text) {
-    std::ranges::transform(text, text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::ranges::transform(text, text.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
     return text;
 }
 /// The single value of a header; empty when it is missing, nullopt when it is repeated.
@@ -217,7 +237,7 @@ inline Screening screen(const http::Request& request, unsigned short port, std::
 template <typename Backend>
 class Endpoint {
 public:
-    explicit Endpoint(Backend& controller) : backend(controller) { }
+    explicit Endpoint(Backend& controller) : backend(controller) {}
 
     /// Handles a request that `screen` accepted, with its whole body.
     Answer handle(const http::Request& request, std::string_view body) {
@@ -226,9 +246,9 @@ public:
             return refusal(400, "Mcp-Session-Id is repeated");
         // Every message of an initialized session, its termination included, names a supported revision (or none, which
         // MCP lets the server read as its default); a rejected one has no effect on the session.
-        const auto negotiated   = detail::single(request, "MCP-Protocol-Version");
+        const auto negotiated       = detail::single(request, "MCP-Protocol-Version");
         const bool supportedVersion = negotiated && (negotiated->empty() || *negotiated == protocolVersion);
-        const auto unsupported  = [] {
+        const auto unsupported      = [] {
             return rpcError(400, -32600, "Unsupported MCP-Protocol-Version; this server supports " + std::string(protocolVersion));
         };
         if (request.method == http::Request::Method::Delete) {
@@ -250,7 +270,7 @@ public:
         bool        isRequest = false;
         try {
             const Object message{body};
-            method   = message.has("method") ? message.string("method") : std::string{};
+            method    = message.has("method") ? message.string("method") : std::string{};
             isRequest = message.has("id") && message.has("method");
             if (!message.has("method")) {
                 // A response of the client: this server sends no request, so there is nothing to route it to. It is
@@ -280,7 +300,9 @@ public:
                 answer.headers.emplace_back("Mcp-Session-Id", created);
                 const std::scoped_lock lock{mutex};
                 if (conversations.size() >= maxSessions) {
-                    const auto oldest = std::ranges::min_element(conversations, {}, [](const auto& item) { return item.second->used; });
+                    const auto oldest = std::ranges::min_element(conversations, {}, [](const auto& item) {
+                        return item.second->used;
+                    });
                     conversations.erase(oldest);
                 }
                 conversations.emplace(created, std::move(conversation));
@@ -317,7 +339,7 @@ public:
 
 private:
     struct Conversation {
-        explicit Conversation(Backend& backend) : mcp(backend) { }
+        explicit Conversation(Backend& backend) : mcp(backend) {}
         std::mutex                            mutex;
         Mcp<Backend>                          mcp;
         std::chrono::steady_clock::time_point used = std::chrono::steady_clock::now();
@@ -341,7 +363,10 @@ private:
 inline std::string clientConfiguration(std::string_view url, std::string_view token, std::string_view name = "webfront", bool authentication = true) {
     std::string server = "{\"type\":" + json::quote("http") + ",\"url\":" + json::quote(url);
     if (authentication)
-        server += ",\"headers\":" + objectJson({{"Authorization", json::quote("Bearer " + std::string(token))}});
+        server += ",\"headers\":"
+                  + objectJson({
+                      {"Authorization", json::quote("Bearer " + std::string(token))}
+        });
     server += "}";
     return "{\n  \"mcpServers\": {\n    " + json::quote(name) + ": " + server + "\n  }\n}\n";
 }
@@ -351,15 +376,16 @@ inline std::string clientConfiguration(std::string_view url, std::string_view to
 inline void validateTokenOptions(const std::optional<std::string>& fixed, bool authentication) {
     if (!authentication && fixed)
         throw std::invalid_argument("A fixed MCP token cannot be combined with disabled authentication");
-    if (fixed && (fixed->size() < 32 || fixed->size() > 1024 || !std::ranges::all_of(*fixed, [](unsigned char c) { return c >= 0x21 && c <= 0x7e; })))
+    if (fixed && (fixed->size() < 32 || fixed->size() > 1024 || !std::ranges::all_of(*fixed, [](unsigned char c) {
+                      return c >= 0x21 && c <= 0x7e;
+                  })))
         throw std::invalid_argument("MCP token must contain 32 to 1024 visible ASCII characters without spaces");
 }
 
 /// A failure to bind or listen on the requested MCP port; retains the native error code.
 class BindError : public std::system_error {
 public:
-    BindError(std::error_code cause, unsigned short port)
-        : std::system_error(cause, "WebFront cannot listen for MCP on 127.0.0.1:" + std::to_string(port)) { }
+    BindError(std::error_code cause, unsigned short port) : std::system_error(cause, "WebFront cannot listen for MCP on 127.0.0.1:" + std::to_string(port)) {}
     /// Whether the native error reports that the requested port is already in use.
     [[nodiscard]] bool addressInUse() const noexcept {
 #ifdef _WIN32
@@ -377,15 +403,19 @@ class Server {
 public:
     /// @param port 0 (the default) lets the OS choose; a chosen port is never replaced: when it is taken the constructor throws
     /// @throws std::system_error naming the address, the port and the cause when the listener cannot be bound
-    Server(std::shared_ptr<Backend> controller, const std::filesystem::path& directory, unsigned short port = 0,
-           std::optional<std::string> fixedToken = std::nullopt, bool authentication = true)
+    Server(std::shared_ptr<Backend>     controller,
+           const std::filesystem::path& directory,
+           unsigned short               port           = 0,
+           std::optional<std::string>   fixedToken     = std::nullopt,
+           bool                         authentication = true)
         : backend(std::move(controller)),
           endpoint(*backend),
           token(selectToken(fixedToken, authentication)),
           listener(channel::createSocket()),
           boundPort(bind(listener, port)),
           address("http://127.0.0.1:" + std::to_string(boundPort) + "/mcp"),
-          file(directory / configurationFile), authenticate(authentication) {
+          file(directory / configurationFile),
+          authenticate(authentication) {
         channel::nonblocking(listener.value);
         channel::writeEndpoint(file, clientConfiguration(address, token, "webfront", authenticate));
         worker = std::jthread([this](std::stop_token stop) {
@@ -449,7 +479,7 @@ private:
         std::size_t                           headerBytes = 0;
         std::optional<Screening>              screening{};
         std::string                           body{};
-        bool                                  refused = false;
+        bool                                  refused  = false;
         std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
         explicit Pending(channel::Handle handle) : socket(handle) {
             channel::nonblocking(handle);
@@ -544,7 +574,9 @@ private:
             }
         } revoke{*this};
         while (!stop.stop_requested() && !backend->isClosed()) {
-            std::erase_if(connections, [](const Connection& connection) { return connection.finished.load(); });
+            std::erase_if(connections, [](const Connection& connection) {
+                return connection.finished.load();
+            });
 #ifdef _WIN32
             std::vector<WSAPOLLFD> items;
 #else
@@ -599,12 +631,11 @@ private:
         auto&           connection = connections.emplace_back();
         channel::Socket transfer{std::exchange(peer.socket.value, channel::invalid)};
         try {
-            connection.thread = std::jthread(
-                [this, handle = transfer.value, request = std::move(peer.request), body = std::move(peer.body), &connection] {
-                    respond(handle, request, body);
-                    connection.finished.store(true);
-                });
-            transfer.value = channel::invalid;
+            connection.thread = std::jthread([this, handle = transfer.value, request = std::move(peer.request), body = std::move(peer.body), &connection] {
+                respond(handle, request, body);
+                connection.finished.store(true);
+            });
+            transfer.value    = channel::invalid;
         } catch (...) {
             connection.finished.store(true);
             throw;
@@ -631,8 +662,7 @@ private:
                 if (count == 0 || (count < 0 && !channel::retryableSocketError(channel::socketError())))
                     break;
             }
-        } catch (const std::exception&) {
-        }
+        } catch (const std::exception&) {}
     }
 };
 }  // namespace webfront::automation::mcphttp

@@ -14,14 +14,14 @@
 #ifdef _WIN32
     #include <shellapi.h>
 #else
-    #include <spawn.h>
-    #include <sys/wait.h>
-    #include <unistd.h>
-
     #include <cerrno>
     #include <cstdio>
     #include <functional>
     #include <thread>
+
+    #include <spawn.h>
+    #include <sys/wait.h>
+    #include <unistd.h>
 extern char** environ;
 #endif
 

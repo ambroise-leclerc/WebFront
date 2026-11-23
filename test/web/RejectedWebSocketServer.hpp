@@ -12,7 +12,7 @@
 // A test-owned endpoint that accepts HTTP requests but always refuses WebSocket upgrades.
 // Binding port zero keeps the initial-connection-failure tests independent of other services.
 class RejectedWebSocketServer {
-    using Net = webfront::networking::TCPStdnet;
+    using Net  = webfront::networking::TCPStdnet;
     using Task = webfront::networking::Task;
 
 public:
@@ -45,19 +45,20 @@ public:
 private:
     static constexpr std::string_view response{"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"};
 
-    Net::IoContext        context;
-    Net::Acceptor         acceptor;
+    Net::IoContext                  context;
+    Net::Acceptor                   acceptor;
     webfront::networking::TaskScope tasks;
-    std::atomic<unsigned> rejected{0};
-    std::string           endpointUrl;
-    std::jthread          worker;
+    std::atomic<unsigned>           rejected{0};
+    std::string                     endpointUrl;
+    std::jthread                    worker;
 
     void spawn(Task task) {
         webfront::networking::Spawn(tasks, Net::Scheduler(acceptor), std::move(task));
     }
 
     Task acceptConnections() {
-        for (;;) spawn(reject(co_await Net::Accept(acceptor)));
+        for (;;)
+            spawn(reject(co_await Net::Accept(acceptor)));
     }
 
     Task reject(Net::Socket socket) {

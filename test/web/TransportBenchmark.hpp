@@ -53,7 +53,7 @@ int run(int argc, char** argv, const char* usage, const char* page = "transport-
     try {
         if (argc > 2)
             throw std::runtime_error(usage);
-        Report         report;
+        Report        report;
         App<Frontend> app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
         app.template cppFunction<std::string, std::string>("echo", [](const std::string& value) {
             return value;

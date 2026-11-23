@@ -1,8 +1,8 @@
 #include <webfront/WebFront.hpp>
 #include WEBFRONT_LIFE_ASSETS_HEADER
+#include "../PortOption.hpp"
 #include "Life.hpp"
 #include "LifeFrontend.hpp"
-#include "../PortOption.hpp"
 
 #include <iostream>
 

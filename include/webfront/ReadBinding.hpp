@@ -15,9 +15,9 @@
 /// connection reads only if the application declared its deployment (RemoteFileTransport).
 #pragma once
 
-#include "ViewAssociation.hpp"
 #include "automation/Credentials.hpp"
 #include "http/HTTPServer.hpp"
+#include "ViewAssociation.hpp"
 
 #include <algorithm>
 #include <any>
@@ -42,9 +42,11 @@ namespace webfront {
 /// How the application declares that a connection which is not the view of an embedded frontend (the system browser, a
 /// remote browser) reaches it (ADR-020). WebFront decides on neither the address nor `Forwarded`/`X-Forwarded-*`.
 enum class RemoteFileTransport {
-    refused,                ///< Default: such a connection reads no file.
-    loopbackAttested,       ///< The server listens on the loopback only (checked at configuration); the integrator attests no proxy or tunnel exposes it and the machine is not shared with untrusted users.
-    encryptedByDeployment,  ///< The deployment encrypts below HTTP (VPN, SSH or other tunnel) while the browser still uses http://: unverified. The cookie is not `Secure`, which a browser would refuse over http://.
+    refused,           ///< Default: such a connection reads no file.
+    loopbackAttested,  ///< The server listens on the loopback only (checked at configuration); the integrator attests no proxy or tunnel exposes it and the
+                       ///< machine is not shared with untrusted users.
+    encryptedByDeployment,  ///< The deployment encrypts below HTTP (VPN, SSH or other tunnel) while the browser still uses http://: unverified. The cookie is
+                            ///< not `Secure`, which a browser would refuse over http://.
     httpsByDeployment,      ///< The browser reaches the application by https:// (TLS reverse proxy): unverified. The binding cookie is `Secure`.
     plaintextAccepted       ///< An isolated trusted network: unverified.
 };
@@ -77,7 +79,9 @@ namespace detail {
 
 [[nodiscard]] inline std::string lowerAscii(std::string_view text) {
     std::string result(text);
-    std::ranges::transform(result, result.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::ranges::transform(result, result.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
     return result;
 }
 
@@ -121,24 +125,31 @@ struct ReadPresentation {
 /// The closed list of passive types shown inline (raster images, audio, video, text/plain); every other type is a download.
 /// HTML, XML, JavaScript and WebAssembly are announced as application/octet-stream; SVG keeps its type, for `<img>`.
 [[nodiscard]] inline ReadPresentation presentRead(std::string_view contentType) {
-    const auto  announced = std::string(trimBlanks(contentType));
-    const auto  semicolon = announced.find(';');
-    const auto  essence   = lowerAscii(trimBlanks(std::string_view{announced}.substr(0, semicolon)));
+    const auto announced = std::string(trimBlanks(contentType));
+    const auto semicolon = announced.find(';');
+    const auto essence   = lowerAscii(trimBlanks(std::string_view{announced}.substr(0, semicolon)));
     if (essence.empty())
         return {"application/octet-stream", false};
-    static constexpr std::string_view active[] = {"text/html",       "application/xhtml+xml",   "text/xml",         "application/xml",
-                                                  "text/javascript", "application/javascript",  "application/x-javascript",
-                                                  "text/ecmascript", "application/ecmascript",  "application/wasm"};
+    static constexpr std::string_view active[] = {"text/html",
+                                                  "application/xhtml+xml",
+                                                  "text/xml",
+                                                  "application/xml",
+                                                  "text/javascript",
+                                                  "application/javascript",
+                                                  "application/x-javascript",
+                                                  "text/ecmascript",
+                                                  "application/ecmascript",
+                                                  "application/wasm"};
     // Every spelling a browser runs as a script (text/javascript1.5, application/x-ecmascript, text/jscript, ...), and
     // stylesheets, are announced as opaque bytes.
-    const bool scripting = essence.contains("javascript") || essence.contains("ecmascript") || essence.contains("jscript")
-                           || essence.contains("livescript") || essence.contains("vbscript") || essence == "text/css";
-    const bool isActive = scripting || std::ranges::find(active, essence) != std::end(active)
-                          || (essence.ends_with("+xml") && essence != "image/svg+xml") || essence.ends_with("+wasm");
+    const bool scripting = essence.contains("javascript") || essence.contains("ecmascript") || essence.contains("jscript") || essence.contains("livescript")
+                           || essence.contains("vbscript") || essence == "text/css";
+    const bool isActive = scripting || std::ranges::find(active, essence) != std::end(active) || (essence.ends_with("+xml") && essence != "image/svg+xml")
+                          || essence.ends_with("+wasm");
     if (isActive)
         return {"application/octet-stream", false};
-    static constexpr std::string_view raster[] = {"image/png", "image/jpeg", "image/gif",  "image/webp",
-                                                  "image/avif", "image/bmp", "image/apng", "image/x-icon", "image/vnd.microsoft.icon"};
+    static constexpr std::string_view raster[] =
+        {"image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp", "image/apng", "image/x-icon", "image/vnd.microsoft.icon"};
     const bool passive = std::ranges::find(raster, essence) != std::end(raster) || essence.starts_with("audio/") || essence.starts_with("video/")
                          || essence == "text/plain";
     return {announced, passive};
@@ -150,16 +161,16 @@ struct ReadPresentation {
     std::string name(slash == std::string_view::npos ? rest : rest.substr(slash + 1));
     std::string ascii, encoded;
     for (const char raw : name) {
-        const auto c = static_cast<unsigned char>(raw);
+        const auto c     = static_cast<unsigned char>(raw);
         const bool plain = c >= 0x20 && c < 0x7f && c != '"' && c != '\\' && c != ';' && c != '%' && c != '/';
-        ascii += plain ? static_cast<char>(c) : '_';
+        ascii           += plain ? static_cast<char>(c) : '_';
         if (asciiAlnum(c) || std::string_view{"!#$&+-.^_`|~"}.contains(static_cast<char>(c))) {
             encoded += static_cast<char>(c);
         } else {
             constexpr std::string_view digits = "0123456789ABCDEF";
-            encoded += '%';
-            encoded += digits[c >> 4];
-            encoded += digits[c & 15];
+            encoded                          += '%';
+            encoded                          += digits[c >> 4];
+            encoded                          += digits[c & 15];
         }
     }
     if (ascii.empty())
@@ -168,7 +179,9 @@ struct ReadPresentation {
 }
 
 inline void setHeader(http::RouteReply& reply, std::string_view name, std::string value) {
-    std::erase_if(reply.headers, [&](const auto& header) { return lowerAscii(header.first) == lowerAscii(name); });
+    std::erase_if(reply.headers, [&](const auto& header) {
+        return lowerAscii(header.first) == lowerAscii(name);
+    });
     reply.headers.emplace_back(std::string(name), std::move(value));
 }
 
@@ -181,7 +194,9 @@ inline void hardenRead(http::RouteReply& reply, std::string_view rest) {
     const auto presentation = presentRead(contentType);
     setHeader(reply, "Content-Type", presentation.contentType);
     // A handler cannot choose a presentation of its own: the disposition is derived from the announced type.
-    std::erase_if(reply.headers, [](const auto& header) { return lowerAscii(header.first) == "content-disposition"; });
+    std::erase_if(reply.headers, [](const auto& header) {
+        return lowerAscii(header.first) == "content-disposition";
+    });
     if (!presentation.inlineOk)
         reply.headers.emplace_back("Content-Disposition", attachmentName(rest));
     setHeader(reply, "Cache-Control", "no-store");
@@ -209,14 +224,26 @@ public:
 
     struct Options {
         RemoteFileTransport remote = RemoteFileTransport::refused;
-        bool secure = false;
+        bool                secure = false;
     };
 
-    explicit ReadBinding(RemoteFileTransport declared = RemoteFileTransport::refused, Clock clock = [] { return std::chrono::steady_clock::now(); })
+    explicit ReadBinding(
+        RemoteFileTransport declared = RemoteFileTransport::refused,
+        Clock               clock =
+            [] {
+                return std::chrono::steady_clock::now();
+            })
         : ReadBinding(Options{.remote = declared}, std::move(clock)) {}
 
-    explicit ReadBinding(std::same_as<Options> auto options, Clock clock = [] { return std::chrono::steady_clock::now(); })
-        : transport(options.remote), secureTransport(options.secure), now(std::move(clock)),
+    explicit ReadBinding(
+        std::same_as<Options> auto options,
+        Clock                      clock =
+            [] {
+                return std::chrono::steady_clock::now();
+            })
+        : transport(options.remote),
+          secureTransport(options.secure),
+          now(std::move(clock)),
           ownPrefix(std::string(cookiePrefix) + automation::channel::nonce().substr(0, 8) + "-") {}
 
     /// Names the cookies after `name` (the port the server listens on) instead of a random word, so that a restart on the
@@ -228,12 +255,16 @@ public:
 
     /// The cookie name prefix of this application: cookies are shared across ports of a host, so each binding names (and
     /// erases) only its own, `wf-client-<application>-<client>`.
-    [[nodiscard]] const std::string& clientCookiePrefix() const noexcept { return ownPrefix; }
+    [[nodiscard]] const std::string& clientCookiePrefix() const noexcept {
+        return ownPrefix;
+    }
 
     ReadBinding(const ReadBinding&)            = delete;
     ReadBinding& operator=(const ReadBinding&) = delete;
 
-    [[nodiscard]] RemoteFileTransport declaredTransport() const noexcept { return transport; }
+    [[nodiscard]] RemoteFileTransport declaredTransport() const noexcept {
+        return transport;
+    }
 
     /// A connection starts. `local` is true only for the view of an embedded frontend. Returns the one-time secret
     /// that the page exchanges for its cookie.
@@ -242,10 +273,10 @@ public:
         Released         released;
         std::scoped_lock lock{mutex};
         if (stopped)
-            return secret;  // nothing is registered: the exchange of this secret finds no connection
+            return secret;              // nothing is registered: the exchange of this secret finds no connection
         if (connections.contains(key))  // a key opened twice starts over: the old secret, client link and grants die
             dropConnection(key, released);
-        connections[key] = Connection{.local = local, .client = {}, .exchange = secret};
+        connections[key]  = Connection{.local = local, .client = {}, .exchange = secret};
         exchanges[secret] = key;
         return secret;
     }
@@ -279,7 +310,9 @@ public:
         if (options.transferable && (options.lifetime.count() <= 0 || options.lifetime > maxTransferableLifetime))
             throw ReadRefused("A transferable read needs a lifetime of at most 15 minutes");
         // The server refuses a target holding ".." or a control character before any route sees it: such a URL would never work.
-        if (rest.contains("..") || std::ranges::any_of(rest, [](char c) { return static_cast<unsigned char>(c) < 32 || c == 127; }))
+        if (rest.contains("..") || std::ranges::any_of(rest, [](char c) {
+                return static_cast<unsigned char>(c) < 32 || c == 127;
+            }))
             throw ReadRefused("The path of a read cannot contain \"..\" or control characters");
         if (http::routing::collapseSegments("/" + std::string(rest)) != "/" + std::string(rest))
             throw ReadRefused("The path of a read cannot hold empty or dot segments");
@@ -287,12 +320,18 @@ public:
         Released         released;
         std::scoped_lock lock{mutex};
         reapExpired(released);
-        const auto       connection = connections.find(key);
+        const auto connection = connections.find(key);
         if (stopped || connection == connections.end())
             throw ReadRefused("The connection is closed");
         if (!connection->second.local && transport == RemoteFileTransport::refused)
             throw ReadRefused("This connection is not the view of an embedded frontend: declare WebFrontConfig::remoteFileTransport to read files");
-        Grant record{.owner = key, .route = std::string(routeId), .secret = secret, .path = std::string(rest), .transferable = options.transferable, .expiry = {}, .context = std::make_shared<const std::any>(std::move(options.context))};
+        Grant record{.owner        = key,
+                     .route        = std::string(routeId),
+                     .secret       = secret,
+                     .path         = std::string(rest),
+                     .transferable = options.transferable,
+                     .expiry       = {},
+                     .context      = std::make_shared<const std::any>(std::move(options.context))};
         if (options.lifetime.count() > 0) {
             // now() + lifetime must not overflow the clock's representation (seconds::max() converts to ticks that do not fit).
             const auto current = now();
@@ -337,7 +376,7 @@ public:
             auto reply = plain(http::Response::ok);
             detail::setHeader(reply, "Cache-Control", "no-store");
             detail::setHeader(reply, "Referrer-Policy", "no-referrer");
-            const auto what = request.path.substr(bindPath.size());
+            const auto what    = request.path.substr(bindPath.size());
             const auto cookies = detail::requestCookies(request.request);
             if (what.starts_with("check/")) {  // the client the exchange assigned to this page, which must be the one whose cookie came back
                 std::scoped_lock lock{mutex};
@@ -355,10 +394,10 @@ public:
     /// The prefix this is registered under must be `prefix`, which ends with '/'.
     [[nodiscard]] http::RouteHandler readHandler(std::string routeId, std::string prefix, ReadHandler handler) {
         return [this, routeId = std::move(routeId), prefix = std::move(prefix), handler = std::move(handler)](const http::RouteRequest& request) {
-            const auto after = request.path.substr(std::min(prefix.size(), request.path.size()));
-            const auto slash = after.find('/');
-            const auto token = after.substr(0, slash);
-            const auto rest  = slash == std::string_view::npos ? std::string_view{} : after.substr(slash + 1);
+            const auto after   = request.path.substr(std::min(prefix.size(), request.path.size()));
+            const auto slash   = after.find('/');
+            const auto token   = after.substr(0, slash);
+            const auto rest    = slash == std::string_view::npos ? std::string_view{} : after.substr(slash + 1);
             auto       context = authorize(routeId, token, rest, detail::requestCookies(request.request));
             if (!context) {
                 auto denied = plain(http::Response::forbidden);
@@ -372,7 +411,8 @@ public:
     }
 
     /// True when `token` is accepted for a request that presents `cookies`: used by the route, exposed for tests.
-    [[nodiscard]] bool accepts(std::string_view routeId, std::string_view token, std::string_view rest, const std::vector<std::pair<std::string, std::string>>& cookies) {
+    [[nodiscard]] bool
+    accepts(std::string_view routeId, std::string_view token, std::string_view rest, const std::vector<std::pair<std::string, std::string>>& cookies) {
         return authorize(routeId, token, rest, cookies).has_value();
     }
 
@@ -385,14 +425,14 @@ private:
         std::string exchange;  // the one-time secret, until used
     };
     struct Client {
-        std::string           secret;
+        std::string             secret;
         std::set<ConnectionKey> connections;
     };
     struct Grant {
         ConnectionKey                                        owner = 0;
         std::string                                          route;  // the registration that issued it
         std::string                                          secret;
-        std::string                                          path;  // the path it was issued for
+        std::string                                          path;   // the path it was issued for
         bool                                                 transferable = false;
         std::optional<std::chrono::steady_clock::time_point> expiry;
         std::shared_ptr<const std::any>                      context;
@@ -413,9 +453,9 @@ private:
                 encoded += static_cast<char>(c);
             } else {
                 constexpr std::string_view digits = "0123456789ABCDEF";
-                encoded += '%';
-                encoded += digits[c >> 4];
-                encoded += digits[c & 15];
+                encoded                          += '%';
+                encoded                          += digits[c >> 4];
+                encoded                          += digits[c & 15];
             }
         }
         return encoded;
@@ -433,13 +473,21 @@ private:
                 clients.erase(client);
         }
         connections.erase(found);
-        detach([key](const auto& grant) { return grant.second.owner == key; }, released);
+        detach(
+            [key](const auto& grant) {
+                return grant.second.owner == key;
+            },
+            released);
     }
 
     /// Drops the expired grants and their contexts, whether or not their tokens are ever presented again. Caller holds the lock.
     void reapExpired(Released& released) {
         const auto instant = now();
-        detach([instant](const auto& grant) { return grant.second.expiry && instant >= *grant.second.expiry; }, released);
+        detach(
+            [instant](const auto& grant) {
+                return grant.second.expiry && instant >= *grant.second.expiry;
+            },
+            released);
     }
 
     /// Removes the grants matching `selected`, handing their contexts to `released` so that the caller destroys them once
@@ -496,11 +544,13 @@ private:
         // Cookies named after a client the server forgot are erased; the ones of a known client are left alone.
         for (const auto& [name, value] : cookies)
             if (name.starts_with(ownPrefix) && !clients.contains(name.substr(ownPrefix.size())))
-                reply.headers.emplace_back("Set-Cookie", name + "=; Max-Age=0; Path=" + std::string(servicesPath) + "; HttpOnly; SameSite=Strict" + (secureCookies() ? "; Secure" : ""));
+                reply.headers.emplace_back("Set-Cookie",
+                                           name + "=; Max-Age=0; Path=" + std::string(servicesPath) + "; HttpOnly; SameSite=Strict"
+                                               + (secureCookies() ? "; Secure" : ""));
         auto id = cookieClient(cookies);
         if (id.empty()) {
             id = automation::channel::nonce().substr(0, 16);
-            Client created{.secret = automation::channel::nonce(), .connections = {}};
+            Client      created{.secret = automation::channel::nonce(), .connections = {}};
             std::string cookie = ownPrefix + id + "=" + created.secret + "; Path=" + std::string(servicesPath) + "; HttpOnly; SameSite=Strict";
             if (secureCookies())
                 cookie += "; Secure";
@@ -514,18 +564,19 @@ private:
     }
 
     /// The context of the grant, when `token` and the cookies are acceptable. Every refusal looks alike.
-    std::optional<std::shared_ptr<const std::any>> authorize(std::string_view routeId, std::string_view token, std::string_view rest, const std::vector<std::pair<std::string, std::string>>& cookies) {
+    std::optional<std::shared_ptr<const std::any>>
+    authorize(std::string_view routeId, std::string_view token, std::string_view rest, const std::vector<std::pair<std::string, std::string>>& cookies) {
         const auto dot = token.find('.');
         if (dot == std::string_view::npos)
             return std::nullopt;
         Released         released;
         std::scoped_lock lock{mutex};
         reapExpired(released);
-        const auto       found = grants.find(std::string(token.substr(0, dot)));
+        const auto found = grants.find(std::string(token.substr(0, dot)));
         if (found == grants.end() || !detail::viewSecretMatches(found->second.secret, token.substr(dot + 1)))
             return std::nullopt;
         const auto& grant = found->second;
-        if (grant.path != rest)  // a token opens the path it was issued for, nothing else under the route
+        if (grant.path != rest)      // a token opens the path it was issued for, nothing else under the route
             return std::nullopt;
         if (grant.route != routeId)  // a grant is valid for the registration that issued it, not for a later route on the prefix
             return std::nullopt;
@@ -547,27 +598,35 @@ private:
         return grant.context;
     }
 
-    bool secureCookies() const { return secureTransport || transport == RemoteFileTransport::httpsByDeployment; }
+    bool secureCookies() const {
+        return secureTransport || transport == RemoteFileTransport::httpsByDeployment;
+    }
 
-    RemoteFileTransport                transport;
-    bool                               secureTransport = false;
-    Clock                              now;
-    std::string                        ownPrefix;
-    std::mutex                         mutex;
-    std::map<ConnectionKey, Connection> connections;
+    RemoteFileTransport                  transport;
+    bool                                 secureTransport = false;
+    Clock                                now;
+    std::string                          ownPrefix;
+    std::mutex                           mutex;
+    std::map<ConnectionKey, Connection>  connections;
     std::map<std::string, ConnectionKey> exchanges;
-    std::map<std::string, Client>      clients;
-    std::map<std::string, Grant>       grants;
-    bool                               stopped = false;
+    std::map<std::string, Client>        clients;
+    std::map<std::string, Grant>         grants;
+    bool                                 stopped = false;
 };
 
 /// A registered read route (BasicWF::addReadRoute): the route lasts as long as this object. Move-only.
 class ReadRoute {
 public:
     ReadRoute() = default;
-    [[nodiscard]] const std::string& prefix() const noexcept { return prefixValue; }
-    [[nodiscard]] const std::string& id() const noexcept { return idValue; }
-    [[nodiscard]] explicit operator bool() const noexcept { return static_cast<bool>(registration); }
+    [[nodiscard]] const std::string& prefix() const noexcept {
+        return prefixValue;
+    }
+    [[nodiscard]] const std::string& id() const noexcept {
+        return idValue;
+    }
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return static_cast<bool>(registration);
+    }
 
     ReadRoute(std::string id, std::string prefix, std::shared_ptr<ReadBinding> owner, http::RouteTable::Registration route)
         : idValue(std::move(id)), prefixValue(std::move(prefix)), bound(std::move(owner)), registration(std::move(route)) {}

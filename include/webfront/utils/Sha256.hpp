@@ -19,7 +19,7 @@ public:
 
     /// Adds `bytes` to the message. Whole blocks are compressed where they lie; only a partial one is copied.
     void update(std::span<const std::byte> bytes) {
-        length += bytes.size();
+        length          += bytes.size();
         const auto* data = reinterpret_cast<const std::uint8_t*>(bytes.data());
         std::size_t size = bytes.size();
         if (filled != 0) {
@@ -92,7 +92,7 @@ private:
         std::array<std::uint32_t, 64> words{};
         for (std::size_t i = 0; i < 16; ++i)
             words[i] = (std::uint32_t{input[i * 4]} << 24) | (std::uint32_t{input[i * 4 + 1]} << 16) | (std::uint32_t{input[i * 4 + 2]} << 8)
-                     | std::uint32_t{input[i * 4 + 3]};
+                       | std::uint32_t{input[i * 4 + 3]};
         for (std::size_t i = 16; i < 64; ++i) {
             const auto x = words[i - 15], y = words[i - 2];
             words[i] = words[i - 16] + (std::rotr(x, 7) ^ std::rotr(x, 18) ^ (x >> 3)) + words[i - 7] + (std::rotr(y, 17) ^ std::rotr(y, 19) ^ (y >> 10));

@@ -29,11 +29,17 @@ public:
     }
 
     /// The scheduler running the operations of a socket or an acceptor.
-    static auto Scheduler(auto& ioObject) { return ioObject.context().get_scheduler(); }
+    static auto Scheduler(auto& ioObject) {
+        return ioObject.context().get_scheduler();
+    }
 
     /// Completes with the number of bytes read, zero at the end of the stream.
-    static auto Receive(Socket& socket, MutableBuffer buffer) { return ::stdnet::async_receive(socket, buffer); }
-    static auto Send(Socket& socket, const auto& buffers) { return ::stdnet::async_write(socket, buffers); }
+    static auto Receive(Socket& socket, MutableBuffer buffer) {
+        return ::stdnet::async_receive(socket, buffer);
+    }
+    static auto Send(Socket& socket, const auto& buffers) {
+        return ::stdnet::async_write(socket, buffers);
+    }
     /// Completes with an accepted socket whose Nagle algorithm is disabled. The option is a latency optimisation: macOS refuses it
     /// (EINVAL) on a connection that the peer already reset, which is not an accept failure. The socket is delivered anyway and
     /// its first read or write reports the closed connection (#628).
@@ -41,8 +47,7 @@ public:
         return ::stdnet::ex::then(::stdnet::async_accept(acceptor), [](Socket socket) {
             try {
                 socket.set_option(::stdnet::ip::tcp_no_delay(true));
-            } catch (const std::system_error&) {
-            }
+            } catch (const std::system_error&) {}
             return socket;
         });
     }

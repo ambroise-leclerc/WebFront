@@ -18,12 +18,12 @@ void require(bool value, const char* message) {
 }
 
 struct Scenario {
-    std::string           mode;  // download | choose | cancel | dialogs | hold (script dialogs, issue #452)
-    std::filesystem::path folder;
-    std::filesystem::path fixture;
-    std::string           title;
-    std::string           downloaded;
-    bool                  asked = false;
+    std::string              mode;  // download | choose | cancel | dialogs | hold (script dialogs, issue #452)
+    std::filesystem::path    folder;
+    std::filesystem::path    fixture;
+    std::string              title;
+    std::string              downloaded;
+    bool                     asked = false;
     std::vector<std::string> dialogs;  // What the injection point saw, in order.
 };
 Scenario scenario;
@@ -143,7 +143,7 @@ int main(int argc, char** argv) {
         webfront::BasicWFWithFrontend<webfront::NetProvider, FS, Frontend> app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
         app.show(scenario.mode == "hold"      ? std::string("script-dialogs.html?hold")
                  : scenario.mode == "dialogs" ? std::string("script-dialogs.html")
-                                            : "file-services.html?" + (scenario.mode == "download" ? std::string("download") : std::string("choose")));
+                                              : "file-services.html?" + (scenario.mode == "download" ? std::string("download") : std::string("choose")));
         if (scenario.mode == "download") {
             require(!scenario.downloaded.empty(), "The download did not finish");
             // The engine neutralizes the page's "../webfront-download.txt" itself (Chrome writes "_webfront-download.txt").

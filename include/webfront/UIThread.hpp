@@ -24,7 +24,7 @@ namespace webfront {
 /// @brief UIThread::stop() gave up: the window did not close in the time allowed, and its thread still runs show().
 class UIThreadStalled : public std::runtime_error {
 public:
-    UIThreadStalled() : std::runtime_error("webfront::UIThread::stop(): the interface did not close when asked; its thread is still running") { }
+    UIThreadStalled() : std::runtime_error("webfront::UIThread::stop(): the interface did not close when asked; its thread is still running") {}
 };
 
 /**
@@ -92,7 +92,9 @@ public:
         std::exception_ptr error;
         {
             std::unique_lock lock(mutex);
-            changed.wait(lock, [&] { return started; });
+            changed.wait(lock, [&] {
+                return started;
+            });
             if (!application)  // set before `started`: construction or setup failed
                 error = std::exchange(failed, nullptr);
         }
@@ -111,7 +113,7 @@ public:
     ~UIThread() {
         try {
             stop(std::chrono::milliseconds::max());
-        } catch (...) {  // observed through failure() or an explicit stop(), or not at all
+        } catch (...) {         // observed through failure() or an explicit stop(), or not at all
         }
         if (worker.joinable())  // never leave a joinable thread to std::thread's destructor, whatever stop() threw
             worker.join();
@@ -132,7 +134,9 @@ public:
     template <typename Rep, typename Period>
     bool waitFor(std::chrono::duration<Rep, Period> timeout) const {
         std::unique_lock lock(mutex);
-        return changed.wait_for(lock, timeout, [&] { return finished; });
+        return changed.wait_for(lock, timeout, [&] {
+            return finished;
+        });
     }
 
     /// What show() threw, once it has ended; null while it runs and after a normal end. stop() rethrows it.
@@ -165,7 +169,9 @@ public:
                 } catch (...) {  // a request that failed is repeated at the next period, like one that reached nothing
                 }
                 lock.lock();
-                if (changed.wait_for(lock, closeRetry, [&] { return finished; }))
+                if (changed.wait_for(lock, closeRetry, [&] {
+                        return finished;
+                    }))
                     break;
                 // Elapsed time is converted down to the patience's unit: converting milliseconds::max() up would overflow.
                 if (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start) >= patience)
@@ -201,8 +207,8 @@ private:
         changed.notify_all();
     }
 
-    std::optional<App>              application;  // written by the interface thread before `started`, then by stop()
-    mutable std::mutex              mutex;        // guards started, finished and failed
+    std::optional<App>              application;       // written by the interface thread before `started`, then by stop()
+    mutable std::mutex              mutex;             // guards started, finished and failed
     mutable std::condition_variable changed;
     bool                            started  = false;  // construction and setup are over, successfully or not
     bool                            finished = false;  // show() returned or threw

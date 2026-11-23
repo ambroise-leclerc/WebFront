@@ -55,16 +55,17 @@ public:
             ending.swap(threads);
         }
         for (auto& thread : ending)
-            if (thread.joinable()) thread.join();
+            if (thread.joinable())
+                thread.join();
     }
 
     /// Thread-safe. True while a job runs or is queued, and counts the completions: a changed `completions` between two
     /// observations means a job ended in between. A job's continuation is posted before it is counted as ended, so
     /// that an idle worker with the same count has nothing left to post to the context.
     struct Activity {
-        bool          busy        = false;
-        std::uint64_t completions = 0;
-        bool operator==(const Activity&) const = default;
+        bool          busy                              = false;
+        std::uint64_t completions                       = 0;
+        bool          operator==(const Activity&) const = default;
     };
     [[nodiscard]] Activity activity() const {
         std::lock_guard lock(mutex);
@@ -91,7 +92,8 @@ public:
 
             void start() noexcept {
                 try {
-                    if (worker->enqueue(this)) return;
+                    if (worker->enqueue(this))
+                        return;
                 } catch (...) {
                     networking::ex::set_error(std::move(receiver), std::current_exception());
                     return;
@@ -112,7 +114,9 @@ public:
                 }
                 networking::ex::set_value(std::move(receiver));
             }
-            void cancel() noexcept override { networking::ex::set_stopped(std::move(receiver)); }
+            void cancel() noexcept override {
+                networking::ex::set_stopped(std::move(receiver));
+            }
         };
 
         template <typename Receiver>
@@ -122,27 +126,32 @@ public:
     };
 
     /// A sender running `work` on the worker thread. State it touches must outlive the await.
-    [[nodiscard]] Sender run(std::function<void()> work) { return {this, std::move(work)}; }
+    [[nodiscard]] Sender run(std::function<void()> work) {
+        return {this, std::move(work)};
+    }
 
 private:
-    mutable std::mutex      mutex;
-    std::condition_variable changed;
-    std::deque<Job*>        queue;
-    bool                    stopping = false;
+    mutable std::mutex       mutex;
+    std::condition_variable  changed;
+    std::deque<Job*>         queue;
+    bool                     stopping = false;
     std::vector<std::thread> threads;
-    std::size_t             limit;
-    std::size_t             idle = 0;
-    std::size_t             running = 0;      // jobs taken from the queue (or cancelled by a stop) and not yet ended
-    std::uint64_t           completions = 0;
+    std::size_t              limit;
+    std::size_t              idle        = 0;
+    std::size_t              running     = 0;  // jobs taken from the queue (or cancelled by a stop) and not yet ended
+    std::uint64_t            completions = 0;
 
     bool enqueue(Job* job) {
         {
             std::lock_guard lock(mutex);
-            if (stopping) return false;
+            if (stopping)
+                return false;
             queue.push_back(job);
             if (queue.size() > idle && threads.size() < limit) {
                 try {
-                    threads.emplace_back([this] { loop(); });
+                    threads.emplace_back([this] {
+                        loop();
+                    });
                 } catch (...) {
                     if (threads.empty()) {
                         queue.pop_back();
@@ -157,18 +166,20 @@ private:
 
     void finished(std::size_t count) noexcept {
         std::lock_guard lock(mutex);
-        running -= count;
+        running     -= count;
         completions += count;
     }
 
     void loop() noexcept {
         for (;;) {
-            Job* job = nullptr;
+            Job*             job = nullptr;
             std::deque<Job*> cancelled;
             {
                 std::unique_lock lock(mutex);
                 ++idle;
-                changed.wait(lock, [this] { return stopping || !queue.empty(); });
+                changed.wait(lock, [this] {
+                    return stopping || !queue.empty();
+                });
                 --idle;
                 if (stopping) {
                     cancelled.swap(queue);
@@ -185,11 +196,12 @@ private:
                 continue;
             }
             const auto count = cancelled.size();
-            for (auto* pending : cancelled) pending->cancel();
+            for (auto* pending : cancelled)
+                pending->cancel();
             finished(count);
             return;
         }
     }
 };
 
-} // namespace webfront::http
+}  // namespace webfront::http

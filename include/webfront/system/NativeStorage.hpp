@@ -185,8 +185,8 @@ inline constexpr int searchFlags = O_RDONLY | O_DIRECTORY;
 class Fd {
 public:
     Fd() = default;
-    explicit Fd(int value) : descriptor(value) { }
-    Fd(Fd&& other) noexcept : descriptor(std::exchange(other.descriptor, -1)) { }
+    explicit Fd(int value) : descriptor(value) {}
+    Fd(Fd&& other) noexcept : descriptor(std::exchange(other.descriptor, -1)) {}
     Fd& operator=(Fd&& other) noexcept {
         if (this != &other) {
             reset();
@@ -490,7 +490,7 @@ inline void clearAccessControl(int file, const std::string& what) {
 // The content of a file opened relative to a directory of the root.
 class FdSource : public ByteSource {
 public:
-    FdSource(Fd opened, std::uint64_t length) : file(std::move(opened)), total(length) { }
+    FdSource(Fd opened, std::uint64_t length) : file(std::move(opened)), total(length) {}
 
     std::size_t read(std::span<char> buffer) override {
         std::size_t count = 0;
@@ -844,7 +844,7 @@ public:
 private:
     friend class NativeStorage;
     Writer(std::shared_ptr<State> storageState, State::Walk opened, std::vector<std::string> path, std::string finalName, WriteMode writeMode)
-        : state(std::move(storageState)), walk(std::move(opened)), components(std::move(path)), name(std::move(finalName)), mode(writeMode) { }
+        : state(std::move(storageState)), walk(std::move(opened)), components(std::move(path)), name(std::move(finalName)), mode(writeMode) {}
 
     // Gives the temporary file the group, the permission bits (never setuid, setgid nor sticky) and the ACL of the file it replaces,
     // read now, under the lock that serializes the storage's operations: whatever the storage moved to that name since
@@ -1036,9 +1036,9 @@ inline NativeStorage::Writer NativeStorage::beginWrite(std::string_view path, Wr
     for (int attempt = 0; !writer.file; ++attempt) {
         writer.temporary = detail::temporaryName();
         writer.file      = detail::posix::openAt(writer.fileDirectory(),
-                                                 writer.temporary.c_str(),
-                                                 O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW,
-                                                 mode == WriteMode::replace ? 0600 : 0644);
+                                            writer.temporary.c_str(),
+                                            O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW,
+                                            mode == WriteMode::replace ? 0600 : 0644);
         if (!writer.file && (errno != EEXIST || attempt == 8))
             detail::posix::fail(errno, "Cannot write " + detail::quoted(writer.components));
     }
@@ -1129,8 +1129,8 @@ inline constexpr NTSTATUS statusDirectoryNotEmpty   = static_cast<NTSTATUS>(0xC0
 class Handle {
 public:
     Handle() = default;
-    explicit Handle(HANDLE value) : handle(value == INVALID_HANDLE_VALUE ? nullptr : value) { }
-    Handle(Handle&& other) noexcept : handle(std::exchange(other.handle, nullptr)) { }
+    explicit Handle(HANDLE value) : handle(value == INVALID_HANDLE_VALUE ? nullptr : value) {}
+    Handle(Handle&& other) noexcept : handle(std::exchange(other.handle, nullptr)) {}
     Handle& operator=(Handle&& other) noexcept {
         if (this != &other) {
             reset();
@@ -1283,16 +1283,16 @@ inline NTSTATUS openRelative(Handle& result, HANDLE parent, const std::wstring& 
     IO_STATUS_BLOCK io{};
     HANDLE          handle = nullptr;
     const auto      status = Ntdll::get().createFile(&handle,
-                                                     access | SYNCHRONIZE | FILE_READ_ATTRIBUTES,
-                                                     &attributes,
-                                                     &io,
-                                                     nullptr,
-                                                     FILE_ATTRIBUTE_NORMAL,
-                                                     share,
-                                                     disposition,
-                                                     options | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT,
-                                                     nullptr,
-                                                     0);
+                                                access | SYNCHRONIZE | FILE_READ_ATTRIBUTES,
+                                                &attributes,
+                                                &io,
+                                                nullptr,
+                                                FILE_ATTRIBUTE_NORMAL,
+                                                share,
+                                                disposition,
+                                                options | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT,
+                                                nullptr,
+                                                0);
     if (status >= 0)
         result = Handle{handle};
     return status;
@@ -1383,7 +1383,7 @@ inline std::wstring finalPath(HANDLE handle) {
 // The content of a file opened relative to a directory of the root.
 class HandleSource : public ByteSource {
 public:
-    HandleSource(Handle opened, std::uint64_t length) : file(std::move(opened)), total(length) { }
+    HandleSource(Handle opened, std::uint64_t length) : file(std::move(opened)), total(length) {}
 
     std::size_t read(std::span<char> buffer) override {
         std::size_t count = 0;
@@ -1692,7 +1692,7 @@ public:
 private:
     friend class NativeStorage;
     Writer(std::shared_ptr<State> storageState, State::Walk opened, std::vector<std::string> path, std::string finalName, WriteMode writeMode)
-        : state(std::move(storageState)), walk(std::move(opened)), components(std::move(path)), name(std::move(finalName)), mode(writeMode) { }
+        : state(std::move(storageState)), walk(std::move(opened)), components(std::move(path)), name(std::move(finalName)), mode(writeMode) {}
 
     void abandon() noexcept {
         if (!file)
@@ -1836,12 +1836,12 @@ inline void NativeStorage::createDirectory(std::string_view path) {
     state->notify(StoragePoint::resolved, name);
     detail::windows::Handle directory;
     const auto              status = detail::windows::openRelative(directory,
-                                                                   walk.top(),
-                                                                   detail::windows::wide(name),
-                                                                   detail::windows::directoryAccess,
-                                                                   detail::windows::fullSharing,
-                                                                   FILE_CREATE,
-                                                                   FILE_DIRECTORY_FILE);
+                                                      walk.top(),
+                                                      detail::windows::wide(name),
+                                                      detail::windows::directoryAccess,
+                                                      detail::windows::fullSharing,
+                                                      FILE_CREATE,
+                                                      FILE_DIRECTORY_FILE);
     if (status < 0)
         detail::windows::failStatus(status, "Cannot create " + detail::quoted(components));
     directory.reset();

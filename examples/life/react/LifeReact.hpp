@@ -42,7 +42,7 @@ template <typename App>
         panel.append(status);
         auto session     = std::make_shared<Session>(Session{
             react::Store<BrowserUI, Snapshot>{ui, "life"},
-            {},
+                {},
             0,
             label
         });

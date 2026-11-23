@@ -5,6 +5,7 @@
 
 #include "FileSystem.hpp"
 #include "FontStacks.hpp"
+
 #include <fstream>
 #include <system_error>
 
@@ -17,13 +18,15 @@ public:
     std::optional<File> open(std::filesystem::path path) {
         std::ifstream file;
         file.open(rootPath / path, std::ios::binary);
-        if (file.is_open()) return File{std::move(file)};
+        if (file.is_open())
+            return File{std::move(file)};
         return {};
     }
+
 protected:
     std::filesystem::path rootPath;
 };
-} // namespace detail
+}  // namespace detail
 
 /// @brief Native file system for debugging purposes.
 class NativeDebugFS : public detail::NativeRawFS {
@@ -66,4 +69,4 @@ public:
     }
 };
 
-} // namespace webfront::fs
+}  // namespace webfront::fs

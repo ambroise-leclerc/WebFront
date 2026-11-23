@@ -39,7 +39,7 @@ inline constexpr std::string_view cancelled = "webfront.cancelled";
  */
 class BridgeError : public std::runtime_error {
 public:
-    static constexpr std::size_t maxCodeSize = 64;
+    static constexpr std::size_t      maxCodeSize    = 64;
     static constexpr std::string_view reservedPrefix = "webfront.";
 
     /// @throws std::invalid_argument for an ill-formed or reserved code

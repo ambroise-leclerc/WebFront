@@ -1,9 +1,9 @@
 /// @brief Intent journal of the developer store: publishing several files as one all-or-nothing change.
 #pragma once
 
-#include "WindowsCompat.hpp"
 #include "DeveloperFiles.hpp"
 #include "DeveloperPaths.hpp"
+#include "WindowsCompat.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -25,9 +25,9 @@
 #include <vector>
 
 #if !defined(_WIN32)
-#include <fcntl.h>
-#include <sys/file.h>
-#include <unistd.h>
+    #include <fcntl.h>
+    #include <sys/file.h>
+    #include <unistd.h>
 #endif
 
 namespace webfront::developer {
@@ -48,8 +48,7 @@ struct InjectedFault : std::runtime_error {
 /// Flushes a file's content to stable storage.
 inline void syncFile(const std::filesystem::path& file) {
 #if defined(_WIN32)
-    HANDLE handle = CreateFileW(file.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
-                                FILE_ATTRIBUTE_NORMAL, nullptr);
+    HANDLE handle = CreateFileW(file.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (handle == INVALID_HANDLE_VALUE)
         throw std::runtime_error("Cannot open " + file.string() + " for synchronization");
     const bool flushed = FlushFileBuffers(handle) != 0;
@@ -60,11 +59,11 @@ inline void syncFile(const std::filesystem::path& file) {
     const int descriptor = ::open(file.c_str(), O_RDONLY);
     if (descriptor < 0)
         throw std::runtime_error("Cannot open " + file.string() + " for synchronization");
-#if defined(__APPLE__) && defined(F_FULLFSYNC)
+    #if defined(__APPLE__) && defined(F_FULLFSYNC)
     const bool flushed = ::fcntl(descriptor, F_FULLFSYNC) == 0 || ::fsync(descriptor) == 0;
-#else
+    #else
     const bool flushed = ::fsync(descriptor) == 0;
-#endif
+    #endif
     ::close(descriptor);
     if (!flushed)
         throw std::runtime_error("Cannot synchronize " + file.string());
@@ -82,14 +81,15 @@ inline void syncDirectory(const std::filesystem::path& directory) {
 
 /// Creates the missing directories between the project root and `directory`, synchronizing the parent
 /// of each one it creates: the entry of a new directory is only durable once its parent is.
-inline void createDirectoriesDurably(const std::filesystem::path& root, const std::filesystem::path& directory,
+inline void createDirectoriesDurably(const std::filesystem::path&                             root,
+                                     const std::filesystem::path&                             directory,
                                      const std::function<void(const std::filesystem::path&)>& sync = syncDirectory) {
     // The ordinary spellings are compared; each directory takes the extended form once its path is long.
     auto current = plainPath(root);
     for (const auto& part : plainPath(directory).lexically_relative(current)) {
         if (part == ".")
             continue;
-        current /= part;
+        current        /= part;
         const auto path = extendedPath(current);
         if (!std::filesystem::exists(path)) {
             std::filesystem::create_directory(path);
@@ -106,8 +106,8 @@ class ProjectLock {
 public:
     explicit ProjectLock(const std::filesystem::path& file) {
 #if defined(_WIN32)
-        handle = CreateFileW(file.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
-                             FILE_ATTRIBUTE_NORMAL, nullptr);
+        handle =
+            CreateFileW(file.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         OVERLAPPED region{};
         if (handle == INVALID_HANDLE_VALUE || !LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, &region)) {
             release();
@@ -178,7 +178,9 @@ inline std::optional<std::vector<JournalEntry>> parseJournal(const std::string& 
     std::vector<JournalEntry> entries;
     for (std::size_t i = 1; i + 1 < lines.size(); i += 2) {
         const auto& source = lines[i + 1];
-        if (source.empty() || !std::ranges::all_of(source, [](unsigned char c) { return std::isdigit(c) != 0; }))
+        if (source.empty() || !std::ranges::all_of(source, [](unsigned char c) {
+                return std::isdigit(c) != 0;
+            }))
             return std::nullopt;
         entries.push_back({lines[i], source});
     }
@@ -194,7 +196,7 @@ inline std::string fingerprint(const std::filesystem::path& root, const std::vec
             hash = (hash ^ static_cast<unsigned char>(data[i])) * 1099511628211ULL;
     };
     for (const auto& path : paths) {
-        const auto file = projectPath(root, path);
+        const auto    file = projectPath(root, path);
         std::ifstream stream(file, std::ios::binary);
         const char    present = std::filesystem::is_regular_file(file) && stream ? 1 : 0;
         feed(&present, 1);
@@ -215,10 +217,13 @@ inline std::string fingerprint(const std::filesystem::path& root, const std::vec
 /// after an interruption, including one of this very function. A source that is gone was already
 /// renamed: sources are only removed after the journal, and a publication that never reached its
 /// journal is never rolled forward.
-inline void rollForward(const std::filesystem::path& root, const std::filesystem::path& directory, const std::string& number,
-                        const std::vector<JournalEntry>& entries, const StepHook& hook) {
-    const auto owned = directory / (number + ".d");
-    int        done  = 0;
+inline void rollForward(const std::filesystem::path&     root,
+                        const std::filesystem::path&     directory,
+                        const std::string&               number,
+                        const std::vector<JournalEntry>& entries,
+                        const StepHook&                  hook) {
+    const auto                      owned = directory / (number + ".d");
+    int                             done  = 0;
     std::set<std::filesystem::path> directories{owned};
     for (const auto& [target, source] : entries) {
         const auto staged      = owned / source;
@@ -247,8 +252,8 @@ inline void rollForward(const std::filesystem::path& root, const std::filesystem
 /// recovery (the next state() or group publication, or the next opening of the project) completes it.
 struct IncompletePublication : std::runtime_error {
     explicit IncompletePublication(const std::string& reason)
-        : std::runtime_error("A committed publication of the project is not applied yet (" + reason +
-                             "); fix the cause and run the command again to complete it") {}
+        : std::runtime_error("A committed publication of the project is not applied yet (" + reason
+                             + "); fix the cause and run the command again to complete it") {}
 };
 
 /// Completes the journals that reached their commit point and abandons the others. A journal is

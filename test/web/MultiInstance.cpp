@@ -20,7 +20,9 @@ using Net = webfront::NetProvider;
 
 struct Instance {
     webfront::WebFront app;
-    std::thread        server{[this] { app.run(); }};
+    std::thread        server{[this] {
+        app.run();
+    }};
     ~Instance() {
         app.stop();
         if (server.joinable())

@@ -1,6 +1,6 @@
-#include <webfront/testing/Bdd.hpp>
 #include "TemporaryDirectory.hpp"
 #include <webfront/Pty.hpp>
+#include <webfront/testing/Bdd.hpp>
 
 #include <charconv>
 #include <fstream>
@@ -54,11 +54,11 @@ std::string plain(std::string_view raw) {
             continue;
         }
         const char kind = raw[++i];
-        if (kind == '[') { // CSI: parameters, then a final byte in 0x40-0x7e
+        if (kind == '[') {  // CSI: parameters, then a final byte in 0x40-0x7e
             while (i + 1 < raw.size() && (raw[i + 1] < '@' || raw[i + 1] > '~'))
                 ++i;
             ++i;
-        } else if (kind == ']') { // OSC: up to BEL or ESC followed by a backslash
+        } else if (kind == ']') {  // OSC: up to BEL or ESC followed by a backslash
             while (i + 1 < raw.size() && raw[i + 1] != '\a' && raw[i + 1] != '\x1b')
                 ++i;
             ++i;
@@ -178,7 +178,8 @@ const Scenario ptyShell{"PTY exchanges bytes with an interactive shell and resiz
 
 const Scenario ptyControlSequences{"PTY test markers are found through terminal control sequences inserted in the output", [] {
                                        // ConPTY sets the window title while the probe starts, here in the middle of the marker.
-                                       const std::string raw = "\x1b[2J\x1b[4;1H> probe stall\r\nSTALLED:\x1b]0;cmd.exe - probe\a" "25776:END\r\n\x1b]0;t\x1b\\";
+                                       const std::string raw = "\x1b[2J\x1b[4;1H> probe stall\r\nSTALLED:\x1b]0;cmd.exe - probe\a"
+                                                               "25776:END\r\n\x1b]0;t\x1b\\";
                                        require(plain(raw) == "> probe stall\r\nSTALLED:25776:END\r\n");
                                        require(stallPid(raw) == 25776);
                                    }};

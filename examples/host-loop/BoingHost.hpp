@@ -265,7 +265,7 @@ private:
     Settings                         settings;
     std::uint32_t                    revision{0};
     std::map<std::uint64_t, Deliver> waiting;
-    std::set<std::uint64_t>         inFlight;  // retained until this consumer's delivery begins
+    std::set<std::uint64_t>          inFlight;  // retained until this consumer's delivery begins
     Displayed                        lastDisplayed;
     bool                             stopping{false}, ended{false};
 

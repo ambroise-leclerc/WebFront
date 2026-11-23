@@ -18,7 +18,7 @@ namespace webfront::frontend {
  * It says nothing about the session: a native window can still fail at run time, for instance without a display.
  * NativeOrBrowserFrontend handles that case.
  */
-#if (defined(_WIN32) && defined(WEBFRONT_EMBED_WEBVIEW2)) || (defined(__APPLE__) && defined(WEBFRONT_EMBED_WKWEBVIEW)) \
+#if (defined(_WIN32) && defined(WEBFRONT_EMBED_WEBVIEW2)) || (defined(__APPLE__) && defined(WEBFRONT_EMBED_WKWEBVIEW))                                         \
     || (defined(__linux__) && defined(WEBFRONT_EMBED_WEBKITGTK))
 inline constexpr bool nativeWebViewAvailable = true;
 #else

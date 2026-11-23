@@ -80,7 +80,7 @@ enum class StorageErrc {
  */
 class StorageError : public BridgeError {
 public:
-    StorageError(StorageErrc errc, const std::string& message) : BridgeError(std::string(storageErrorCode(errc)), message), errcValue(errc) { }
+    StorageError(StorageErrc errc, const std::string& message) : BridgeError(std::string(storageErrorCode(errc)), message), errcValue(errc) {}
 
     [[nodiscard]] StorageErrc errc() const noexcept {
         return errcValue;

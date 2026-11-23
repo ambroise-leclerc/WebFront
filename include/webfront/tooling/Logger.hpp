@@ -4,39 +4,41 @@
 #pragma once
 
 #if defined(WEBFRONT_USE_MDDLOG) && WEBFRONT_USE_MDDLOG
-#include "MddlogLogger.hpp" // IWYU pragma: export
+    #include "MddlogLogger.hpp"             // IWYU pragma: export
 #else
-#include "../details/C++20Support.hpp" // Provides <format> and <source_location>
-#include "HexDump.hpp"
+    #include "../details/C++20Support.hpp"  // Provides <format> and <source_location>
+    #include "HexDump.hpp"
 
-#include <algorithm>
-#include <array>
-#include <atomic>
-#include <chrono>
-#include <condition_variable>
-#include <filesystem>
-#include <functional>
-#include <iostream>
-#include <limits>
-#include <list>
-#include <map>
-#include <memory>
-#include <mutex>
-#include <string_view>
-#include <thread>
-#include <utility>
-#include <vector>
+    #include <algorithm>
+    #include <array>
+    #include <atomic>
+    #include <chrono>
+    #include <condition_variable>
+    #include <filesystem>
+    #include <functional>
+    #include <iostream>
+    #include <limits>
+    #include <list>
+    #include <map>
+    #include <memory>
+    #include <mutex>
+    #include <string_view>
+    #include <thread>
+    #include <utility>
+    #include <vector>
 
 namespace webfront::log {
-using LogType = const uint8_t;
+using LogType              = const uint8_t;
 constinit LogType Disabled = 0, Error = 1, Warn = 2, Info = 3, Debug = 4;
-const auto clogSink = [](std::string_view t) { std::clog << t << "\n"; };
+const auto        clogSink = [](std::string_view t) {
+    std::clog << t << "\n";
+};
 inline std::array<std::atomic<bool>, Debug + 1> logTypeEnabled{};
 /// Identifies one registered sink. A slot is reused once its sink is gone, so the generation makes a stale id harmless:
 /// removing it again can never reach the sink that took the slot over.
 struct SinkId {
-    std::size_t index      = std::numeric_limits<std::size_t>::max();
-    std::size_t generation = 0;
+    std::size_t index                                    = std::numeric_limits<std::size_t>::max();
+    std::size_t generation                               = 0;
     friend bool operator==(const SinkId&, const SinkId&) = default;
 };
 inline struct Sinks {
@@ -99,7 +101,7 @@ private:
     // Contract: never remove a sink while holding a lock that the sink's callback takes (the removal would wait for a
     // callback that waits for that lock). WebLink removes its transport after releasing transportMutex.
     struct Entry : std::enable_shared_from_this<Entry> {
-        explicit Entry(std::function<void(std::string_view)> function) : callback(std::move(function)) { }
+        explicit Entry(std::function<void(std::string_view)> function) : callback(std::move(function)) {}
         void invoke(std::string_view line) {
             {
                 const std::lock_guard lock(mutex);
@@ -111,7 +113,7 @@ private:
                 Entry& entry;
                 ~Exit() {
                     std::function<void(std::string_view)> released;  // destroyed after the lock is dropped
-                    const std::lock_guard lock(entry.mutex);
+                    const std::lock_guard                 lock(entry.mutex);
                     entry.runners.erase(std::find(entry.runners.begin(), entry.runners.end(), std::this_thread::get_id()));
                     entry.idle.notify_all();
                     released = entry.takeCallbackIfQuiet();
@@ -120,7 +122,7 @@ private:
             callback(line);
         }
         void retire() {
-            const auto self = std::this_thread::get_id();
+            const auto                            self = std::this_thread::get_id();
             std::function<void(std::string_view)> released;  // destroyed after the lock is dropped
             {
                 const std::lock_guard lock(mutex);
@@ -130,7 +132,12 @@ private:
             // This thread's own deliveries of the sink (it removes itself) cannot end before this call returns.
             WaitRegistry::Waiting waiting{self, this->weak_from_this()};
             std::unique_lock      lock(mutex);
-            while (std::count_if(runners.begin(), runners.end(), [&](auto id) { return id != self; }) != 0) {
+            while (std::count_if(runners.begin(),
+                                 runners.end(),
+                                 [&](auto id) {
+                                     return id != self;
+                                 })
+                   != 0) {
                 lock.unlock();
                 const bool cycle = WaitRegistry::wouldWaitForever(self, *this);
                 lock.lock();
@@ -152,18 +159,18 @@ private:
             return !alive && runners.empty();
         }
         std::vector<std::thread::id> runnersOtherThan(std::thread::id self) {
-            const std::lock_guard lock(mutex);
+            const std::lock_guard        lock(mutex);
             std::vector<std::thread::id> others;
             for (const auto id : runners)
                 if (id != self)
                     others.push_back(id);
             return others;
         }
-        std::mutex                                  mutex;
-        std::condition_variable                     idle;
-        bool                                        alive = true;
-        std::vector<std::thread::id>                runners;  // one item per callback running now
-        std::function<void(std::string_view)>       callback;
+        std::mutex                            mutex;
+        std::condition_variable               idle;
+        bool                                  alive = true;
+        std::vector<std::thread::id>          runners;  // one item per callback running now
+        std::function<void(std::string_view)> callback;
     };
     // Which sink each thread is waiting to see finish. A removal that would wait for a thread that is itself (directly or
     // through others) waiting for a callback of the remover is a deadlock, and gives up instead.
@@ -217,7 +224,7 @@ private:
     };
     SinkId addOne(auto&& callback) {
         const std::lock_guard lock(mutex);
-        auto entry = std::make_shared<Entry>(std::forward<decltype(callback)>(callback));
+        auto                  entry = std::make_shared<Entry>(std::forward<decltype(callback)>(callback));
         // A slot is free once its sink was removed and no thread still runs the callback; a bounded table keeps the
         // snapshot and the search proportional to the sinks alive, not to every sink ever added.
         std::size_t index = 0;
@@ -225,8 +232,8 @@ private:
             ++index;
         if (index == slots.size())
             slots.emplace_back();
-        slots[index].entry   = std::move(entry);
-        slots[index].retired = nullptr;
+        slots[index].entry    = std::move(entry);
+        slots[index].retired  = nullptr;
         const auto generation = ++slots[index].generation;
         publish();
         return {index, generation};
@@ -247,63 +254,118 @@ private:
 
 // NOTE : functions below are defined inline static in order to avoir clang "uneeded function" and "unused function" errors
 namespace {
-    using namespace std;
-    using srcLoc = source_location;
-    
-    constexpr auto toChar(LogType l) { return l == Debug ? 'D' : l == Warn ? 'W' : l == Error ? 'E' : 'I'; }
-    inline static void log(LogType l, string_view text) { out(format("[{}] {:%T} | {}", toChar(l), chrono::system_clock::now(), text));}
-    inline static void log(LogType l, string_view text, const srcLoc& s) {
-        out(format("[{}] {:%T} | {:16}:{:4} | {}", toChar(l), chrono::system_clock::now(), filesystem::path(s.file_name()).filename().string(), s.line(), text));
-    }
-    template<typename... Ts> static void log(LogType l, string_view fmt, Ts&&... ts) {
-#ifdef __cpp_lib_format
-        log(l, vformat(fmt, make_format_args(ts...)));
-#else
-        log(l, format(fmt, std::forward<Ts>(ts)...));
-#endif
-    }
-    template<typename... Ts> static void log(LogType l, string_view fmt, const srcLoc& s, Ts&&... ts) {
-#if __cpp_lib_format
-        log(l, vformat(fmt, make_format_args(ts...)), s);
-#else
-        log(l, format(fmt, std::forward<Ts>(ts)...), s);
-#endif
-    }
+using namespace std;
+using srcLoc = source_location;
 
-    inline static void set(LogType logType, bool enabled) { logTypeEnabled[logType].store(enabled, std::memory_order_relaxed); }
-    inline static bool is(LogType logType) { return logTypeEnabled[logType].load(std::memory_order_relaxed); }
-    inline static void setLogLevel(LogType l) { set(Error, l >= Error); set(Warn, l >= Warn); set(Info, l >= Info); set(Debug, l >= Debug);}
+constexpr auto toChar(LogType l) {
+    return l == Debug ? 'D' : l == Warn ? 'W' : l == Error ? 'E' : 'I';
+}
+inline static void log(LogType l, string_view text) {
+    out(format("[{}] {:%T} | {}", toChar(l), chrono::system_clock::now(), text));
+}
+inline static void log(LogType l, string_view text, const srcLoc& s) {
+    out(format("[{}] {:%T} | {:16}:{:4} | {}", toChar(l), chrono::system_clock::now(), filesystem::path(s.file_name()).filename().string(), s.line(), text));
+}
+template <typename... Ts>
+static void log(LogType l, string_view fmt, Ts&&... ts) {
+    #ifdef __cpp_lib_format
+    log(l, vformat(fmt, make_format_args(ts...)));
+    #else
+    log(l, format(fmt, std::forward<Ts>(ts)...));
+    #endif
+}
+template <typename... Ts>
+static void log(LogType l, string_view fmt, const srcLoc& s, Ts&&... ts) {
+    #if __cpp_lib_format
+    log(l, vformat(fmt, make_format_args(ts...)), s);
+    #else
+    log(l, format(fmt, std::forward<Ts>(ts)...), s);
+    #endif
 }
 
-template<typename... Ts> struct debug { debug(string_view fmt, Ts&&... ts, const srcLoc& l = srcLoc::current()) {
-    if (is(Debug)) log(Debug, fmt, l, std::forward<Ts>(ts)...);
+inline static void set(LogType logType, bool enabled) {
+    logTypeEnabled[logType].store(enabled, std::memory_order_relaxed);
+}
+inline static bool is(LogType logType) {
+    return logTypeEnabled[logType].load(std::memory_order_relaxed);
+}
+inline static void setLogLevel(LogType l) {
+    set(Error, l >= Error);
+    set(Warn, l >= Warn);
+    set(Info, l >= Info);
+    set(Debug, l >= Debug);
+}
+}  // namespace
+
+template <typename... Ts>
+struct debug {
+    debug(string_view fmt, Ts&&... ts, const srcLoc& l = srcLoc::current()) {
+        if (is(Debug))
+            log(Debug, fmt, l, std::forward<Ts>(ts)...);
     }
 };
-template<typename... Ts> debug(string_view, Ts&&...) -> debug<Ts...>;
-template<typename... Ts> void error(string_view fmt, Ts&&... ts) { if (is(Error)) log(Error, fmt, std::forward<Ts>(ts)...); }
-template<typename... Ts> void warn(string_view fmt, Ts&&... ts) { if (is(Warn)) log(Warn, fmt, std::forward<Ts>(ts)...); }
-template<typename... Ts> void info(string_view fmt, Ts&&... ts) { if (is(Info)) log(Info, fmt, std::forward<Ts>(ts)...); }
-void infoHex(string_view text, auto container) { if (is(Info)) { log(Info, text); out(utils::hexDump(container)); }}
-auto addSinks(auto&&... ts) { return out.add(std::forward<decltype(ts)>(ts)...); }
-void removeSinks(auto&&... sinkIds) { (out.remove(sinkIds), ...); }
+template <typename... Ts>
+debug(string_view, Ts&&...) -> debug<Ts...>;
+template <typename... Ts>
+void error(string_view fmt, Ts&&... ts) {
+    if (is(Error))
+        log(Error, fmt, std::forward<Ts>(ts)...);
+}
+template <typename... Ts>
+void warn(string_view fmt, Ts&&... ts) {
+    if (is(Warn))
+        log(Warn, fmt, std::forward<Ts>(ts)...);
+}
+template <typename... Ts>
+void info(string_view fmt, Ts&&... ts) {
+    if (is(Info))
+        log(Info, fmt, std::forward<Ts>(ts)...);
+}
+void infoHex(string_view text, auto container) {
+    if (is(Info)) {
+        log(Info, text);
+        out(utils::hexDump(container));
+    }
+}
+auto addSinks(auto&&... ts) {
+    return out.add(std::forward<decltype(ts)>(ts)...);
+}
+void removeSinks(auto&&... sinkIds) {
+    (out.remove(sinkIds), ...);
+}
 
 // Without mddlog no context is captured; the scope keeps call sites identical in both builds.
 enum class CallDirection : uint8_t { None, CppToJs, JsToCpp };
-struct Context { string_view component; string_view webLinkId; CallDirection direction = CallDirection::None; string_view callId; };
+struct Context {
+    string_view   component;
+    string_view   webLinkId;
+    CallDirection direction = CallDirection::None;
+    string_view   callId;
+};
 struct ContextScope {
     explicit ContextScope(Context) noexcept {}
-    ContextScope(const ContextScope&) = delete;
+    ContextScope(const ContextScope&)            = delete;
     ContextScope& operator=(const ContextScope&) = delete;
 };
 
 // Without mddlog a transport is a synchronous text sink: records carry only the rendered line.
-struct TransportRecord { string_view text; };
-struct TransportHandle { SinkId id; };
+struct TransportRecord {
+    string_view text;
+};
+struct TransportHandle {
+    SinkId id;
+};
 inline TransportHandle addTransport(function<void(const TransportRecord&)> write) {
-    return {addSinks([write = std::move(write)](string_view t) { write(TransportRecord{t}); })};
+    return {addSinks([write = std::move(write)](string_view t) {
+        write(TransportRecord{t});
+    })};
 }
-inline void removeTransport(TransportHandle handle) { out.remove(handle.id); }
-inline void reportTransportFailure(TransportHandle handle) { removeTransport(handle); }
+inline void removeTransport(TransportHandle handle) {
+    out.remove(handle.id);
+}
+inline void reportTransportFailure(TransportHandle handle) {
+    removeTransport(handle);
+}
 inline void reportTransportOverflow() noexcept {}
-} //namespace webfront::log
+}  // namespace webfront::log
 #endif

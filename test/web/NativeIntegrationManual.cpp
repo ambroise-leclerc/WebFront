@@ -138,7 +138,7 @@ std::future<Outcome> onUI(const UIExecutor& executor, F function) {
     struct State {
         std::promise<Outcome>                                                                             result;
         decltype(ex::connect(std::declval<decltype(executor.schedule())>(), std::declval<Receiver<F>>())) operation;
-        State(const UIExecutor& e, F f) : operation(ex::connect(e.schedule(), Receiver<F>{&result, std::move(f)})) { }
+        State(const UIExecutor& e, F f) : operation(ex::connect(e.schedule(), Receiver<F>{&result, std::move(f)})) {}
     };
     static std::list<std::unique_ptr<State>> states;
     static std::mutex                        mutex;
@@ -202,7 +202,7 @@ void nativeDialog(const UIExecutor& executor, HWND parent, int visibleMs) {
                 owner          = GetWindow(shownDialog, GW_OWNER);
                 parentDisabled = parent && !IsWindowEnabled(parent);
                 // The dialog's modal loop must keep dispatching the executor's wake-up message.
-                auto during     = onUI(executor, [] { });
+                auto during     = onUI(executor, [] {});
                 ranDuringDialog = ready(during, Outcome::ran, 5);
                 std::this_thread::sleep_for(std::chrono::milliseconds(visibleMs));
                 PostMessageW(shownDialog, WM_CLOSE, 0, 0);
@@ -361,7 +361,7 @@ int validate(int visibleMs) {
     check(text(app.nativeWindow().get()) == (embedded ? "error notOpen" : "error unsupported"),
           "app.nativeWindow() before show(): " + text(app.nativeWindow().get()));
     {
-        auto early = onUI(executor, [] { });
+        auto early = onUI(executor, [] {});
         check(ready(early, Outcome::unavailable), "an operation scheduled before show() is refused (UIExecutorUnavailable)");
     }
 
@@ -481,7 +481,7 @@ int validate(int visibleMs) {
     check(scenarioDone, "show() returned after the scenario ended the loop");
     check(!executor.available() && !executor.onUIThread(), "the executor is unavailable after the loop ended");
     {
-        auto late = onUI(executor, [] { });
+        auto late = onUI(executor, [] {});
         check(ready(late, Outcome::unavailable), "an operation scheduled after closure is refused");
     }
     check(text(app.nativeWindow().get()) == (embedded ? "error closed" : "error unsupported"),

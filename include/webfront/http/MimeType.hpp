@@ -19,13 +19,32 @@ struct MimeType {
             std::string_view extension;
             Type             type;
         };
-        constexpr auto mappings = std::array<Mapping, 17>{{
-            {"js", js}, {"mjs", js}, {"htm", html}, {"html", html}, {"jpg", jpg}, {"jpeg", jpg}, {"css", css}, {"png", png},
-            {"gif", gif}, {"json", json}, {"pdf", pdf}, {"ttf", ttf}, {"ico", ico}, {"svg", svg}, {"webp", webp}, {"csv", csv}, {"wasm", wasm},
-        }};
-        if (e.starts_with('.')) e.remove_prefix(1);
+        constexpr auto mappings = std::array<Mapping, 17>{
+            {
+             {"js", js},
+             {"mjs", js},
+             {"htm", html},
+             {"html", html},
+             {"jpg", jpg},
+             {"jpeg", jpg},
+             {"css", css},
+             {"png", png},
+             {"gif", gif},
+             {"json", json},
+             {"pdf", pdf},
+             {"ttf", ttf},
+             {"ico", ico},
+             {"svg", svg},
+             {"webp", webp},
+             {"csv", csv},
+             {"wasm", wasm},
+             }
+        };
+        if (e.starts_with('.'))
+            e.remove_prefix(1);
         for (const auto& mapping : mappings)
-            if (e == mapping.extension) return mapping.type;
+            if (e == mapping.extension)
+                return mapping.type;
         return plain;
     }
 
@@ -51,4 +70,4 @@ struct MimeType {
     }
 };
 
-} // namespace webfront::http
+}  // namespace webfront::http

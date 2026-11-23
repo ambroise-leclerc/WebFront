@@ -25,7 +25,7 @@ public:
     explicit DownloadStaging(const std::filesystem::path& parent) {
         sweepStale(parent);
 #ifdef __APPLE__
-        auto pattern = (parent / ".webfront-download-XXXXXX").string();
+        auto              pattern = (parent / ".webfront-download-XXXXXX").string();
         std::vector<char> buffer(pattern.begin(), pattern.end());
         buffer.push_back('\0');
         if (!::mkdtemp(buffer.data()))
@@ -34,7 +34,7 @@ public:
 #else
         std::random_device random;
         for (int attempt = 0; attempt < 100; ++attempt) {
-            auto candidate = parent / (".webfront-download-" + std::to_string(random()) + "-" + std::to_string(random()));
+            auto            candidate = parent / (".webfront-download-" + std::to_string(random()) + "-" + std::to_string(random()));
             std::error_code error;
             if (std::filesystem::create_directory(candidate, error)) {
                 directory = std::move(candidate);
@@ -51,13 +51,15 @@ public:
         throw std::filesystem::filesystem_error("Cannot allocate download staging", parent, std::make_error_code(std::errc::file_exists));
 #endif
     }
-    DownloadStaging(const DownloadStaging&) = delete;
+    DownloadStaging(const DownloadStaging&)            = delete;
     DownloadStaging& operator=(const DownloadStaging&) = delete;
     ~DownloadStaging() {
         std::error_code ignored;
         std::filesystem::remove_all(directory, ignored);
     }
-    [[nodiscard]] std::filesystem::path path() const { return directory / "download"; }
+    [[nodiscard]] std::filesystem::path path() const {
+        return directory / "download";
+    }
     /**
      * @brief Installs the staged file. A new target never replaces a file that appeared meanwhile.
      *
@@ -103,8 +105,7 @@ public:
                 }
                 error.clear();
             }
-        } catch (...) {
-        }
+        } catch (...) {}
     }
 
 private:
@@ -177,7 +178,7 @@ public:
     }
 
 private:
-    mutable std::mutex         mutex;
+    mutable std::mutex              mutex;
     std::set<std::filesystem::path> reserved;
 };
 

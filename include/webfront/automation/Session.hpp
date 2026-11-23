@@ -58,7 +58,8 @@ public:
                + json::quote(closed  ? "closed"
                              : ready ? "ready"
                                      : "starting")
-               + ",\"allow\":" + stringArray(options.allow) + ",\"callbacks\":" + stringArray(options.callbacks) + ",\"failure\":" + json::quote(failure) + ",\"audit\":" + auditJson() + "}";
+               + ",\"allow\":" + stringArray(options.allow) + ",\"callbacks\":" + stringArray(options.callbacks) + ",\"failure\":" + json::quote(failure)
+               + ",\"audit\":" + auditJson() + "}";
     }
 
     std::string start(const Object& request, Clock::time_point now = Clock::now()) {
@@ -253,8 +254,8 @@ private:
     /// A name an application registered, never an internal `webfront.*` one: letters, digits, `.`, `_`, `-`, at most 128.
     static bool callbackName(std::string_view name) {
         return !name.empty() && name.size() <= 128 && !name.starts_with("webfront.") && std::ranges::all_of(name, [](char c) {
-                   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
-               });
+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+        });
     }
     static bool knownPermission(std::string_view name) {
         for (const auto& [operation, definition] : operationDefinitions())
@@ -267,14 +268,14 @@ private:
             const auto operation = request.string("operation");
             if (!operation.empty() && operation.size() <= 64)
                 return operation;
-        } catch (const std::exception&) { }
+        } catch (const std::exception&) {}
         return "<unknown>";
     }
     void authorize(const Object& request) const {
         std::string claimed;
         try {
             claimed = request.string("session");
-        } catch (const std::exception&) { }
+        } catch (const std::exception&) {}
         if (!channel::sameToken(claimed, identity))
             throw OperationError("wrong_session", "Wrong automation session");
     }

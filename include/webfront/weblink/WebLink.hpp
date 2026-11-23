@@ -40,22 +40,25 @@ struct WebLinkEvent {
 
     WebLinkEvent(Code eventCode, WebLinkId id, std::string message = {}, std::span<const std::byte> dataView = {}, msg::CallId correlationId = 0)
         : code(eventCode), webLinkId(id), text(std::move(message)), data(dataView), callId(correlationId) {}
-    Code code;
-    WebLinkId webLinkId;
-    std::string text;
+    Code                       code;
+    WebLinkId                  webLinkId;
+    std::string                text;
     std::span<const std::byte> data;
-    msg::CallId callId;
+    msg::CallId                callId;
 };
 
 /// Decimal text of a link or call identifier for the diagnostic context, without allocating.
 class DecimalId {
 public:
-    explicit DecimalId(std::uint64_t value) : size(static_cast<std::size_t>(std::to_chars(digits.data(), digits.data() + digits.size(), value).ptr - digits.data())) {}
-    [[nodiscard]] std::string_view view() const { return {digits.data(), size}; }
+    explicit DecimalId(std::uint64_t value)
+        : size(static_cast<std::size_t>(std::to_chars(digits.data(), digits.data() + digits.size(), value).ptr - digits.data())) {}
+    [[nodiscard]] std::string_view view() const {
+        return {digits.data(), size};
+    }
 
 private:
     std::array<char, 20> digits{};
-    std::size_t size;
+    std::size_t          size;
 };
 
 /// Shared by a WebLink's WebSocket handlers, which can run after the link is destroyed: the
@@ -63,17 +66,18 @@ private:
 /// retire() returns without touching the link; retire() waits for handlers already running.
 class HandlerGuard {
 public:
-    template<typename Handler>
+    template <typename Handler>
     void run(Handler&& handler) {
         {
             std::lock_guard lock(mutex);
-            if (!alive) return;
+            if (!alive)
+                return;
             ++inFlight;
         }
         struct Exit {
             explicit Exit(HandlerGuard& value) : guard(value) {}
             HandlerGuard& guard;
-            Exit(const Exit&) = delete;
+            Exit(const Exit&)            = delete;
             Exit& operator=(const Exit&) = delete;
             ~Exit() {
                 auto& running = runningOnThisThread();
@@ -91,11 +95,13 @@ public:
     /// Stop new handlers and wait for those on other threads. A handler of this link running on
     /// the calling thread (destruction from inside it) cannot be waited for and is not.
     void retire() {
-        const auto& running = runningOnThisThread();
-        const auto  own     = static_cast<std::size_t>(std::count(running.begin(), running.end(), this));
+        const auto&      running = runningOnThisThread();
+        const auto       own     = static_cast<std::size_t>(std::count(running.begin(), running.end(), this));
         std::unique_lock lock(mutex);
         alive = false;
-        idle.wait(lock, [&] { return inFlight == own; });
+        idle.wait(lock, [&] {
+            return inFlight == own;
+        });
     }
 
 private:
@@ -104,44 +110,61 @@ private:
         return running;
     }
 
-    std::mutex mutex;
+    std::mutex              mutex;
     std::condition_variable idle;
-    bool alive = true;
-    std::size_t inFlight = 0;
+    bool                    alive    = true;
+    std::size_t             inFlight = 0;
 };
 
 /// The only size of handshake proof that is kept: the 64 hexadecimal characters of a launch secret (ADR-020).
 inline constexpr std::size_t handshakeProofSize = 64;
 
-template<typename Net, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
+template <typename Net, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
 class WebLink {
-    std::shared_ptr<HandlerGuard> handlers{std::make_shared<HandlerGuard>()};
+    std::shared_ptr<HandlerGuard>                      handlers{std::make_shared<HandlerGuard>()};
     std::shared_ptr<websocket::WebSocket<Net, Policy>> ws;
-    WebLinkId id;
-    DecimalId idText{id};
-    bool sameEndian;
-    bool handshaken{};  /// The handshake is accepted once
-    std::mutex transportMutex;
-    std::optional<log::TransportHandle> transport; /// Browser log transport, attached at handshake
-    bool transportRetired{};                       /// No transport may attach after disconnection
-    std::atomic<std::uint64_t> droppedLogs{0};     /// Diagnostic frames refused by the bounded write queue
-    std::function<void(WebLinkEvent)> eventsHandler;
-    std::span<const std::byte> undecodedData; /// Data received but not yet consumed
+    WebLinkId                                          id;
+    DecimalId                                          idText{id};
+    bool                                               sameEndian;
+    bool                                               handshaken{};        /// The handshake is accepted once
+    std::mutex                                         transportMutex;
+    std::optional<log::TransportHandle>                transport;           /// Browser log transport, attached at handshake
+    bool                                               transportRetired{};  /// No transport may attach after disconnection
+    std::atomic<std::uint64_t>                         droppedLogs{0};      /// Diagnostic frames refused by the bounded write queue
+    std::function<void(WebLinkEvent)>                  eventsHandler;
+    std::span<const std::byte>                         undecodedData;       /// Data received but not yet consumed
     std::shared_ptr<detail::PendingCalls<Policy>>      pending{std::make_shared<detail::PendingCalls<Policy>>()};
 
 public:
     /// Starts reading at once, unless `startNow` is false: start() then begins, once the owner can dispatch its events.
-    WebLink(typename Net::Socket&& socket, WebLinkId webLinkId, std::function<void(WebLinkEvent)> eventHandler, networking::TaskScope& scope,
-            bool startNow = true)
+    WebLink(typename Net::Socket&&            socket,
+            WebLinkId                         webLinkId,
+            std::function<void(WebLinkEvent)> eventHandler,
+            networking::TaskScope&            scope,
+            bool                              startNow = true)
         : ws(websocket::WebSocket<Net, Policy>::create(std::move(socket), scope)), id(webLinkId), eventsHandler(eventHandler) {
         log::debug("New WebLink created with id:{}", id);
 
-        ws->onMessage([](std::string_view text) { log::debug("onMessage(text) :{}", text); });
+        ws->onMessage([](std::string_view text) {
+            log::debug("onMessage(text) :{}", text);
+        });
         // Handlers capture the shared guard, never rely on `this` alone: completions may run after destruction.
-        ws->onMessage([this, guard = handlers](std::span<const std::byte> data) { guard->run([&] { onBinaryMessage(data); }); });
+        ws->onMessage([this, guard = handlers](std::span<const std::byte> data) {
+            guard->run([&] {
+                onBinaryMessage(data);
+            });
+        });
         // Retire the transport before the WebSocket logs the write error, so it is never fed its own failure.
-        ws->onWriteError([this, guard = handlers](std::error_code) { guard->run([&] { detachTransport(true); }); });
-        ws->onWritten([this, guard = handlers] { guard->run([&] { wakeWriters(); }); });
+        ws->onWriteError([this, guard = handlers](std::error_code) {
+            guard->run([&] {
+                detachTransport(true);
+            });
+        });
+        ws->onWritten([this, guard = handlers] {
+            guard->run([&] {
+                wakeWriters();
+            });
+        });
         ws->onClose([this, guard = handlers](websocket::CloseEvent event) {
             guard->run([&] {
                 const log::ContextScope context(linkContext());
@@ -151,7 +174,7 @@ public:
                 // The WebSocket reports its closure once, and never when it is stopped by the server or the link.
                 const auto queue = writerQueue;  // the event may release this link
                 eventsHandler({WebLinkEvent::Code::closed, id});
-                wakeAll(*queue);  // after the closure is known: nothing will be written any more
+                wakeAll(*queue);                 // after the closure is known: nothing will be written any more
             });
         });
 
@@ -160,11 +183,13 @@ public:
     }
 
     /// Starts reading, for a link constructed with `startNow` false.
-    void start() { ws->start(); }
-    WebLink(const WebLink&) = delete;
-    WebLink(WebLink&&) = delete;
+    void start() {
+        ws->start();
+    }
+    WebLink(const WebLink&)            = delete;
+    WebLink(WebLink&&)                 = delete;
     WebLink& operator=(const WebLink&) = delete;
-    WebLink& operator=(WebLink&&) = delete;
+    WebLink& operator=(WebLink&&)      = delete;
 
     ~WebLink() {
         // First let no WebSocket handler reach this object again, then remove the transport (waiting
@@ -183,8 +208,12 @@ public:
 
     /// Diagnostic frames are refused once this many frames of any kind await the network.
     static constexpr std::size_t maxPendingLogFrames = 64;
-    [[nodiscard]] std::uint64_t droppedLogFrames() const { return droppedLogs.load(std::memory_order_relaxed); }
-    [[nodiscard]] std::size_t pendingWrites() const { return ws->pendingWrites(); }
+    [[nodiscard]] std::uint64_t  droppedLogFrames() const {
+        return droppedLogs.load(std::memory_order_relaxed);
+    }
+    [[nodiscard]] std::size_t pendingWrites() const {
+        return ws->pendingWrites();
+    }
 
     /// Returns 0 when at most `limit` frames await the network. Otherwise registers `ready`, called once they do, on
     /// the thread that writes the frame bringing them down, and returns its identifier for cancelWrites(). The waiters
@@ -201,15 +230,19 @@ public:
     /// Forgets a waiter of whenWritesAtMost() that was not called yet.
     void cancelWrites(std::uint64_t waiter) {
         std::function<void()> removed;  // destroyed outside the lock
-        std::lock_guard lock(writerQueue->mutex);
+        std::lock_guard       lock(writerQueue->mutex);
         if (auto found = writerQueue->writers.find(waiter); found != writerQueue->writers.end()) {
             removed = std::move(found->second.ready);
             writerQueue->writers.erase(found);
         }
     }
 
-    void sendCommand(const auto& message) { ws->write(message.header(), message.payload()); }
-    void sendFrame(websocket::Frame<Net> frame) { ws->write(std::move(frame)); }
+    void sendCommand(const auto& message) {
+        ws->write(message.header(), message.payload());
+    }
+    void sendFrame(websocket::Frame<Net> frame) {
+        ws->write(std::move(frame));
+    }
     /// A frame shared with other links (websocket::Frame::share()), never copied.
     void sendFrame(std::shared_ptr<const websocket::Frame<Net>> frame) {
         ws->write(std::move(frame));
@@ -219,10 +252,10 @@ public:
         ws->writeLatest(std::move(frame), key, maxPending);
     }
 
-    template<typename Result>
+    template <typename Result>
     std::pair<msg::CallId, std::future<Result>> expectResult() {
-        auto promise = std::make_shared<std::promise<Result>>();
-        auto future = promise->get_future();
+        auto        promise = std::make_shared<std::promise<Result>>();
+        auto        future  = promise->get_future();
         msg::CallId callId{};
         try {
             callId = pending->add({.complete =
@@ -266,10 +299,17 @@ private:
         }
 
         switch (static_cast<msg::Command>(data[0])) {
-        case msg::Command::handshake: handleHandshake(data); break;
-        case msg::Command::callFunction: handleCallFunction(data); break;
-        case msg::Command::functionReturn: completePending(*msg::FunctionReturn<Policy>::castFromRawData(data)); break;
-        default: break;
+            case msg::Command::handshake:
+                handleHandshake(data);
+                break;
+            case msg::Command::callFunction:
+                handleCallFunction(data);
+                break;
+            case msg::Command::functionReturn:
+                completePending(*msg::FunctionReturn<Policy>::castFromRawData(data));
+                break;
+            default:
+                break;
         }
     }
 
@@ -287,7 +327,7 @@ private:
         constexpr bool nativeIsLittle = std::endian::native == std::endian::little;
         constexpr bool nativeIsBig    = std::endian::native == std::endian::big;
         const auto     jsEndian       = static_cast<msg::JSEndian>(command->getEndian());
-        sameEndian = (nativeIsLittle && jsEndian == msg::JSEndian::little) || (nativeIsBig && jsEndian == msg::JSEndian::big);
+        sameEndian                    = (nativeIsLittle && jsEndian == msg::JSEndian::little) || (nativeIsBig && jsEndian == msg::JSEndian::big);
 
         // Anything after the two header bytes is the secret of an embedded view (ADR-020); the application judges it.
         // Only a proof of the exact size of a launch secret is copied: anything else cannot match and is not worth an allocation.
@@ -298,18 +338,17 @@ private:
     }
 
     void handleCallFunction(std::span<const std::byte> data) {
-        auto command = msg::FunctionCall<Policy>::castFromRawData(data);
-        const DecimalId callText(command->getCallId());
-        const log::ContextScope context({.component = "cppFunction", .webLinkId = idText.view(), .direction = log::CallDirection::JsToCpp, .callId = callText.view()});
+        auto                    command = msg::FunctionCall<Policy>::castFromRawData(data);
+        const DecimalId         callText(command->getCallId());
+        const log::ContextScope context(
+            {.component = "cppFunction", .webLinkId = idText.view(), .direction = log::CallDirection::JsToCpp, .callId = callText.view()});
         log::info("Function called !");
         auto [functionName, paramData] = command->getFunctionName();
         try {
             eventsHandler(WebLinkEvent(WebLinkEvent::Code::cppFunctionCalled, id, functionName, paramData, command->getCallId()));
-        }
-        catch (const std::out_of_range& e) {
+        } catch (const std::out_of_range& e) {
             sendException(command->getCallId(), e);
-        }
-        catch (const std::exception& e) {
+        } catch (const std::exception& e) {
             log::info("event cppFunctionCalled failed with exception {}", e.what());
             sendError(command->getCallId(), e.what());
         }
@@ -321,7 +360,8 @@ private:
         returnValue.setCallId(callId);
         websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(returnValue.header().data()), returnValue.header().size())};
         returnValue.encodeParameter(error, frame);
-        if (callId != 0) sendFrame(std::move(frame));
+        if (callId != 0)
+            sendFrame(std::move(frame));
     }
 
 
@@ -331,12 +371,13 @@ public:
     /// cannot forge an error that looks like the bridge's own. WebFront's own codes leave through the internal
     /// detail::rejectWithBridgeCode, not through a method of the link.
     void sendError(msg::CallId callId, std::string_view message, std::string_view code = bridge_code::generic) {
-        if (callId == 0) return;
-        const bool usable = BridgeError::isValidCode(code) && !BridgeError::isReserved(code);
+        if (callId == 0)
+            return;
+        const bool                  usable = BridgeError::isValidCode(code) && !BridgeError::isReserved(code);
         msg::FunctionReturn<Policy> result;
         result.setCallId(callId);
         websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(result.header().data()), result.header().size())};
-        const auto error = detail::makeBridgeError(usable ? code : bridge_code::generic, std::string(message));
+        const auto            error = detail::makeBridgeError(usable ? code : bridge_code::generic, std::string(message));
         result.encodeParameter(error, frame);
         frame.freeze();
         sendFrame(std::move(frame));
@@ -377,7 +418,9 @@ private:
             call();
     }
 
-    void wakeAllWriters() { wakeAll(*writerQueue); }
+    void wakeAllWriters() {
+        wakeAll(*writerQueue);
+    }
 
     static void wakeAll(WriterQueue& queue) {
         std::map<std::uint64_t, Writer> ready;
@@ -395,7 +438,7 @@ private:
     }
 
     void attachTransport() {
-        auto handle = log::addTransport([this, guard = handlers](const log::TransportRecord& record) {
+        auto                                handle = log::addTransport([this, guard = handlers](const log::TransportRecord& record) {
             guard->run([&] {
                 // A browser that stops reading must not grow the write queue without bound: diagnostics
                 // are dropped and counted, never logged (that would feed this transport again).
@@ -425,14 +468,18 @@ private:
             transportRetired = true;
             attached.swap(transport);
         }
-        if (!attached) return;
-        if (failed) log::reportTransportFailure(*attached);
-        else log::removeTransport(*attached);
+        if (!attached)
+            return;
+        if (failed)
+            log::reportTransportFailure(*attached);
+        else
+            log::removeTransport(*attached);
     }
 
     void completePending(const msg::FunctionReturn<Policy>& result) {
-        const DecimalId callText(result.getCallId());
-        const log::ContextScope context({.component = "jsFunction", .webLinkId = idText.view(), .direction = log::CallDirection::CppToJs, .callId = callText.view()});
+        const DecimalId         callText(result.getCallId());
+        const log::ContextScope context(
+            {.component = "jsFunction", .webLinkId = idText.view(), .direction = log::CallDirection::CppToJs, .callId = callText.view()});
         if (!pending->complete(result))
             log::error("Received a return for unknown call {}", result.getCallId());
     }
@@ -479,13 +526,15 @@ public:
         };
         struct OnStop {
             Operation* operation;
-            void       operator()() noexcept { operation->stopped(); }
+            void       operator()() noexcept {
+                operation->stopped();
+            }
         };
 
-        Receiver                                                        receiver;
-        std::weak_ptr<Link>                                             link;
-        std::size_t                                                     limit;
-        std::shared_ptr<State>                                          state;
+        Receiver                                                              receiver;
+        std::weak_ptr<Link>                                                   link;
+        std::size_t                                                           limit;
+        std::shared_ptr<State>                                                state;
         std::optional<networking::ex::stop_callback_for_t<StopToken, OnStop>> stopCallback;
 
         void stopped() noexcept {
@@ -506,7 +555,7 @@ public:
         Operation(Operation&&) = delete;
 
         void start() noexcept {
-            auto token = networking::ex::get_stop_token(networking::ex::get_env(receiver));
+            auto token  = networking::ex::get_stop_token(networking::ex::get_env(receiver));
             auto waited = link.lock();
             if (token.stop_requested()) {
                 state->done = true;
@@ -523,12 +572,12 @@ public:
                 try {
                     waiter = waited->whenWritesAtMost(limit, [shared] {
                         if (shared->done.exchange(true) || shared->record(Completion::value))
-                            return;  // stopped first, or start() delivers it
+                            return;                       // stopped first, or start() delivers it
                         auto* operation = shared->operation;
                         operation->stopCallback.reset();  // waits for a stop callback running on another thread
                         networking::ex::set_value(std::move(operation->receiver));
                     });
-                } catch (...) { }  // registering failed: there is nothing to wait for
+                } catch (...) {}  // registering failed: there is nothing to wait for
             }
             shared->waiter = waiter;
             Completion completion;
@@ -540,7 +589,7 @@ public:
             if (completion == Completion::none && waiter == 0 && !shared->done.exchange(true))
                 completion = Completion::value;  // already at most `limit` frames queued
             if (completion == Completion::none)
-                return;  // the waiter or the stop callback completes it
+                return;                          // the waiter or the stop callback completes it
             if (waiter != 0)
                 waited->cancelWrites(waiter);
             stopCallback.reset();
@@ -562,4 +611,4 @@ private:
 };
 }  // namespace detail
 
-} // namespace webfront
+}  // namespace webfront

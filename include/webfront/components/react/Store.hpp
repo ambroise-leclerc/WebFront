@@ -87,7 +87,7 @@ public:
         return state && state->valid();
     }
     void set(T value) const {
-        auto& current = checked();
+        auto& current   = checked();
         current.pending = std::move(value);
         if (!current.scheduled) {
             current.scheduled = true;
@@ -107,7 +107,7 @@ public:
         checked().onError = std::move(callback);
     }
     void close() const {
-        auto& current = checked();
+        auto& current  = checked();
         current.closed = true;
         current.pending.reset();
         current.onError = nullptr;

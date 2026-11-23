@@ -44,7 +44,7 @@ inline std::string newViewSecret() {
     std::size_t mismatch = launchSecret.size() ^ presented.size();
     for (std::size_t index = 0; index < launchSecret.size(); ++index) {
         const unsigned char given = index < presented.size() ? static_cast<unsigned char>(presented[index]) : 0;
-        mismatch |= static_cast<std::size_t>(static_cast<unsigned char>(launchSecret[index]) ^ given);
+        mismatch                 |= static_cast<std::size_t>(static_cast<unsigned char>(launchSecret[index]) ^ given);
     }
     return mismatch == 0;
 }
@@ -53,7 +53,9 @@ inline std::string newViewSecret() {
 /// browser's URL parser finish serialization, including compression of IPv6 and its embedded IPv4 notation.
 [[nodiscard]] inline std::string browserOrigin(std::string_view address, std::string_view port, bool secure = false) {
     auto origin = applicationOrigin(address, port, secure);
-    std::ranges::transform(origin, origin.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::ranges::transform(origin, origin.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
     if (port == (secure ? "443" : "80"))
         origin.resize(origin.size() - port.size() - 1);
     return origin;
@@ -63,17 +65,21 @@ inline std::string newViewSecret() {
 /// Returns an empty script (no association) unless `secret` is lowercase hexadecimal and `origin` is made of the characters
 /// of a plain http origin: nothing else can be written in a string literal without escaping, and nothing is escaped here.
 [[nodiscard]] inline std::string viewSecretScript(std::string_view secret, std::string_view origin) {
-    const auto isHex    = [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); };
-    const auto isOrigin = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || std::string_view{":/.[]-"}.contains(c); };
+    const auto isHex = [](char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+    };
+    const auto isOrigin = [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) || std::string_view{":/.[]-"}.contains(c);
+    };
     if (secret.empty() || origin.empty() || !std::ranges::all_of(secret, isHex) || !std::ranges::all_of(origin, isOrigin))
         return {};
     std::string script = "if (window === window.top && location.origin === new URL('";
-    script += origin;
-    script += "').origin) Object.defineProperty(window, '";
-    script += viewSecretProperty;
-    script += "', {value: '";
-    script += secret;
-    script += "', configurable: true});";
+    script            += origin;
+    script            += "').origin) Object.defineProperty(window, '";
+    script            += viewSecretProperty;
+    script            += "', {value: '";
+    script            += secret;
+    script            += "', configurable: true});";
     return script;
 }
 

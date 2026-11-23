@@ -25,8 +25,8 @@ const char* failure(cudaError_t status) {
 }  // namespace
 
 const char* cudaDevice() {
-    static char name[256] = "";
-    int         count     = 0;
+    static char    name[256] = "";
+    int            count     = 0;
     cudaDeviceProp properties;
     if (name[0] == '\0' && cudaGetDeviceCount(&count) == cudaSuccess && count > 0 && cudaGetDeviceProperties(&properties, 0) == cudaSuccess)
         for (std::size_t i = 0; i + 1 < sizeof name && properties.name[i] != '\0'; ++i)

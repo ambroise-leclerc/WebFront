@@ -2,29 +2,29 @@
 
 #include "../ContentPolicy.hpp"
 #include "../system/WindowsCompat.hpp"
-#include "../ViewAssociation.hpp"
 #include "../tooling/Logger.hpp"
-#include "CEFPaths.hpp"
-#include "ProfileLease.hpp"
+#include "../ViewAssociation.hpp"
 #include "Capture.hpp"
+#include "CEFPaths.hpp"
 #include "DefaultBrowser.hpp"
 #include "Downloads.hpp"
-#include "ScriptDialogs.hpp"
 #include "NativeWindow.hpp"
+#include "ProfileLease.hpp"
+#include "ScriptDialogs.hpp"
 #include "UIExecutor.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
 
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
 #include <future>
 #include <iostream>
-#include <memory>
-#include <cstdint>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -50,14 +50,14 @@ namespace webfront::cef {
 // Exception types for CEF initialization
 class CEFInitializationError : public std::runtime_error {
 public:
-    explicit CEFInitializationError(const std::string& message) : std::runtime_error("CEF initialization failed: " + message) { }
+    explicit CEFInitializationError(const std::string& message) : std::runtime_error("CEF initialization failed: " + message) {}
 };
 
 class CEFSubprocessExit : public std::exception {
     int exit_code_;
 
 public:
-    explicit CEFSubprocessExit(int exit_code) : exit_code_(exit_code) { }
+    explicit CEFSubprocessExit(int exit_code) : exit_code_(exit_code) {}
 
     [[nodiscard]] const char* what() const noexcept override {
         return "CEF subprocess should exit";
@@ -92,8 +92,8 @@ public:
     #include "cef_id_mappers.h"
     #include "cef_load_handler.h"
     #include "cef_parser.h"
-    #include "cef_task.h"
     #include "cef_request_handler.h"
+    #include "cef_task.h"
     #include "views/cef_browser_view.h"
     #include "views/cef_window.h"
     #include "views/cef_window_delegate.h"
@@ -107,11 +107,11 @@ static constexpr bool webfrontEmbedCEF{true};
 
 // Constants
 namespace {
-constexpr const char* kCEFCacheDir         = "cef_cache";
-constexpr const char* kCEFLogFile          = "cef_debug.log";
-constexpr const char* kICUDataFile         = "icudtl.dat";
-constexpr const char* kLocalesDir          = "locales";
-constexpr const char* kResourcesDir        = "Resources";
+constexpr const char* kCEFCacheDir  = "cef_cache";
+constexpr const char* kCEFLogFile   = "cef_debug.log";
+constexpr const char* kICUDataFile  = "icudtl.dat";
+constexpr const char* kLocalesDir   = "locales";
+constexpr const char* kResourcesDir = "Resources";
 }  // namespace
 
 // Helper function to set keychain-related environment variables
@@ -148,7 +148,7 @@ inline void configurePlatformPaths(CefSettings& settings [[maybe_unused]]) {
     std::filesystem::path framework_path = detail::macOSFrameworkPath(exe_path);
     std::filesystem::path resources_path = framework_path / kResourcesDir;
     // One live process per profile: Chromium would hand a second instance over to the first (ProfileLease.hpp).
-    std::filesystem::path cache_path     = frontend::leaseProfileDirectory(exe_dir / kCEFCacheDir / exe_path.filename());
+    std::filesystem::path cache_path = frontend::leaseProfileDirectory(exe_dir / kCEFCacheDir / exe_path.filename());
 
     // Convert to absolute paths
     framework_path = std::filesystem::absolute(framework_path);
@@ -175,7 +175,7 @@ inline void configurePlatformPaths(CefSettings& settings [[maybe_unused]]) {
     std::filesystem::path locales_path   = resources_path / kLocalesDir;
     std::filesystem::path exe_path       = current_exe;
     // One live process per profile: Chromium would hand a second instance over to the first (ProfileLease.hpp).
-    std::filesystem::path cache_path     = frontend::leaseProfileDirectory(exe_dir / kCEFCacheDir / exe_path.filename());
+    std::filesystem::path cache_path = frontend::leaseProfileDirectory(exe_dir / kCEFCacheDir / exe_path.filename());
 
     // Convert to absolute paths
     resources_path = std::filesystem::absolute(resources_path);
@@ -306,8 +306,8 @@ public:
     }
 
 private:
-    std::mutex                  mutex;
-    std::map<int, ViewLaunch>   launches;
+    std::mutex                mutex;
+    std::map<int, ViewLaunch> launches;
     #ifdef __clang__
         #pragma clang diagnostic push
         #pragma clang diagnostic ignored "-Wextra-semi"
@@ -376,7 +376,9 @@ public:
             return;
         }
         CefRefPtr<SimpleCEFWindowDelegate> self(this);
-        setReveal([self, window] { self->present(window); });
+        setReveal([self, window] {
+            self->present(window);
+        });
         CefPostDelayedTask(TID_UI, new PresentTask(self, window), presentDelayMilliseconds);
     }
 
@@ -426,7 +428,9 @@ private:
     class PresentTask : public CefTask {
     public:
         PresentTask(CefRefPtr<SimpleCEFWindowDelegate> owner, CefRefPtr<CefWindow> target) : delegate(std::move(owner)), window(std::move(target)) {}
-        void Execute() override { delegate->present(window); }
+        void Execute() override {
+            delegate->present(window);
+        }
 
     private:
         CefRefPtr<SimpleCEFWindowDelegate> delegate;
@@ -434,10 +438,10 @@ private:
         IMPLEMENT_REFCOUNTING(PresentTask);
     };
 
-    CefRefPtr<CefBrowserView> browserView;
+    CefRefPtr<CefBrowserView>                  browserView;
     std::function<void(std::function<void()>)> setReveal;
-    WindowOptions             windowOptions;
-    bool                      presented = false;
+    WindowOptions                              windowOptions;
+    bool                                       presented = false;
 
     #ifdef __clang__
         #pragma clang diagnostic push
@@ -466,15 +470,15 @@ private:
 
 using frontend::CaptureProvider;
 using frontend::CaptureRegistration;
-using frontend::PendingCaptures;
 using frontend::CaptureResult;
+using frontend::PendingCaptures;
 
 namespace detail {
 /// The browser as seen by capture requests: read and cleared only on the UI thread, so a request that outlives the
 /// window finds it null.
 struct CaptureJob;
 struct CaptureTarget {
-    CefRefPtr<CefBrowser>                    browser;
+    CefRefPtr<CefBrowser>       browser;
     PendingCaptures<CaptureJob> pending;  // Requests nobody has answered yet, queued or in flight.
 };
 
@@ -486,7 +490,7 @@ struct CaptureJob {
 inline void answer(CaptureJob& job, CaptureResult result) noexcept {
     try {
         job.done.set_value(std::move(result));
-    } catch (...) { }
+    } catch (...) {}
 }
 
 /// The window is going away: no pending request waits for an answer that will never come.
@@ -514,7 +518,7 @@ inline CaptureResult pngOf(const void* json, std::size_t size) {
 // registration then; the job outlives a waiter that timed out.
 class CaptureObserver : public CefDevToolsMessageObserver {
 public:
-    explicit CaptureObserver(std::shared_ptr<CaptureJob> request) : job(std::move(request)) { }
+    explicit CaptureObserver(std::shared_ptr<CaptureJob> request) : job(std::move(request)) {}
 
     void start(CefRefPtr<CefBrowserHost> host) {
         registration = host->AddDevToolsMessageObserver(this);
@@ -558,7 +562,7 @@ private:
 
 class CaptureTask : public CefTask {
 public:
-    explicit CaptureTask(std::shared_ptr<CaptureJob> request) : job(std::move(request)) { }
+    explicit CaptureTask(std::shared_ptr<CaptureJob> request) : job(std::move(request)) {}
     void Execute() override {
         try {
             if (!job->target->browser) {
@@ -570,7 +574,7 @@ public:
         } catch (...) {
             try {
                 job->done.set_exception(std::current_exception());
-            } catch (...) { }
+            } catch (...) {}
         }
     }
 
@@ -618,7 +622,7 @@ class SimpleCEFClient : public CefClient,
                         public CefJSDialogHandler {
 public:
     explicit SimpleCEFClient(webfront::detail::BoundContentPolicy policy = webfront::detail::BoundContentPolicy{}, browser::Launcher launch = browser::launch)
-        : contentPolicy(std::move(policy)), popupLauncher(launch) { }
+        : contentPolicy(std::move(policy)), popupLauncher(launch) {}
 
     void setContentPolicy(webfront::detail::BoundContentPolicy policy) {
         contentPolicy = std::move(policy);
@@ -638,10 +642,10 @@ public:
     /// Test injection: answers <input type="file"> without a dialog (an empty list cancels). Unset keeps the engine's dialog.
     std::function<std::vector<std::string>()> chooseFiles;
     /// Test injection: a non-empty folder receives downloads without a "save as" dialog.
-    std::filesystem::path downloadDirectory;
-    frontend::detail::DownloadReservations                         downloadReservations;
-    std::mutex                                                     reservedMutex;
-    std::map<std::uint32_t, std::filesystem::path>                 reservedByDownload;  // CefDownloadItem id -> destination
+    std::filesystem::path                          downloadDirectory;
+    frontend::detail::DownloadReservations         downloadReservations;
+    std::mutex                                     reservedMutex;
+    std::map<std::uint32_t, std::filesystem::path> reservedByDownload;  // CefDownloadItem id -> destination
     /// Test injection: called with the full path of each completed download.
     std::function<void(const std::string&)> downloadFinished;
 
@@ -831,7 +835,7 @@ public:
         return this;
     }
 
-    virtual void OnTitleChange(CefRefPtr<CefBrowser> /*browser*/, const CefString& /*title*/) override { }
+    virtual void OnTitleChange(CefRefPtr<CefBrowser> /*browser*/, const CefString& /*title*/) override {}
     virtual void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
         // The application's window is the first browser; popups are cancelled and DevTools has its own client.
         if (!captureTarget->browser) {
@@ -869,10 +873,10 @@ private:
         return true;
     }
 
-    webfront::detail::BoundContentPolicy contentPolicy;
-    browser::Launcher                    popupLauncher;
-    bool loadingInitialPage = true;
-    std::shared_ptr<detail::CaptureTarget> captureTarget = std::make_shared<detail::CaptureTarget>();
+    webfront::detail::BoundContentPolicy   contentPolicy;
+    browser::Launcher                      popupLauncher;
+    bool                                   loadingInitialPage = true;
+    std::shared_ptr<detail::CaptureTarget> captureTarget      = std::make_shared<detail::CaptureTarget>();
     CaptureRegistration                    captureRegistration;
 
     void dispatchPopup(const std::string& url, bool userGesture) noexcept {
@@ -967,9 +971,13 @@ private:
     #endif
 };
 
-inline void openWindow(std::string url, webfront::detail::BoundContentPolicy contentPolicy,
-                       CefRefPtr<SimpleCEFClient> client = nullptr, const std::filesystem::path& profile = {},
-                       WindowOptions windowSettings = {}, bool preserveSignalHandlers = false, const ViewLaunch& launch = {}) {
+inline void openWindow(std::string                          url,
+                       webfront::detail::BoundContentPolicy contentPolicy,
+                       CefRefPtr<SimpleCEFClient>           client                 = nullptr,
+                       const std::filesystem::path&         profile                = {},
+                       WindowOptions                        windowSettings         = {},
+                       bool                                 preserveSignalHandlers = false,
+                       const ViewLaunch&                    launch                 = {}) {
     // One window per process. Refuse a second open() first, before CefInitialize (which succeeds again when the context
     // exists) and before any view: its browser would reach OnAfterCreated and replace the published window of the running
     // one, before host.attach() could refuse it, and the first connection's dialogs would be parented to the new window.
@@ -1017,7 +1025,8 @@ inline void openWindow(std::string url, webfront::detail::BoundContentPolicy con
     // Chrome's browser startup can install handlers independently of ContentMain's setting.
     // Restore the embedder's exact actions once all browser initialization has finished.
     if (preserveSignalHandlers && (::sigaction(SIGINT, &previousInt, nullptr) || ::sigaction(SIGTERM, &previousTerm, nullptr))) {
-        if (initialized) CefShutdown();
+        if (initialized)
+            CefShutdown();
         throw std::runtime_error("Cannot restore native signal handlers");
     }
     #endif
@@ -1049,7 +1058,9 @@ inline void openWindow(std::string url, webfront::detail::BoundContentPolicy con
     // Create a window delegate for controlling the window appearance
     CefRefPtr<SimpleCEFWindowDelegate> window_delegate(new SimpleCEFWindowDelegate(frontend::detail::resolveWindow(std::move(windowSettings))));
     window_delegate->SetBrowserView(browser_view);
-    window_delegate->SetRevealHook([client](std::function<void()> reveal) { client->onInitialLoad = std::move(reveal); });
+    window_delegate->SetRevealHook([client](std::function<void()> reveal) {
+        client->onInitialLoad = std::move(reveal);
+    });
 
     // Create a top-level window with no browser chrome
     CefRefPtr<CefWindow> window = CefWindow::CreateTopLevelWindow(window_delegate);
@@ -1057,7 +1068,9 @@ inline void openWindow(std::string url, webfront::detail::BoundContentPolicy con
     // Run the CEF message loop; CefPostTask is thread-safe and the task runs on this (UI) thread. A failed post (the loop is
     // ending) is dropped: closing the host completes what is pending stopped.
     auto& host = frontend::uiExecutorHostOf<frontend::CEFFrontend>();
-    host.attach([] { CefPostTask(TID_UI, new DrainTask); });
+    host.attach([] {
+        CefPostTask(TID_UI, new DrainTask);
+    });
     {
         struct Closing {
             frontend::UIExecutorHost& host;
@@ -1083,8 +1096,12 @@ inline void closeBrowser(void* browser) {
     static_cast<CefBrowser*>(browser)->GetHost()->CloseBrowser(true);
 }
 
-inline void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy = {},
-                 const WindowOptions& window = {}, const ViewLaunch& launch = {}) {
+inline void open(std::string_view     address,
+                 std::string_view     port,
+                 std::string_view     file,
+                 const ContentPolicy& policy = {},
+                 const WindowOptions& window = {},
+                 const ViewLaunch&    launch = {}) {
     detail::openWindow(frontend::detail::applicationUrl(address, port, file, launch.origin),
                        webfront::detail::BoundContentPolicy{frontend::detail::applicationUrl(address, port, "", launch.origin), policy},
                        nullptr,
@@ -1109,8 +1126,12 @@ inline void initialize() {
                              "WEBFRONT_EMBED_CEF=OFF. Reconfigure with -DWEBFRONT_EMBED_CEF=ON to use the embedded CEF frontend.");
 }
 
-inline void open(std::string_view /*address*/, std::string_view /*port*/, std::string_view /*file*/, const ContentPolicy& = {}, const WindowOptions& = {},
-                 const ViewLaunch& = {}) {
+inline void open(std::string_view /*address*/,
+                 std::string_view /*port*/,
+                 std::string_view /*file*/,
+                 const ContentPolicy& = {},
+                 const WindowOptions& = {},
+                 const ViewLaunch&    = {}) {
     throw std::runtime_error("webfront::frontend::CEFFrontend requires CEF support, but this build was configured with "
                              "WEBFRONT_EMBED_CEF=OFF. Reconfigure with -DWEBFRONT_EMBED_CEF=ON to use the embedded CEF frontend.");
 }

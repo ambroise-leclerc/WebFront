@@ -65,7 +65,7 @@ inline std::vector<std::string> contractStrings(std::string_view value) {
 }
 class OperationError : public std::runtime_error {
 public:
-    OperationError(std::string category, std::string message) : std::runtime_error(std::move(message)), code(std::move(category)) { }
+    OperationError(std::string category, std::string message) : std::runtime_error(std::move(message)), code(std::move(category)) {}
     const std::string code;
 };
 /// The channel to the native owner failed: the outcome of the request in flight is unknown.
@@ -93,9 +93,12 @@ inline const auto& operationDefinitions() {
         const Object                                            schemas{contractObject().raw("x-webfront-operations")};
         for (const auto& [name, raw] : schemas.members()) {
             const Object schema{raw};
-            values.emplace(
-                name,
-                OperationDefinition{schema, schema.string("permission"), contractStrings(schema.raw("arguments")), contractStrings(schema.raw("required")), schema.string("since")});
+            values.emplace(name,
+                           OperationDefinition{schema,
+                                               schema.string("permission"),
+                                               contractStrings(schema.raw("arguments")),
+                                               contractStrings(schema.raw("required")),
+                                               schema.string("since")});
         }
         return values;
     }();

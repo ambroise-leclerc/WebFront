@@ -21,12 +21,14 @@
 
 #if defined(_WIN32)
     #include "../system/WindowsCompat.hpp"
+
     #include <windows.h>
 #elif defined(__APPLE__)
     #include <dlfcn.h>
     #include <pthread.h>
 #elif defined(__linux__)
     #include <cerrno>
+
     #include <dlfcn.h>
     #include <sys/eventfd.h>
     #include <unistd.h>
@@ -66,7 +68,9 @@ public:
     void disarm() {
         std::unique_lock lock(mutex);
         quit = nullptr;  // no later request() copies it
-        callsDone.wait(lock, [&] { return calls == 0; });
+        callsDone.wait(lock, [&] {
+            return calls == 0;
+        });
         requested = false;
     }
 
@@ -102,8 +106,8 @@ private:
     mutable std::mutex      mutex;
     std::condition_variable callsDone;
     unsigned                calls{0};
-    bool                  requested{false};
-    std::function<void()> quit;
+    bool                    requested{false};
+    std::function<void()>   quit;
 };
 
 namespace detail::uiloop {
@@ -128,7 +132,7 @@ struct CloseGuard {
 inline constexpr UINT drainMessage = WM_APP + 0x4C2;
 
 struct LoopWindow {
-    UIExecutorHost* host{};
+    UIExecutorHost*         host{};
     static LRESULT CALLBACK procedure(HWND handle, UINT message, WPARAM wParam, LPARAM lParam) noexcept {
         if (message == drainMessage) {
             if (auto* self = reinterpret_cast<LoopWindow*>(GetWindowLongPtrW(handle, GWLP_USERDATA)))
@@ -177,7 +181,9 @@ inline void run(UIExecutorHost& host, UILoopStop& stop, const Launch& launch = {
             throw std::runtime_error("UI loop: cannot wake the interface thread (the message queue is full)");
     });
     CloseGuard guard{host, stop};
-    if (stop.arm([event = stopEvent.handle] { SetEvent(event); }))
+    if (stop.arm([event = stopEvent.handle] {
+            SetEvent(event);
+        }))
         return;
     for (;;) {
         if (stop.requestedStop())
@@ -216,16 +222,16 @@ public:
         void (*perform)(void*);
     };
 
-    Ref (*current)()                                  = nullptr;
-    Ref (*sourceCreate)(void*, long, SourceContext*)  = nullptr;
-    void (*addSource)(Ref, Ref, Ref)                  = nullptr;
-    void (*removeSource)(Ref, Ref, Ref)               = nullptr;
-    void (*signal)(Ref)                               = nullptr;
-    void (*wakeUp)(Ref)                               = nullptr;
-    int (*runInMode)(Ref, double, unsigned char)      = nullptr;
-    void (*release)(Ref)                              = nullptr;
-    Ref commonModes                                   = nullptr;
-    Ref defaultMode                                   = nullptr;
+    Ref (*current)()                                 = nullptr;
+    Ref (*sourceCreate)(void*, long, SourceContext*) = nullptr;
+    void (*addSource)(Ref, Ref, Ref)                 = nullptr;
+    void (*removeSource)(Ref, Ref, Ref)              = nullptr;
+    void (*signal)(Ref)                              = nullptr;
+    void (*wakeUp)(Ref)                              = nullptr;
+    int (*runInMode)(Ref, double, unsigned char)     = nullptr;
+    void (*release)(Ref)                             = nullptr;
+    Ref commonModes                                  = nullptr;
+    Ref defaultMode                                  = nullptr;
 
     static const CoreFoundation& get() {
         static const CoreFoundation instance;
@@ -286,7 +292,7 @@ public:
         const auto mode     = reinterpret_cast<Id*>(dlsym(RTLD_DEFAULT, "NSDefaultRunLoopMode"));
         if (!getClass || !selector || !send || !poolPush || !poolPop || !mode)
             return;
-        defaultMode      = *mode;
+        defaultMode         = *mode;
         const auto appClass = getClass("NSApplication");
         eventClass          = getClass("NSEvent");
         dateClass           = getClass("NSDate");
@@ -304,8 +310,17 @@ public:
     /// Thread-safe: makes next() return, so that the loop reads its flags again.
     void wake() const {
         const auto pool  = poolPush();
-        const auto event = call<Id>(eventClass, "otherEventWithType:location:modifierFlags:timestamp:windowNumber:context:subtype:data1:data2:",
-                                    15UL /* NSEventTypeApplicationDefined */, Point{0, 0}, 0UL, 0.0, 0L, Id{}, short{0}, 0L, 0L);
+        const auto event = call<Id>(eventClass,
+                                    "otherEventWithType:location:modifierFlags:timestamp:windowNumber:context:subtype:data1:data2:",
+                                    15UL /* NSEventTypeApplicationDefined */,
+                                    Point{0, 0},
+                                    0UL,
+                                    0.0,
+                                    0L,
+                                    Id{},
+                                    short{0},
+                                    0L,
+                                    0L);
         if (event)
             call<void>(application, "postEvent:atStart:", event, static_cast<signed char>(1));
         poolPop(pool);
@@ -315,8 +330,7 @@ public:
     void next() const {
         const auto pool  = poolPush();
         const auto until = call<Id>(dateClass, "distantFuture");
-        const auto event = call<Id>(application, "nextEventMatchingMask:untilDate:inMode:dequeue:", ~0UL, until, defaultMode,
-                                    static_cast<signed char>(1));
+        const auto event = call<Id>(application, "nextEventMatchingMask:untilDate:inMode:dequeue:", ~0UL, until, defaultMode, static_cast<signed char>(1));
         if (event)
             call<void>(application, "sendEvent:", event);
         poolPop(pool);
@@ -329,24 +343,26 @@ private:
     }
 
     Selector (*selector)(const char*) = nullptr;
-    void*  send{};
-    Id     (*poolPush)()   = nullptr;
-    void   (*poolPop)(Id)  = nullptr;
-    Id     application{};
-    Id     eventClass{};
-    Id     dateClass{};
-    Id     defaultMode{};
+    void* send{};
+    Id (*poolPush)()    = nullptr;
+    void (*poolPop)(Id) = nullptr;
+    Id application{};
+    Id eventClass{};
+    Id dateClass{};
+    Id defaultMode{};
 };
 
 inline void run(UIExecutorHost& host, UILoopStop& stop, const Launch& launch = {}) {
     // AppKit belongs to the main thread: fail before initializing it or attaching the executor.
     if (!pthread_main_np())
         throw std::runtime_error("UI loop: the system browser's interface loop must run on the main thread on macOS");
-    const auto& cf = CoreFoundation::get();
-    const AppKitPump pump;
+    const auto&                   cf = CoreFoundation::get();
+    const AppKitPump              pump;
     CoreFoundation::SourceContext context{};
     context.info    = &host;
-    context.perform = +[](void* info) { static_cast<UIExecutorHost*>(info)->drain(); };
+    context.perform = +[](void* info) {
+        static_cast<UIExecutorHost*>(info)->drain();
+    };
     const auto source = cf.sourceCreate(nullptr, 0, &context);
     if (!source)
         throw std::runtime_error("UI loop: cannot create the run loop source");
@@ -405,11 +421,11 @@ public:
     }
     void signal() const noexcept {
         const std::uint64_t one = 1;
-        while (::write(descriptor, &one, sizeof(one)) < 0 && errno == EINTR) { }
+        while (::write(descriptor, &one, sizeof(one)) < 0 && errno == EINTR) {}
     }
     std::uint64_t consume() const noexcept {
         std::uint64_t count = 0;
-        while (::read(descriptor, &count, sizeof(count)) < 0 && errno == EINTR) { }
+        while (::read(descriptor, &count, sizeof(count)) < 0 && errno == EINTR) {}
         return count;
     }
 };
@@ -463,8 +479,7 @@ inline void run(UIExecutorHost& host, UILoopStop& stop, const Launch& launch = {
     // can then dispatch it, and the callback below always runs on the interface thread. A host that iterates this context
     // on another thread (even briefly, when this call arrives) is refused here instead of running our callback there.
     if (!glib.contextAcquire(context))
-        throw std::runtime_error(
-            "UI loop: the default GLib context is owned by another thread; run the loop on the thread that iterates it");
+        throw std::runtime_error("UI loop: the default GLib context is owned by another thread; run the loop on the thread that iterates it");
     struct Release {
         const GLib&  glib;
         GLib::Object context;
@@ -476,7 +491,7 @@ inline void run(UIExecutorHost& host, UILoopStop& stop, const Launch& launch = {
     if (!loop)
         throw std::runtime_error("UI loop: cannot create the GLib main loop");
     struct Unref {
-        const GLib& glib;
+        const GLib&  glib;
         GLib::Object loop;
         ~Unref() {
             glib.loopUnref(loop);

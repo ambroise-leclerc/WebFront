@@ -131,9 +131,9 @@ class DirectChannel : public std::enable_shared_from_this<DirectChannel> {
     // Always called once per evaluation, with an error when the view is destroyed first.
     static void onEvaluated(Object view, Object result, std::weak_ptr<DirectChannel>* pending) noexcept {
         const std::unique_ptr<std::weak_ptr<DirectChannel>> owned(pending);
-        const auto&                                          api   = DirectApi::shared();
-        gtk::Api::Error*                                     error = nullptr;
-        const auto                                           value = api.evaluateFinish(view, result, &error);
+        const auto&                                         api   = DirectApi::shared();
+        gtk::Api::Error*                                    error = nullptr;
+        const auto                                          value = api.evaluateFinish(view, result, &error);
         if (const auto self = owned->lock())
             return self->completed(value, error);
         // The window closed first: the channel and its session are gone, the result is only released.
@@ -146,8 +146,7 @@ class DirectChannel : public std::enable_shared_from_this<DirectChannel> {
         bool echoed = false;
         try {
             echoed = value && text(value) == payload;
-        } catch (...) {
-        }
+        } catch (...) {}
         if (value)
             session.a.unref(value);
         if (error)
@@ -168,7 +167,7 @@ class DirectChannel : public std::enable_shared_from_this<DirectChannel> {
     }
 
 public:
-    explicit DirectChannel(gtk::Session& live) : session(live) { }
+    explicit DirectChannel(gtk::Session& live) : session(live) {}
     void attach() {
         listen("wfecho", onEcho);
         listen("wfrun", onRun);

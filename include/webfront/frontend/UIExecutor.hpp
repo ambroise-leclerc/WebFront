@@ -46,16 +46,16 @@ namespace ex = networking::ex;
 /// @brief No interface-thread loop is attached: the frontend has none, it has not started or it has closed.
 class UIExecutorUnavailable : public std::runtime_error {
 public:
-    UIExecutorUnavailable() : std::runtime_error("no interface thread is available: the frontend has no running loop") { }
+    UIExecutorUnavailable() : std::runtime_error("no interface thread is available: the frontend has no running loop") {}
 };
 
 namespace detail {
 
 /// One pending operation. The first of run / stop / close / failure to claim it completes the receiver, once.
 struct UIJob {
-    virtual ~UIJob()                         = default;
-    virtual void run() noexcept              = 0;  // on the interface thread
-    virtual void abandon() noexcept          = 0;  // loop closed or stop requested: completes stopped
+    virtual ~UIJob()                               = default;
+    virtual void run() noexcept                    = 0;  // on the interface thread
+    virtual void abandon() noexcept                = 0;  // loop closed or stop requested: completes stopped
     virtual void fail(std::exception_ptr) noexcept = 0;
 };
 
@@ -160,7 +160,7 @@ public:
             {
                 std::lock_guard lock(mutex);
                 if (queue.empty() || phase != Phase::running || wakePending)
-                    return;  // nothing left, or a job queued meanwhile already asked for the next pass
+                    return;                  // nothing left, or a job queued meanwhile already asked for the next pass
                 wake        = wakeFunction;  // may throw: nothing has changed yet
                 wakePending = true;
                 ++wakesInFlight;
@@ -180,7 +180,9 @@ public:
             phase = Phase::closed;
             pending.swap(queue);
             // No new wake starts (phase is closed): wait for those in flight on other threads, which only signal the loop.
-            wakesDone.wait(lock, [&] { return wakesInFlight == 0; });
+            wakesDone.wait(lock, [&] {
+                return wakesInFlight == 0;
+            });
             wakeFunction = nullptr;  // may hold the session that is ending
         }
         for (auto& job : pending)
@@ -235,7 +237,7 @@ class UIScheduleSender {
         std::exception_ptr                                    failure;
         std::optional<ex::stop_callback_for_t<Token, OnStop>> stopCallback;
 
-        State(Receiver r, std::weak_ptr<UIExecutorShared> o) : receiver(std::move(r)), owner(std::move(o)) { }
+        State(Receiver r, std::weak_ptr<UIExecutorShared> o) : receiver(std::move(r)), owner(std::move(o)) {}
 
         // The first completion wins. Delivery is deferred while start() registers the stop callback: a token already
         // stopped invokes it inline, and the callback is not yet constructed.
@@ -314,7 +316,7 @@ class UIScheduleSender {
 
     public:
         using operation_state_concept = ex::operation_state_tag;
-        explicit Operation(std::shared_ptr<State<Receiver>> value) : state(std::move(value)) { }
+        explicit Operation(std::shared_ptr<State<Receiver>> value) : state(std::move(value)) {}
         Operation(const Operation&)            = delete;
         Operation(Operation&&)                 = delete;
         Operation& operator=(const Operation&) = delete;
@@ -329,7 +331,7 @@ public:
     using sender_concept        = ex::sender_tag;
     using completion_signatures = ex::completion_signatures<ex::set_value_t(), ex::set_error_t(std::exception_ptr), ex::set_stopped_t()>;
 
-    explicit UIScheduleSender(std::weak_ptr<UIExecutorShared> value) : target(std::move(value)) { }
+    explicit UIScheduleSender(std::weak_ptr<UIExecutorShared> value) : target(std::move(value)) {}
 
     template <typename Receiver>
     auto connect(Receiver receiver) const {
@@ -345,7 +347,7 @@ class UIExecutor {
 
 public:
     UIExecutor() = default;
-    explicit UIExecutor(std::weak_ptr<detail::UIExecutorShared> value) : shared(std::move(value)) { }
+    explicit UIExecutor(std::weak_ptr<detail::UIExecutorShared> value) : shared(std::move(value)) {}
 
     /// True while the frontend's loop runs. A later call to schedule() can still find it closed.
     [[nodiscard]] bool available() const {
@@ -407,7 +409,7 @@ template <typename Tag>
 /// thread; on the interface thread it reaches the caller, as the std::logic_error it is.
 class WindowNotReady : public std::logic_error {
 public:
-    explicit WindowNotReady(const std::string& message) : std::logic_error(message) { }
+    explicit WindowNotReady(const std::string& message) : std::logic_error(message) {}
 };
 
 namespace detail {
@@ -439,10 +441,10 @@ struct UIInvocation {
             finish(std::make_exception_ptr(UIExecutorUnavailable{}));
         }
     };
-    Function                         function;
-    std::promise<std::exception_ptr> done;
+    Function                                                                               function;
+    std::promise<std::exception_ptr>                                                       done;
     ex::connect_result_t<decltype(std::declval<const UIExecutor&>().schedule()), Receiver> operation;
-    UIInvocation(const UIExecutor& loop, Function work) : function(std::move(work)), operation(ex::connect(loop.schedule(), Receiver{this})) { }
+    UIInvocation(const UIExecutor& loop, Function work) : function(std::move(work)), operation(ex::connect(loop.schedule(), Receiver{this})) {}
 };
 
 }  // namespace detail

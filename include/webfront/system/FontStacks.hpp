@@ -36,7 +36,9 @@ namespace detail {
 
 inline std::string lower(std::string_view text) {
     std::string result(text);
-    std::ranges::transform(result, result.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::ranges::transform(result, result.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
     return result;
 }
 
@@ -133,10 +135,10 @@ inline bool wordAt(std::string_view text, std::size_t at, std::string_view word)
 /// the value of `content`) are not declarations; the property name is read whatever its case. A declaration whose value
 /// uses `var()` or `inherit` is not analysed. Pure and total: any text is accepted.
 inline std::vector<LongStack> longStacks(std::string_view css) {
-    const auto             clean = detail::withoutComments(css);
-    std::vector<LongStack> found;
+    const auto                 clean = detail::withoutComments(css);
+    std::vector<LongStack>     found;
     constexpr std::string_view property = "font-family";
-    char quote = 0;
+    char                       quote    = 0;
     for (std::size_t at = 0; at < clean.size(); ++at) {
         const char c = clean[at];
         if (quote) {
@@ -160,7 +162,7 @@ inline std::vector<LongStack> longStacks(std::string_view css) {
         if (colon >= clean.size() || clean[colon] != ':')
             continue;
         // The value ends at the first `;` or `}` outside quotes.
-        std::size_t end = colon + 1;
+        std::size_t end        = colon + 1;
         char        valueQuote = 0;
         for (; end < clean.size(); ++end) {
             const char v = clean[end];
@@ -175,8 +177,8 @@ inline std::vector<LongStack> longStacks(std::string_view css) {
                 break;
             }
         }
-        end = std::min(end, clean.size());
-        at  = end;  // resume after the declaration (the loop increments past the terminator)
+        end              = std::min(end, clean.size());
+        at               = end;  // resume after the declaration (the loop increments past the terminator)
         const auto value = std::string(detail::trim(std::string_view(clean).substr(colon + 1, end - colon - 1)));
         if (value.find("var(") != std::string::npos || detail::lower(value) == "inherit")
             continue;
@@ -196,9 +198,9 @@ inline std::ostream* warningOutput = nullptr;
 /// The version of a stylesheet file: its size and its last write time, compared as they are (no conversion of the file
 /// clock's representation, which differs between standard libraries).
 struct Stamp {
-    std::uintmax_t                size = 0;
+    std::uintmax_t                  size = 0;
     std::filesystem::file_time_type written{};
-    friend bool operator==(const Stamp&, const Stamp&) = default;
+    friend bool                     operator==(const Stamp&, const Stamp&) = default;
 };
 
 namespace detail {
@@ -234,7 +236,7 @@ inline std::size_t warnLongStacks(const std::string& name, std::string_view css,
             entry->second = stamp;
         }
     }
-    const auto stacks = longStacks(css);
+    const auto       stacks = longStacks(css);
     std::scoped_lock lock{detail::seenMutex()};
     auto&            out = warningOutput ? *warningOutput : std::cerr;
     for (const auto& stack : stacks)

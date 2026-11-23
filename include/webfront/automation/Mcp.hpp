@@ -8,7 +8,7 @@ namespace webfront::automation {
 template <typename Backend>
 class Mcp {
 public:
-    explicit Mcp(Backend& controller) : session(controller) { }
+    explicit Mcp(Backend& controller) : session(controller) {}
 
     std::optional<std::string> receive(std::string_view line) {
         std::string id           = "null";
@@ -51,9 +51,10 @@ public:
                 initialized = true;
                 // Lifecycle version negotiation: offer our supported version when the requested one differs.
                 // A client that does not support it should disconnect, rather than use a mismatched profile.
-                return success(id,
-                               R"({"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"webfront-developer","version":"1.0.0"},"instructions":)"
-                                   + json::quote(mcpInstructions) + "}");
+                return success(
+                    id,
+                    R"({"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"webfront-developer","version":"1.0.0"},"instructions":)"
+                        + json::quote(mcpInstructions) + "}");
             }
             if (!ready)
                 return error(id, -32600, "Initialize the MCP connection first");

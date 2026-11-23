@@ -81,8 +81,8 @@ inline std::vector<std::string> parseArguments(std::string_view json) {
 
 inline void validateName(std::string_view name) {
     const auto invalid = name.empty() || std::ranges::any_of(name, [](char c) {
-        return static_cast<unsigned char>(c) <= ' ' || c == '\x7f' || c == '\'' || c == '"' || c == '\\';
-    });
+                             return static_cast<unsigned char>(c) <= ' ' || c == '\x7f' || c == '\'' || c == '"' || c == '\\';
+                         });
     if (invalid)
         throw std::invalid_argument("Invalid command name '" + std::string(name) + "'");
     if (std::ranges::find(reservedNames, name) != reservedNames.end())
@@ -98,10 +98,10 @@ struct Run {
     int                      exitCode = 0;
     // The command's own stop source, requested with its task's: a copy of the Context that outlives the task still
     // reads a valid source.
-    ex::inplace_stop_source  stop;
-    std::atomic<bool>        disconnected{false};
+    ex::inplace_stop_source stop;
+    std::atomic<bool>       disconnected{false};
 
-    Run(UI caller, std::uint32_t commandId, std::vector<std::string> args) : ui(std::move(caller)), id(commandId), arguments(std::move(args)) { }
+    Run(UI caller, std::uint32_t commandId, std::vector<std::string> args) : ui(std::move(caller)), id(commandId), arguments(std::move(args)) {}
 
     /// Calls a browser function of the terminal, unless the browser disconnected (Registry::closed): its connection
     /// is gone, and a later browser may get its identifier. Returns false when the call was not made.
@@ -120,7 +120,7 @@ struct Run {
 template <typename UI>
 class Context {
 public:
-    explicit Context(std::shared_ptr<detail::Run<UI>> command) : run(std::move(command)) { }
+    explicit Context(std::shared_ptr<detail::Run<UI>> command) : run(std::move(command)) {}
 
     /// The words after the command name, split like a shell line by the terminal.
     [[nodiscard]] const std::vector<std::string>& args() const noexcept {
@@ -314,19 +314,20 @@ private:
     // command it stopped waiting for. A stopped command still reports: its coroutine was unwound, not this one.
     struct ForwardStop {
         Run<UI>* run;
-        void     operator()() noexcept { run->stop.request_stop(); }
+        void     operator()() noexcept {
+            run->stop.request_stop();
+        }
     };
 
     static Task execute(std::weak_ptr<Registry> registry, std::shared_ptr<Handler> handler, std::shared_ptr<Run<UI>> run) {
         const auto taskStop = co_await ex::read_env(ex::get_stop_token);
         // Forwards the task's stop request (Ctrl+C, disconnection, shutdown) to the command's source while it runs.
         const ex::stop_callback_for_t<std::remove_cvref_t<decltype(taskStop)>, ForwardStop> forward{taskStop, ForwardStop{run.get()}};
-        bool stopped = false;
-        std::string error;
+        bool                                                                                stopped = false;
+        std::string                                                                         error;
         try {
             // The command observes its own source: requested before the senders it awaits are stopped.
-            co_await ex::let_stopped(ex::write_env((*handler)(Context<UI>{run}), ex::prop{ex::get_stop_token, run->stop.get_token()}),
-                                     [&stopped]() noexcept {
+            co_await ex::let_stopped(ex::write_env((*handler)(Context<UI>{run}), ex::prop{ex::get_stop_token, run->stop.get_token()}), [&stopped]() noexcept {
                 stopped = true;
                 return ex::just();
             });
@@ -341,7 +342,7 @@ private:
         const int code = stopped || run->stop.stop_requested() ? interruptedExitCode : !error.empty() ? 1 : run->exitCode;
         try {
             run->send("webfront.commands.exit", code, error.empty() ? std::string_view{} : chunks(error).front());
-        } catch (...) { }  // nothing is left to report it to
+        } catch (...) {}  // nothing is left to report it to
     }
 };
 
@@ -382,7 +383,8 @@ public:
             return owner->list();
         }));
         registered(app.template cppFunction<void, UI, std::uint32_t, std::string, std::string>(
-            "webfront.commands.start", [owner = registry](UI ui, std::uint32_t id, const std::string& name, const std::string& arguments) {
+            "webfront.commands.start",
+            [owner = registry](UI ui, std::uint32_t id, const std::string& name, const std::string& arguments) {
                 owner->start(std::move(ui), id, name, arguments);
             }));
         registered(app.template cppFunction<void, UI, std::uint32_t>("webfront.commands.cancel", [owner = registry](UI ui, std::uint32_t id) {

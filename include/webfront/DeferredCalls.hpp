@@ -7,8 +7,8 @@
 #include <cstdint>
 #include <map>
 #include <memory>
-#include <optional>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <tuple>
 #include <type_traits>
@@ -104,11 +104,11 @@ public:
     }
 
 private:
-    mutable std::mutex                 mutex;
-    std::set<msg::CallId>              inFlightIds;
+    mutable std::mutex                                 mutex;
+    std::set<msg::CallId>                              inFlightIds;
     std::map<std::uint64_t, std::optional<TaskHandle>> tasks;
-    std::uint64_t                      lastKey = 0;
-    bool                               closed  = false;
+    std::uint64_t                                      lastKey = 0;
+    bool                                               closed  = false;
 };
 
 }  // namespace webfront::detail

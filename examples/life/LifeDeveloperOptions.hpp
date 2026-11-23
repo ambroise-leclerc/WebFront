@@ -10,9 +10,9 @@ namespace webfront::demo {
 struct LifeDeveloperOptions {
     static constexpr const char* defaultProject = "life-project";
 
-    std::filesystem::path       project = defaultProject;
-    std::optional<std::string>  environment;
-    std::optional<std::string>  integrity;
+    std::filesystem::path      project = defaultProject;
+    std::optional<std::string> environment;
+    std::optional<std::string> integrity;
 };
 
 /// Returns nullopt when the arguments do not follow the usage; no argument selects `life-project` in the

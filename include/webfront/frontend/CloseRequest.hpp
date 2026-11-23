@@ -20,7 +20,9 @@ namespace webfront::frontend {
 /// `static constexpr bool requiresMainThread` says; a frontend that does not declare it is taken to run on any thread.
 template <typename Frontend>
 inline constexpr bool requiresMainThread = [] {
-    if constexpr (requires { { Frontend::requiresMainThread } -> std::convertible_to<bool>; })
+    if constexpr (requires {
+                      { Frontend::requiresMainThread } -> std::convertible_to<bool>;
+                  })
         return static_cast<bool>(Frontend::requiresMainThread);
     else
         return false;
@@ -43,7 +45,9 @@ template <typename Frontend>
 inline constexpr bool endsOnRequest = [] {
     if constexpr (!CanRequestClose<Frontend>)
         return false;
-    else if constexpr (requires { { Frontend::endsOnRequest } -> std::convertible_to<bool>; })
+    else if constexpr (requires {
+                           { Frontend::endsOnRequest } -> std::convertible_to<bool>;
+                       })
         return static_cast<bool>(Frontend::endsOnRequest);
     else
         return true;
@@ -80,15 +84,14 @@ struct WindowCloseRequest {
         }
     };
 
-    UIExecutor                                                           executor;
-    NativeWindow                                                         window;
-    Close                                                                close;
-    std::optional<UISession>                                             session;
+    UIExecutor                                                                       executor;
+    NativeWindow                                                                     window;
+    Close                                                                            close;
+    std::optional<UISession>                                                         session;
     ex::connect_result_t<decltype(std::declval<UIExecutor&>().schedule()), Receiver> operation;
 
     WindowCloseRequest(const UIExecutor& loop, NativeWindow target, Close function, std::optional<UISession> owner)
-        : executor(loop), window(std::move(target)), close(std::move(function)), session(owner),
-          operation(ex::connect(loop.schedule(), Receiver{this})) { }
+        : executor(loop), window(std::move(target)), close(std::move(function)), session(owner), operation(ex::connect(loop.schedule(), Receiver{this})) {}
 };
 
 /// Runs `close(const NativeWindowHandle&)` on the interface thread with the published window. Returns false, having

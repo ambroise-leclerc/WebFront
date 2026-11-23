@@ -66,11 +66,10 @@ inline constexpr std::string_view defaultRegistry{"https://registry.npmjs.org/"}
 /// The configuration the environment reads. "registry" always names a usable registry, for environments
 /// that predate "registryExplicit"; the latter tells whether the application chose it.
 inline std::string bootstrapConfig(const DeveloperBootstrapOptions& options) {
-    return "{\"environment\":" + json::quote(options.environment) + ",\"integrity\":" + json::quote(options.integrity)
-         + ",\"registry\":" + json::quote(options.registry.value_or(std::string(defaultRegistry)))
-         + ",\"registryExplicit\":" + (options.registry ? "true" : "false")
-         + (options.manifestDirectory.empty() ? std::string{} : ",\"manifestDirectory\":" + json::quote(options.manifestDirectory))
-         + ",\"supported\":{\"protocol\":[" + std::to_string(protocolVersion) + "],\"api\":[" + std::to_string(apiVersion) + "]}}";
+    return "{\"environment\":" + json::quote(options.environment) + ",\"integrity\":" + json::quote(options.integrity) + ",\"registry\":"
+           + json::quote(options.registry.value_or(std::string(defaultRegistry))) + ",\"registryExplicit\":" + (options.registry ? "true" : "false")
+           + (options.manifestDirectory.empty() ? std::string{} : ",\"manifestDirectory\":" + json::quote(options.manifestDirectory))
+           + ",\"supported\":{\"protocol\":[" + std::to_string(protocolVersion) + "],\"api\":[" + std::to_string(apiVersion) + "]}}";
 }
 }  // namespace developer
 
@@ -82,7 +81,7 @@ public:
     /// An explicit project is required before enabling development file operations.
     explicit DeveloperAppWithNetwork(std::filesystem::path projectDirectory = {}, WebFrontConfig config = {})
         : Base(developer::projectConfig(std::move(config), projectDirectory)),
-          project(projectDirectory.empty() ? std::filesystem::path{} : developer::canonicalDirectory(projectDirectory)) { }
+          project(projectDirectory.empty() ? std::filesystem::path{} : developer::canonicalDirectory(projectDirectory)) {}
 
     void bootstrap(std::string_view          mode,
                    DeveloperBootstrapOptions options = {.environment = std::string(developer::release::environment),
