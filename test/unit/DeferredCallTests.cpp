@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
 /// @brief C++ callbacks that answer a JavaScript call later: their result, failures, stop, disconnection and shutdown (#459).
 #include "InjectableNetworking.hpp"
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/WebFront.hpp>
 #include <webfront/networking/TCPNetworkingStdnet.hpp>
 #include <webfront/system/DefaultFS.hpp>

@@ -2,7 +2,7 @@
 #include "Mocks.hpp"
 #include "Version.hpp"
 #include <functional>
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/networking/NetworkingMock.hpp>
 #include <webfront/tooling/Logger.hpp>
 #include <webfront/WebFront.hpp>

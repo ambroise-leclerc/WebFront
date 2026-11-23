@@ -1,5 +1,5 @@
 #include "InjectableNetworking.hpp"
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/components/react/Store.hpp>
 #include <webfront/tooling/Logger.hpp>
 #include <webfront/WebFront.hpp>

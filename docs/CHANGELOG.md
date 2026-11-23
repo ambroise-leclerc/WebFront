@@ -17,6 +17,7 @@ these entries stays in the GitHub releases and the Git history.
 - The CEF profile is now `cef_cache/<executable>`, not `cef_cache`: an application starts with an empty profile (localStorage, cookies); to keep the data, move the old contents of `cef_cache` into `cef_cache/<executable>` once (#617, `docs/HOST_INTEGRATION.md`).
 
 ### Added
+- Write your own scenarios with the public `webfront::bdd` framework: `<webfront/testing/Bdd.hpp>`, the `WebFront::Bdd` target, the installable `WebFrontBdd` package and `webfront_bdd_discover_tests()` (prefix, properties, shards) replace the internal `test/unit/Bdd.hpp` and `bdd_discover_tests`, and follow WebFront's versions (#647, `docs/BDD.md`).
 - Configure a stable MCP port and application-supplied Bearer token, or explicitly disable authentication for trusted development (#637, ADR-026, `docs/AUTOMATION.md`).
 - Connect an MCP client to the application itself: `enableAutomation(app, {.grants = {...}})` serves MCP over Streamable HTTP on a loopback port of its own, prints its URL and writes a private `mcp.json` with the URL and a session Bearer token, so several applications run side by side with no other program (#632, ADR-025, `docs/AUTOMATION.md`).
 - Use a custom network provider with `DeveloperAppWithNetwork`. The `BasicDeveloperApp` alias selects the existing TCP provider (#631).

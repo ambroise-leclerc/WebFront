@@ -1,6 +1,6 @@
 /** @brief Module-free consumer regressions for WebFront's optional diagnostic facade. */
 #include <webfront/tooling/Logger.hpp>
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 
 #include <array>
 #include <cstddef>

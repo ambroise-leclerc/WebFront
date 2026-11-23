@@ -1,6 +1,6 @@
 /** @brief Bounded browser transport lane: context, saturation, failures, reentrance and WebLink lifecycle. */
 #include "InjectableNetworking.hpp"
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/tooling/Logger.hpp>
 #include <webfront/weblink/WebLink.hpp>
 

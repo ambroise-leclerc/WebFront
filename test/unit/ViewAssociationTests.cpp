@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
 /// @brief A connection proves it comes from the view of an embedded frontend by the secret of the launch (#453, ADR-020).
 #include "InjectableNetworking.hpp"
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/networking/TCPNetworkingStdnet.hpp>
 #include <webfront/system/DefaultFS.hpp>
 #include <webfront/WebFront.hpp>

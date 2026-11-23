@@ -1,5 +1,5 @@
 // CEF's macros must not reach a stdexec header (#243): WebFront.hpp must compile once they are defined.
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 
 #ifndef WEBFRONT_EMBED_CEF
     // frontend/CEF.hpp includes the stdnet and stdexec headers before CEF's headers, which define these

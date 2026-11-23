@@ -1,4 +1,4 @@
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/http/BuffersPolicy.hpp>
 #include <webfront/JsFunction.hpp>
 #include <webfront/networking/NetworkingMock.hpp>

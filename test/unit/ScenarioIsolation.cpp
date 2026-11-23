@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
 /// @brief Gives every scenario the process-wide state a process of its own would have, so that the scenarios pass in any
 /// order within one process (WEBFRONT_TEST_UNIT_SHARDS, #543).
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/tooling/Logger.hpp>
 
 #include <array>

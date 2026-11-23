@@ -1,6 +1,6 @@
 #include "FormsHarness.hpp"
 #include "FormsSettings.hpp"
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/components/forms/Form.hpp>
 // Without C++26 reflection the optional layer compiles to nothing.
 #include <webfront/components/forms/Reflection.hpp>

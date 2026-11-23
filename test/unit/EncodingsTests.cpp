@@ -1,6 +1,6 @@
 #include <webfront/http/Encodings.hpp>
 
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 
 #include <string>
 

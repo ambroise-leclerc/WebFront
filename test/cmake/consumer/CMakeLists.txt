@@ -61,3 +61,12 @@ add_custom_target(check_consumer_options ALL
     COMMAND ${CMAKE_COMMAND} "-DOPTIONS_FILE=${CMAKE_CURRENT_BINARY_DIR}/consumer-options-$<CONFIG>-CXX.cmake"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/CheckOptions.cmake"
     VERBATIM)
+
+# webfront_bdd_discover_tests() works from the parent project of an embedded WebFront (#647): the function runs with the
+# variables of its caller, so it must not read any that only WebFront's directory defines.
+add_executable(bdd_consumer bdd.cpp)
+target_link_libraries(bdd_consumer PRIVATE WebFront::Bdd)
+webfront_bdd_discover_tests(bdd_consumer TEST_PREFIX "Embedded." PROPERTIES TIMEOUT 10)
+add_custom_target(check_bdd_discovery ALL
+    COMMAND ${CMAKE_COMMAND} "-DDIRECTORY=${CMAKE_CURRENT_BINARY_DIR}" -P "${CMAKE_CURRENT_SOURCE_DIR}/CheckBddDiscovered.cmake"
+    DEPENDS bdd_consumer VERBATIM)
