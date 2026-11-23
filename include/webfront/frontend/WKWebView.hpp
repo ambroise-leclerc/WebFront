@@ -11,6 +11,7 @@
 #include "UIExecutor.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
+#include "WindowRegistry.hpp"
 
 #include <chrono>
 #include <concepts>
@@ -351,7 +352,7 @@ struct Session {
     id                                   sharedDataStore = nullptr;
     std::function<void()>                closedHook;
     bool                                 receivedResponse = false, committed = false;
-    std::exception_ptr                   error;
+    std::exception_ptr                   failure;
     std::shared_ptr<CaptureTarget>       captureTarget = std::make_shared<CaptureTarget>();
     CaptureRegistration                  captureRegistration;
 
@@ -498,8 +499,8 @@ struct Session {
         try {
             function();
         } catch (...) {
-            if (!error)
-                error = std::current_exception();
+            if (!failure)
+                failure = std::current_exception();
             close();
         }
     }
@@ -678,8 +679,8 @@ struct Session {
             send<void>(app, "run");
             running = false;
         }
-        if (error)
-            std::rethrow_exception(error);
+        if (failure)
+            std::rethrow_exception(failure);
     }
 
     void navigationAction(id action, void (^decision)(long)) noexcept {
@@ -1198,86 +1199,61 @@ inline Class viewClass() {
     return cls;
 }
 
-// All windows belong to the active AppKit session and are used on the main thread.
-struct Windows {
-    Session*                                        primary = nullptr;
-    std::map<std::string, std::unique_ptr<Session>> secondary;
-    std::vector<std::unique_ptr<Session>>           finished;
+inline void reapSecondaryWindows();  // defined with the registry, after Session
 
+// What the registry of the secondary windows (WindowRegistry.hpp) asks of AppKit: reaping is a block on the main queue.
+struct WindowHooks {
+    static constexpr std::string_view name = "WKWebViewFrontend";
+
+    template <typename Registry>
+    void scheduleReap(Registry&) {
+        dispatch_async_f(
+            dispatch_get_main_queue(), nullptr, +[](void*) { reapSecondaryWindows(); });
+    }
+    void cancelReap() { }
+    void present(Session& session) {
+        // A hidden window stays hidden: ordering it to the front would show it.
+        if (session.options.visible)
+            send<void>(session.window, "makeKeyAndOrderFront:", static_cast<id>(nullptr));
+    }
+    bool close(Session& session) {
+        session.close();
+        return true;
+    }
+};
+
+// All windows belong to the active AppKit session and are used on the main thread.
+struct Windows : frontend::detail::WindowRegistry<Session, WindowHooks> {
     static Windows& instance() {
         static Windows windows;
         return windows;
     }
-    void retire(const std::string& page) {
-        const auto found = secondary.find(page);
-        if (found == secondary.end())
-            return;
-        // run() returned long ago for this window, so nothing else can report a page that failed to load.
-        if (found->second->error) {
-            try {
-                std::rethrow_exception(found->second->error);
-            } catch (const std::exception& failure) {
-                std::fprintf(stderr, "WKWebViewFrontend: the secondary window of '%s' closed: %s\n", page.c_str(), failure.what());
-            } catch (...) {}
-        }
-        finished.push_back(std::move(found->second));
-        secondary.erase(found);
-        dispatch_async_f(
-            dispatch_get_main_queue(),
-            nullptr,
-            +[](void*) {
-                auto retired = std::move(instance().finished);
-                retired.clear();
-            });
-    }
-    void clear() {
-        secondary.clear();
-        finished.clear();
-        primary = nullptr;
-    }
 };
 
+inline void reapSecondaryWindows() {
+    Windows::instance().reap();
+}
+
 inline void openSecondary(std::string_view address, std::string_view port, std::string_view page, WKWebViewOptions options) {
-    auto& windows = Windows::instance();
-    // A first window that closed still runs its loop until the pass ends: a window built now would be destroyed with it.
-    if (!windows.primary || windows.primary->closed)
-        throw std::logic_error("WKWebView: no application window is open");
-    std::string key(page);
-    if (const auto found = windows.secondary.find(key); found != windows.secondary.end()) {
-        // A hidden window stays hidden: ordering it to the front would show it.
-        if (found->second->options.visible)
-            send<void>(found->second->window, "makeKeyAndOrderFront:", static_cast<id>(nullptr));
-        return;
-    }
-    // The first window's visibility and startup delay: a hidden application never shows a window or takes the focus.
-    options.visible        = windows.primary->options.visible;
-    options.startupTimeout = windows.primary->options.startupTimeout;
-    auto child             = std::make_unique<Session>(applicationUrl(address, port, page, options.launch.origin), std::move(options));
-    child->secondary       = true;
-    child->sharedDataStore = send(send(windows.primary->view, "configuration"), "websiteDataStore");
-    child->create();
-    child->closedHook = [key] {
-        Windows::instance().retire(key);
-    };
-    // Registered only once started: a window whose start throws is not left in the table, and its page can be opened again.
-    // One that closed during start() already retired itself from a table that did not hold it yet, without a word: the
-    // caller is still waiting, so the failure is thrown to it.
-    child->start();
-    if (child->closed) {
-        if (child->error)
-            std::rethrow_exception(child->error);
-        throw std::runtime_error("WKWebView: the secondary window of '" + key + "' closed while it started");
-    }
-    windows.secondary[key] = std::move(child);
+    Windows::instance().open(
+        std::string(page),
+        [&](Session& primary) {
+            // The first window's visibility and startup delay: a hidden application never shows a window or takes the focus.
+            options.visible        = primary.options.visible;
+            options.startupTimeout = primary.options.startupTimeout;
+            auto child             = std::make_shared<Session>(applicationUrl(address, port, page, options.launch.origin), std::move(options));
+            child->secondary       = true;
+            child->sharedDataStore = send(send(primary.view, "configuration"), "websiteDataStore");
+            child->create();
+            return child;
+        },
+        [](Session& session, Session&) {
+            session.start();
+        });
 }
 
 inline bool closeSecondary(std::string_view page) {
-    auto&      windows = Windows::instance();
-    const auto found   = windows.secondary.find(std::string(page));
-    if (found == windows.secondary.end() || found->second->closed)
-        return false;
-    found->second->close();
-    return true;
+    return Windows::instance().close(std::string(page));
 }
 
 inline void open(std::string_view address, std::string_view port, std::string_view file, const WKWebViewOptions& options) {
@@ -1297,31 +1273,19 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
     window.create();
     window.start();
     // The AppKit loop drains the main queue: a wake is a block on it. Closing completes pending operations stopped,
-    // also when run() throws or returns at once because the window already closed.
+    // also when run() throws or returns at once because the window already closed. The window is published once the
+    // loop is attached (this is the interface thread) and withdrawn before the session releases it.
     auto& host = executorHost();
-    host.attach([&host] {
-        dispatch_async_f(
-            dispatch_get_main_queue(), &host, +[](void* context) { static_cast<UIExecutorHost*>(context)->drain(); });
-    });
-    // Published once the loop is attached (this is the interface thread), withdrawn before the session releases the window.
-    auto& windowHost = detail::wkwebview::windowHost();
-    windowHost.publish({.kind = NativeWindowKind::cocoa, .pointer = window.window, .portalParent = {}});
-    struct Closing {
-        UIExecutorHost& host;
-        NativeWindowHost& windowHost;
-        ~Closing() {
-            windowHost.retract();
-            host.close();
-        }
-    } closing{host, windowHost};
-    auto& windows   = Windows::instance();
-    windows.primary = &window;
-    struct Others {
-        Windows& windows;
-        ~Others() {
-            windows.clear();
-        }
-    } others{windows};
+    frontend::detail::InterfaceSession<Windows> interfaceSession(
+        host,
+        detail::wkwebview::windowHost(),
+        Windows::instance(),
+        window,
+        [&host] {
+            dispatch_async_f(
+                dispatch_get_main_queue(), &host, +[](void* context) { static_cast<UIExecutorHost*>(context)->drain(); });
+        },
+        {.kind = NativeWindowKind::cocoa, .pointer = window.window, .portalParent = {}});
     window.run();
 }
 

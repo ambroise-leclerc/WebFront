@@ -13,6 +13,7 @@
 #include "UIExecutor.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
+#include "WindowRegistry.hpp"
 #include "../ViewAssociation.hpp"
 #include "WebKitGTKPolicy.hpp"
 
@@ -981,138 +982,96 @@ struct OpenOptions {
     ViewLaunch                    launch{};
 };
 
-/// The windows of the application beside the first one (#616). Every member is used on the interface thread only.
-struct Windows {
-    Session*                                        primary = nullptr;
-    std::map<std::string, std::unique_ptr<Session>> secondary;
-    std::vector<std::unique_ptr<Session>>           finished;  // closed, destroyed from an idle callback
-    unsigned                                        reaper = 0;
+/// What the registry of the secondary windows (WindowRegistry.hpp) asks of GTK: reaping is an idle callback.
+struct WindowHooks {
+    static constexpr std::string_view name = "WebKitGTKFrontend";
+    unsigned                          reaper = 0;
 
+    template <typename Registry>
+    void scheduleReap(Registry&) {
+        if (!reaper)
+            reaper = api().idleAddFull(200, reap, nullptr, nullptr);
+    }
+    void cancelReap() {
+        if (reaper)
+            api().sourceRemove(std::exchange(reaper, 0));
+    }
+    void present(Session& session) {
+        api().windowPresent(session.window);
+    }
+    bool close(Session& session) {
+        session.close();
+        return true;
+    }
+    static int reap(void*) noexcept;
+};
+
+/// The windows of the application beside the first one (#616). Every member is used on the interface thread only.
+struct Windows : frontend::detail::WindowRegistry<Session, WindowHooks> {
     static Windows& instance() {
         static Windows windows;
         return windows;
     }
-    static int reap(void*) noexcept {
-        auto& windows  = instance();
-        windows.reaper = 0;
-        auto closed    = std::move(windows.finished);
-        windows.finished.clear();
-        closed.clear();  // destroys the sessions, outside of any of their own callbacks
-        return 0;
-    }
-    void retire(const std::string& page) {
-        const auto found = secondary.find(page);
-        if (found == secondary.end())
-            return;
-        // open() returned long ago, so nothing else can report a page that failed (HTTP error, navigation timeout, web
-        // process lost): the failure is written, then the window is reaped.
-        if (found->second->failure) {
-            try {
-                std::rethrow_exception(found->second->failure);
-            } catch (const std::exception& error) {
-                std::fprintf(stderr, "WebKitGTKFrontend: the secondary window of '%s' closed: %s\n", page.c_str(), error.what());
-            } catch (...) {
-            }
-        }
-        finished.push_back(std::move(found->second));
-        secondary.erase(found);
-        if (!reaper)
-            reaper = api().idleAddFull(200, reap, nullptr, nullptr);
-    }
-    /// The first window ended: the others end with it, and nothing is left to reap.
-    void clear() {
-        if (reaper)
-            api().sourceRemove(std::exchange(reaper, 0));
-        auto windows = std::move(secondary);
-        secondary.clear();
-        finished.clear();
-        windows.clear();
-        primary = nullptr;
-    }
 };
+
+inline int WindowHooks::reap(void*) noexcept {
+    auto& windows        = Windows::instance();
+    windows.hooks.reaper = 0;
+    windows.reap();  // destroys the sessions, outside of any of their own callbacks
+    return 0;
+}
 
 /// On the interface thread: opens `file` in a window of its own, or brings the window already showing it to the front.
 inline void openSecondary(const std::string& address, const std::string& port, const std::string& file, OpenOptions options, SandboxMode mode) {
-    auto& windows = Windows::instance();
-    // A first window that closed still runs its loop until the pass ends: a window built now would be destroyed with it.
-    if (!windows.primary || windows.primary->closed)
-        throw std::logic_error("WebKitGTKFrontend: no window of the application is open; show() it before opening another");
-    if (const auto found = windows.secondary.find(file); found != windows.secondary.end()) {
-        api().windowPresent(found->second->window);
-        return;
-    }
-    auto session = std::make_unique<Session>(webfront::detail::BoundContentPolicy{applicationUrl(address, port, "", options.launch.origin), options.contentPolicy}, options.window);
-    session->secondary     = true;
-    session->sharedNetwork = windows.primary->network;
-    session->launch        = options.launch;
-    session->create(mode);
-    session->closedHook = [file] {
-        Windows::instance().retire(file);
-    };
-    // Registered only once started: a window whose start throws is not left in the table, and its page can be opened again.
-    // One that closed during start() retired itself from a table that did not hold it yet, without a word: the caller is
-    // still waiting, so the failure is thrown to it.
-    session->start(applicationUrl(address, port, file, options.launch.origin));
-    if (session->closed) {
-        if (session->failure)
-            std::rethrow_exception(session->failure);
-        throw std::runtime_error("WebKitGTKFrontend: the secondary window of '" + file + "' closed while it started");
-    }
-    windows.secondary[file] = std::move(session);
+    Windows::instance().open(
+        file,
+        [&](Session& primary) {
+            auto session = std::make_shared<Session>(webfront::detail::BoundContentPolicy{applicationUrl(address, port, "", options.launch.origin), options.contentPolicy}, options.window);
+            session->secondary     = true;
+            session->sharedNetwork = primary.network;
+            session->launch        = options.launch;
+            session->create(mode);
+            return session;
+        },
+        [&](Session& session, Session&) {
+            session.start(applicationUrl(address, port, file, options.launch.origin));
+        });
 }
 
 /// On the interface thread: asks the secondary window showing `file` to close, as its user would. False when there is none.
 inline bool closeSecondary(const std::string& file) {
-    auto& windows = Windows::instance();
-    const auto found = windows.secondary.find(file);
-    if (found == windows.secondary.end() || found->second->closed)
-        return false;
-    found->second->close();
-    return true;
+    return Windows::instance().close(file);
 }
 
 inline void open(std::string_view address, std::string_view port, std::string_view file, const OpenOptions& options = {}, SandboxMode mode = SandboxMode::development) {
     initialize(mode);
     // One window per process: a second open() on the main thread is refused before it creates a window.
-    if (uiExecutorHostOf<WebKitGTKHost>().executor().available())
-        throw std::logic_error("WebKitGTKFrontend: open() is already running; a process opens one window at a time");
+    frontend::detail::InterfaceSession<Windows>::refuseSecond(uiExecutorHostOf<WebKitGTKHost>(), WindowHooks::name);
     Session session(webfront::detail::BoundContentPolicy{applicationUrl(address, port, "", options.launch.origin), options.contentPolicy}, options.window);
     session.launch = options.launch;
     session.create(mode);
     if (options.configure)
         options.configure(session);
-    // g_idle_add_full is thread-safe and wakes the main context the loop of run() iterates.
+    // g_idle_add_full is thread-safe and wakes the main context the loop of run() iterates. GTK realizes the window at
+    // present(): run() then sets the X11 identifier, and the Wayland one arrives later.
     auto& host = uiExecutorHostOf<WebKitGTKHost>();
-    host.attach([&host] {
-        constexpr int defaultIdle = 200;  // G_PRIORITY_DEFAULT_IDLE
-        api().idleAddFull(
-            defaultIdle,
-            +[](void* data) -> int {
-                static_cast<UIExecutorHost*>(data)->drain();
-                return 0;  // G_SOURCE_REMOVE
-            },
-            &host,
-            nullptr);
-    });
-    // GTK realizes the window at present(): run() then sets the X11 identifier, and the Wayland one arrives later.
-    auto& windowHost = nativeWindowHostOf<WebKitGTKHost>();
-    windowHost.publish({.kind = NativeWindowKind::gtk, .pointer = session.window, .portalParent = {}});
-    struct Closing {
-        UIExecutorHost&   host;
-        NativeWindowHost& windowHost;
-        ~Closing() {
-            windowHost.retract();
-            host.close();
-        }
-    } closing{host, windowHost};
-    auto& windows   = Windows::instance();
-    windows.primary = &session;
-    struct Others {
-        Windows& windows;
-        ~Others() {
-            windows.clear();
-        }
-    } others{windows};
+    frontend::detail::InterfaceSession<Windows> interfaceSession(
+        host,
+        nativeWindowHostOf<WebKitGTKHost>(),
+        Windows::instance(),
+        session,
+        [&host] {
+            constexpr int defaultIdle = 200;  // G_PRIORITY_DEFAULT_IDLE
+            api().idleAddFull(
+                defaultIdle,
+                +[](void* data) -> int {
+                    static_cast<UIExecutorHost*>(data)->drain();
+                    return 0;  // G_SOURCE_REMOVE
+                },
+                &host,
+                nullptr);
+        },
+        {.kind = NativeWindowKind::gtk, .pointer = session.window, .portalParent = {}});
     session.run(applicationUrl(address, port, file, options.launch.origin));
 }
 
