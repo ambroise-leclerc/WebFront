@@ -419,6 +419,8 @@ struct UIInvocation {
         using receiver_concept = ex::receiver_tag;
         UIInvocation* self;
         void          finish(std::exception_ptr error) noexcept {
+            // The operation state holds this receiver and is deleted from its own completion: only the moved-out promise is
+            // touched afterwards.
             auto completion = std::move(self->done);
             delete self;
             completion.set_value(std::move(error));
@@ -466,9 +468,11 @@ void invokeOnUIThread(const UIExecutor& executor, Function function) {
 
 /// @brief invokeOnUIThread(), run again every 10 ms while `function` throws WindowNotReady (#646). The interface thread
 /// cannot wait for itself: there, WindowNotReady reaches the caller. The frontend bounds the wait: a first window that
-/// never becomes ready closes, and the call then fails as invokeOnUIThread() does.
+/// never becomes ready closes, and the call then fails as invokeOnUIThread() does. A frontend that does not bound it is
+/// bounded here: after `limit` (one minute by default) the call throws std::logic_error.
 template <typename Function>
-void invokeOnUIThreadWhenReady(const UIExecutor& executor, Function function) {
+void invokeOnUIThreadWhenReady(const UIExecutor& executor, Function function, std::chrono::milliseconds limit = std::chrono::minutes(1)) {
+    const auto deadline = std::chrono::steady_clock::now() + limit;
     for (;;) {
         try {
             invokeOnUIThread(executor, function);
@@ -476,6 +480,8 @@ void invokeOnUIThreadWhenReady(const UIExecutor& executor, Function function) {
         } catch (const WindowNotReady&) {
             if (executor.onUIThread())
                 throw;
+            if (std::chrono::steady_clock::now() >= deadline)
+                throw std::logic_error("the first window did not become ready in time to host another");
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }

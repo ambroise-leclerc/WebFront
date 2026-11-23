@@ -1073,6 +1073,9 @@ inline void openSecondary(std::string_view address, std::string_view port, std::
     auto& windows = Windows::instance();
     if (!windows.primary)
         throw std::logic_error("WebView2Frontend: no window of the application is open; show() it before opening another");
+    // Refused first, as the other frontends do: a first window that closed no longer raises or opens anything.
+    if (windows.primary->closed)
+        throw std::logic_error("WebView2Frontend: no window of the application is open; show() it before opening another");
     const std::string key(page);
     if (const auto found = windows.secondary.find(key); found != windows.secondary.end()) {
         // A hidden window stays hidden and does not take the focus.
@@ -1083,8 +1086,6 @@ inline void openSecondary(std::string_view address, std::string_view port, std::
         }
         return;
     }
-    if (windows.primary->closed)
-        throw std::logic_error("WebView2Frontend: no window of the application is open; show() it before opening another");
     if (!windows.primary->environment)
         throw WindowNotReady("WebView2Frontend: the first window is not ready (its browser is being created); call it later");
     // The first window's delay, which the application configured (WebView2FrontendWithOptions), not this call's default.
@@ -1099,8 +1100,8 @@ inline void openSecondary(std::string_view address, std::string_view port, std::
     session->createWindow(windows.primary->shown(), options.window);
     session->startSecondary(windows.primary->environment.Get());
     // Registered only once started: a window whose start throws is not left in the table, and its page can be opened again.
-    // One that closed during the start retired itself from a table that did not hold it yet, without a word: the caller is
-    // still waiting, so the failure is thrown to it.
+    // The browser is created asynchronously: this test only catches a window that closed synchronously (a refused creation),
+    // which retired itself from a table that did not hold it yet, without a word. A later failure is written by retire().
     if (session->closed) {
         if (session->failure)
             std::rethrow_exception(session->failure);

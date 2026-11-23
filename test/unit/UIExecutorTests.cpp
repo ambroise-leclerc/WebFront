@@ -884,3 +884,39 @@ const Scenario invokeBlocking{"invokeOnUIThread runs a function on the interface
         });
     });
 }};
+
+const Scenario invokeWhenReady{"invokeOnUIThreadWhenReady tries again while the window is not ready, and gives up after its limit", [] {
+    given("a frontend loop attached to an executor", [&] {
+        FakeLoop loop;
+        loop.start();
+        const auto executor = loop.host.executor();
+        when("the function is refused twice as not ready", [&] {
+            int attempts = 0;
+            invokeOnUIThreadWhenReady(executor, [&] {
+                if (++attempts < 3)
+                    throw WindowNotReady("not ready");
+            });
+            then("it ran again until the window was ready", [&] {
+                check(attempts == 3);
+            });
+        });
+        when("the window never becomes ready", [&] {
+            int attempts = 0;
+            then("the call throws once its limit elapsed instead of waiting forever", [&] {
+                requireThrows<std::logic_error>([&] {
+                    invokeOnUIThreadWhenReady(executor, [&] { ++attempts; throw WindowNotReady("never"); }, 50ms);
+                });
+                check(attempts > 1);
+            });
+        });
+        when("the interface thread itself is refused as not ready", [&] {
+            then("the refusal reaches the caller at once", [&] {
+                requireThrows<WindowNotReady>([&] {
+                    invokeOnUIThread(executor, [&] {
+                        invokeOnUIThreadWhenReady(executor, [] { throw WindowNotReady("now"); });
+                    });
+                });
+            });
+        });
+    });
+}};

@@ -1038,6 +1038,7 @@ inline void openSecondary(const std::string& address, const std::string& port, c
     if (!windows.primary || windows.primary->closed)
         throw std::logic_error("WebKitGTKFrontend: no window of the application is open; show() it before opening another");
     if (const auto found = windows.secondary.find(file); found != windows.secondary.end()) {
+        // WebKitGTK has no hidden mode (its windows are always presented): raising the window is the right answer.
         api().windowPresent(found->second->window);
         return;
     }
