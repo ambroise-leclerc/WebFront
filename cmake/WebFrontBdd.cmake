@@ -9,7 +9,7 @@
 #   webfront_bdd_discover_tests(my_tests [TEST_PREFIX <prefix>] [PROPERTIES <name> <value>...]
 #                               [SHARDS <n> [SHARD_NAME <name>] [JUNIT_PREFIX <path>]])
 #
-#   TEST_PREFIX   text put before "Scenario: " in each case name; refused with SHARDS (use SHARD_NAME).
+#   TEST_PREFIX   text put before "Scenario: " in each case name; refused with SHARDS (use SHARD_NAME), with "]==]" or a line break.
 #   PROPERTIES    properties of every case (TIMEOUT, LABELS, ENVIRONMENT...). A skipped scenario exits with 4, which the
 #                 cases treat as SKIP_RETURN_CODE; a SKIP_RETURN_CODE of yours replaces it.
 #   SHARDS        registers <n> cases instead, each running a share of the scenarios in declaration order in one process
@@ -18,14 +18,35 @@
 #                 <JUNIT_PREFIX>-<i>.xml (default "${CMAKE_CURRENT_BINARY_DIR}/<target>-results").
 #
 # After each build of the target, the executable lists its scenarios (`--list`) and this file, run as a script, writes the
-# add_test() calls that CTest includes. Each case runs `<target> --exact <title>`.
+# add_test() calls that CTest includes. Each case runs `<target> --exact <title>`, through the CROSSCOMPILING_EMULATOR of the
+# target when it has one (which also lists the scenarios at build time).
 
 if(CMAKE_SCRIPT_MODE_FILE)
-    # Keep properties in a generated file: passing shell metacharacters through a Windows post-build command is unreliable.
-    execute_process(COMMAND "${EXECUTABLE}" --list OUTPUT_VARIABLE titles ERROR_VARIABLE errors RESULT_VARIABLE result)
+    # A bracket argument whose delimiter occurs neither in the value nor at the junction with its own closing bracket.
+    function(bdd_quote out value)
+        set(equals "==")
+        string(LENGTH "${value}" length)
+        while(TRUE)
+            string(FIND "${value}]${equals}]" "]${equals}]" position)
+            if(position EQUAL length)
+                break()
+            endif()
+            string(APPEND equals "=")
+        endwhile()
+        set(${out} "[${equals}[${value}]${equals}]" PARENT_SCOPE)
+    endfunction()
+
+    # With CMAKE_CROSSCOMPILING_EMULATOR the executable cannot run alone: the emulator lists the scenarios and runs each case.
+    execute_process(COMMAND ${EMULATOR} "${EXECUTABLE}" --list OUTPUT_VARIABLE titles ERROR_VARIABLE errors RESULT_VARIABLE result)
     if(NOT result EQUAL 0)
-        message(FATAL_ERROR "${EXECUTABLE} --list failed (${result}): ${errors}")
+        message(FATAL_ERROR "${EMULATOR} ${EXECUTABLE} --list failed (${result}): ${errors}")
     endif()
+    set(command_prefix)
+    foreach(word IN LISTS EMULATOR EXECUTABLE)
+        bdd_quote(quoted "${word}")
+        string(APPEND command_prefix " ${quoted}")
+    endforeach()
+    # Keep properties in a generated file: passing shell metacharacters through a Windows post-build command is unreliable.
     include("${PROPERTIES_FILE}")
     set(quoted_properties)
     foreach(property IN LISTS properties)
@@ -47,9 +68,10 @@ if(CMAKE_SCRIPT_MODE_FILE)
         string(REPLACE "%5B" "[" title "${title}")
         string(REPLACE "%5D" "]" title "${title}")
         string(REPLACE "%25" "%" title "${title}")
-        set(name "${PREFIX}Scenario: ${title}")
-        string(APPEND content "add_test([==[${name}]==] [==[${EXECUTABLE}]==] --exact [==[${title}]==])\n"
-            "set_tests_properties([==[${name}]==] PROPERTIES SKIP_RETURN_CODE 4${quoted_properties})\n")
+        bdd_quote(quoted_name "${PREFIX}Scenario: ${title}")
+        bdd_quote(quoted_title "${title}")
+        string(APPEND content "add_test(${quoted_name}${command_prefix} --exact ${quoted_title})\n"
+            "set_tests_properties(${quoted_name} PROPERTIES SKIP_RETURN_CODE 4${quoted_properties})\n")
     endforeach()
     file(WRITE "${OUTPUT}" "${content}")
     return()
@@ -99,6 +121,9 @@ function(webfront_bdd_discover_tests target)
             message(FATAL_ERROR "webfront_bdd_discover_tests: a property value must not contain ']==]': ${property}")
         endif()
     endforeach()
+    if(arg_TEST_PREFIX MATCHES "\\]==\\]|[\r\n]")
+        message(FATAL_ERROR "webfront_bdd_discover_tests: TEST_PREFIX must not contain ']==]' or a line break: ${arg_TEST_PREFIX}")
+    endif()
     set_property(TARGET ${target} PROPERTY WEBFRONT_BDD_DISCOVERED TRUE)
     set(base "${CMAKE_CURRENT_BINARY_DIR}/${target}")
     set(properties_file "${base}_properties-$<CONFIG>.cmake")
@@ -117,7 +142,7 @@ function(webfront_bdd_discover_tests target)
         string(CONCAT include_content "if(EXISTS \"${output}\")\n  include(\"${output}\")\n"
                             "else()\n  add_test([==[${target}_NOT_BUILT]==] [==[${target}_NOT_BUILT]==])\nendif()\n")
     endif()
-    set(discovery_command "${CMAKE_COMMAND}" "-DEXECUTABLE=$<TARGET_FILE:${target}>" "-DOUTPUT=${output}" "-DPREFIX=${arg_TEST_PREFIX}"
+    set(discovery_command "${CMAKE_COMMAND}" "-DEXECUTABLE=$<TARGET_FILE:${target}>" "-DOUTPUT=${output}" "-DPREFIX=${arg_TEST_PREFIX}" "-DEMULATOR=$<TARGET_PROPERTY:${target},CROSSCOMPILING_EMULATOR>"
                 "-DPROPERTIES_FILE=${properties_file}" -P "${CMAKE_CURRENT_FUNCTION_LIST_FILE}")
     # Right after each build of the target, so that building it alone registers its cases...
     add_custom_command(TARGET ${target} POST_BUILD COMMAND ${discovery_command} VERBATIM)

@@ -17,15 +17,15 @@ execute_process(COMMAND "${CMAKE_CTEST_COMMAND}" -N WORKING_DIRECTORY "${WORK}" 
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "ctest -N failed:\n${listed}")
 endif()
-foreach(title IN ITEMS "A [b title" "Second\; one" "Third ]x" "Fourth [tag] title" "Literal <bdd-open> %5B %25 <bdd-semicolon>")
+foreach(title IN ITEMS "A [b title" "Second\; one" "Third ]x" "Fourth [tag] title" "Literal <bdd-open> %5B %25 <bdd-semicolon>" "Ends like a delimiter ]==")
     string(REPLACE "\;" ";" title "${title}")
     string(FIND "${listed}" ": Probe.Scenario: ${title}\n" position)
     if(position EQUAL -1)
         message(FATAL_ERROR "CTest does not list \"Probe.Scenario: ${title}\":\n${listed}")
     endif()
 endforeach()
-if(NOT listed MATCHES "Total Tests: 5\n")
-    message(FATAL_ERROR "CTest should list 5 cases:\n${listed}")
+if(NOT listed MATCHES "Total Tests: 6\n")
+    message(FATAL_ERROR "CTest should list 6 cases:\n${listed}")
 endif()
 
 # Exercise the actual post-build command through cmd.exe: pipes in its arguments used to break Ninja on Windows.
@@ -35,7 +35,7 @@ if(WIN32 AND GENERATOR STREQUAL "Ninja")
     file(WRITE "${WORK}/project/CMakeLists.txt"
         "cmake_minimum_required(VERSION 3.31)\nproject(DiscoveryProbe LANGUAGES CXX)\ninclude([==[${SCRIPT}]==])\nadd_executable(probe main.cpp)\nwebfront_bdd_discover_tests(probe PROPERTIES TIMEOUT 10 LABELS [==[one|two]==])\n")
     execute_process(COMMAND "${CMAKE_COMMAND}" -S "${WORK}/project" -B "${WORK}/build" -G Ninja
-        "-DCMAKE_CXX_COMPILER=${CXX_COMPILER}"
+        "-DCMAKE_CXX_COMPILER=${CXX_COMPILER}" "-DCMAKE_CROSSCOMPILING_EMULATOR=${CMAKE_COMMAND};-E;env"
         RESULT_VARIABLE configured OUTPUT_VARIABLE configure_output ERROR_VARIABLE configure_error)
     if(NOT configured EQUAL 0)
         message(FATAL_ERROR "Discovery regression configuration failed: ${configure_output}${configure_error}")
@@ -46,6 +46,10 @@ if(WIN32 AND GENERATOR STREQUAL "Ninja")
         message(FATAL_ERROR "Discovery post-build command failed: ${build_output}${build_error}")
     endif()
     file(READ "${WORK}/build/probe_tests.cmake" actual)
+    string(FIND "${actual}" "[==[-E]==] [==[env]==]" emulator_used)
+    if(emulator_used EQUAL -1)
+        message(FATAL_ERROR "The target emulator is not used by the cases:\n${actual}")
+    endif()
     if(NOT actual MATCHES "\\[==\\[one\\|two\\]==\\]")
         message(FATAL_ERROR "The post-build command did not preserve the property")
     endif()
@@ -90,4 +94,24 @@ if(WIN32 AND GENERATOR STREQUAL "Ninja")
     if(NOT regenerated MATCHES "\\[==\\[TIMEOUT\\]==\\] \\[==\\[20\\]==\\]")
         message(FATAL_ERROR "The cases keep the old properties after a reconfiguration:\n${regenerated}")
     endif()
+endif()
+
+# A target with a CROSSCOMPILING_EMULATOR lists its scenarios and runs its cases through it (#648).
+execute_process(COMMAND "${CMAKE_COMMAND}" "-DEXECUTABLE=${PROBE}" "-DOUTPUT=${WORK}/emulated.cmake" -DPREFIX=Probe.
+                        "-DEMULATOR=${CMAKE_COMMAND};-E;env" "-DPROPERTIES_FILE=${WORK}/properties.cmake" -P "${SCRIPT}"
+                RESULT_VARIABLE emulated ERROR_VARIABLE emulated_error)
+if(NOT emulated EQUAL 0)
+    message(FATAL_ERROR "The discovery through an emulator failed: ${emulated_error}")
+endif()
+file(READ "${WORK}/emulated.cmake" emulated_cases)
+string(FIND "${emulated_cases}" "-E" emulator_position)
+string(FIND "${emulated_cases}" "env" env_position)
+string(FIND "${emulated_cases}" "--exact" exact_position)
+if(emulator_position EQUAL -1 OR env_position EQUAL -1 OR NOT env_position LESS exact_position)
+    message(FATAL_ERROR "The cases do not run through the emulator:\n${emulated_cases}")
+endif()
+
+configure_probe(prefix "webfront_bdd_discover_tests(probe TEST_PREFIX [=[a]==]b]=])")
+if(status EQUAL 0 OR NOT log MATCHES "TEST_PREFIX must not contain")
+    message(FATAL_ERROR "A prefix holding ]==] was not refused (${status}):\n${log}")
 endif()

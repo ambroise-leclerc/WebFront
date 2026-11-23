@@ -62,7 +62,7 @@ wait for an asynchronous state. The header documents each of them (Doxygen).
 
 | Option | Effect |
 | --- | --- |
-| `TEST_PREFIX <text>` | Put before `Scenario: ` in the name of each case; refused with `SHARDS` |
+| `TEST_PREFIX <text>` | Put before `Scenario: ` in the name of each case; refused with `SHARDS`, with `]==]` and with a line break |
 | `PROPERTIES <name> <value>...` | Properties of every case (`TIMEOUT`, `LABELS`, `ENVIRONMENT`...); a `SKIP_RETURN_CODE` of yours replaces the default 4 |
 | `SHARDS <n>` | Register `<n>` cases, each running a share of the scenarios in one process, instead of one case per scenario |
 | `SHARD_NAME <name>` | With `SHARDS` only (refused otherwise): name of the shards, `<name>-<i>` (default `<target>Shards`) |
@@ -74,7 +74,8 @@ Call it once per target without `SHARDS`: a second such call on the same target 
 
 After each build the executable lists its scenarios (`--list`) and a post-build step writes one CTest case per scenario,
 `Scenario: <title>`, whatever brackets or semicolons the title holds. Each case runs `<target> --exact <title>`; a
-scenario that skips itself exits with 4, which the cases treat as skipped.
+scenario that skips itself exits with 4, which the cases treat as skipped. When the target has a `CROSSCOMPILING_EMULATOR`
+(or `CMAKE_CROSSCOMPILING_EMULATOR` is set), it lists the scenarios and runs every case.
 
 The executable's own options are `--list`, `--exact`, `--order`, `--rng-seed`, `--shard-count`, `--shard-index`, `--junit`
 and the name filters; run it with `--help`.
