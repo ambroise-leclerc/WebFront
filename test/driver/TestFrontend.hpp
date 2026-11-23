@@ -27,13 +27,17 @@ struct TestFrontend : Frontend {
                      const ViewLaunch& launch) {
         // Rendering stays visible where the frontend can hide its window; the Linux engines use one Xvfb display around a
         // complete suite and their native windows stay real.
-        typename Frontend::Options options{};
-        options.contentPolicy = policy;
-        options.window        = window;
-        options.launch        = launch;
-        if constexpr (requires { options.visible = visibleWindows; })
-            options.visible = visibleWindows;
-        Frontend::open(address, port, page, options);
+        if constexpr (requires { Frontend::startingOptions(); }) {
+            auto options          = Frontend::startingOptions();  // the provider's settings, then the ones of the call
+            options.contentPolicy = policy;
+            options.window        = window;
+            options.launch        = launch;
+            if constexpr (requires { options.visible = visibleWindows; })
+                options.visible = visibleWindows;
+            Frontend::open(address, port, page, options);
+        } else {
+            Frontend::open(address, port, page, policy, window, launch);
+        }
     }
 };
 }  // namespace webfront::testdriver

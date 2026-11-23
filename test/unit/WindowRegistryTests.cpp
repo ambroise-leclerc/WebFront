@@ -191,6 +191,17 @@ const Scenario secondaryWindowRegistry{"The registry of the secondary windows is
             });
         });
 
+        when("the first window closes while a secondary one still shows the page", [&] {
+            openPage(windows, "a.html");
+            events.clear();
+            first.closed = true;
+            then("asking for that page brings its window to the front instead of failing", [&] {
+                openPage(windows, "a.html");
+                check(!happened("create a.html"));
+                check(windows.secondary.size() == 1);
+            });
+        });
+
         when("a window opens a page while the others are destroyed", [&] {
             openPage(windows, "a.html");
             bool lateOpened           = true;
@@ -488,6 +499,13 @@ const Scenario startupTimeoutRange{"A startup deadline a timer cannot hold is re
     using std::chrono::milliseconds;
     then("a positive deadline is kept", [&] {
         check(frontend::detail::timerMilliseconds(milliseconds{30000}, "FakeFrontend") == 30000u);
+    });
+    then("a facade refuses them before any window is opened", [&] {
+        FakeFrontend::opened.clear();
+        ViewOptions options;
+        options.startupTimeout = milliseconds{-1};
+        checkThrows<std::invalid_argument>([&] { FakeFrontend::open("127.0.0.1", "9000", "a.html", options); }, contains("FakeFrontend: startupTimeout must be between 1 and"));
+        check(FakeFrontend::opened.empty());
     });
     then("zero, negative and oversized deadlines are refused with the frontend's name", [&] {
         for (const auto bad : {milliseconds{0}, milliseconds{-1}, milliseconds{-86400000}, milliseconds{4294967296LL}})

@@ -78,7 +78,7 @@ struct ViewOptions {
  *
  * - `using Host = ...`: the type that names the process-wide hosts (UIExecutor.hpp, NativeWindow.hpp);
  * - `static constexpr bool compiled`: the engine is part of this build; `static constexpr std::string_view name` and
- *   `unavailable` (what to configure) make the message of a frontend that is not;
+ *   `enable` (what to configure) make the message of a frontend that is not;
  * - `using Options`: the frontend's options (`contentPolicy`, `window` and `launch` at least; ViewOptions has them), and an
  *   optional `static Options defaultOptions()` for the ones a call starts from;
  * - `static void openNative(address, port, file, const Options&)` and `closeNative(const NativeWindowHandle&)` (on the
@@ -162,9 +162,12 @@ struct EmbeddedFrontend {
     }
     template <typename D = Derived>  // dependent: the options type is only needed once the frontend is complete
     static void open(std::string_view address, std::string_view port, std::string_view file, const typename D::Options& options = startingOptions()) {
-        if constexpr (Derived::compiled)
+        if constexpr (Derived::compiled) {
+            // One rule for every frontend: a deadline no toolkit timer can hold is refused before any window exists.
+            if constexpr (requires { options.startupTimeout; })
+                (void)detail::timerMilliseconds(options.startupTimeout, Derived::name);
             Derived::openNative(address, port, file, options);
-        else
+        } else
             unavailable();
     }
     static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy) {
@@ -178,7 +181,7 @@ struct EmbeddedFrontend {
         open(address, port, file, optionsOf(policy, &window, &launch));
     }
 
-private:
+    /// The options a call starts from: the frontend's configured ones, or the default ones.
     template <typename D = Derived>
     static typename D::Options startingOptions() {
         if constexpr (requires { Derived::defaultOptions(); })
@@ -186,6 +189,8 @@ private:
         else
             return typename Derived::Options{};
     }
+
+private:
     template <typename D = Derived>
     static typename D::Options optionsOf(const ContentPolicy& policy, const WindowOptions* window = nullptr, const ViewLaunch* launch = nullptr) {
         // The settings of the arguments the caller gave replace the configured ones; the others stay as configured.

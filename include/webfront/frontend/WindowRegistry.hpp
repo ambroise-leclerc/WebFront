@@ -91,7 +91,7 @@ public:
      *
      * `create(Session& primary)` builds the window and returns a `std::shared_ptr<Session>`; `start(Session&, Session& primary)`
      * starts its load and returns. Either may throw (a window whose creation or start throws is not registered, and its page
-     * can be opened again). Throws std::logic_error when the first window is not open: one that closed still runs its loop
+     * can be opened again). A page already showing a window is brought to the front. Throws std::logic_error when a new window is needed and the first window is not open: one that closed still runs its loop
      * until the pass ends, and a window built now would be destroyed with it. False, with a word on standard error, when
      * the session is ending (clear() runs): the request comes from the teardown of a window, which an exception would
      * turn into the end of the process, so it is refused without one.
@@ -102,12 +102,12 @@ public:
             std::fprintf(stderr, "%.*s: the window of '%s' was not opened: the session is ending\n", static_cast<int>(Hooks::name.size()), Hooks::name.data(), page.c_str());
             return false;
         }
-        if (!primary || primary->closed)
-            throw std::logic_error(std::string(Hooks::name) + ": no window of the application is open; show() it before opening another");
         if (const auto found = secondary.find(page); found != secondary.end()) {
             hooks.present(*found->second);
             return true;
         }
+        if (!primary || primary->closed)
+            throw std::logic_error(std::string(Hooks::name) + ": no window of the application is open; show() it before opening another");
         std::shared_ptr<Session> session = create(*primary);
         session->closedHook              = [this, page] {
             retire(page);
