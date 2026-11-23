@@ -154,7 +154,7 @@ const Scenario assertionsPass{
         requireThrows<int>([] {
             throw 3;
         });
-        requireNothrow([] { });
+        requireNothrow([] {});
         std::optional<int> value{1};
         require(value);
         auto scope = info("value ", *value);
@@ -196,7 +196,9 @@ const Scenario eventuallyHolds{"eventually holds", [] {
                                        std::this_thread::sleep_for(20ms);
                                        value = 2;
                                    }};
-                                   requireEventually([&] { return value == 2; });
+                                   requireEventually([&] {
+                                       return value == 2;
+                                   });
                                    checkEventually(
                                        [&] {
                                            return value == 2;
@@ -214,9 +216,17 @@ const Scenario eventuallyHolds{"eventually holds", [] {
 
 const Scenario eventuallyTimesOut{"eventually times out", [] {
                                       using namespace std::chrono_literals;
-                                      check(!checkEventually([] { return false; }, 20ms));
+                                      check(!checkEventually(
+                                          [] {
+                                              return false;
+                                          },
+                                          20ms));
                                       trace.push_back("after check");
-                                      requireEventually([] { return false; }, 20ms);
+                                      requireEventually(
+                                          [] {
+                                              return false;
+                                          },
+                                          20ms);
                                       trace.push_back("not reached");
                                   }};
 
