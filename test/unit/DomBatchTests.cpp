@@ -1,4 +1,4 @@
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/weblink/DomBatch.hpp>
 
 #include <algorithm>

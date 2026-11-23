@@ -1,10 +1,10 @@
-# The scenarios use Bdd.hpp, a test framework in a single header; BddDiscoverTests registers them in CTest.
-include(BddDiscoverTests.cmake)
+# The scenarios use WebFront::Bdd (include/webfront/testing/Bdd.hpp, docs/BDD.md), a test framework in a single header;
+# webfront_bdd_discover_tests registers them in CTest.
 
 find_package(Threads)
 include(CTest)
 
-# WEBFRONT_TEST_TIMEOUT_FACTOR (Bdd.hpp) lengthens the waits of a slow job. It is read here, when CMake configures, and
+# WEBFRONT_TEST_TIMEOUT_FACTOR (Bdd.hpp, a documented option) lengthens the waits of a slow job. It is read here, when CMake configures, and
 # handed to every unit test as its environment, so that the waits and the CTest limits agree whatever the environment of
 # ctest is (TimeoutFactor.cmake gives the rule, which the TimeoutFactor case checks).
 include(TimeoutFactor.cmake)
@@ -40,15 +40,15 @@ endif()
 
 # The framework's own test: the order of the sections, the failures, the filters and the exit codes.
 add_executable(bdd_self_test BddSelfTest.cpp)
-target_link_libraries(bdd_self_test PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options)
+target_link_libraries(bdd_self_test PRIVATE WebFront::Bdd WebFront_test_hardening WebFront_warnings WebFront_options)
 target_compile_features(bdd_self_test PRIVATE cxx_std_23)
 add_test(NAME BddSelfTest COMMAND bdd_self_test)
 # CTest registers one case per scenario whatever brackets or semicolons its title holds.
 add_executable(bdd_discovery_probe Main.cpp BddDiscoveryProbe.cpp)
-target_link_libraries(bdd_discovery_probe PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options)
+target_link_libraries(bdd_discovery_probe PRIVATE WebFront::Bdd WebFront_test_hardening WebFront_warnings WebFront_options)
 target_compile_features(bdd_discovery_probe PRIVATE cxx_std_23)
 add_test(NAME BddDiscovery COMMAND ${CMAKE_COMMAND} -DPROBE=$<TARGET_FILE:bdd_discovery_probe>
-    -DSCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/BddDiscoverTests.cmake -DWORK=${CMAKE_CURRENT_BINARY_DIR}/bdd-discovery
+    -DSCRIPT=${PROJECT_SOURCE_DIR}/cmake/WebFrontBdd.cmake -DWORK=${CMAKE_CURRENT_BINARY_DIR}/bdd-discovery
     "-DGENERATOR=${CMAKE_GENERATOR}" "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}"
     -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckBddDiscovery.cmake)
 set_tests_properties(BddSelfTest BddDiscovery PROPERTIES TIMEOUT 30 LABELS fast)
@@ -69,7 +69,7 @@ if(WEBFRONT_EMBED_WEBVIEW2)
   list(APPEND TESTS_LIST WebView2Tests.cpp)
 endif()
 add_executable(tests ${TESTS_LIST})
-target_link_libraries(tests PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
+target_link_libraries(tests PRIVATE WebFront::Bdd WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
 # The scene of the host-loop example: the CPU renderer everywhere, compared with the CUDA one where a toolkit was found.
 target_link_libraries(tests PRIVATE WebFront_boing)
 if(WIN32)
@@ -129,17 +129,12 @@ if(NOT WEBFRONT_TEST_UNIT_SHARDS MATCHES "^[0-9]+$")
   message(FATAL_ERROR "WEBFRONT_TEST_UNIT_SHARDS must be a non-negative integer, not '${WEBFRONT_TEST_UNIT_SHARDS}'")
 endif()
 if(WEBFRONT_TEST_UNIT_SHARDS GREATER 0)
-  math(EXPR _last_shard "${WEBFRONT_TEST_UNIT_SHARDS} - 1")
-  foreach(_shard RANGE ${_last_shard})
-    # The shards split the scenarios in their declaration order, which every process sees alike.
-    add_test(NAME UnitTests-${_shard} COMMAND tests --order decl --shard-count ${WEBFRONT_TEST_UNIT_SHARDS} --shard-index ${_shard}
-        --junit "${CMAKE_BINARY_DIR}/unit-results-${_shard}.xml")
-    # The scenarios of a shard share its time limit; the slowest of them takes a few seconds.
-    # A shard whose every scenario is skipped exits with 4, as a single scenario does (BddDiscoverTests.cmake).
-    set_tests_properties(UnitTests-${_shard} PROPERTIES TIMEOUT ${_shard_timeout} LABELS fast SKIP_RETURN_CODE 4 ${_unit_test_environment})
-  endforeach()
+  # The shards split the scenarios in their declaration order, which every process sees alike. The scenarios of a shard
+  # share its time limit; the slowest of them takes a few seconds.
+  webfront_bdd_discover_tests(tests SHARDS ${WEBFRONT_TEST_UNIT_SHARDS} SHARD_NAME UnitTests
+      JUNIT_PREFIX "${CMAKE_BINARY_DIR}/unit-results" PROPERTIES TIMEOUT ${_shard_timeout} LABELS fast ${_unit_test_environment})
 else()
-  bdd_discover_tests(tests PROPERTIES TIMEOUT ${_unit_timeout} LABELS fast ${_unit_test_environment})
+  webfront_bdd_discover_tests(tests PROPERTIES TIMEOUT ${_unit_timeout} LABELS fast ${_unit_test_environment})
 endif()
 
 # The developer journey type-checks the declaration this tool writes from the hand-described settings (#383).
@@ -175,10 +170,10 @@ endif()
 if(_reflection_supported)
   # Bdd.hpp is a header: the whole executable, its framework included, is compiled as C++26.
   add_executable(forms_reflection_tests Main.cpp FormsReflectionTests.cpp)
-  target_link_libraries(forms_reflection_tests PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
+  target_link_libraries(forms_reflection_tests PRIVATE WebFront::Bdd WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
   set_target_properties(forms_reflection_tests PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
   target_compile_options(forms_reflection_tests PRIVATE -freflection)
-  bdd_discover_tests(forms_reflection_tests TEST_PREFIX "C++26." PROPERTIES TIMEOUT 60 LABELS fast)
+  webfront_bdd_discover_tests(forms_reflection_tests TEST_PREFIX "C++26." PROPERTIES TIMEOUT 60 LABELS fast)
   # Misplaced annotations do not compile: each case must fail with the message of describe<T>().
   foreach(_case IN ITEMS "RANGE_ON_BOOL|Range applies to numeric members only" "RANGE_ON_STRING|Range applies to numeric members only"
                          "RANGE_ON_ENUM|Range applies to numeric members only" "REPEATED_LABEL|Label is repeated on a member"
@@ -470,3 +465,9 @@ target_compile_definitions(automation_distribution_guard PRIVATE WEBFRONT_DISTRI
 add_test(NAME AutomationAbsentFromDistribution
          COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --target automation_distribution_guard --config $<CONFIG>)
 set_tests_properties(AutomationAbsentFromDistribution PROPERTIES PASS_REGULAR_EXPRESSION "does not exist in a distribution build")
+
+# A project outside WebFront finds the installed WebFrontBdd package, writes scenarios and has CTest discover them (#647).
+add_test(NAME BddConsumer COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DBUILD_DIR=${CMAKE_BINARY_DIR}
+    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/bdd-consumer "-DGENERATOR=${CMAKE_GENERATOR}" "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}"
+    -DCONFIG=$<CONFIG> -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckBddConsumer.cmake)
+set_tests_properties(BddConsumer PROPERTIES TIMEOUT 300)

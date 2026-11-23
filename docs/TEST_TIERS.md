@@ -5,7 +5,7 @@ to the standard tier.
 
 | Tier | Label | Content | When it runs |
 | --- | --- | --- | --- |
-| Fast | `fast` | C++ unit tests (`test/unit/Bdd.hpp`) and the Python tool tests; no browser, no nested build | Locally on demand, and as the first test step of every Linux/Windows/macOS desktop job |
+| Fast | `fast` | C++ unit tests (`include/webfront/testing/Bdd.hpp`) and the Python tool tests; no browser, no nested build | Locally on demand, and as the first test step of every Linux/Windows/macOS desktop job |
 | Standard | none, or `web-integration` | Everything but the portability tests: unit tests, real-browser integration, `wf` commands, embedded builds | Every pull request and every push to `develop` or `master` |
 | Portability | `portability` | The library consumed from another project: `AddSubdirectoryConsumer` | Weekly, and on every pull request into `master` |
 

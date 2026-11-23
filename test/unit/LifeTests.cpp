@@ -1,7 +1,7 @@
 #include "../../examples/life/Life.hpp"
 #include "../../examples/life/LifeDeveloperOptions.hpp"
 #include "TemporaryDirectory.hpp"
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 
 #include <fstream>
 

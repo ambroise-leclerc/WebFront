@@ -1,7 +1,7 @@
 // MCP over Streamable HTTP served by the application (ADR-025): header screening, MCP sessions, the loopback listener
 // on real sockets and its activation through enableAutomation.
 #include "TemporaryDirectory.hpp"
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/automation/Enable.hpp>
 #include <webfront/automation/McpHttp.hpp>
 

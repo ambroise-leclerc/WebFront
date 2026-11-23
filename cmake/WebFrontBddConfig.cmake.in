@@ -1,0 +1,7 @@
+@PACKAGE_INIT@
+
+# WebFront::Bdd, the BDD test framework of WebFront (docs/BDD.md), and webfront_bdd_discover_tests().
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
+include("${CMAKE_CURRENT_LIST_DIR}/WebFrontBddTargets.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/WebFrontBdd.cmake")

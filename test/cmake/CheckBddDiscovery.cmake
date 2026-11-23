@@ -1,4 +1,4 @@
-# Registers the scenarios of PROBE with BddDiscoverTests.cmake (SCRIPT) and checks that CTest sees one case per scenario,
+# Registers the scenarios of PROBE with WebFrontBdd.cmake (SCRIPT) and checks that CTest sees one case per scenario,
 # whatever brackets and semicolons their titles hold.
 file(REMOVE_RECURSE "${WORK}")
 file(MAKE_DIRECTORY "${WORK}")
@@ -33,7 +33,7 @@ if(WIN32 AND GENERATOR STREQUAL "Ninja")
     file(MAKE_DIRECTORY "${WORK}/project")
     file(WRITE "${WORK}/project/main.cpp" "#include <iostream>\nint main() { std::cout << \"probe\\n\"; }\n")
     file(WRITE "${WORK}/project/CMakeLists.txt"
-        "cmake_minimum_required(VERSION 3.31)\nproject(DiscoveryProbe LANGUAGES CXX)\ninclude([==[${SCRIPT}]==])\nadd_executable(probe main.cpp)\nbdd_discover_tests(probe PROPERTIES TIMEOUT 10 LABELS [==[one|two]==])\n")
+        "cmake_minimum_required(VERSION 3.31)\nproject(DiscoveryProbe LANGUAGES CXX)\ninclude([==[${SCRIPT}]==])\nadd_executable(probe main.cpp)\nwebfront_bdd_discover_tests(probe PROPERTIES TIMEOUT 10 LABELS [==[one|two]==])\n")
     execute_process(COMMAND "${CMAKE_COMMAND}" -S "${WORK}/project" -B "${WORK}/build" -G Ninja
         "-DCMAKE_CXX_COMPILER=${CXX_COMPILER}"
         RESULT_VARIABLE configured OUTPUT_VARIABLE configure_output ERROR_VARIABLE configure_error)

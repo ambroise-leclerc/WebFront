@@ -1,6 +1,6 @@
 #include "../../examples/host-loop/BoingHost.hpp"
 #include "../../examples/host-loop/HostLoopCapture.hpp"
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 
 #include <algorithm>
 #include <array>

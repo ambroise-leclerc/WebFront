@@ -1,5 +1,5 @@
 #include "Mocks.hpp"
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/ContentPolicy.hpp>
 #include <webfront/http/HTTPServer.hpp>
 #include <webfront/networking/NetworkingMock.hpp>

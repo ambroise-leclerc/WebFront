@@ -54,6 +54,8 @@ find_package(Threads REQUIRED)
 
 add_library(WebFront INTERFACE)
 add_library(WebFront::WebFront ALIAS WebFront)
+# The public test framework (WebFront::Bdd, webfront_bdd_discover_tests), which WebFront's own tests use.
+include(cmake/WebFrontBddTarget.cmake)
 if(WEBFRONT_DISTRIBUTION)
     target_compile_definitions(WebFront INTERFACE WEBFRONT_DISTRIBUTION=1)
 endif()

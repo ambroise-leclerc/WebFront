@@ -2,7 +2,7 @@
 #include "InjectableNetworking.hpp"
 #include "Mocks.hpp"
 #include "TemporaryDirectory.hpp"
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/http/BlockingWorker.hpp>
 #include <webfront/http/HTTPServer.hpp>
 

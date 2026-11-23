@@ -1,5 +1,5 @@
 #include "Mocks.hpp"
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include "TemporaryDirectory.hpp"
 #include <webfront/networking/NetworkingMock.hpp>
 #include <webfront/UIThread.hpp>

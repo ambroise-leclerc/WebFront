@@ -2,7 +2,7 @@
 /// @brief The binding of HTTP reads to the browser client of a connection: token, cookie, transport, neutralized content (#469, ADR-020).
 #include "InjectableNetworking.hpp"
 #include "Mocks.hpp"
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/ReadBinding.hpp>
 #include <webfront/WebFront.hpp>
 #include <webfront/http/HTTPServer.hpp>

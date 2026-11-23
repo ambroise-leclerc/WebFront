@@ -1,7 +1,7 @@
 /// @brief Socket mock driving a WebLink from the test thread, with injectable write failures.
 #pragma once
 #include "InlineTaskScope.hpp"
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/http/WebSocket.hpp>
 #include <webfront/networking/NetworkingMock.hpp>
 
