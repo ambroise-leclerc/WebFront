@@ -1302,12 +1302,26 @@ public:
         }
     }
 
-    /// Whether the frontend can show a second window of the application (see openSecondaryWindow()).
+    /// Whether the frontend type can show a second window of the application (see openSecondaryWindow()). A frontend that
+    /// chooses at run time, as NativeOrBrowserFrontend does, may still refuse it: canShowSecondaryWindow() tells.
     static constexpr bool supportsSecondaryWindow =
         requires(std::string_view text, const ContentPolicy& policy, const WindowOptions& window, const ViewLaunch& launch) {
             Frontend::openSecondaryWindow(text, text, text, policy, window, launch);
             { Frontend::uiExecutor() } -> std::same_as<frontend::UIExecutor>;
         };
+
+    /** @brief Whether openSecondaryWindow() can open a window with the frontend chosen at run time, once show() runs: false
+     * when the frontend type cannot (supportsSecondaryWindow), and for NativeOrBrowserFrontend once it fell back to the system
+     * browser (the frontend is initialized when the first application is constructed). Use it to offer the action or not.
+     */
+    [[nodiscard]] static bool canShowSecondaryWindow() {
+        if constexpr (!supportsSecondaryWindow)
+            return false;
+        else if constexpr (requires { { Frontend::secondaryWindowsAvailable() } -> std::convertible_to<bool>; })
+            return Frontend::secondaryWindowsAvailable();
+        else
+            return true;
+    }
 
     /** @brief Opens `page` in a second native window beside the one show() runs, served by the same server (#616).
      *
@@ -1329,8 +1343,8 @@ public:
      * Under WebView2, a call made just after show() started waits until the first window's browser is created; on the
      * interface thread that call throws std::logic_error instead. Throws std::logic_error when this application is not
      * showing a window (also once the first window has closed), and when the frontend cannot show a second window (today the
-     * WebKitGTK, WKWebView and WebView2 frontends can; the system browser and CEF refuse). Window placement is left to the
-     * toolkit.
+     * WebKitGTK, WKWebView and WebView2 frontends can; the system browser and CEF refuse; canShowSecondaryWindow() tells it
+     * beforehand). Window placement is left to the toolkit.
      */
     void openSecondaryWindow(std::string_view page, WindowOptions options = {}) {
         if constexpr (supportsSecondaryWindow) {

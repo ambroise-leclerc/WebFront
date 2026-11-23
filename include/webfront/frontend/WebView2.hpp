@@ -274,6 +274,10 @@ public:
             throw std::invalid_argument("WebView2: startup timeout must be between 1 and USER_TIMER_MAXIMUM milliseconds");
         startupTimeoutMilliseconds = static_cast<UINT>(timeout.count());
     }
+    /// The delay of the watchdog, as given at construction.
+    [[nodiscard]] std::chrono::milliseconds startupTimeout() const noexcept {
+        return std::chrono::milliseconds{startupTimeoutMilliseconds};
+    }
     HWND                                             window = nullptr;
     Microsoft::WRL::ComPtr<ICoreWebView2Environment> environment;
     Microsoft::WRL::ComPtr<ICoreWebView2Controller>  controller;
@@ -1083,7 +1087,8 @@ inline void openSecondary(std::string_view address, std::string_view port, std::
         throw std::logic_error("WebView2Frontend: no window of the application is open; show() it before opening another");
     if (!windows.primary->environment)
         throw WindowNotReady("WebView2Frontend: the first window is not ready (its browser is being created); call it later");
-    auto session           = std::make_shared<Session>(options.startupTimeout);
+    // The first window's delay, which the application configured (WebView2FrontendWithOptions), not this call's default.
+    auto session           = std::make_shared<Session>(windows.primary->startupTimeout());
     session->secondary     = true;
     session->contentPolicy = webfront::detail::BoundContentPolicy{frontend::detail::applicationUrl(address, port, "", options.launch.origin), options.contentPolicy};
     session->viewLaunch    = options.launch;

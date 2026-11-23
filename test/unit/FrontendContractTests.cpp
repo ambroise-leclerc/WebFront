@@ -1398,8 +1398,45 @@ const Scenario secondWindowRefused{"A frontend without a second window refuses o
     });
     given("the native-or-browser frontend whose native window cannot show a second one", [&] {
         using Either = frontend::NativeOrBrowserFrontendFor<HostFrontend<>, DeafFrontend>;
-        check(!Either::closeSecondaryWindow("other.html"));
-        requireThrows<std::logic_error>([&] { Either::openSecondaryWindow("127.0.0.1", "9002", "other.html", ContentPolicy{}, WindowOptions{}, ViewLaunch{}); });
+        // It does not claim a capacity its native frontend lacks (#646).
+        static_assert(!HostApp<Either>::supportsSecondaryWindow);
+        then("the application reports that it cannot show one", [&] {
+            check(!HostApp<Either>::canShowSecondaryWindow());
+        });
+    });
+}};
+
+namespace {
+// Native frontends that can show a second window; the second cannot initialize, so the system browser replaces it.
+struct SecondaryNative : NotReadyFrontend { };
+struct UnavailableSecondaryNative : NotReadyFrontend {
+    static void initialize() {
+        throw std::runtime_error("no display");
+    }
+};
+}  // namespace
+
+const Scenario secondaryAvailability{"Whether a second window can be shown follows the frontend chosen at run time (#646)", [] {
+    given("a native-or-browser frontend whose native window can show a second one", [&] {
+        using Native   = frontend::NativeOrBrowserFrontendFor<SecondaryNative, DeafFrontend>;
+        using Fallback = frontend::NativeOrBrowserFrontendFor<UnavailableSecondaryNative, DeafFrontend>;
+        static_assert(HostApp<Native>::supportsSecondaryWindow && HostApp<Fallback>::supportsSecondaryWindow);
+        Native::initialize();
+        Fallback::initialize();
+        then("it can when the native window is used, and cannot once it fell back to the system browser", [&] {
+            check(Native::usesNativeWindow());
+            check(HostApp<Native>::canShowSecondaryWindow());
+            check(!Fallback::usesNativeWindow());
+            check(!HostApp<Fallback>::canShowSecondaryWindow());
+            requireThrows<std::logic_error>([&] { Fallback::openSecondaryWindow("127.0.0.1", "9002", "other.html", ContentPolicy{}, WindowOptions{}, ViewLaunch{}); });
+            check(!Fallback::closeSecondaryWindow("other.html"));
+        });
+    });
+    given("frontends without a choice at run time", [&] {
+        then("a frontend that shows a second window can, one that cannot does not", [&] {
+            check(HostApp<NotReadyFrontend>::canShowSecondaryWindow());
+            check(!HostApp<HostFrontend<>>::canShowSecondaryWindow());
+        });
     });
 }};
 

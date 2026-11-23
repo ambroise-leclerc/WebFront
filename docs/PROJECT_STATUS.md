@@ -28,7 +28,7 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   accepts a secondary thread (WebView2); a host loop cannot share the main thread with an embedded
   window. See [host integration](HOST_INTEGRATION.md).
   A second native window of the same application (`app.openSecondaryWindow()`, #616) exists on WebKitGTK, WKWebView and WebView2; CEF
-  and the system browser refuse it with `std::logic_error`, and the position of the window is left to the toolkit. The call waits
+  and the system browser refuse it with `std::logic_error` (`app.canShowSecondaryWindow()` tells it beforehand, also after `NativeOrBrowserFrontend` fell back to the browser), and the position of the window is left to the toolkit. The call waits
   for the interface thread: a `cppFunction` callback runs it on `app.uiExecutor()` rather than hold the server's thread.
 - **Native pseudoterminals (opt-in).** `webfront::Pty` uses a Unix PTY on Linux and macOS or ConPTY on Windows 10 version 1809 and later. The page adapter requires a loopback bind and the application’s own browser origin. See the [PTY guide and standalone example](PTY.md).
 - **Developer environment.** `NativeApp::bootstrap("developer")` loads the verified, pinned

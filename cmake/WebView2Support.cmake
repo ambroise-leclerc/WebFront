@@ -66,7 +66,8 @@ function(webfront_add_webview2_tests)
     target_link_libraries(webview2_lifecycle PRIVATE WebFront WebFront_warnings WebFront_options)
     foreach(mode repeated-show native-early-close navigation-diagnostic mta missing-runtime
                  closed-startup-timeout failed-startup-timeout late-navigation-failure runtime-ready
-                 file-choose file-cancel file-download script-dialogs first-frame present-timeout)
+                 file-choose file-cancel file-download script-dialogs first-frame present-timeout
+                 secondary-startup-timeout)
         add_test(NAME WebView2Lifecycle-${mode} COMMAND webview2_lifecycle ${mode})
         webfront_set_browser_test_properties("WebView2Lifecycle-${mode}" "${webtest_source_dir}" 45)
     endforeach()

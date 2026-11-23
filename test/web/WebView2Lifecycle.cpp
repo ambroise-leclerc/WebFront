@@ -549,6 +549,52 @@ int runtimeReadyBeforePageLoad() {
     return 0;
 }
 
+// A secondary window keeps the startup delay the application configured (90 s in LifecycleOptions), not the 30 s default
+// of the options its call builds (#646).
+int secondaryStartupTimeout() {
+    App               app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    std::atomic<bool> showReturned{false};
+    std::string       failure;
+    std::thread       host([&] {
+        try {
+            const auto executor = app.uiExecutor();
+            for (int attempt = 0; attempt < 4000 && !executor.available(); ++attempt)
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            constexpr std::string_view page = "second-window.html?name=editor";
+            app.openSecondaryWindow(page);
+            std::chrono::milliseconds timeout{};
+            webfront::frontend::invokeOnUIThread(executor, [&] {
+                auto&      windows = webfront::frontend::detail::webview2::Windows::instance();
+                const auto found   = windows.secondary.find(std::string(page));
+                if (found != windows.secondary.end())
+                    timeout = found->second->startupTimeout();
+            });
+            require(timeout == LifecycleOptions::get().startupTimeout, "The secondary window did not keep the configured startup timeout");
+        } catch (const std::exception& error) {
+            failure = error.what();
+        }
+        // Repeated until show() returns: a request made before the window exists reaches nothing.
+        while (!showReturned) {
+            app.requestClose();
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+    });
+    {
+        struct Join {
+            std::atomic<bool>& showReturned;
+            std::thread&       host;
+            ~Join() {
+                showReturned = true;
+                host.join();
+            }
+        } join{showReturned, host};
+        app.show("second-window.html");
+    }
+    if (!failure.empty())
+        throw std::runtime_error(failure);
+    return 0;
+}
+
 int expectOpenFailure(std::string_view port, std::string_view diagnostic) {
     try {
         webfront::testdriver::TestFrontend<webfront::frontend::WebView2Frontend>::open(port, "index.html");
@@ -661,6 +707,7 @@ int run(std::string_view mode) {
          return startupCompletion(true);
          }                                                    },
         {"late-navigation-failure",      lateNavigationFailure},
+        {"secondary-startup-timeout",  secondaryStartupTimeout},
         {                    "mta",                  rejectMta},
         {        "missing-runtime",
          [] {
