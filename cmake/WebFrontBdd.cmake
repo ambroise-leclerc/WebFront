@@ -31,19 +31,22 @@ if(CMAKE_SCRIPT_MODE_FILE)
     foreach(property IN LISTS properties)
         string(APPEND quoted_properties " [==[${property}]==]")
     endforeach()
-    # A title may hold a ';', which splits a CMake list, or an unpaired '[' or ']', inside which a list is not split.
-    string(REPLACE ";" "<bdd-semicolon>" titles "${titles}")
-    string(REPLACE "[" "<bdd-open>" titles "${titles}")
-    string(REPLACE "]" "<bdd-close>" titles "${titles}")
+    # A title may hold a ';', which splits a CMake list, or an unpaired '[' or ']', inside which a list is not split. They are
+    # escaped as percent codes, "%" first so that a title which holds a code of its own comes back unchanged.
+    string(REPLACE "%" "%25" titles "${titles}")
+    string(REPLACE ";" "%3B" titles "${titles}")
+    string(REPLACE "[" "%5B" titles "${titles}")
+    string(REPLACE "]" "%5D" titles "${titles}")
     string(REPLACE "\n" ";" titles "${titles}")
     set(content "")
     foreach(title IN LISTS titles)
         if(title STREQUAL "")
             continue()
         endif()
-        string(REPLACE "<bdd-semicolon>" ";" title "${title}")
-        string(REPLACE "<bdd-open>" "[" title "${title}")
-        string(REPLACE "<bdd-close>" "]" title "${title}")
+        string(REPLACE "%3B" ";" title "${title}")
+        string(REPLACE "%5B" "[" title "${title}")
+        string(REPLACE "%5D" "]" title "${title}")
+        string(REPLACE "%25" "%" title "${title}")
         set(name "${PREFIX}Scenario: ${title}")
         string(APPEND content "add_test([==[${name}]==] [==[${EXECUTABLE}]==] --exact [==[${title}]==])\n"
             "set_tests_properties([==[${name}]==] PROPERTIES SKIP_RETURN_CODE 4${quoted_properties})\n")
@@ -99,7 +102,8 @@ function(webfront_bdd_discover_tests target)
     set_property(TARGET ${target} PROPERTY WEBFRONT_BDD_DISCOVERED TRUE)
     set(base "${CMAKE_CURRENT_BINARY_DIR}/${target}")
     set(properties_file "${base}_properties-$<CONFIG>.cmake")
-    file(GENERATE OUTPUT "${properties_file}" CONTENT "set(properties [==[${arg_PROPERTIES}]==])\n")
+    # The prefix goes into the file as well: a change of either makes the file newer than the cases generated from it.
+    file(GENERATE OUTPUT "${properties_file}" CONTENT "set(properties [==[${arg_PROPERTIES}]==])\n# prefix: [==[${arg_TEST_PREFIX}]==]\n")
     get_property(multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
     if(multi_config)
         set(output "${base}_tests-$<CONFIG>.cmake")
@@ -113,10 +117,13 @@ function(webfront_bdd_discover_tests target)
         string(CONCAT include_content "if(EXISTS \"${output}\")\n  include(\"${output}\")\n"
                             "else()\n  add_test([==[${target}_NOT_BUILT]==] [==[${target}_NOT_BUILT]==])\nendif()\n")
     endif()
-    add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" "-DEXECUTABLE=$<TARGET_FILE:${target}>" "-DOUTPUT=${output}" "-DPREFIX=${arg_TEST_PREFIX}"
-                "-DPROPERTIES_FILE=${properties_file}" -P "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
-        VERBATIM)
+    set(discovery_command "${CMAKE_COMMAND}" "-DEXECUTABLE=$<TARGET_FILE:${target}>" "-DOUTPUT=${output}" "-DPREFIX=${arg_TEST_PREFIX}"
+                "-DPROPERTIES_FILE=${properties_file}" -P "${CMAKE_CURRENT_FUNCTION_LIST_FILE}")
+    # Right after each build of the target, so that building it alone registers its cases...
+    add_custom_command(TARGET ${target} POST_BUILD COMMAND ${discovery_command} VERBATIM)
+    # ...and again when only the properties or the prefix changed: that reconfiguration does not rebuild the executable.
+    add_custom_command(OUTPUT "${output}" COMMAND ${discovery_command} DEPENDS ${target} "${properties_file}" VERBATIM)
+    add_custom_target(${target}_bdd_discovery ALL DEPENDS "${output}")
     file(WRITE "${base}_include.cmake" "${include_content}")
     set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES "${base}_include.cmake")
 endfunction()

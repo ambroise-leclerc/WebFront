@@ -1,7 +1,7 @@
 # Installs the WebFrontBdd package of BUILD_DIR into WORK, then configures, builds and runs a project that finds it and
 # registers its own scenarios with webfront_bdd_discover_tests (#647).
 #   cmake -DROOT=<checkout> -DBUILD_DIR=<configured tree> -DWORK=<scratch> -DGENERATOR=<g> -DCXX_COMPILER=<c>
-#         [-DCONFIG=<config>] -P test/cmake/CheckBddConsumer.cmake
+#         -DINSTALL_LIBDIR=<lib> -DINSTALL_INCLUDEDIR=<include> [-DCONFIG=<config>] -P test/cmake/CheckBddConsumer.cmake
 file(REMOVE_RECURSE "${WORK}")
 file(MAKE_DIRECTORY "${WORK}")
 
@@ -17,8 +17,9 @@ if(NOT CONFIG)
     set(CONFIG Release)
 endif()
 run_step("Installing the package" "${CMAKE_COMMAND}" --install "${BUILD_DIR}" --config ${CONFIG} --component WebFrontBdd --prefix "${WORK}/prefix")
-foreach(installed IN ITEMS include/webfront/testing/Bdd.hpp lib/cmake/WebFrontBdd/WebFrontBddConfig.cmake
-                           lib/cmake/WebFrontBdd/WebFrontBddTargets.cmake lib/cmake/WebFrontBdd/WebFrontBdd.cmake)
+set(bdd_cmake_dir "${INSTALL_LIBDIR}/cmake/WebFrontBdd")
+foreach(installed IN ITEMS "${INSTALL_INCLUDEDIR}/webfront/testing/Bdd.hpp" "${bdd_cmake_dir}/WebFrontBddConfig.cmake"
+                           "${bdd_cmake_dir}/WebFrontBddTargets.cmake" "${bdd_cmake_dir}/WebFrontBdd.cmake")
     if(NOT EXISTS "${WORK}/prefix/${installed}")
         message(FATAL_ERROR "The installation lacks ${installed}")
     endif()

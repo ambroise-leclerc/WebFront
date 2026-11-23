@@ -467,7 +467,11 @@ add_test(NAME AutomationAbsentFromDistribution
 set_tests_properties(AutomationAbsentFromDistribution PROPERTIES PASS_REGULAR_EXPRESSION "does not exist in a distribution build")
 
 # A project outside WebFront finds the installed WebFrontBdd package, writes scenarios and has CTest discover them (#647).
-add_test(NAME BddConsumer COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DBUILD_DIR=${CMAKE_BINARY_DIR}
-    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/bdd-consumer "-DGENERATOR=${CMAKE_GENERATOR}" "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}"
-    -DCONFIG=$<CONFIG> -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckBddConsumer.cmake)
-set_tests_properties(BddConsumer PROPERTIES TIMEOUT 300 LABELS portability)
+# Only the top-level project installs the package, so only it can run this check.
+if(WEBFRONT_IS_TOP_LEVEL)
+    add_test(NAME BddConsumer COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DBUILD_DIR=${CMAKE_BINARY_DIR}
+        -DWORK=${CMAKE_CURRENT_BINARY_DIR}/bdd-consumer "-DGENERATOR=${CMAKE_GENERATOR}" "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        "-DINSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}" "-DINSTALL_INCLUDEDIR=${CMAKE_INSTALL_INCLUDEDIR}"
+        -DCONFIG=$<CONFIG> -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckBddConsumer.cmake)
+    set_tests_properties(BddConsumer PROPERTIES TIMEOUT 300 LABELS portability)
+endif()
