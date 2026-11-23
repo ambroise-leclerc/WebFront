@@ -44,6 +44,31 @@ void send(Pty& terminal, std::string_view text) {
     require(terminal.write({reinterpret_cast<const std::uint8_t*>(text.data()), text.size()}));
 }
 
+/// The text without terminal control sequences. A terminal can insert them anywhere in the output (ConPTY sets the
+/// window title while a program starts, possibly in the middle of a line), so markers are searched in this form.
+std::string plain(std::string_view raw) {
+    std::string result;
+    for (std::size_t i = 0; i < raw.size(); ++i) {
+        if (raw[i] != '\x1b' || i + 1 >= raw.size()) {
+            result += raw[i];
+            continue;
+        }
+        const char kind = raw[++i];
+        if (kind == '[') { // CSI: parameters, then a final byte in 0x40-0x7e
+            while (i + 1 < raw.size() && (raw[i + 1] < '@' || raw[i + 1] > '~'))
+                ++i;
+            ++i;
+        } else if (kind == ']') { // OSC: up to BEL or ESC followed by a backslash
+            while (i + 1 < raw.size() && raw[i + 1] != '\a' && raw[i + 1] != '\x1b')
+                ++i;
+            ++i;
+            if (i < raw.size() && raw[i] == '\x1b')
+                ++i;
+        }
+    }
+    return result;
+}
+
 struct Transcript {
     std::uint64_t      cursor = 0;
     std::string        text;
@@ -57,7 +82,7 @@ struct Transcript {
             if (!part.bytes.empty())
                 text.append(reinterpret_cast<const char*>(part.bytes.data()), part.bytes.size());
             exit = part.exitCode;
-            if (marker.empty() ? exit.has_value() : text.contains(marker))
+            if (marker.empty() ? exit.has_value() : plain(text).contains(marker))
                 return;
             std::this_thread::sleep_for(10ms);
         } while (!exit && std::chrono::steady_clock::now() < deadline);
@@ -66,7 +91,8 @@ struct Transcript {
     }
 };
 
-unsigned stallPid(std::string_view text) {
+unsigned stallPid(std::string_view raw) {
+    const auto text         = plain(raw);
     const auto start        = text.find("STALLED:") + std::string_view("STALLED:").size();
     unsigned   pid          = 0;
     const auto [end, error] = std::from_chars(text.data() + start, text.data() + text.size(), pid);
@@ -149,6 +175,13 @@ const Scenario ptyShell{"PTY exchanges bytes with an interactive shell and resiz
                                 });
                             });
                         }};
+
+const Scenario ptyControlSequences{"PTY test markers are found through terminal control sequences inserted in the output", [] {
+                                       // ConPTY sets the window title while the probe starts, here in the middle of the marker.
+                                       const std::string raw = "\x1b[2J\x1b[4;1H> probe stall\r\nSTALLED:\x1b]0;cmd.exe - probe\a" "25776:END\r\n\x1b]0;t\x1b\\";
+                                       require(plain(raw) == "> probe stall\r\nSTALLED:25776:END\r\n");
+                                       require(stallPid(raw) == 25776);
+                                   }};
 
 const Scenario ptyHangUp{"PTY refuses oversized input promptly and terminates a stalled foreground descendant", [] {
                              Pty        terminal(shell());
