@@ -1,0 +1,26 @@
+name: Source Format
+
+on:
+  push:
+    branches: [ master, develop ]
+  pull_request:
+    branches: [ master, develop ]
+
+permissions:
+  contents: read
+
+jobs:
+  clang-format:
+    name: clang-format
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # The version is pinned: clang-format changes its output from one release to the next.
+      - name: Install clang-format
+        run: python3 -m pip install --user clang-format==21.1.8
+
+      - name: Check the tracked sources
+        run: .github/scripts/check-clang-format.sh "$HOME/.local/bin/clang-format"
