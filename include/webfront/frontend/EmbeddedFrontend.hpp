@@ -14,6 +14,7 @@
 #include <chrono>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -22,13 +23,21 @@
 
 namespace webfront::frontend {
 
+namespace detail {
+/// A startup deadline a toolkit timer can hold: positive and below 2^31 milliseconds. A negative or huge count would
+/// otherwise wrap around when it becomes the unsigned argument of the timer.
+[[nodiscard]] inline unsigned timerMilliseconds(std::chrono::milliseconds timeout, std::string_view frontend) {
+    if (timeout.count() < 1 || timeout.count() > std::numeric_limits<int>::max())
+        throw std::invalid_argument(std::string(frontend) + ": startupTimeout must be between 1 and " + std::to_string(std::numeric_limits<int>::max()) + " milliseconds");
+    return static_cast<unsigned>(timeout.count());
+}
+}  // namespace detail
+
 /// What an embedded frontend is asked when it opens a window, the same for the first window and the secondary ones. A
 /// frontend honours the settings that its toolkit has (a field it has no use for is ignored) and its own startup deadline.
 struct ViewOptions {
     /// The initial document must finish loading within this interval; no bridge connection is required.
     std::chrono::milliseconds startupTimeout{30000};
-    /// WebView2 only: the profile folder; empty keeps the default.
-    std::filesystem::path userDataFolder{};
     ContentPolicy         contentPolicy{};
     WindowOptions         window{};
     /// WKWebView and WebView2: keep the native window hidden and avoid activating the application.
@@ -44,6 +53,9 @@ struct ViewOptions {
     /// Per-launch proof of this view (ADR-020): given to documents of the application's origin only, at the start of the
     /// document, for WebFront.js to present in its handshake. Set by WebFront; empty gives the view no association.
     ViewLaunch launch{};
+    /// WebView2 only: the profile folder; empty keeps the default. Last, so the members before it keep the order that
+    /// WKWebViewOptions had.
+    std::filesystem::path userDataFolder{};
 
     /// A secondary window is built from the first one's: its visibility, its startup deadline and its test injections.
     void inherit(const ViewOptions& first) {

@@ -11,6 +11,7 @@ these entries stays in the GitHub releases and the Git history.
 ## Unreleased
 
 ### Breaking
+- `WebView2Options` is now `ViewOptions`, shared with WKWebView: `userDataFolder` moves after `launch`, so a positional initialization of `WebView2Options` stops compiling; use designated initializers (#652, `docs/FRONTENDS.md`).
 - `webfront/automation/Enable.hpp` no longer compiles with `WEBFRONT_DISTRIBUTION`: gate `enableAutomation` out of the distribution build, as the guide already advised (#632, ADR-025).
 - `webfront-agent` is removed with its JSON CLI, MCP on stdio, `--serve`, `--attach`, `--list` and `--print-mcp-config`, as are `WEBFRONT_BUILD_AUTOMATION`, `WEBFRONT_AUTOMATION_FRONTEND` and `webfront_add_agent()`: connect the MCP client to the URL the application prints (#632, ADR-025, `docs/AUTOMATION.md`).
 - `AutomationOptions::listen` becomes `directory` and may stay empty (a private directory named after the session is created), `Automation::endpoint()` becomes `directory()`, and the JSON-lines attachment channel (`ChannelServer`, `ChannelClient`) is gone (#632).

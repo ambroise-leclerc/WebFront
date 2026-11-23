@@ -918,7 +918,7 @@ struct Session : FailureState {
         rethrowIfFailed();
         if (closed)
             return;
-        navigationTimer = a.timeoutAdd(static_cast<unsigned>(startupTimeout.count()), onNavigationTimeout, this);
+        navigationTimer = a.timeoutAdd(frontend::detail::timerMilliseconds(startupTimeout, "WebKitGTKFrontend"), onNavigationTimeout, this);
         presentTimer = a.timeoutAdd(frontend::detail::Presentation::maximumDelayMs, onPresentTimeout, this);
         presentHidden();
         trace("load started");
@@ -930,7 +930,7 @@ struct Session : FailureState {
 
     /// Starts the load of a secondary window and returns: the loop of the application's own window drives it.
     void start(const std::string& url) {
-        navigationTimer = a.timeoutAdd(static_cast<unsigned>(startupTimeout.count()), onNavigationTimeout, this);
+        navigationTimer = a.timeoutAdd(frontend::detail::timerMilliseconds(startupTimeout, "WebKitGTKFrontend"), onNavigationTimeout, this);
         presentTimer    = a.timeoutAdd(frontend::detail::Presentation::maximumDelayMs, onPresentTimeout, this);
         presentHidden();
         a.load(view, url.c_str());
@@ -1032,6 +1032,7 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
     initialize(mode);
     // One window per process: a second open() on the main thread is refused before it creates a window.
     frontend::detail::InterfaceSession<Windows>::refuseSecond(uiExecutorHostOf<WebKitGTKHost>(), WindowHooks::name);
+    (void)frontend::detail::timerMilliseconds(options.startupTimeout, WindowHooks::name);  // refused before a window exists
     Session session(webfront::detail::BoundContentPolicy{applicationUrl(address, port, "", options.launch.origin), options.contentPolicy}, options.window);
     session.launch             = options.launch;
     session.startupTimeout     = options.startupTimeout;

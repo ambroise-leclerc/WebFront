@@ -430,3 +430,14 @@ const Scenario windowPresentation{"A window is made opaque once, by the first fr
         });
     });
 }};
+
+const Scenario startupTimeoutRange{"A startup deadline a timer cannot hold is refused", {"window-registry"}, [] {
+    using std::chrono::milliseconds;
+    then("a positive deadline is kept", [&] {
+        check(frontend::detail::timerMilliseconds(milliseconds{30000}, "FakeFrontend") == 30000u);
+    });
+    then("zero, negative and oversized deadlines are refused with the frontend's name", [&] {
+        for (const auto bad : {milliseconds{0}, milliseconds{-1}, milliseconds{-86400000}, milliseconds{4294967296LL}})
+            checkThrows<std::invalid_argument>([&] { (void)frontend::detail::timerMilliseconds(bad, "FakeFrontend"); }, contains("FakeFrontend: startupTimeout must be between 1 and"));
+    });
+}};
