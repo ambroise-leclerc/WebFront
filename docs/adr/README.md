@@ -68,7 +68,7 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-023](ADR-023-espace-de-noms-des-commandes-du-terminal.md) | Terminal command names: `wf` stays the prefix of project commands, read-only file commands (`ls`, `cat`, `tree`, `mounts`), file command names reserved ahead, dependency graph with `wf list --tree`, `wf why`, `wf info` | Accepted | 2026-11-14 | 1.0 — 2026-11-14 |
 | [ADR-024](ADR-024-tls-integre.md) | Optional integrated TLS 1.3 server | Proposed | 2026-11-21 | 1.0 |
 | [ADR-025](ADR-025-mcp-http-dans-l-application.md) | The application serves MCP over Streamable HTTP on its own loopback listener, with a session Bearer token, strict Host/Origin checks, per-instance discovery and no automation in distribution builds; the webfront-agent launcher is removed; amends ADR-019 | Accepted (delivery in progress) | 2026-11-21 | 1.3 — 2026-11-22 |
-| [ADR-026](ADR-026-configuration-mcp-persistante.md) | Stable MCP client configuration with explicit development security modes | Accepted (delivery in progress) | 2026-11-22 | 1.2 — 2026-11-22 |
+| [ADR-026](ADR-026-configuration-mcp-persistante.md) | Stable MCP client configuration with explicit development security modes | Accepted | 2026-11-22 | 1.2 — 2026-11-22 |
 
 Numbering follows the reading topics; milestones and individual file histories provide
 the chronology, which does not follow the numerical order.
