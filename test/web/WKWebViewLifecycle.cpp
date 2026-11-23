@@ -305,10 +305,10 @@ void committedNavigation() {
     send<void>(session.delegate, "webView:didCommitNavigation:", session.view, static_cast<id>(nullptr));
     session.rejectNavigation("initial navigation was denied by contentPolicy");
     send<void>(session.delegate, "webView:didFailNavigation:withError:", session.view, static_cast<id>(nullptr), static_cast<id>(nullptr));
-    require(notified && !session.loaded && !session.closed && !session.error, "A denied later navigation closed the committed document");
+    require(notified && !session.loaded && !session.closed && !session.failure, "A denied later navigation closed the committed document");
     Session initial("http://127.0.0.1:9002/", {.visible = false});
     initial.rejectNavigation("initial navigation was denied by contentPolicy");
-    require(initial.closed && initial.error, "A denied initial navigation was not reported");
+    require(initial.closed && initial.failure, "A denied initial navigation was not reported");
 }
 
 void agentApplication() {
@@ -658,14 +658,14 @@ void loadRevealPresentation(bool delayOnly) {
         require(!send<BOOL>(send(session.view, "valueForKey:", key.get()), "boolValue"), "The view still paints its own background");
     }
     double shownAlpha = 0;
-    session.windowShown = [&] {
+    session.presentation.windowShown = [&] {
         shownAlpha = send<double>(session.window, "alphaValue");
         session.close();
     };
     session.start();
     session.run();
     require(shownAlpha == 1.0, "The window was not made opaque");
-    require(session.presentedByFrame != delayOnly, delayOnly ? "The load revealed the window although it was disabled" : "The window waited for the delay instead of the document load");
+    require(session.presentation.byFrame != delayOnly, delayOnly ? "The load revealed the window although it was disabled" : "The window waited for the delay instead of the document load");
     // The displayed pixels are not read: cacheDisplayInRect renders neither the window's fill nor the web content (it reads black),
     // and capturing the screen needs a permission the CI does not have. The state that produces them is checked instead: the
     // window's colour, and the view no longer painting its own background (above).

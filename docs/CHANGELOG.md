@@ -11,6 +11,7 @@ these entries stays in the GitHub releases and the Git history.
 ## Unreleased
 
 ### Breaking
+- `WebView2Options` is now `ViewOptions`, shared with WKWebView: `userDataFolder` moves after `launch`, so a positional initialization of `WebView2Options` stops compiling, and so does a designated one that writes `.userDataFolder` before `.contentPolicy`, `.window`, `.visible` or `.launch` (write it last) (#652, `docs/FRONTENDS.md`).
 - `webfront/automation/Enable.hpp` no longer compiles with `WEBFRONT_DISTRIBUTION`: gate `enableAutomation` out of the distribution build, as the guide already advised (#632, ADR-025).
 - `webfront-agent` is removed with its JSON CLI, MCP on stdio, `--serve`, `--attach`, `--list` and `--print-mcp-config`, as are `WEBFRONT_BUILD_AUTOMATION`, `WEBFRONT_AUTOMATION_FRONTEND` and `webfront_add_agent()`: connect the MCP client to the URL the application prints (#632, ADR-025, `docs/AUTOMATION.md`).
 - `AutomationOptions::listen` becomes `directory` and may stay empty (a private directory named after the session is created), `Automation::endpoint()` becomes `directory()`, and the JSON-lines attachment channel (`ChannelServer`, `ChannelClient`) is gone (#632).
@@ -50,6 +51,9 @@ in a native pseudoterminal, and a faster, less flashy start of the native window
 - Choose the colour of the WebKitGTK view under the page with `WindowOptions::background` (WebKitGTK; the other embedded frontends are listed here), and read the start-up milestones of a WebKitGTK view with `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WEBKITGTK.md`).
 
 ### Changed
+- WebKitGTK takes a `startupTimeout` (30 s by default), and WebView2 refuses a secondary window once the first one closed, even for a page already open (#652).
+- Open every native window from one `ViewOptions` (`WKWebViewOptions` and `WebView2Options` are aliases), whose test injections reach the secondary windows too (#652, `docs/FRONTENDS.md`).
+- Write a native frontend from shared headers: `EmbeddedFrontend` (facade and every `open()` overload), `WindowRegistry`/`InterfaceSession`, `StartupTrace` and `Presentation`, tested on Linux with fake windows (#652, `docs/FRONTENDS.md`).
 - Reveal the WKWebView window when the document has loaded or after one second (#611, `docs/WKWEBVIEW.md`).
 - Reveal the WebView2 window after the first frame or one second (#611, `docs/WEBVIEW2.md`).
 - Show the WebKitGTK window when the page reports its first frame, or when a one-second timer fires, even if the page has not painted, instead of at once; the embedded pages, the starter and the examples use the cheap `sans-serif` and `monospace` font stacks (#611, `docs/WEBKITGTK.md`).
