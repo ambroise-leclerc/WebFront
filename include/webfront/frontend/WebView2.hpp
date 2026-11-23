@@ -1071,7 +1071,8 @@ inline void openSecondary(std::string_view address, std::string_view port, std::
         throw std::logic_error("WebView2Frontend: no window of the application is open; show() it before opening another");
     const std::string key(page);
     if (const auto found = windows.secondary.find(key); found != windows.secondary.end()) {
-        if (const auto handle = found->second->window) {
+        // A hidden window stays hidden and does not take the focus.
+        if (const auto handle = found->second->window; handle && IsWindowVisible(handle)) {
             if (IsIconic(handle))
                 ShowWindow(handle, SW_RESTORE);
             SetForegroundWindow(handle);

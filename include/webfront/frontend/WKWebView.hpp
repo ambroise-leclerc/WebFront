@@ -1244,7 +1244,9 @@ inline void openSecondary(std::string_view address, std::string_view port, std::
         throw std::logic_error("WKWebView: no application window is open");
     std::string key(page);
     if (const auto found = windows.secondary.find(key); found != windows.secondary.end()) {
-        send<void>(found->second->window, "makeKeyAndOrderFront:", static_cast<id>(nullptr));
+        // A hidden window stays hidden: ordering it to the front would show it.
+        if (found->second->options.visible)
+            send<void>(found->second->window, "makeKeyAndOrderFront:", static_cast<id>(nullptr));
         return;
     }
     // The first window's visibility and startup delay: a hidden application never shows a window or takes the focus.
