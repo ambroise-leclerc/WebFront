@@ -133,26 +133,36 @@ struct HttpConsumerApp {
     };
     std::filesystem::path    project;
     std::vector<std::string> registered{};
+    mutable unsigned         projectReads = 0;
     template <typename Handler>
     void cppFunction(std::string_view name, Handler) {
         registered.emplace_back(name);
     }
     webfront::UISubscription subscribeUIStarted(std::function<void(UI)>) { return {}; }
     webfront::UISubscription subscribeUIClosed(std::function<void(UI)>) { return {}; }
-    const std::filesystem::path& projectDirectory() const { return project; }
+    const std::filesystem::path& projectDirectory() const { ++projectReads; return project; }
 };
 }  // namespace mcphttptests
 
 const Scenario mcpHttpScreening{"MCP HTTP requests are screened on their headers before any body is read", [] {
     using namespace mcphttptests;
     constexpr unsigned short port = 4321;
-    const auto               screened = [&](std::string_view text) { return mcphttp::screen(parsed(text), port, token); };
+    const auto               screened = [&](std::string_view text) { return mcphttp::screen(parsed(text), port, token, true); };
     given("a well-formed authenticated POST", [&] {
         then("it is accepted with its announced length", [&] {
             const auto accepted = screened(post(port, "{}"));
             require(!accepted.refusal);
             require(accepted.length == 2);
             require(!accepted.expectsContinue);
+            require(!mcphttp::screen(parsed(post(port, "{}")), port, token).refusal);
+            const Object defaults{mcphttp::clientConfiguration("http://127.0.0.1:4321/mcp", token)};
+            require(Object(Object(defaults.raw("mcpServers")).raw("webfront")).has("headers"));
+            const auto ordered = mcphttp::clientConfiguration("http://127.0.0.1:4321/mcp", token);
+            require(ordered.find("\"type\"") < ordered.find("\"url\""));
+            require(ordered.find("\"url\"") < ordered.find("\"headers\""));
+            const Object escaped{mcphttp::clientConfiguration("http://127.0.0.1:4321/mcp", "a\"b", "custom")};
+            const Object server{Object(escaped.raw("mcpServers")).raw("custom")};
+            require(Object(server.raw("headers")).string("Authorization") == "Bearer a\"b");
             require(screened(post(port, "{}", "Expect: 100-continue\r\n")).expectsContinue);
         });
         then("localhost is the other accepted spelling, and the Bearer scheme is case-insensitive", [&] {
@@ -178,6 +188,7 @@ const Scenario mcpHttpScreening{"MCP HTTP requests are screened on their headers
             require(status(screened(post(port, "{}", "Origin: http://127.0.0.1:9002\r\n"))) == 403);
             require(status(screened(post(port, "{}", "Origin: null\r\n"))) == 403);
             require(status(screened(post(port, "{}", "Sec-Fetch-Site: same-origin\r\n"))) == 403);
+            require(status(screened(post(port, "{}", "Sec-Fetch-Dest: document\r\n"))) == 403);
             require(status(screened(post(port, "{}", "Sec-Fetch-Mode: no-cors\r\n"))) == 403);
         });
         then("a CORS preflight and a GET get 405 and no Access-Control header", [&] {
@@ -470,7 +481,7 @@ const Scenario mcpHttpListener{"The MCP listener serves loopback HTTP with a pri
             try {
                 mcphttp::Server<Session> second{controller, other.path, port};
                 require(false);
-            } catch (const std::system_error& error) {
+            } catch (const mcphttp::BindError& error) {
                 require(std::string(error.what()).find("127.0.0.1:" + std::to_string(port)) != std::string::npos);
             }
             require(!std::filesystem::exists(other.path / mcphttp::configurationFile));
@@ -480,9 +491,18 @@ const Scenario mcpHttpListener{"The MCP listener serves loopback HTTP with a pri
         controller->close("Developer window closed");
         then("the listener closes and the configuration with its token is removed", [&] {
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
-            while (std::filesystem::exists(server.configuration()) && std::chrono::steady_clock::now() < deadline)
+            std::error_code error;
+            bool present = true;
+            do {
+                present = std::filesystem::exists(server.configuration(), error);
+                if (!error && !present)
+                    break;
+                if (error && !channel::transientRemovalFailure(error))
+                    break;
                 std::this_thread::sleep_for(std::chrono::milliseconds{10});
-            require(!std::filesystem::exists(server.configuration()));
+            } while (std::chrono::steady_clock::now() < deadline);
+            require(!error);
+            require(!present);
             [[maybe_unused]] channel::Runtime runtime;
             channel::Socket                   peer{channel::createSocket()};
             const auto                        address = channel::address(port);
@@ -603,4 +623,120 @@ const Scenario mcpHttpActivation{"An application that enables automation serves 
             require(!std::filesystem::exists(sessions / (session + ".json")));
         });
     });
+}};
+
+const Scenario stableMcp{"A fixed MCP token and port survive activation and authentication can be explicitly disabled", [] {
+    using namespace mcphttptests;
+    webfront::test::TemporaryDirectory root;
+    std::filesystem::create_directory(root.path() / "project");
+    HttpConsumerApp app{.project = root.path() / "project"};
+    const auto sessions = root.path() / "sessions";
+    const std::string fixed(64, 'a');
+    // A port selected by the OS can be claimed between launches. Retry only that bind error, keeping each
+    // successful pair on the same port and token; any other failure still fails the scenario.
+    for (int attempt = 0; ; ++attempt) {
+        try {
+            auto first = enableAutomation(app, {.mcpToken = fixed, .discovery = sessions, .announce = false});
+            require(first->banner().find("WARNING") == std::string::npos);
+            const auto port = static_cast<unsigned short>(std::stoi(first->mcpUrl().substr(first->mcpUrl().rfind(':') + 1)));
+            const auto config = channel::readEndpoint(first->directory(), "mcp.json");
+            first->close();
+            for (int run = 0; run < 2; ++run) {
+                auto instance = enableAutomation(app, {.mcpPort = port, .mcpToken = fixed, .discovery = sessions, .announce = false});
+                require(channel::readEndpoint(instance->directory(), "mcp.json") == config);
+                for (const auto& entry : discovery::list(sessions)) {
+                    std::ifstream input(sessions / (entry.session + ".json"));
+                    std::ostringstream record;
+                    record << input.rdbuf();
+                    require(record.str().find(fixed) == std::string::npos);
+                }
+                const auto opened = roundTrip(port, post(port, initialize, {}, fixed));
+                require(opened.status == 200);
+                require(roundTrip(port, post(port, initialize, {}, std::string(64, 'b'))).status == 401);
+                const auto extra = "MCP-Session-Id: " + opened.header("mcp-session-id") + "\r\nMCP-Protocol-Version: 2025-11-25\r\n";
+                require(roundTrip(port, post(port, initialized, extra, fixed)).status == 202);
+                const auto result = roundTrip(port, post(port, R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"webfront.session","arguments":{}}})", extra, fixed));
+                require(result.status == 200);
+                require(result.body.find("result") != std::string::npos);
+                requireThrows([&] { enableAutomation(app, {.mcpPort = port, .mcpToken = fixed, .discovery = sessions, .announce = false}); });
+                auto side = enableAutomation(app, {.discovery = sessions, .announce = false});
+                require(side->mcpUrl() != instance->mcpUrl());
+                side->close();
+                instance->close();
+            }
+            auto open = enableAutomation(app, {.mcpPort = port, .disableMcpAuthentication = true, .discovery = sessions, .announce = false});
+            require(open->banner().find("WARNING: MCP authentication disabled") != std::string::npos);
+            require(open->banner().find("local processes can use granted operations") != std::string::npos);
+            require(open->banner().find("WARNING") < open->banner().find("grants:"));
+            require(open->banner().ends_with(open->clientConfiguration().generic_string()));
+            const Object configuration{channel::readEndpoint(open->directory(), "mcp.json")};
+            require(!Object(Object(configuration.raw("mcpServers")).raw("webfront")).has("headers"));
+            require(channel::readEndpoint(open->directory(), "mcp.json").find(fixed) == std::string::npos);
+            auto request = post(port, initialize);
+            request.erase(request.find("Authorization:"), request.find("\r\n", request.find("Authorization:")) + 2 - request.find("Authorization:"));
+            require(roundTrip(port, request).status == 200);
+            require(roundTrip(port, post(port, initialize, {}, "wrong-token")).status == 200);
+            require(roundTrip(port, post(port, initialize, "Origin: http://evil.test\r\n")).status == 403);
+            require(roundTrip(port, post(port, initialize, "Sec-Fetch-Mode: cors\r\n")).status == 403);
+            require(roundTrip(port, post(port, initialize, "Sec-Fetch-Dest: document\r\n")).status == 403);
+            auto hostile = request;
+            hostile.replace(hostile.find("127.0.0.1"), 9, "evil.test");
+            require(roundTrip(port, hostile).status == 421);
+            open->close();
+            break;
+        } catch (const mcphttp::BindError& error) {
+            if (!error.addressInUse() || attempt == 4)
+                throw;
+        }
+    }
+    requireThrows([&] { enableAutomation(app, {.mcpToken = "", .discovery = sessions, .announce = false}); });
+    requireThrows([&] { enableAutomation(app, {.mcpToken = "a", .discovery = sessions, .announce = false}); });
+    requireThrows([&] { enableAutomation(app, {.mcpToken = std::string(31, 'a'), .discovery = sessions, .announce = false}); });
+    requireThrows([&] { enableAutomation(app, {.mcpToken = std::string(1025, 'a'), .discovery = sessions, .announce = false}); });
+    requireThrows([&] { enableAutomation(app, {.mcpToken = std::string(32, 'a') + "\r\nInjected", .discovery = sessions, .announce = false}); });
+    requireThrows([&] { enableAutomation(app, {.mcpToken = fixed, .disableMcpAuthentication = true, .discovery = sessions, .announce = false}); });
+    HttpConsumerApp untouched{.project = root.path() / "project"};
+    const auto absent = root.path() / "never-created";
+    requireThrows([&] { enableAutomation(untouched, {.mcpToken = "short", .discovery = absent, .announce = false}); });
+    require(untouched.projectReads == 0);
+    require(untouched.registered.empty());
+    require(!std::filesystem::exists(absent));
+    requireThrows([&] { Automation<HttpConsumerApp> invalid{untouched, {.mcpToken = fixed, .disableMcpAuthentication = true, .discovery = absent, .announce = false}}; });
+    require(untouched.projectReads == 0);
+    require(!std::filesystem::exists(absent));
+    auto minimum = enableAutomation(app, {.mcpToken = std::string(32, 'a'), .discovery = sessions, .announce = false});
+    minimum->close();
+}};
+
+const Scenario unauthenticatedMcpBanner{"An unauthenticated MCP listener warns at startup", [] {
+    using namespace mcphttptests;
+    webfront::test::TemporaryDirectory root;
+    std::filesystem::create_directory(root.path() / "project");
+    HttpConsumerApp app{.project = root.path() / "project"};
+    std::ostringstream captured;
+    struct RestoreBuffer {
+        std::streambuf* previous;
+        ~RestoreBuffer() { std::cerr.rdbuf(previous); }
+    } restore{std::cerr.rdbuf(captured.rdbuf())};
+    auto automation = enableAutomation(app, {.disableMcpAuthentication = true, .discovery = root.path() / "sessions"});
+    require(captured.str().find("WARNING: MCP authentication disabled") != std::string::npos);
+    require(captured.str().find(automation->mcpUrl()) != std::string::npos);
+    automation->close();
+    captured.str("");
+    captured.clear();
+    auto silent = enableAutomation(app, {.disableMcpAuthentication = true, .discovery = root.path() / "sessions", .announce = false});
+    require(captured.str().empty());
+    require(silent->banner().find("WARNING: MCP authentication disabled") != std::string::npos);
+    silent->close();
+}};
+
+const Scenario mcpBindError{"MCP bind errors identify an occupied address", [] {
+    using namespace mcphttptests;
+#ifdef _WIN32
+    const int occupied = WSAEADDRINUSE;
+#else
+    const int occupied = EADDRINUSE;
+#endif
+    require(mcphttp::BindError{std::error_code{occupied, std::system_category()}, 1234}.addressInUse());
+    require(!mcphttp::BindError{std::make_error_code(std::errc::permission_denied), 1234}.addressInUse());
 }};

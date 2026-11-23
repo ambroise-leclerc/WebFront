@@ -11,13 +11,15 @@
 // `consumer.secret` (never allow-listed by the tests). Closing its standard input closes the window, on every platform and
 // whatever the engine does with signals. The status is 0 after a normal closing, 70 when the developer environment failed
 // to start (its reason on stderr), 71 when the native deadline of an operation revoked the session; a window that does not
-// close after a deadline ends the process with enableAutomation's own status 72.
+// close after a deadline ends the process with enableAutomation's own status 72. An occupied MCP port exits with 73 so
+// the test client can retry a port lost between reservation and bind.
 #include "../driver/WfDriver.hpp"
 #include <webfront/automation/Enable.hpp>
 
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <system_error>
 #ifndef _WIN32
     #include <cerrno>
     #include <poll.h>
@@ -83,6 +85,8 @@ int main(int argc, char** argv) {
         std::filesystem::path project, environment, registry, directory, sessions, called;
         std::string           integrity, manifest, grants = "check,build,preview,inspect,interact,call", callbacks = "consumer.render";
         std::chrono::seconds  timeout{30}, startupTimeout{90};
+        unsigned short mcpPort = 0;
+        bool stableMcp = false;
         for (int i = 1; i + 1 < argc; i += 2) {
             const std::string_view name{argv[i]};
             const std::string      value{argv[i + 1]};
@@ -100,6 +104,10 @@ int main(int argc, char** argv) {
                 directory = value;
             else if (name == "--sessions")
                 sessions = value;
+            else if (name == "--mcp-port")
+                mcpPort = static_cast<unsigned short>(std::stoul(value));
+            else if (name == "--stable-mcp")
+                stableMcp = value == "true";
             else if (name == "--called")
                 called = value;
             else if (name == "--grants")
@@ -145,6 +153,8 @@ int main(int argc, char** argv) {
         auto automation = webfront::automation::enableAutomation(app,
                                                                  {.grants         = split(grants),
                                                                   .callbacks      = called.empty() ? std::vector<std::string>{} : split(callbacks),
+                                                                  .mcpPort        = mcpPort,
+                                                                  .mcpToken       = stableMcp ? std::optional<std::string>{std::string(64, 'a')} : std::nullopt,
                                                                   .directory      = directory,
                                                                   .discovery      = sessions,
                                                                   .timeout        = timeout,
@@ -171,6 +181,11 @@ int main(int argc, char** argv) {
         automation->close();
         app.shutdown();
         return status;
+    } catch (const webfront::automation::mcphttp::BindError& error) {
+        std::cerr << "automation_host: " << error.what() << '\n';
+        if (error.addressInUse())
+            return 73;
+        return 1;
     } catch (const std::exception& error) {
         std::cerr << "automation_host: " << error.what() << '\n';
         return 1;

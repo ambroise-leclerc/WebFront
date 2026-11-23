@@ -563,13 +563,78 @@ def session(args):
     print("MCP real-window regression passed: diagnostics/correction/check/build/test/preview/actions/cancellation/shared session/setup")
 
 
+def port_conflict_after_failure(process, timeout=1):
+    """Wait briefly for the host's collision status after discovery fails; other failures are not retried."""
+    try:
+        return process.wait(timeout=timeout) == 73
+    except subprocess.TimeoutExpired:
+        return False
+
+
+def stable(args):
+    pathlib.Path(args.work).mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=args.work, prefix="stable-") as temporary:
+        root = pathlib.Path(temporary)
+        project = root / "project"
+        shutil.copytree(args.fixture, project)
+        install(args, project)
+        with (root / "stable.log").open("w") as log:
+            # Exercise the signal used by the retry with a port that is definitely occupied.
+            with socket.socket() as occupied:
+                occupied.bind(("127.0.0.1", 0))
+                occupied.listen(1)
+                host = Host(args, project, root, "occupied", log,
+                            ["--stable-mcp", "true", "--mcp-port", str(occupied.getsockname()[1])])
+                try:
+                    assert host.wait() == 73, host.logs()
+                finally:
+                    host.close()
+            # The reservation must be released before the host binds; retry only a confirmed EADDRINUSE.
+            for attempt in range(5):
+                with socket.socket() as reservation:
+                    reservation.bind(("127.0.0.1", 0))
+                    port = reservation.getsockname()[1]
+                client, original = None, None
+                for run in range(2):
+                    host = Host(args, project, root, f"stable-{attempt}-{run}", log, ["--stable-mcp", "true", "--mcp-port", str(port)])
+                    try:
+                        try:
+                            path = pathlib.Path(host.record()["configuration"])
+                        except AssertionError:
+                            # Allow a just-exiting host to publish its status; a still-running host or any other
+                            # exit code retains the original failure rather than being treated as a collision.
+                            if port_conflict_after_failure(host.process):
+                                # On either launch the port may have been taken in the gap; restart both launches
+                                # with a new port and client so each successful pair still uses one configuration.
+                                break
+                            raise
+                        if client is None:
+                            original = path.read_bytes()
+                            client = Client(path)
+                        else:
+                            assert path.read_bytes() == original
+                            client.mcp_session = None
+                        client.initialize()
+                        assert client.tool("session")["session"] == client.session
+                        client.close()
+                        host.stop()
+                        assert host.wait() == 0, host.logs()
+                    finally:
+                        host.close()
+                else:
+                    # No break: both launches succeeded on this port, so the scenario is done. A break (port taken
+                    # in the gap) skips this and retries both launches with a new port.
+                    return
+            raise AssertionError("MCP port was occupied on all five attempts")
+
+
 def main():
     parser = argparse.ArgumentParser()
     for name in ("host", "driver", "environment", "provision", "registry", "fixture", "work"):
         parser.add_argument("--" + name, required=True)
-    parser.add_argument("--scenario", choices=("session", "mcp-watchdog", "consumer"), default="session")
+    parser.add_argument("--scenario", choices=("session", "mcp-watchdog", "consumer", "stable"), default="session")
     args = parser.parse_args()
-    {"session": session, "mcp-watchdog": watchdog, "consumer": consumer}[args.scenario](args)
+    {"session": session, "mcp-watchdog": watchdog, "consumer": consumer, "stable": stable}[args.scenario](args)
 
 
 if __name__ == "__main__":
