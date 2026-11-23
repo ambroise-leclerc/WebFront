@@ -6,9 +6,11 @@
 | --- | --- | --- | --- | --- | --- |
 | 1.0 | 2026-11-22 | Proposée | Ambroise Leclerc | Configuration persistante par projet (#637). | [110b138](https://github.com/ambroise-leclerc/WebFront/commit/110b138301a4920e0a25d6614644624602943cc3) (historique consigné ; pas de commit distinct) |
 | 1.1 | 2026-11-22 | Acceptée, puis suspendue | Ambroise Leclerc | L'usurpation de l'écouteur révèle une exposition du jeton persistant. | [110b138](https://github.com/ambroise-leclerc/WebFront/commit/110b138301a4920e0a25d6614644624602943cc3) (historique consigné ; pas de commit distinct) |
-| 1.2 | 2026-11-22 | Acceptée (livraison en cours) | Ambroise Leclerc | Mode explicite simplifié, compromis de sécurité acceptés ; issue #637 amendée. | #637 |
+| 1.2 | 2026-11-22 | Acceptée | Ambroise Leclerc | Mode explicite simplifié, compromis de sécurité acceptés ; issue #637 amendée. | [110b138](https://github.com/ambroise-leclerc/WebFront/commit/110b138301a4920e0a25d6614644624602943cc3) ; livraison : [5306a9f](https://github.com/ambroise-leclerc/WebFront/commit/5306a9f520a2c40002318a09b9e629e00aef59f8) |
 
 ## Décision
+
+La décision 1.2, consignée le 2026-11-22, a été livrée le 2026-11-23 par la fusion de la PR #644.
 
 Le mode de l'ADR-025 reste le défaut : port choisi par l'OS, jeton aléatoire par session et configuration privée supprimée à la fermeture. L'application peut fixer le port et fournir un jeton Bearer durable, ou désactiver explicitement l'authentification. Le développeur gère le secret et sa rotation ; WebFront ne le persiste pas hors de la configuration privée de session. Le client copie une fois URL et en-tête dans sa configuration utilisateur, hors projet. Il doit lancer l'application avant de se connecter. Un port occupé provoque une erreur explicite ; une autre instance peut utiliser le mode par défaut. La découverte ne contient pas de jeton.
 
