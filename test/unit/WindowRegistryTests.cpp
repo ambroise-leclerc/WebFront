@@ -30,10 +30,13 @@ struct FakeSession {
     bool                  inCallback = false;  // true while its own closedHook runs
     bool                  closeOnStart = false;
     std::exception_ptr    failOnStart;
+    static inline std::function<void()> destroyProbe;  // runs in every destructor: what a window's teardown can observe
 
     explicit FakeSession(std::string name = {}) : page(std::move(name)) { }
     ~FakeSession() {
         events.push_back("destroy " + page);
+        if (destroyProbe)
+            destroyProbe();
         if (inCallback)
             events.push_back("destroyed in its own callback");
         if (closedHook)
@@ -162,7 +165,7 @@ const Scenario secondaryWindowRegistry{"The registry of the secondary windows is
             then("the caller learns why, and the page is not registered", [&] {
                 checkThrows<std::runtime_error>([&] {
                     openPage(windows, "a.html", true, std::make_exception_ptr(std::runtime_error("navigation failed")));
-                });
+                }, contains("navigation failed"));
                 check(windows.secondary.empty());
             });
             andWhen("it closed without a failure", [&] {
@@ -188,6 +191,19 @@ const Scenario secondaryWindowRegistry{"The registry of the secondary windows is
             });
         });
 
+        when("a window opens a page while the others are destroyed", [&] {
+            openPage(windows, "a.html");
+            FakeSession::destroyProbe = [&] {
+                openPage(windows, "late.html");  // a destructor cannot be refused by an exception: it is ignored
+            };
+            windows.clear();
+            FakeSession::destroyProbe = nullptr;
+            then("no window outlives the session", [&] {
+                check(windows.secondary.empty());
+                check(!happened("create late.html"));
+            });
+        });
+
         when("the first window ends with secondary windows open", [&] {
             openPage(windows, "a.html");
             openPage(windows, "b.html");
@@ -195,6 +211,7 @@ const Scenario secondaryWindowRegistry{"The registry of the secondary windows is
             events.clear();
             windows.clear();
             then("the reap is withdrawn and every session is destroyed with its hook cleared", [&] {
+                require(!events.empty());
                 check(events.front() == "cancel reap");
                 check(happened("destroy a.html"));
                 check(happened("destroy b.html"));
@@ -229,6 +246,9 @@ const Scenario interfaceSessionOrder{"The session of an open() attaches, publish
                 then("the executor is available, the window published and the first window registered", [&] {
                     check(host.executor().available());
                     check(windows.primary == &first);
+                    const auto window = published().get();
+                    require(window.has_value());
+                    check(window->pointer == &handle);
                 });
                 andWhen("another open() starts", [&] {
                     then("it is refused", [&] {
@@ -238,9 +258,15 @@ const Scenario interfaceSessionOrder{"The session of an open() attaches, publish
                 });
                 openPage(windows, "a.html");
                 events.clear();
+                FakeSession::destroyProbe = [&] {  // the secondary windows are destroyed while the window is still published
+                    if (!published().get().has_value() || !host.executor().available())
+                        events.push_back("withdrawn too early");
+                };
             }
+            FakeSession::destroyProbe = nullptr;
             then("the secondary windows are cleared first, then the window is withdrawn and the host closed", [&] {
                 check(!events.empty() && events.front() == "cancel reap");
+                check(happened("destroy a.html") && !happened("withdrawn too early"));
                 check(windows.primary == nullptr && windows.secondary.empty());
                 check(!host.executor().available());
                 check(!published().get().has_value());
@@ -290,6 +316,23 @@ struct FakeFrontend : EmbeddedFrontend<FakeFrontend> {
     static void closeNative(const NativeWindowHandle&) { }
     static void openSecondaryNative(std::string_view, std::string_view, std::string_view, const Options&) { }
     static bool closeSecondaryNative(std::string_view) { return true; }
+};
+
+// A frontend whose options come from a provider (WebView2FrontendWithOptions): a call overrides only what it passes.
+struct ConfiguredFrontend : EmbeddedFrontend<ConfiguredFrontend> {
+    static constexpr bool             secondaryWindows = false;
+    static constexpr bool             compiled         = true;
+    static constexpr std::string_view name             = "ConfiguredFrontend";
+    using Host    = ConfiguredFrontend;
+    using Options = ViewOptions;
+    static inline std::vector<std::string> opened;
+    static ViewOptions defaultOptions() {
+        return {.window = {.title = "configured"}, .launch = {"configured-secret", "configured-origin"}};
+    }
+    static void openNative(std::string_view, std::string_view, std::string_view file, const Options& options) {
+        opened.push_back(std::string(file) + " " + options.window.title + " " + options.launch.secret);
+    }
+    static void closeNative(const NativeWindowHandle&) { }
 };
 
 struct AbsentFrontend : EmbeddedFrontend<AbsentFrontend> {
@@ -343,6 +386,15 @@ const Scenario embeddedFrontendFacade{"The facade of the embedded frontends give
                 checkThrows<std::logic_error>([&] { FakeFrontend::openSecondaryWindow("127.0.0.1", "9000", "a.html", {}, {}, {}); },
                                               contains("FakeFrontend: no window of the application is open"));
             });
+        });
+    });
+    given("a frontend configured by a provider", [&] {
+        ConfiguredFrontend::opened.clear();
+        ConfiguredFrontend::open("127.0.0.1", "9000", "a.html", ContentPolicy{});
+        ConfiguredFrontend::open("127.0.0.1", "9000", "b.html", ContentPolicy{}, WindowOptions{.title = "own"});
+        ConfiguredFrontend::open("127.0.0.1", "9000", "c.html", ContentPolicy{}, WindowOptions{.title = "own"}, ViewLaunch{"own-secret", ""});
+        then("a call replaces only the settings it passes", [&] {
+            check(ConfiguredFrontend::opened == std::vector<std::string>{"a.html configured configured-secret", "b.html own configured-secret", "c.html own own-secret"});
         });
     });
     given("a frontend whose engine is not part of the build", [&] {

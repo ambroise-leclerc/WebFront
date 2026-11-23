@@ -42,6 +42,7 @@ public:
     std::map<std::string, std::shared_ptr<Session>> secondary;
     std::vector<std::shared_ptr<Session>>           finished;  // closed, destroyed by reap()
     Hooks                                           hooks;
+    bool                                            clearing = false;  // clear() is destroying the windows
 
     /// A session closed (its closedHook): takes it out of the table, reports why it failed, and reaps it later.
     void retire(const std::string& page) {
@@ -73,6 +74,7 @@ public:
     /// The first window ended: the others end with it, and nothing is left to reap. The sessions leave the table before
     /// they are destroyed, and their hook no longer retires them from it.
     void clear() {
+        clearing = true;
         hooks.cancelReap();
         auto windows = std::move(secondary);
         secondary.clear();
@@ -80,7 +82,8 @@ public:
             entry.second->closedHook = nullptr;
         finished.clear();
         windows.clear();
-        primary = nullptr;
+        primary  = nullptr;
+        clearing = false;
     }
 
     /**
@@ -93,6 +96,8 @@ public:
      */
     template <typename Create, typename Start>
     void open(const std::string& page, Create&& create, Start&& start) {
+        if (clearing)
+            return;  // asked by the teardown of a window of a session that is ending: an exception would end the process
         if (!primary || primary->closed)
             throw std::logic_error(std::string(Hooks::name) + ": no window of the application is open; show() it before opening another");
         if (const auto found = secondary.find(page); found != secondary.end()) {

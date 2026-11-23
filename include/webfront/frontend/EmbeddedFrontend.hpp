@@ -80,7 +80,7 @@ struct EmbeddedFrontend {
         if constexpr (!Derived::compiled) {
             unavailable();
         } else {
-            auto options = optionsOf(policy, window, launch);
+            auto options = optionsOf(policy, &window, &launch);
             try {
                 onUIThread([&] {
                     Derived::openSecondaryNative(address, port, page, options);
@@ -120,14 +120,14 @@ struct EmbeddedFrontend {
             unavailable();
     }
     static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy) {
-        open(address, port, file, optionsOf(policy, {}, {}));
+        open(address, port, file, optionsOf(policy));
     }
     static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window) {
-        open(address, port, file, optionsOf(policy, window, {}));
+        open(address, port, file, optionsOf(policy, &window));
     }
     static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window,
                      const ViewLaunch& launch) {
-        open(address, port, file, optionsOf(policy, window, launch));
+        open(address, port, file, optionsOf(policy, &window, &launch));
     }
 
 private:
@@ -139,11 +139,14 @@ private:
             return typename Derived::Options{};
     }
     template <typename D = Derived>
-    static typename D::Options optionsOf(const ContentPolicy& policy, const WindowOptions& window, const ViewLaunch& launch) {
+    static typename D::Options optionsOf(const ContentPolicy& policy, const WindowOptions* window = nullptr, const ViewLaunch* launch = nullptr) {
+        // The settings of the arguments the caller gave replace the configured ones; the others stay as configured.
         auto options          = startingOptions();
         options.contentPolicy = policy;
-        options.window        = window;
-        options.launch        = launch;
+        if (window)
+            options.window = *window;
+        if (launch)
+            options.launch = *launch;
         return options;
     }
     template <typename Function>

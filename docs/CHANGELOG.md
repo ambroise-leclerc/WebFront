@@ -50,7 +50,7 @@ in a native pseudoterminal, and a faster, less flashy start of the native window
 - Choose the colour of the WebKitGTK view under the page with `WindowOptions::background` (WebKitGTK; the other embedded frontends are listed here), and read the start-up milestones of a WebKitGTK view with `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WEBKITGTK.md`).
 
 ### Changed
-- WebKitGTK takes a `startupTimeout` (30 s by default, the message now in milliseconds), a secondary window of WKWebView and WebKitGTK starts with the first window's delay, WKWebView clears the hook of a secondary window before destroying it, and its messages name `WKWebViewFrontend` everywhere (#652).
+- WebKitGTK takes a `startupTimeout` (30 s by default), and WebView2 refuses a secondary window once the first one closed, even for a page already open (#652).
 - Write a native frontend from shared headers: `EmbeddedFrontend` (facade and every `open()` overload), `WindowRegistry`/`InterfaceSession`, `StartupTrace` and `Presentation`, tested on Linux with fake windows (#652, `docs/FRONTENDS.md`).
 - Reveal the WKWebView window when the document has loaded or after one second (#611, `docs/WKWEBVIEW.md`).
 - Reveal the WebView2 window after the first frame or one second (#611, `docs/WEBVIEW2.md`).
