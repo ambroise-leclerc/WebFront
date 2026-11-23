@@ -17,15 +17,15 @@ execute_process(COMMAND "${CMAKE_CTEST_COMMAND}" -N WORKING_DIRECTORY "${WORK}" 
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "ctest -N failed:\n${listed}")
 endif()
-foreach(title IN ITEMS "A [b title" "Second\; one" "Third ]x" "Fourth [tag] title" "Literal <bdd-open> %5B %25 <bdd-semicolon>" "Ends like a delimiter ]==")
+foreach(title IN ITEMS "A [b title" "Second\; one" "Third ]x" "Fourth [tag] title" "Literal <bdd-open> %5B %25 <bdd-semicolon>" "Ends like a delimiter ]==" "Ends with a backslash \\")
     string(REPLACE "\;" ";" title "${title}")
     string(FIND "${listed}" ": Probe.Scenario: ${title}\n" position)
     if(position EQUAL -1)
         message(FATAL_ERROR "CTest does not list \"Probe.Scenario: ${title}\":\n${listed}")
     endif()
 endforeach()
-if(NOT listed MATCHES "Total Tests: 6\n")
-    message(FATAL_ERROR "CTest should list 6 cases:\n${listed}")
+if(NOT listed MATCHES "Total Tests: 7\n")
+    message(FATAL_ERROR "CTest should list 7 cases:\n${listed}")
 endif()
 
 # Exercise the actual post-build command through cmd.exe: pipes in its arguments used to break Ninja on Windows.
@@ -33,7 +33,7 @@ if(WIN32 AND GENERATOR STREQUAL "Ninja")
     file(MAKE_DIRECTORY "${WORK}/project")
     file(WRITE "${WORK}/project/main.cpp" "#include <iostream>\nint main() { std::cout << \"probe\\n\"; }\n")
     file(WRITE "${WORK}/project/CMakeLists.txt"
-        "cmake_minimum_required(VERSION 3.31)\nproject(DiscoveryProbe LANGUAGES CXX)\ninclude([==[${SCRIPT}]==])\nadd_executable(probe main.cpp)\nwebfront_bdd_discover_tests(probe PROPERTIES TIMEOUT 10 LABELS [==[one|two]==])\n")
+        "cmake_minimum_required(VERSION 3.31)\nproject(DiscoveryProbe LANGUAGES CXX)\ninclude([==[${SCRIPT}]==])\nadd_executable(probe main.cpp)\nwebfront_bdd_discover_tests(probe PROPERTIES TIMEOUT 10 ENVIRONMENT [=[A=b\\]=] FIXTURES_SETUP [=[fx]==]=] FIXTURES_REQUIRED [=[x;y]=] LABELS [==[one|two]==])\n")
     execute_process(COMMAND "${CMAKE_COMMAND}" -S "${WORK}/project" -B "${WORK}/build" -G Ninja
         "-DCMAKE_CXX_COMPILER=${CXX_COMPILER}" "-DCMAKE_CROSSCOMPILING_EMULATOR=${CMAKE_COMMAND};-E;env"
         RESULT_VARIABLE configured OUTPUT_VARIABLE configure_output ERROR_VARIABLE configure_error)
@@ -50,12 +50,19 @@ if(WIN32 AND GENERATOR STREQUAL "Ninja")
     if(emulator_used EQUAL -1)
         message(FATAL_ERROR "The target emulator is not used by the cases:\n${actual}")
     endif()
+    # A value ending in a backslash or like a closing delimiter neither merges with its neighbour nor closes its argument.
+    string(FIND "${actual}" "[==[A=b\\]==]" backslash_kept)
+    string(FIND "${actual}" "[===[fx]==]===]" delimiter_kept)
+    string(FIND "${actual}" "[==[x;y]==]" semicolon_kept)
+    if(backslash_kept EQUAL -1 OR delimiter_kept EQUAL -1 OR semicolon_kept EQUAL -1)
+        message(FATAL_ERROR "The cases do not keep the properties as written:\n${actual}")
+    endif()
     if(NOT actual MATCHES "\\[==\\[one\\|two\\]==\\]")
         message(FATAL_ERROR "The post-build command did not preserve the property")
     endif()
 endif()
 
-# A second call without SHARDS on a target, and a property value that would break the generated file, are refused (#648).
+# A second call without SHARDS on a target is refused; property values and prefixes that look like a closing delimiter are not (#648).
 file(MAKE_DIRECTORY "${WORK}/refusals")
 file(WRITE "${WORK}/refusals/main.cpp" "int main() {}\n")
 function(configure_probe name calls)
@@ -72,8 +79,9 @@ if(status EQUAL 0 OR NOT log MATCHES "already registered")
     message(FATAL_ERROR "A second call on a target was not refused (${status}):\n${log}")
 endif()
 configure_probe(bracket "webfront_bdd_discover_tests(probe PROPERTIES ENVIRONMENT [=[A=]==]]=])")
-if(status EQUAL 0 OR NOT log MATCHES "must not contain")
-    message(FATAL_ERROR "A property holding ]==] was not refused (${status}):\n${log}")
+if(NOT status EQUAL 0)
+    message(FATAL_ERROR "A property holding ]==] must be accepted:
+${log}")
 endif()
 configure_probe(both "webfront_bdd_discover_tests(probe)\nwebfront_bdd_discover_tests(probe SHARDS 2)")
 if(NOT status EQUAL 0)
@@ -112,6 +120,7 @@ if(emulator_position EQUAL -1 OR env_position EQUAL -1 OR NOT env_position LESS 
 endif()
 
 configure_probe(prefix "webfront_bdd_discover_tests(probe TEST_PREFIX [=[a]==]b]=])")
-if(status EQUAL 0 OR NOT log MATCHES "TEST_PREFIX must not contain")
-    message(FATAL_ERROR "A prefix holding ]==] was not refused (${status}):\n${log}")
+if(NOT status EQUAL 0)
+    message(FATAL_ERROR "A prefix holding ]==] must be accepted:
+${log}")
 endif()
