@@ -1327,9 +1327,11 @@ public:
      */
     void openSecondaryWindow(std::string_view page, WindowOptions options = {}) {
         if constexpr (supportsSecondaryWindow) {
-            if (showEpoch.load() % 2 == 0)
-                throw std::logic_error("webfront::BasicWF::openSecondaryWindow(): this application is not showing a window; call show() first");
+            // One read: its parity and the session this call is bound to are those of the same instant. A second read could
+            // land in a show() that started after the first one ended, and bind the call to a session it was not made for.
             const auto epoch = showEpoch.load();
+            if (epoch % 2 == 0)
+                throw std::logic_error("webfront::BasicWF::openSecondaryWindow(): this application is not showing a window; call show() first");
             const auto executor = Frontend::uiExecutor();
             const auto session = executor.session();
             if (!session || session->thread != showThread.load() || showEpoch.load() != epoch)

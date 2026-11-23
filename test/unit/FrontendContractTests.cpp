@@ -1188,6 +1188,13 @@ namespace {
 struct SecondaryContractFrontend : SharedWindowFrontend<true> {
     static inline int opened = 0;
     static inline int closed = 0;
+    /// Run once, when BasicWF asks for the executor: after it has captured the session of its show().
+    static inline std::function<void()> beforeExecutor;
+    [[nodiscard]] static frontend::UIExecutor uiExecutor() {
+        if (auto hook = std::exchange(beforeExecutor, {}))
+            hook();
+        return SharedWindowFrontend<true>::uiExecutor();
+    }
     static void openSecondaryWindow(std::string_view, std::string_view, std::string_view, const ContentPolicy&, const WindowOptions&, const ViewLaunch&) {
         ++opened;
     }
@@ -1234,6 +1241,50 @@ const Scenario secondaryOwnership{"Only the owner can operate secondary windows"
         }
         showing.join();
         Shared::insideOpen = nullptr;
+    });
+}};
+
+const Scenario secondaryStaleSession{"A secondary window is never opened in a session that started after the call did", [] {
+    given("a call made during the show() of one application, whose show() ends and another starts before it is delivered", [&] {
+        using Shared = SecondaryContractFrontend;
+        Shared::opened = 0;
+        Shared::closed = 0;
+        HostApp<Shared> owner;
+        const auto      ownerState = ContractIoContext::current;
+        HostApp<Shared> later;
+        const auto      laterState = ContractIoContext::current;
+        ContractIoContext::current = ownerState;
+        std::jthread    ownerShow([&] { owner.show(); });
+        requireEventually([&] { return windowOpen(ownerState); });
+        std::jthread laterShow;
+        Shared::beforeExecutor = [&] {
+            {
+                std::lock_guard lock(ownerState->mutex);
+                ownerState->closeWindow = true;
+                ownerState->changed.notify_all();
+            }
+            ownerShow.join();
+            ContractIoContext::current = laterState;
+            laterShow                  = std::jthread([&] { later.show(); });
+            requireEventually([&] { return windowOpen(laterState); });
+        };
+        bool refused = false;
+        try {
+            owner.openSecondaryWindow("one.html");
+        } catch (const std::logic_error&) {
+            refused = true;
+        }
+        then("the call is refused and the later session received nothing", [&] {
+            check(refused);
+            check(Shared::opened == 0);
+            check(!owner.requestClose("one.html"));
+            check(Shared::closed == 0);
+        });
+        {
+            std::lock_guard lock(laterState->mutex);
+            laterState->closeWindow = true;
+            laterState->changed.notify_all();
+        }
     });
 }};
 
