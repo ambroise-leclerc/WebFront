@@ -25,6 +25,7 @@ inline std::string nonce() {
     }
     return result;
 }
+/// Content comparison is constant-time for equal lengths; a length mismatch is rejected immediately.
 inline bool sameToken(std::string_view left, std::string_view right) {
     if (left.size() != right.size())
         return false;

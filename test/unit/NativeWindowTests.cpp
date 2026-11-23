@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
 /// @brief Typed access to the native window of an embedded frontend, and its link to a connection (#463, ADR-020).
 #include "InjectableNetworking.hpp"
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/frontend/NativeWindow.hpp>
 #include <webfront/networking/TCPNetworkingStdnet.hpp>
 #include <webfront/system/DefaultFS.hpp>

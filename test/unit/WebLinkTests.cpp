@@ -1,6 +1,6 @@
 #include "InjectableNetworking.hpp"
 
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/http/WebSocket.hpp>
 #include <webfront/weblink/WebLink.hpp>
 

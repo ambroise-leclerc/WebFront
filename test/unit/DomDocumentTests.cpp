@@ -1,4 +1,4 @@
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/dom/Document.hpp>
 
 using namespace webfront::bdd;

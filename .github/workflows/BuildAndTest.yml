@@ -33,10 +33,6 @@ on:
         description: 'Passes of the complete desktop suite when repeat_desktop_tests is set (20 qualifies a reliability fix)'
         type: number
         default: 3
-      webview2_show_repeats:
-        description: 'With repeat_desktop_tests, repeat WebView2Lifecycle-repeated-show this many times on the WebView2 job, before the complete suite (0 skips it; ignored without repeat_desktop_tests, which starts that job)'
-        type: number
-        default: 0
 
 permissions:
   contents: read
@@ -273,34 +269,6 @@ jobs:
         run: >-
           ctest --test-dir build -C ${{ matrix.build_type }} -L fast ${{ env.WEBFRONT_CONFIGURATION != 'true' && '-LE configuration' || '' }}
           --parallel 4 --output-on-failure --no-tests=error --output-junit "$PWD/build/fast-results.xml"
-      # Qualifies the apartment check of #638 under the load of the job: the case is repeated while the rest of the suite
-      # (everything that holds no browser window or port) runs again and again with the same --parallel 4. It runs before the
-      # complete suite, which stops at its first failed pass. Only the repetitions decide the step; the load is not judged.
-      - name: Repeat the WebView2 repeated-show case under load
-        if: ${{ matrix.platform == 'windows-msvc-webview2' && github.event_name == 'workflow_dispatch' && inputs.webview2_show_repeats > 0 }}
-        shell: pwsh
-        run: |
-          $stop = Join-Path $env:RUNNER_TEMP 'stop-load'
-          Remove-Item $stop -ErrorAction SilentlyContinue
-          $load = Start-Job -ArgumentList $PWD.Path, $stop, '${{ matrix.build_type }}' -ScriptBlock {
-            param($root, $stop, $config)
-            while (-not (Test-Path $stop)) {
-              ctest --test-dir "$root/build" -C $config -LE 'web-integration|portability' --parallel 4 --no-tests=error *> $null
-            }
-          }
-          # -V keeps the "apartment:" line each show() records, so that a passing run says which pages leave a COM initialization.
-          $log = Join-Path $env:RUNNER_TEMP 'repeated-show.log'
-          ctest --test-dir build -C ${{ matrix.build_type }} -R WebView2Lifecycle-repeated-show --repeat until-fail:${{ inputs.webview2_show_repeats }} -V --no-tests=error | Tee-Object -FilePath $log
-          $status = $LASTEXITCODE
-          Write-Host '--- apartment left after show(), by page, iteration and outcome ---'
-          Select-String -Path $log -Pattern 'apartment: page=' | ForEach-Object { $_.Line -replace '^.*apartment: ', '' } | Group-Object | Sort-Object Name | ForEach-Object { '{0,4} x {1}' -f $_.Count, $_.Name }
-          New-Item $stop -ItemType File -Force | Out-Null
-          Wait-Job $load -Timeout 300 | Out-Null
-          Stop-Job $load -ErrorAction SilentlyContinue
-          # Nothing of the load may still run when the complete suite starts: stopping the job leaves its ctest and tests alive.
-          Get-Process -Name ctest -ErrorAction SilentlyContinue | ForEach-Object { taskkill /F /T /PID $_.Id | Out-Null }
-          Write-Host ('processes left by the load: ' + @(Get-Process -Name ctest -ErrorAction SilentlyContinue).Count)
-          exit $status
       - name: Test C++ and native browser integration
         id: desktop_suite
         # The fast tier has just run: a single pass does not run it again; the three passes of the complete tier do.

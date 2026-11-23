@@ -1,4 +1,4 @@
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/frontend/CEFPaths.hpp>
 
 #include <filesystem>

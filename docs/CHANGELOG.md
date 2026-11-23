@@ -18,6 +18,8 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Added
 - Open a second native window with `app.openSecondaryWindow(page, WindowOptions)` (WebKitGTK, WKWebView, WebView2; CEF and the system browser throw `std::logic_error`): it shares the server, the `cppFunction`s, the `jsFunction` subscribers and the view-association proof of the first window; `app.requestClose(page)` closes it, and closing the first closes the others (#616, `docs/FRONTENDS.md`).
+- Write your own scenarios with the public `webfront::bdd` framework: `<webfront/testing/Bdd.hpp>`, the `WebFront::Bdd` target, the installable `WebFrontBdd` package and `webfront_bdd_discover_tests()` (prefix, properties, shards) replace the internal `test/unit/Bdd.hpp` and `bdd_discover_tests`, and follow WebFront's versions (#647, `docs/BDD.md`).
+- Configure a stable MCP port and application-supplied Bearer token, or explicitly disable authentication for trusted development (#637, ADR-026, `docs/AUTOMATION.md`).
 - Connect an MCP client to the application itself: `enableAutomation(app, {.grants = {...}})` serves MCP over Streamable HTTP on a loopback port of its own, prints its URL and writes a private `mcp.json` with the URL and a session Bearer token, so several applications run side by side with no other program (#632, ADR-025, `docs/AUTOMATION.md`).
 - Use a custom network provider with `DeveloperAppWithNetwork`. The `BasicDeveloperApp` alias selects the existing TCP provider (#631).
 - Pass the MSVC code analysis on the automation host probe and the discovery directory of `Enable.hpp` (C6031, C6244), which stopped the Windows desktop job of a dispatch or pull request at its build (#638).
@@ -27,7 +29,8 @@ these entries stays in the GitHub releases and the Git history.
 - Run the MSVC code analysis in a pull request into `develop` that changes Windows code, and list the reruns each job needed before going green with `FlakeReport.py --days` (#628, `docs/TEST_TIERS.md`, `docs/TEST_PERFORMANCE.md`).
 
 ### Fixed
-- Check the leftover STA of a WebView2 window only after a page that ran to its end, not after one that closes the window on a load failure, and record the apartment `WebView2Lifecycle-repeated-show` finds after each `show()`, so that a failure or a passing run says which page leaves one (#638, `docs/PROJECT_STATUS.md`).
+- Check the leftover STA of a WebView2 window only after a page that ran to its end, not after one that closes the window on a load failure: the runtime can keep a COM initialization of its own then, in about one `show()` in 500 under load, and the limit is documented with its measurements (#638, `docs/PROJECT_STATUS.md`).
+- Refuse every `Sec-Fetch-*` request header on the MCP listener, including `Sec-Fetch-Dest`, in both authenticated and unauthenticated modes (#637).
 - Pass the compiler analysis on the Windows pseudoterminal when it cannot prove the attribute list non-null (C6387), stop a unit test from opening the developer's real browser (the directory of its replacement opener was removed before the shell found it), and keep an accepted connection whose `TCP_NODELAY` the system refuses, as macOS does after a reset (#628).
 
 ## [1.1.0] - 2026-11-20

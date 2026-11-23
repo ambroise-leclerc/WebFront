@@ -1,5 +1,5 @@
 #include "../driver/WfDriver.hpp"
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 
 #include <sstream>
 

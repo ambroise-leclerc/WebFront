@@ -1,5 +1,5 @@
 #include "TemporaryDirectory.hpp"
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/DeveloperApp.hpp>
 #include <webfront/http/MimeType.hpp>
 

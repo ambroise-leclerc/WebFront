@@ -12,11 +12,12 @@
 | 1.5 | 2026-10-18 | Acceptée | Ambroise Leclerc | Durcissement des décodeurs, assainisseurs et tests par génération d’entrées dans la CI. | [d6f086d](https://github.com/ambroise-leclerc/WebFront/commit/d6f086d50350379162ab01e7bdba2a734646d24d) |
 | 1.6 | 2026-10-19 | Acceptée | Ambroise Leclerc | Contrôles hors ligne de fraîcheur et de contenu des ressources gzip reproductibles. | [b031ab5](https://github.com/ambroise-leclerc/WebFront/commit/b031ab58ea9cc32290d701094c1333bab455e67f) |
 | 1.7 | 2026-11-14 | Acceptée | Ambroise Leclerc | Catch2 remplacé par `test/unit/Bdd.hpp`, un cadre BDD en un seul en-tête. | [54c0d0f](https://github.com/ambroise-leclerc/WebFront/commit/54c0d0fd35a414e01e2cff0c27882695ca9a4e9d) |
+| 1.8 | 2026-11-23 | Acceptée | Ambroise Leclerc | Le cadre BDD devient une interface publique maintenue : `WebFront::Bdd`, `webfront_bdd_discover_tests` et `docs/BDD.md`. | [1386947](https://github.com/ambroise-leclerc/WebFront/commit/138694770e3849cd089f7a71120a332ed445f496) |
 
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2020-04-19** (version 1.0).
-Dernière révision : **2026-11-14** (version 1.7).
+Dernière révision : **2026-11-23** (version 1.8).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -28,7 +29,7 @@ comme sous-projet constituent elles aussi des contrats observables.
 ## Décision
 
 Que les tests unitaires, sous `test/unit/`, vérifient unités, états et erreurs à l’aide de simulacres déterministes.
-Ils emploient `test/unit/Bdd.hpp`, un cadre BDD tenant dans un seul en-tête : un
+Ils emploient `include/webfront/testing/Bdd.hpp`, un cadre BDD tenant dans un seul en-tête, interface publique maintenue (`docs/BDD.md`) : un
 scénario est un objet `const Scenario` nommé, ses sections `given`/`when`/`then` sont des lambdas, et `require`/`check`
 situent un échec par `std::source_location`. Le cadre rejoue un scénario jusqu’à avoir parcouru chacune de ses
 feuilles, une nouvelle par passe, comme le faisait Catch2, dont seul ce sous-ensemble servait et dont la

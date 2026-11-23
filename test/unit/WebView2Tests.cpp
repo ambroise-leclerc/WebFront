@@ -1,6 +1,6 @@
 #include "WebView2ControllerMock.hpp"
 #include "WebView2PolicyMocks.hpp"
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/frontend/WebView2.hpp>
 
 #include <thread>

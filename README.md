@@ -496,6 +496,8 @@ For explicit engine selection, `webfront_native_frontend_option(out)` and `webfr
 
 The optional [Jasmine and CTest integration](docs/CONSUMER_TESTING.md) runs browser specs against your application's page. Specs can capture PNG screenshots and image sequences, and can run native programs explicitly authorized by the test owner with `PROGRAMS`, using private temporary spaces for test files. The native-program browser integration is validated on Linux with CEF; see the guide for platform coverage and limitations. Authorized programs run with the user's permissions, so use trusted test code.
 
+Your own C++ tests can use the framework of WebFront's tests: the public [`webfront::bdd`](docs/BDD.md) header, the `WebFront::Bdd` CMake target and `webfront_bdd_discover_tests()`, which registers one CTest case per scenario.
+
 To select an embedded engine explicitly, `webfront::embeddedFrontendAvailable` reports whether one is compiled in and `webfront::EmbeddedWebFront` selects it. See [frontend selection](docs/FRONTENDS.md).
 
 ## Build and test

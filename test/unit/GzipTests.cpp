@@ -1,5 +1,5 @@
 #include "GzipFixtures.hpp"
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/http/Gzip.hpp>
 #include <webfront/http/GzipCache.hpp>
 

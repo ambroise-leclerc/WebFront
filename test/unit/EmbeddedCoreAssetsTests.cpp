@@ -1,4 +1,4 @@
-#include "Bdd.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/system/DeveloperBootstrapData.hpp>
 #include <webfront/system/DeveloperIndexHtmlData.hpp>
 #include <webfront/system/FallbackIndexHtmlData.hpp>
