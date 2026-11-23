@@ -55,6 +55,16 @@ function(bdd_unescape out value)
 endfunction()
 
 if(CMAKE_SCRIPT_MODE_FILE)
+    # The generated file holds the properties and, once escaped where needed, what the build knows (the executable, its
+    # emulator, the output and the prefix): on a command line, a ';' in any of them would split the argument.
+    # Keep properties in a generated file too: passing shell metacharacters through a Windows post-build command is unreliable.
+    include("${PROPERTIES_FILE}")
+    if(DEFINED bdd_executable)
+        set(EXECUTABLE "${bdd_executable}")
+        set(OUTPUT "${bdd_output}")
+        set(EMULATOR ${bdd_emulator})
+        bdd_unescape(PREFIX "${bdd_prefix}")
+    endif()
     # With CMAKE_CROSSCOMPILING_EMULATOR the executable cannot run alone: the emulator lists the scenarios and runs each case.
     execute_process(COMMAND ${EMULATOR} "${EXECUTABLE}" --list OUTPUT_VARIABLE titles ERROR_VARIABLE errors RESULT_VARIABLE result)
     if(NOT result EQUAL 0)
@@ -65,8 +75,6 @@ if(CMAKE_SCRIPT_MODE_FILE)
         bdd_quote(quoted "${word}")
         string(APPEND command_prefix " ${quoted}")
     endforeach()
-    # Keep properties in a generated file: passing shell metacharacters through a Windows post-build command is unreliable.
-    include("${PROPERTIES_FILE}")
     set(quoted_properties)
     foreach(property IN LISTS properties)
         bdd_unescape(property "${property}")
@@ -91,33 +99,43 @@ if(CMAKE_SCRIPT_MODE_FILE)
 endif()
 
 function(webfront_bdd_discover_tests target)
-    cmake_parse_arguments(PARSE_ARGV 1 arg "" "TEST_PREFIX;SHARDS;SHARD_NAME;JUNIT_PREFIX" "PROPERTIES")
-    if(arg_UNPARSED_ARGUMENTS)
-        message(FATAL_ERROR "webfront_bdd_discover_tests: unknown arguments: ${arg_UNPARSED_ARGUMENTS}")
-    endif()
-    # PROPERTIES is read from the arguments themselves: cmake_parse_arguments keeps its values in a list, where a value that
-    # ends with a backslash would merge with the next one. Each value is kept escaped (bdd_escape) from here on.
+    # The arguments are read here, not by cmake_parse_arguments, which keeps the values of PROPERTIES in a list: there a value
+    # that ends with a backslash merges with its neighbour, one that equals a keyword ends the list. PROPERTIES takes pairs, so
+    # a keyword is one only where a name is expected; each value is kept escaped (bdd_escape) from here on.
+    set(keywords "TEST_PREFIX|SHARDS|SHARD_NAME|JUNIT_PREFIX|PROPERTIES")
     set(escaped_properties)
-    set(collecting FALSE)
-    if(ARGC GREATER 1)
-        math(EXPR last_argument "${ARGC} - 1")
-        foreach(index RANGE 1 ${last_argument})
-            set(word "${ARGV${index}}")
-            if(word STREQUAL "PROPERTIES")
-                set(collecting TRUE)
-            elseif(word MATCHES "^(TEST_PREFIX|SHARDS|SHARD_NAME|JUNIT_PREFIX)$")
-                set(collecting FALSE)
-            elseif(collecting)
-                bdd_escape(word "${word}")
-                list(APPEND escaped_properties "${word}")
+    set(index 1)
+    while(index LESS ARGC)
+        set(word "${ARGV${index}}")
+        math(EXPR value_index "${index} + 1")
+        if(word MATCHES "^(TEST_PREFIX|SHARDS|SHARD_NAME|JUNIT_PREFIX)$")
+            if(value_index GREATER_EQUAL ARGC)
+                message(FATAL_ERROR "webfront_bdd_discover_tests: ${word} needs a value")
             endif()
-        endforeach()
-    endif()
+            set(arg_${word} "${ARGV${value_index}}")
+            set(index ${value_index})
+            math(EXPR index "${index} + 1")
+        elseif(word STREQUAL "PROPERTIES")
+            set(index ${value_index})
+            while(index LESS ARGC)
+                set(word "${ARGV${index}}")
+                if(word MATCHES "^(${keywords})$")
+                    break()
+                endif()
+                math(EXPR value_index "${index} + 1")
+                if(value_index GREATER_EQUAL ARGC)
+                    message(FATAL_ERROR "webfront_bdd_discover_tests: PROPERTIES takes pairs of a name and a value, '${word}' has none")
+                endif()
+                bdd_escape(name "${word}")
+                bdd_escape(value "${ARGV${value_index}}")
+                list(APPEND escaped_properties "${name}" "${value}")
+                math(EXPR index "${index} + 2")
+            endwhile()
+        else()
+            message(FATAL_ERROR "webfront_bdd_discover_tests: unknown argument: ${word}")
+        endif()
+    endwhile()
     list(LENGTH escaped_properties property_count)
-    math(EXPR odd_properties "${property_count} % 2")
-    if(odd_properties)
-        message(FATAL_ERROR "webfront_bdd_discover_tests: PROPERTIES takes pairs of a name and a value")
-    endif()
     if(NOT TARGET ${target})
         message(FATAL_ERROR "webfront_bdd_discover_tests: ${target} is not a target")
     endif()
@@ -166,11 +184,6 @@ function(webfront_bdd_discover_tests target)
     set_property(TARGET ${target} PROPERTY WEBFRONT_BDD_DISCOVERED TRUE)
     set(base "${CMAKE_CURRENT_BINARY_DIR}/${target}")
     set(properties_file "${base}_properties-$<CONFIG>.cmake")
-    # The properties go into the file escaped (no bracket, backslash or ';' of theirs can change how CMake reads it) and the
-    # script that discovers the cases unescapes them. The prefix is there as well: a change of either makes the file newer
-    # than the cases generated from it.
-    bdd_escape(escaped_prefix "${arg_TEST_PREFIX}")
-    file(GENERATE OUTPUT "${properties_file}" CONTENT "set(properties [==[${escaped_properties}]==])\n# prefix: ${escaped_prefix}\n")
     get_property(multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
     if(multi_config)
         set(output "${base}_tests-$<CONFIG>.cmake")
@@ -184,11 +197,24 @@ function(webfront_bdd_discover_tests target)
         string(CONCAT include_content "if(EXISTS \"${output}\")\n  include(\"${output}\")\n"
                             "else()\n  add_test([==[${target}_NOT_BUILT]==] [==[${target}_NOT_BUILT]==])\nendif()\n")
     endif()
-    set(discovery_command "${CMAKE_COMMAND}" "-DEXECUTABLE=$<TARGET_FILE:${target}>" "-DOUTPUT=${output}" "-DPREFIX=${arg_TEST_PREFIX}" "-DEMULATOR=$<TARGET_PROPERTY:${target},CROSSCOMPILING_EMULATOR>"
-                "-DPROPERTIES_FILE=${properties_file}" -P "${CMAKE_CURRENT_FUNCTION_LIST_FILE}")
+    # The properties and the prefix go into the file escaped (no bracket, backslash or ';' of theirs can change how CMake reads
+    # it) and the script that discovers the cases unescapes them. A change of any of them makes the file newer than the cases
+    # generated from it.
+    bdd_escape(escaped_prefix "${arg_TEST_PREFIX}")
+    string(CONCAT properties_content
+        "set(properties [==[${escaped_properties}]==])\n"
+        "set(bdd_executable [==[$<TARGET_FILE:${target}>]==])\n"
+        "set(bdd_output [==[${output}]==])\n"
+        "set(bdd_emulator [==[$<TARGET_PROPERTY:${target},CROSSCOMPILING_EMULATOR>]==])\n"
+        "set(bdd_prefix [==[${escaped_prefix}]==])\n")
+    file(GENERATE OUTPUT "${properties_file}" CONTENT "${properties_content}")
+    set(discovery_command "${CMAKE_COMMAND}" "-DPROPERTIES_FILE=${properties_file}" -P "${CMAKE_CURRENT_FUNCTION_LIST_FILE}")
     # Right after each build of the target, so that building it alone registers its cases...
     add_custom_command(TARGET ${target} POST_BUILD COMMAND ${discovery_command} VERBATIM)
-    # ...and again when only the properties or the prefix changed: that reconfiguration does not rebuild the executable.
+    # ...and when only the properties or the prefix changed, the executable is linked again (Makefile and Ninja generators) so
+    # that this command runs when the target alone is built; the target below does the same for a complete build, whatever
+    # the generator.
+    set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS "${properties_file}")
     add_custom_command(OUTPUT "${output}" COMMAND ${discovery_command} DEPENDS ${target} "${properties_file}" VERBATIM)
     add_custom_target(${target}_bdd_discovery ALL DEPENDS "${output}")
     file(WRITE "${base}_include.cmake" "${include_content}")

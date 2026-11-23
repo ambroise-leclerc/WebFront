@@ -68,9 +68,11 @@ wait for an asynchronous state. The header documents each of them (Doxygen).
 | `SHARD_NAME <name>` | With `SHARDS` only (refused otherwise): name of the shards, `<name>-<i>` (default `<target>Shards`) |
 | `JUNIT_PREFIX <path>` | With `SHARDS` only (refused otherwise): JUnit report of each shard, `<path>-<i>.xml` (default `<binary dir>/<target>-results-<i>.xml`) |
 
-A value of `PROPERTIES` is kept as one argument whatever it holds (a `;`, a trailing backslash, `]==]`), so pass such a value as one quoted argument; CMake then reads a `;` in it as a list separator, as `set_tests_properties` does (`ENVIRONMENT "A=1;B=2"` sets two variables). `PROPERTIES` takes pairs of a name and a value.
+A value of `PROPERTIES` is kept as one argument whatever it holds (a `;`, a trailing backslash, `]==]`, even the name of an option such as `SHARDS`), so pass such a value as one quoted argument; CMake then reads a `;` in it as a list separator, as `set_tests_properties` does (`ENVIRONMENT "A=1;B=2"` sets two variables). `PROPERTIES` takes pairs of a name and a value.
 
 Call it once per target without `SHARDS`: a second such call on the same target is refused (it would overwrite the first one's files). A call with `SHARDS` registers its cases at once and can accompany it.
+
+A change of `PROPERTIES` or `TEST_PREFIX` links the executable again (Makefile and Ninja generators), so that building the target alone registers the new values; a complete build does it with any generator.
 
 After each build the executable lists its scenarios (`--list`) and a post-build step writes one CTest case per scenario,
 `Scenario: <title>`, whatever brackets or semicolons the title holds. Each case runs `<target> --exact <title>`; a
