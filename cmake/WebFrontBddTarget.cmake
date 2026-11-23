@@ -14,20 +14,21 @@ target_link_libraries(WebFront_Bdd INTERFACE Threads::Threads)
 target_include_directories(WebFront_Bdd INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/../include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-# Defines webfront_bdd_discover_tests() for the parent project as well (a function is global once defined).
+# Defines webfront_bdd_discover_tests() for the parent project as well. The function reads no variable of this directory
+# (it locates its script with CMAKE_CURRENT_FUNCTION_LIST_FILE): it runs with the variables of its caller.
 include("${CMAKE_CURRENT_LIST_DIR}/WebFrontBdd.cmake")
 
 # A project that embeds WebFront owns its own installation: only the top-level project installs the package.
 if(WEBFRONT_IS_TOP_LEVEL)
     set(_bdd_cmake_dir "${CMAKE_INSTALL_LIBDIR}/cmake/WebFrontBdd")
-    install(TARGETS WebFront_Bdd EXPORT WebFrontBddTargets)
+    install(TARGETS WebFront_Bdd EXPORT WebFrontBddTargets COMPONENT WebFrontBdd)
     install(FILES "${CMAKE_CURRENT_LIST_DIR}/../include/webfront/testing/Bdd.hpp"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/webfront/testing")
-    install(EXPORT WebFrontBddTargets NAMESPACE WebFront:: DESTINATION "${_bdd_cmake_dir}")
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/webfront/testing" COMPONENT WebFrontBdd)
+    install(EXPORT WebFrontBddTargets NAMESPACE WebFront:: DESTINATION "${_bdd_cmake_dir}" COMPONENT WebFrontBdd)
     configure_package_config_file("${CMAKE_CURRENT_LIST_DIR}/WebFrontBddConfig.cmake.in"
         "${CMAKE_CURRENT_BINARY_DIR}/WebFrontBddConfig.cmake" INSTALL_DESTINATION "${_bdd_cmake_dir}")
     write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/WebFrontBddConfigVersion.cmake"
         VERSION ${PROJECT_VERSION} COMPATIBILITY SameMajorVersion ARCH_INDEPENDENT)
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/WebFrontBddConfig.cmake" "${CMAKE_CURRENT_BINARY_DIR}/WebFrontBddConfigVersion.cmake"
-            "${CMAKE_CURRENT_LIST_DIR}/WebFrontBdd.cmake" DESTINATION "${_bdd_cmake_dir}")
+            "${CMAKE_CURRENT_LIST_DIR}/WebFrontBdd.cmake" DESTINATION "${_bdd_cmake_dir}" COMPONENT WebFrontBdd)
 endif()

@@ -9,9 +9,9 @@
 #   webfront_bdd_discover_tests(my_tests [TEST_PREFIX <prefix>] [PROPERTIES <name> <value>...]
 #                               [SHARDS <n> [SHARD_NAME <name>] [JUNIT_PREFIX <path>]])
 #
-#   TEST_PREFIX   text put before "Scenario: " in each case name.
-#   PROPERTIES    properties of every case (TIMEOUT, LABELS, ENVIRONMENT...); a skipped scenario exits with 4, which the
-#                 cases treat as SKIP_RETURN_CODE.
+#   TEST_PREFIX   text put before "Scenario: " in each case name; refused with SHARDS (use SHARD_NAME).
+#   PROPERTIES    properties of every case (TIMEOUT, LABELS, ENVIRONMENT...). A skipped scenario exits with 4, which the
+#                 cases treat as SKIP_RETURN_CODE; a SKIP_RETURN_CODE of yours replaces it.
 #   SHARDS        registers <n> cases instead, each running a share of the scenarios in declaration order in one process
 #                 (`--order decl --shard-count <n> --shard-index <i>`), which saves the start of one process per scenario.
 #                 They are named <SHARD_NAME>-<i> (default "<target>Shards") and write a JUnit report to
@@ -52,8 +52,6 @@ if(CMAKE_SCRIPT_MODE_FILE)
     return()
 endif()
 
-set(_WEBFRONT_BDD_SCRIPT "${CMAKE_CURRENT_LIST_FILE}")
-
 function(webfront_bdd_discover_tests target)
     cmake_parse_arguments(PARSE_ARGV 1 arg "" "TEST_PREFIX;SHARDS;SHARD_NAME;JUNIT_PREFIX" "PROPERTIES")
     if(arg_UNPARSED_ARGUMENTS)
@@ -63,6 +61,9 @@ function(webfront_bdd_discover_tests target)
         message(FATAL_ERROR "webfront_bdd_discover_tests: ${target} is not a target")
     endif()
     if(DEFINED arg_SHARDS)
+        if(arg_TEST_PREFIX)
+            message(FATAL_ERROR "webfront_bdd_discover_tests: TEST_PREFIX does not apply to SHARDS; name the shards with SHARD_NAME")
+        endif()
         if(NOT arg_SHARDS MATCHES "^[1-9][0-9]*$")
             message(FATAL_ERROR "webfront_bdd_discover_tests: SHARDS must be a positive integer, not '${arg_SHARDS}'")
         endif()
@@ -77,7 +78,8 @@ function(webfront_bdd_discover_tests target)
             add_test(NAME ${arg_SHARD_NAME}-${shard}
                 COMMAND ${target} --order decl --shard-count ${arg_SHARDS} --shard-index ${shard}
                         --junit "${arg_JUNIT_PREFIX}-${shard}.xml")
-            # A shard whose every scenario is skipped exits with 4, as a single scenario does.
+            # A shard whose every scenario is skipped exits with 4, as a single scenario does; a SKIP_RETURN_CODE of
+            # PROPERTIES, listed after this one, takes precedence.
             set_tests_properties(${arg_SHARD_NAME}-${shard} PROPERTIES SKIP_RETURN_CODE 4 ${arg_PROPERTIES})
         endforeach()
         return()
@@ -100,7 +102,7 @@ function(webfront_bdd_discover_tests target)
     endif()
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND "${CMAKE_COMMAND}" "-DEXECUTABLE=$<TARGET_FILE:${target}>" "-DOUTPUT=${output}" "-DPREFIX=${arg_TEST_PREFIX}"
-                "-DPROPERTIES_FILE=${properties_file}" -P "${_WEBFRONT_BDD_SCRIPT}"
+                "-DPROPERTIES_FILE=${properties_file}" -P "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
         VERBATIM)
     file(WRITE "${base}_include.cmake" "${include_content}")
     set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES "${base}_include.cmake")

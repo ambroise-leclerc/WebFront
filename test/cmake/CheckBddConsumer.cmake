@@ -16,7 +16,7 @@ endfunction()
 if(NOT CONFIG)
     set(CONFIG Release)
 endif()
-run_step("Installing the package" "${CMAKE_COMMAND}" --install "${BUILD_DIR}" --config ${CONFIG} --prefix "${WORK}/prefix")
+run_step("Installing the package" "${CMAKE_COMMAND}" --install "${BUILD_DIR}" --config ${CONFIG} --component WebFrontBdd --prefix "${WORK}/prefix")
 foreach(installed IN ITEMS include/webfront/testing/Bdd.hpp lib/cmake/WebFrontBdd/WebFrontBddConfig.cmake
                            lib/cmake/WebFrontBdd/WebFrontBddTargets.cmake lib/cmake/WebFrontBdd/WebFrontBdd.cmake)
     if(NOT EXISTS "${WORK}/prefix/${installed}")

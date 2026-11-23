@@ -21,7 +21,7 @@ built or installed from a project that embeds WebFront:
 CPMAddPackage("gh:ambroise-leclerc/WebFront@<version>")
 ```
 
-From an installed WebFront (`cmake --install <build> --prefix <prefix>` of the top-level project), use the package; it
+From an installed WebFront (`cmake --install <build> --prefix <prefix> --component WebFrontBdd` of the top-level project), use the package; it
 installs the header, `WebFront::Bdd` and the module that defines `webfront_bdd_discover_tests()`:
 
 ```cmake
@@ -62,8 +62,8 @@ wait for an asynchronous state. The header documents each of them (Doxygen).
 
 | Option | Effect |
 | --- | --- |
-| `TEST_PREFIX <text>` | Put before `Scenario: ` in the name of each case |
-| `PROPERTIES <name> <value>...` | Properties of every case (`TIMEOUT`, `LABELS`, `ENVIRONMENT`...) |
+| `TEST_PREFIX <text>` | Put before `Scenario: ` in the name of each case; refused with `SHARDS` |
+| `PROPERTIES <name> <value>...` | Properties of every case (`TIMEOUT`, `LABELS`, `ENVIRONMENT`...); a `SKIP_RETURN_CODE` of yours replaces the default 4 |
 | `SHARDS <n>` | Register `<n>` cases, each running a share of the scenarios in one process, instead of one case per scenario |
 | `SHARD_NAME <name>` | Name of the shards, `<name>-<i>` (default `<target>Shards`) |
 | `JUNIT_PREFIX <path>` | JUnit report of each shard, `<path>-<i>.xml` (default `<binary dir>/<target>-results-<i>.xml`) |
