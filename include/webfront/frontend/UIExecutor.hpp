@@ -21,6 +21,7 @@
 #include <deque>
 #include <exception>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -397,6 +398,60 @@ template <typename Tag>
 [[nodiscard]] UIExecutorHost& uiExecutorHostOf() {
     static UIExecutorHost host;
     return host;
+}
+
+namespace detail {
+
+/// One blocking invocation (invokeOnUIThread): deletes itself when its operation completes, whatever the outcome.
+template <typename Function>
+struct UIInvocation {
+    struct Receiver {
+        using receiver_concept = ex::receiver_tag;
+        UIInvocation* self;
+        void          finish(std::exception_ptr error) noexcept {
+            auto done = std::move(self->done);
+            delete self;
+            done.set_value(std::move(error));
+        }
+        void set_value() noexcept {
+            std::exception_ptr error;
+            try {
+                self->function();
+            } catch (...) {
+                error = std::current_exception();
+            }
+            finish(std::move(error));
+        }
+        void set_error(std::exception_ptr) noexcept {
+            finish(std::make_exception_ptr(UIExecutorUnavailable{}));
+        }
+        void set_stopped() noexcept {
+            finish(std::make_exception_ptr(UIExecutorUnavailable{}));
+        }
+    };
+    Function                         function;
+    std::promise<std::exception_ptr> done;
+    ex::connect_result_t<decltype(std::declval<const UIExecutor&>().schedule()), Receiver> operation;
+    UIInvocation(const UIExecutor& loop, Function work) : function(std::move(work)), operation(ex::connect(loop.schedule(), Receiver{this})) { }
+};
+
+}  // namespace detail
+
+/// @brief Runs `function` on the interface thread and waits for it, from any other thread (#616). Called on the interface
+/// thread itself it runs the function at once (waiting there would never end). An exception of the function is rethrown to
+/// the caller; `UIExecutorUnavailable` is thrown when no loop runs, or when it closes before the function started.
+/// Never call it from a thread the interface thread waits for.
+template <typename Function>
+void invokeOnUIThread(const UIExecutor& executor, Function function) {
+    if (executor.onUIThread()) {
+        function();
+        return;
+    }
+    auto* invocation = new detail::UIInvocation<Function>(executor, std::move(function));
+    auto  answer     = invocation->done.get_future();
+    ex::start(invocation->operation);
+    if (auto error = answer.get())
+        std::rethrow_exception(error);
 }
 
 }  // namespace webfront::frontend

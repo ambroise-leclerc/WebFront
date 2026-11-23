@@ -1302,6 +1302,50 @@ public:
         }
     }
 
+    /** @brief Opens `page` in a second native window beside the one show() runs, served by the same server (#616).
+     *
+     * The page reaches the same `cppFunction`s and the same `jsFunction` subscribers as the first one (each window is
+     * one more connected browser: `onUIStarted` and `subscribeUIStarted` see it), and receives the same view-association
+     * proof, so it is an embedded view of this application and not an external browser. The title, the size and the
+     * background come from `options` (an empty background takes the application's). Opening a page that a secondary
+     * window already shows brings that window to the front instead of opening another. Closing the window of show()
+     * closes the others with it; closing a secondary window leaves the rest running.
+     *
+     * Callable from any thread, while show() runs; it returns once the window exists. Throws std::logic_error when this
+     * application is not showing a window, and when the frontend cannot show a second window (today the WebKitGTK
+     * frontend can; the system browser, CEF, WKWebView and WebView2 refuse). Window placement is left to the toolkit.
+     */
+    static constexpr bool supportsSecondaryWindow =
+        requires(std::string_view text, const ContentPolicy& policy, const WindowOptions& window, const ViewLaunch& launch) {
+            Frontend::openSecondaryWindow(text, text, text, policy, window, launch);
+        };
+    void openSecondaryWindow(std::string_view page, WindowOptions options = {}) {
+        if constexpr (supportsSecondaryWindow) {
+            if (showEpoch.load() % 2 == 0)
+                throw std::logic_error("webfront::BasicWF::openSecondaryWindow(): this application is not showing a window; call show() first");
+            if (options.background.empty())
+                options.background = windowOptions.background;
+            Frontend::openSecondaryWindow(httpAddress, httpPort, page, contentPolicy, options,
+                                          ViewLaunch{viewSecret, detail::browserOrigin(httpAddress, httpPort, networking::secureTransport<Net>)});
+        } else {
+            throw std::logic_error("webfront::BasicWF::openSecondaryWindow(): this frontend cannot show a second window of the application");
+        }
+    }
+
+    /** @brief Asks the secondary window showing `page` to close, as if the user had closed it; callable from any thread.
+     * Returns false when no such window is open (or the frontend has none). The window of show() ends with
+     * requestClose().
+     */
+    bool requestClose(std::string_view page) {
+        if constexpr (requires { { Frontend::closeSecondaryWindow(page) } -> std::same_as<bool>; }) {
+            if (showEpoch.load() % 2 == 0)
+                return false;
+            return Frontend::closeSecondaryWindow(page);
+        } else {
+            return false;
+        }
+    }
+
 protected:
     /// For the developer application: its document root is the project that wf builds, which is the development path.
     void useDeveloperEnvironment() noexcept {

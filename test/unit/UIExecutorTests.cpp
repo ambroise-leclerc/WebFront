@@ -851,3 +851,36 @@ const Scenario passInterface{"A pass of the interface thread runs a bounded batc
         host.close();
     });
 }};
+
+const Scenario invokeBlocking{"invokeOnUIThread runs a function on the interface thread and waits for it", [] {
+    given("a frontend loop attached to an executor", [&] {
+        FakeLoop loop;
+        loop.start();
+        const auto executor = loop.host.executor();
+        when("another thread invokes a function", [&] {
+            std::thread::id ran;
+            invokeOnUIThread(executor, [&] { ran = std::this_thread::get_id(); });
+            then("it ran on the interface thread, and had finished when the call returned", [&] {
+                check(ran == loop.uiThread);
+            });
+        });
+        when("the function throws", [&] {
+            then("the caller receives the exception", [&] {
+                requireThrows<std::logic_error>([&] { invokeOnUIThread(executor, [] { throw std::logic_error("refused"); }); });
+            });
+        });
+        when("the interface thread itself invokes a function", [&] {
+            bool nested = false;
+            invokeOnUIThread(executor, [&] { invokeOnUIThread(executor, [&] { nested = true; }); });
+            then("it runs at once instead of waiting for itself", [&] {
+                check(nested);
+            });
+        });
+        when("the loop has closed", [&] {
+            loop.stop();
+            then("the call reports the missing interface thread", [&] {
+                requireThrows<UIExecutorUnavailable>([&] { invokeOnUIThread(executor, [] { }); });
+            });
+        });
+    });
+}};

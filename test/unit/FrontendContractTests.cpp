@@ -1184,6 +1184,28 @@ const Scenario nativeOrBrowserFrontendForwards{"NativeOrBrowserFrontend forwards
     });
 }};
 
+const Scenario secondWindowRefused{"A frontend without a second window refuses openSecondaryWindow with an exception", [] {
+    given("an application whose frontend shows one window", [&] {
+        HostApp<HostFrontend<>> app;
+        static_assert(!HostApp<HostFrontend<>>::supportsSecondaryWindow);
+        then("the call is refused before and while a window is open, and no close request finds a window", [&] {
+            requireThrows<std::logic_error>([&] { app.openSecondaryWindow("other.html"); });
+            check(!app.requestClose("other.html"));
+            const auto state = ContractIoContext::current;
+            std::jthread show([&] { app.show(); });
+            requireEventually([&] { return windowOpen(state); });
+            requireThrows<std::logic_error>([&] { app.openSecondaryWindow("other.html"); });
+            check(!app.requestClose("other.html"));
+            check(app.requestClose());
+        });
+    });
+    given("the native-or-browser frontend whose native window cannot show a second one", [&] {
+        using Either = frontend::NativeOrBrowserFrontendFor<HostFrontend<>, DeafFrontend>;
+        check(!Either::closeSecondaryWindow("other.html"));
+        requireThrows<std::logic_error>([&] { Either::openSecondaryWindow("127.0.0.1", "9002", "other.html", ContentPolicy{}, WindowOptions{}, ViewLaunch{}); });
+    });
+}};
+
 const Scenario uIThreadStop{"UIThread::stop reports a window that does not close", [] {
     given("a window that ignores close requests", [&] {
         UIThread<HostApp<DeafFrontend>> ui(WebFrontConfig{}, [](auto&) { });

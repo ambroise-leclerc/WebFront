@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <functional>
 #include <future>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -339,6 +340,11 @@ struct Session : FailureState {
     std::function<void()>                navigationCancelled;
     /// Per-launch proof of this view (ADR-020), given at the start of the top-level documents of the application's origin.
     ViewLaunch launch;
+    /// A window opened beside the application's own (#616): it shares the network session (cookies, storage and downloads)
+    /// of the first one, runs no loop of its own and reports its closing to `closedHook` instead of ending the loop.
+    Api::Object           sharedNetwork = nullptr;
+    bool                  secondary     = false;
+    std::function<void()> closedHook;
     /// Download folder; empty selects the user's XDG download folder, else the home folder.
     std::filesystem::path downloadDirectory;
     /// Test injection: answers <input type="file"> without a dialog (an empty list cancels). Unset shows the system dialog.
@@ -442,9 +448,16 @@ struct Session : FailureState {
     }
 
     void close() noexcept {
-        closed = true;
+        const bool first = !closed;
+        closed           = true;
         mediaScope.reset();
         a.loopQuit(loop);
+        if (first && closedHook) {
+            try {
+                closedHook();
+            } catch (...) {
+            }
+        }
     }
     void failAndClose(std::string_view message) noexcept {
         FailureState::fail(message);
@@ -483,7 +496,7 @@ struct Session : FailureState {
         trace("session creation");
         const auto data  = profileDirectory("XDG_DATA_HOME", ".local/share");
         const auto cache = profileDirectory("XDG_CACHE_HOME", ".cache");
-        if (!windowOptions.media) {
+        if (!windowOptions.media && !secondary) {
             mediaPlugins  = data / "no-media-plugins";
             mediaRegistry = data / "no-media-registry.bin";  // never rewrite the user's own registry
             std::filesystem::create_directories(mediaPlugins);
@@ -492,8 +505,9 @@ struct Session : FailureState {
         // the first load is requested: the variables stay set from here until the page reports that its load started (or
         // the delay expires), then are restored. The environment is process-wide, so the application is exposed during that
         // window, as docs/WEBKITGTK.md says; a web process launched later (a process swap) runs without the restriction.
-        mediaScope.emplace(mediaEnvironment());
-        network = a.networkNew(data.c_str(), cache.c_str());
+        if (!secondary)
+            mediaScope.emplace(mediaEnvironment());
+        network = sharedNetwork ? a.refSink(sharedNetwork) : a.networkNew(data.c_str(), cache.c_str());
         Api::Object context;
         {
             DevelopmentSandboxEnvironment environment(mode);
@@ -510,7 +524,9 @@ struct Session : FailureState {
         installViewAssociation();
         installFirstFrameProbe();
         registerHandlers();
-        downloadStartedHandler = a.connect(network, "download-started", reinterpret_cast<Api::Callback>(onDownloadStarted), this, nullptr, 0);
+        // The network session is shared: its downloads are tracked once, by the application's own window.
+        if (!secondary)
+            downloadStartedHandler = a.connect(network, "download-started", reinterpret_cast<Api::Callback>(onDownloadStarted), this, nullptr, 0);
         trace("view created");
         captureTarget->view = view;
         captureTarget->pending.open();
@@ -561,7 +577,8 @@ struct Session : FailureState {
     void presentHidden() {
         a.widgetOpacity(window, 0.01);  // GTK does not draw a widget at 0, and WebKit would wait for a frame forever
         a.windowPresent(window);
-        startPortalExport();
+        if (!secondary)  // the portal identifier is that of the application's own window
+            startPortalExport();
     }
     /// Shows the window once the page painted its first frame, or when the delay expired.
     void presentWindow(bool byFrame) {
@@ -941,6 +958,14 @@ struct Session : FailureState {
             a.loopRun(loop);
         rethrowIfFailed();
     }
+
+    /// Starts the load of a secondary window and returns: the loop of the application's own window drives it.
+    void start(const std::string& url) {
+        navigationTimer = a.timeoutAdd(30'000, onNavigationTimeout, this);
+        presentTimer    = a.timeoutAdd(maximumPresentDelayMs, onPresentTimeout, this);
+        presentHidden();
+        a.load(view, url.c_str());
+    }
 };
 
 struct OpenOptions {
@@ -949,6 +974,78 @@ struct OpenOptions {
     std::function<void(Session&)> configure{};
     ViewLaunch                    launch{};
 };
+
+/// The windows of the application beside the first one (#616). Every member is used on the interface thread only.
+struct Windows {
+    Session*                                        primary = nullptr;
+    std::map<std::string, std::unique_ptr<Session>> secondary;
+    std::vector<std::unique_ptr<Session>>           finished;  // closed, destroyed from an idle callback
+    unsigned                                        reaper = 0;
+
+    static Windows& instance() {
+        static Windows windows;
+        return windows;
+    }
+    static int reap(void*) noexcept {
+        auto& windows  = instance();
+        windows.reaper = 0;
+        auto closed    = std::move(windows.finished);
+        windows.finished.clear();
+        closed.clear();  // destroys the sessions, outside of any of their own callbacks
+        return 0;
+    }
+    void retire(const std::string& page) {
+        const auto found = secondary.find(page);
+        if (found == secondary.end())
+            return;
+        finished.push_back(std::move(found->second));
+        secondary.erase(found);
+        if (!reaper)
+            reaper = api().idleAddFull(200, reap, nullptr, nullptr);
+    }
+    /// The first window ended: the others end with it, and nothing is left to reap.
+    void clear() {
+        if (reaper)
+            api().sourceRemove(std::exchange(reaper, 0));
+        auto windows = std::move(secondary);
+        secondary.clear();
+        finished.clear();
+        windows.clear();
+        primary = nullptr;
+    }
+};
+
+/// On the interface thread: opens `file` in a window of its own, or brings the window already showing it to the front.
+inline void openSecondary(const std::string& address, const std::string& port, const std::string& file, OpenOptions options) {
+    auto& windows = Windows::instance();
+    if (!windows.primary)
+        throw std::logic_error("WebKitGTKFrontend: no window of the application is open; show() it before opening another");
+    if (const auto found = windows.secondary.find(file); found != windows.secondary.end()) {
+        api().windowPresent(found->second->window);
+        return;
+    }
+    auto session = std::make_unique<Session>(webfront::detail::BoundContentPolicy{applicationUrl(address, port, "", options.launch.origin), options.contentPolicy}, options.window);
+    session->secondary     = true;
+    session->sharedNetwork = windows.primary->network;
+    session->launch        = options.launch;
+    session->create();
+    session->closedHook = [file] {
+        Windows::instance().retire(file);
+    };
+    auto& stored = windows.secondary[file];
+    stored       = std::move(session);
+    stored->start(applicationUrl(address, port, file, options.launch.origin));
+}
+
+/// On the interface thread: asks the secondary window showing `file` to close, as its user would. False when there is none.
+inline bool closeSecondary(const std::string& file) {
+    auto& windows = Windows::instance();
+    const auto found = windows.secondary.find(file);
+    if (found == windows.secondary.end() || found->second->closed)
+        return false;
+    found->second->close();
+    return true;
+}
 
 inline void open(std::string_view address, std::string_view port, std::string_view file, const OpenOptions& options = {}, SandboxMode mode = SandboxMode::development) {
     initialize(mode);
@@ -984,6 +1081,14 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
             host.close();
         }
     } closing{host, windowHost};
+    auto& windows   = Windows::instance();
+    windows.primary = &session;
+    struct Others {
+        Windows& windows;
+        ~Others() {
+            windows.clear();
+        }
+    } others{windows};
     session.run(applicationUrl(address, port, file, options.launch.origin));
 }
 
@@ -1022,6 +1127,44 @@ struct BasicWebKitGTKFrontend {
         return false;
 #endif
     }
+    /// Opens `page` in a second window beside the one open() runs, or brings the window already showing that page to the
+    /// front (#616). Callable from any thread while open() runs; it returns once the window exists, and throws
+    /// std::logic_error when no window is open. The window shares the application's network session: its cookies,
+    /// storage and downloads (tracked by the first window). Its `WindowOptions::media` is that of the first window.
+    static void openSecondaryWindow([[maybe_unused]] std::string_view address, [[maybe_unused]] std::string_view port,
+                                    [[maybe_unused]] std::string_view page, [[maybe_unused]] const ContentPolicy& policy,
+                                    [[maybe_unused]] const WindowOptions& window, [[maybe_unused]] const ViewLaunch& launch) {
+#if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
+        try {
+            invokeOnUIThread(uiExecutor(), [&] {
+                detail::webkitgtk::openSecondary(std::string(address), std::string(port), std::string(page),
+                                                 {.contentPolicy = policy, .window = window, .launch = launch});
+            });
+        } catch (const UIExecutorUnavailable&) {
+            throw std::logic_error("WebKitGTKFrontend: no window of the application is open; show() it before opening another");
+        }
+#else
+        initialize();
+#endif
+    }
+
+    /// Asks the secondary window showing `page` to close, from any thread; false when none is open.
+    static bool closeSecondaryWindow([[maybe_unused]] std::string_view page) {
+#if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
+        bool closed = false;
+        try {
+            invokeOnUIThread(uiExecutor(), [&] {
+                closed = detail::webkitgtk::closeSecondary(std::string(page));
+            });
+        } catch (const UIExecutorUnavailable&) {
+            return false;
+        }
+        return closed;
+#else
+        return false;
+#endif
+    }
+
     static void             initialize() {
 #if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
         detail::webkitgtk::initialize(Mode);

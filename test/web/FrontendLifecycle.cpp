@@ -643,6 +643,192 @@ int checkHostClose() {
     return 0;
 }
 
+// A second window of the application (#616): both pages share the C++ functions and the pushed calls of one application;
+// closing the second leaves the first usable, closing the first closes the second. A frontend that cannot show a second
+// window must refuse the call with an exception instead of opening a browser.
+constexpr const char* secondPage = "second-window.html?name=editor";
+
+class SecondWindows {
+    std::mutex                              mutex;
+    std::condition_variable                 changed;
+    std::map<std::string, App::UI>          windows;
+    std::map<std::string, bool>             embedded;
+    std::map<std::string, std::int64_t>     seen;
+    std::int64_t                            counter = 0;
+    unsigned                                connections = 0;
+    bool                                    abandoned = false;
+
+    template <typename Predicate>
+    bool waitFor(Predicate predicate) {
+        std::unique_lock lock{mutex};
+        return changed.wait_for(lock, std::chrono::seconds(20), [&] { return predicate() || abandoned; }) && !abandoned && predicate();
+    }
+
+public:
+    void abandon() {
+        {
+            std::lock_guard lock{mutex};
+            abandoned = true;
+        }
+        changed.notify_all();
+    }
+    void setup(App& app) {
+        app.onUIStarted([this](App::UI) {
+            std::lock_guard lock{mutex};
+            ++connections;
+        });
+        app.cppFunction("windowReady", [this](App::UI ui, std::string name) {
+            lifecycleStage = LifecycleStage::bridgeConnected;
+            {
+                std::lock_guard lock{mutex};
+                windows.insert_or_assign(name, ui);
+                embedded[name] = ui.isEmbeddedView();
+            }
+            changed.notify_all();
+        });
+        app.cppFunction("bump", [this] {
+            std::vector<App::UI> all;
+            std::int64_t         value;
+            {
+                std::lock_guard lock{mutex};
+                value = ++counter;
+                for (auto& [name, ui] : windows)
+                    all.push_back(ui);
+            }
+            for (auto& ui : all) {
+                try {
+                    ui.jsFunction("windowTests.changed")(value);
+                } catch (...) {  // a window that closed meanwhile
+                }
+            }
+        });
+        app.cppFunction("seen", [this](std::string name, std::int64_t value) {
+            {
+                std::lock_guard lock{mutex};
+                seen[name] = value;
+            }
+            changed.notify_all();
+        });
+    }
+    bool ready(const std::string& name) {
+        return waitFor([&] { return windows.contains(name); });
+    }
+    bool isEmbedded(const std::string& name) {
+        std::lock_guard lock{mutex};
+        return embedded[name];
+    }
+    unsigned connectionCount() {
+        std::lock_guard lock{mutex};
+        return connections;
+    }
+    App::UI window(const std::string& name) {
+        std::lock_guard lock{mutex};
+        return windows.at(name);
+    }
+    void forget(const std::string& name) {
+        std::lock_guard lock{mutex};
+        windows.erase(name);
+    }
+    bool saw(const std::string& name, std::int64_t value) {
+        return waitFor([&] { return seen.contains(name) && seen[name] == value; });
+    }
+};
+
+int checkSecondWindow() {
+    App app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    lifecycleStage = LifecycleStage::startingInstrumented;
+    bool refusedBeforeShow = false;
+    try {
+        app.openSecondaryWindow(secondPage);
+    } catch (const std::logic_error&) {
+        refusedBeforeShow = true;
+    }
+    if (!refusedBeforeShow)
+        throw std::runtime_error("A second window was accepted before show()");
+    if (app.requestClose(secondPage))
+        throw std::runtime_error("A close request of a window was accepted before show()");
+    SecondWindows windows;
+    windows.setup(app);
+    std::string failure;
+    std::thread host([&] {
+        try {
+            const auto check = [&](bool condition, const char* message) {
+                if (!condition)
+                    throw std::runtime_error(message);
+            };
+            check(windows.ready("main"), "The first window did not connect");
+            if constexpr (!App::supportsSecondaryWindow) {
+                bool refused = false;
+                try {
+                    app.openSecondaryWindow(secondPage);
+                } catch (const std::logic_error&) {
+                    refused = true;
+                }
+                check(refused, "A frontend without a second window did not refuse the call");
+            } else {
+                webfront::WindowOptions options;
+                options.title  = "Second window";
+                options.width  = 640;
+                options.height = 480;
+                app.openSecondaryWindow(secondPage, options);
+                check(windows.ready("editor"), "The second window did not connect");
+                check(windows.isEmbedded("main") && windows.isEmbedded("editor"), "A window of the application lacks the proof of an embedded view");
+                // The same page again brings the window to the front: no third connection.
+                app.openSecondaryWindow(secondPage, options);
+                check(windows.window("editor").template jsFunction<std::string>("windowTests.name")().get() == "editor", "The second window did not answer");
+                check(windows.connectionCount() == 2, "Opening the same page again opened another window");
+                // A change made from one window is seen by both (shared cppFunction, pushed jsFunction).
+                windows.window("editor").jsFunction("windowTests.bump")();
+                check(windows.saw("main", 1) && windows.saw("editor", 1), "A change made in one window did not reach both");
+                // Closing the second window leaves the first usable.
+                check(app.requestClose(secondPage), "The close request of the second window was refused");
+                for (int attempt = 0; attempt < 200 && app.requestClose(secondPage); ++attempt)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+                check(!app.requestClose(secondPage), "The second window did not close");
+                check(windows.window("main").template jsFunction<std::string>("windowTests.name")().get() == "main", "The first window is not usable after the second closed");
+                // Opened again, it shares the state again.
+                windows.forget("editor");
+                app.openSecondaryWindow(secondPage, options);
+                check(windows.ready("editor"), "The second window did not reopen");
+                windows.window("main").jsFunction("windowTests.bump")();
+                check(windows.saw("editor", 2) && windows.saw("main", 2), "The reopened window does not share the state");
+            }
+            check(app.requestClose(), "The close request of the first window was refused");
+        } catch (const std::exception& error) {
+            failure = error.what();
+            app.requestClose();
+        }
+    });
+    struct Join {
+        SecondWindows& windows;
+        std::thread&   thread;
+        ~Join() {
+            windows.abandon();
+            thread.join();
+        }
+    };
+    {
+        Join join{windows, host};
+        app.show("second-window.html");
+        lifecycleStage = LifecycleStage::windowClosed;
+    }
+    if (!failure.empty())
+        throw std::runtime_error(failure);
+    if constexpr (App::supportsSecondaryWindow) {
+        if (app.requestClose(secondPage))
+            throw std::runtime_error("The second window survived the first");
+        bool refused = false;
+        try {
+            app.openSecondaryWindow(secondPage);
+        } catch (const std::logic_error&) {
+            refused = true;
+        }
+        if (!refused)
+            throw std::runtime_error("A second window was accepted after show() returned");
+    }
+    return 0;
+}
+
 // The application on a thread of its own, for a frontend that allows it; the others must refuse with a diagnostic
 // instead of opening a window off the main thread.
 template <typename Application>
@@ -762,6 +948,7 @@ int run(std::string_view mode) {
     cases.emplace("native-window", checkNativeWindow);
     cases.emplace("second-open", checkSecondOpen);
     cases.emplace("host-close", checkHostClose);
+    cases.emplace("second-window", checkSecondWindow);
     cases.emplace("startup-time", checkStartupTime);
     cases.emplace("host-thread", +[] { return checkHostThread<App>(); });
     cases.emplace("view-association", checkViewAssociation);

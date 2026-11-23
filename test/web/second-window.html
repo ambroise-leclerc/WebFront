@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Second window</title>
+<script src="WebFront.js"></script>
+<script>
+    // The same page serves both windows of the test; the query selects the name each one reports (#616).
+    const name = new URLSearchParams(location.search).get("name") || "main";
+    window.windowTests = {
+        name: () => name,
+        bump: () => { webFront.cppFunction("bump")().catch(() => {}); },
+        changed: value => { webFront.cppFunction("seen")(name, value).catch(() => {}); },
+    };
+    webFront.ready.then(() => webFront.cppFunction("windowReady")(name)).catch(() => {});
+</script>

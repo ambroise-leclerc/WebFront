@@ -437,13 +437,13 @@ foreach(case webkitgtk-display webkitgtk-linux cef-linux cef-macos cef-windows c
             continue()
         endif()
         if(case STREQUAL "webview2-windows")
-            set(expected_count 18)  # with StartupTime-cold and -warm (#611)
+            set(expected_count 19)  # with StartupTime-cold and -warm (#611)
         elseif(case STREQUAL "extension")
-            set(expected_count 16)  # an engine without STARTUP_TRACE has no start-up case
+            set(expected_count 17)  # an engine without STARTUP_TRACE has no start-up case
         elseif(case STREQUAL "cef-linux")
-            set(expected_count 14)  # no host-thread case: CEF has no secondary-thread path to observe
+            set(expected_count 15)  # no host-thread case: CEF has no secondary-thread path to observe
         else()
-            set(expected_count 17)
+            set(expected_count 18)
         endif()
         if(NOT count EQUAL expected_count)
             list(APPEND failures "${case}: expected ${expected_count} tests, got ${count}")

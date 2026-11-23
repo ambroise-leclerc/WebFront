@@ -369,6 +369,28 @@ struct NativeOrBrowserFrontendFor {
         }
     }
 
+    /// A second window beside the first (#616): the native window's, or a refusal. The system browser is never asked to open
+    /// one: it would be an external browser, without the proof of an embedded view.
+    static void openSecondaryWindow([[maybe_unused]] std::string_view address, [[maybe_unused]] std::string_view port,
+                                    [[maybe_unused]] std::string_view file, [[maybe_unused]] const ContentPolicy& policy,
+                                    [[maybe_unused]] const WindowOptions& window, [[maybe_unused]] const ViewLaunch& launch) {
+        if (usesNativeWindow()) {
+            if constexpr (requires { Native::openSecondaryWindow(address, port, file, policy, window, launch); }) {
+                Native::openSecondaryWindow(address, port, file, policy, window, launch);
+                return;
+            }
+        }
+        throw std::logic_error(usesNativeWindow() ? "this native frontend cannot show a second window of the application"
+                                                  : "the system browser cannot show a second window of the application");
+    }
+    [[nodiscard]] static bool closeSecondaryWindow([[maybe_unused]] std::string_view file) {
+        if (usesNativeWindow()) {
+            if constexpr (requires { { Native::closeSecondaryWindow(file) } -> std::same_as<bool>; })
+                return Native::closeSecondaryWindow(file);
+        }
+        return false;
+    }
+
     static void open(std::string_view port, std::string_view file) {
         if (usesNativeWindow())
             Native::open(port, file);

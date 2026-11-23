@@ -27,6 +27,8 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   system browser, `app.requestClose()` from another thread, or `webfront::UIThread` where the frontend
   accepts a secondary thread (WebView2); a host loop cannot share the main thread with an embedded
   window. See [host integration](HOST_INTEGRATION.md).
+  A second native window of the same application (`app.openSecondaryWindow()`, #616) exists on WebKitGTK only so far; CEF,
+  WKWebView and WebView2 refuse it with `std::logic_error`, and the position of the window is left to the toolkit.
 - **Native pseudoterminals (opt-in).** `webfront::Pty` uses a Unix PTY on Linux and macOS or ConPTY on Windows 10 version 1809 and later. The page adapter requires a loopback bind and the application’s own browser origin. See the [PTY guide and standalone example](PTY.md).
 - **Developer environment.** `NativeApp::bootstrap("developer")` loads the verified, pinned
   environment selected by `DeveloperReleaseData.hpp`. Its terminal provides `wf init`, `create`,
