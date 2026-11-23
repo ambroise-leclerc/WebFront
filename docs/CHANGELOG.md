@@ -51,6 +51,7 @@ in a native pseudoterminal, and a faster, less flashy start of the native window
 
 ### Changed
 - WebKitGTK takes a `startupTimeout` (30 s by default), and WebView2 refuses a secondary window once the first one closed, even for a page already open (#652).
+- Open every native window from one `ViewOptions` (`WKWebViewOptions` and `WebView2Options` are aliases), whose test injections reach the secondary windows too (#652, `docs/FRONTENDS.md`).
 - Write a native frontend from shared headers: `EmbeddedFrontend` (facade and every `open()` overload), `WindowRegistry`/`InterfaceSession`, `StartupTrace` and `Presentation`, tested on Linux with fake windows (#652, `docs/FRONTENDS.md`).
 - Reveal the WKWebView window when the document has loaded or after one second (#611, `docs/WKWEBVIEW.md`).
 - Reveal the WebView2 window after the first frame or one second (#611, `docs/WEBVIEW2.md`).

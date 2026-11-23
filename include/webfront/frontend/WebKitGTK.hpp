@@ -943,7 +943,24 @@ struct OpenOptions {
     std::function<void(Session&)> configure{};
     ViewLaunch                    launch{};
     std::chrono::milliseconds     startupTimeout{30000};  // the initial document must load within this interval
+    // The test injections of ViewOptions, for the first window and for the secondary ones.
+    std::function<std::vector<std::string>()> chooseFiles{};
+    std::filesystem::path                     downloadDirectory{};
+    std::function<void(const std::string&)>   downloadFinished{};
+    ScriptDialogHandler                       answerScriptDialog{};
 };
+
+/// The options a frontend receives, as the session of a window takes them.
+inline OpenOptions openOptionsOf(const ViewOptions& view) {
+    return {.contentPolicy      = view.contentPolicy,
+            .window             = view.window,
+            .launch             = view.launch,
+            .startupTimeout     = view.startupTimeout,
+            .chooseFiles        = view.chooseFiles,
+            .downloadDirectory  = view.downloadDirectory,
+            .downloadFinished   = view.downloadFinished,
+            .answerScriptDialog = view.answerScriptDialog};
+}
 
 /// What the registry of the secondary windows (WindowRegistry.hpp) asks of GTK: reaping is an idle callback.
 struct WindowHooks {
@@ -992,8 +1009,12 @@ inline void openSecondary(const std::string& address, const std::string& port, c
             auto session = std::make_shared<Session>(webfront::detail::BoundContentPolicy{applicationUrl(address, port, "", options.launch.origin), options.contentPolicy}, options.window);
             session->secondary     = true;
             session->sharedNetwork = primary.network;
-            session->launch        = options.launch;
-            session->startupTimeout = primary.startupTimeout;  // the first window's delay
+            session->launch             = options.launch;
+            session->startupTimeout     = primary.startupTimeout;  // the first window's delay and test injections
+            session->chooseFiles        = primary.chooseFiles;
+            session->downloadDirectory  = primary.downloadDirectory;
+            session->downloadFinished   = primary.downloadFinished;
+            session->answerScriptDialog = primary.answerScriptDialog;
             session->create(mode);
             return session;
         },
@@ -1012,8 +1033,12 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
     // One window per process: a second open() on the main thread is refused before it creates a window.
     frontend::detail::InterfaceSession<Windows>::refuseSecond(uiExecutorHostOf<WebKitGTKHost>(), WindowHooks::name);
     Session session(webfront::detail::BoundContentPolicy{applicationUrl(address, port, "", options.launch.origin), options.contentPolicy}, options.window);
-    session.launch         = options.launch;
-    session.startupTimeout = options.startupTimeout;
+    session.launch             = options.launch;
+    session.startupTimeout     = options.startupTimeout;
+    session.chooseFiles        = options.chooseFiles;
+    session.downloadDirectory  = options.downloadDirectory;
+    session.downloadFinished   = options.downloadFinished;
+    session.answerScriptDialog = options.answerScriptDialog;
     session.create(mode);
     if (options.configure)
         options.configure(session);
@@ -1055,11 +1080,10 @@ struct BasicWebKitGTKFrontend : EmbeddedFrontend<BasicWebKitGTKFrontend<Mode>> {
     static constexpr std::string_view               enable             = "Configure on Linux with -DWEBFRONT_EMBED_WEBKITGTK=ON";
 #if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
     static constexpr bool compiled = true;
-    using Options                  = detail::webkitgtk::OpenOptions;
 #else
     static constexpr bool compiled = false;
-    using Options                  = ViewOptions;
 #endif
+    using Options = ViewOptions;
     using Host = WebKitGTKHost;
 
 #if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
@@ -1067,7 +1091,7 @@ struct BasicWebKitGTKFrontend : EmbeddedFrontend<BasicWebKitGTKFrontend<Mode>> {
         detail::webkitgtk::initialize(Mode);
     }
     static void openNative(std::string_view address, std::string_view port, std::string_view page, const Options& options) {
-        detail::webkitgtk::open(address, port, page, options, Mode);
+        detail::webkitgtk::open(address, port, page, detail::webkitgtk::openOptionsOf(options), Mode);
     }
     static void closeNative(const NativeWindowHandle& window) {
         // gtk_window_close ignores a window that is not realized, and the window is presented only after the first frame:
@@ -1076,7 +1100,7 @@ struct BasicWebKitGTKFrontend : EmbeddedFrontend<BasicWebKitGTKFrontend<Mode>> {
         detail::webkitgtk::api().emitByName(window.pointer, "close-request", &handled);
     }
     static void openSecondaryNative(std::string_view address, std::string_view port, std::string_view page, const Options& options) {
-        detail::webkitgtk::openSecondary(std::string(address), std::string(port), std::string(page), options, Mode);
+        detail::webkitgtk::openSecondary(std::string(address), std::string(port), std::string(page), detail::webkitgtk::openOptionsOf(options), Mode);
     }
     static bool closeSecondaryNative(std::string_view page) {
         return detail::webkitgtk::closeSecondary(std::string(page));

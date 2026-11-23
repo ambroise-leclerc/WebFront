@@ -7,21 +7,53 @@
 #include "Action.hpp"
 #include "CloseRequest.hpp"
 #include "NativeWindow.hpp"
+#include "ScriptDialogs.hpp"
 #include "UIExecutor.hpp"
 #include "Window.hpp"
 
+#include <chrono>
+#include <filesystem>
+#include <functional>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace webfront::frontend {
 
-/// The settings every embedded frontend takes when it opens a window; a frontend's own options start with these.
+/// What an embedded frontend is asked when it opens a window, the same for the first window and the secondary ones. A
+/// frontend honours the settings that its toolkit has (a field it has no use for is ignored) and its own startup deadline.
 struct ViewOptions {
-    ContentPolicy contentPolicy{};
-    WindowOptions window{};
-    ViewLaunch    launch{};
+    /// The initial document must finish loading within this interval; no bridge connection is required.
+    std::chrono::milliseconds startupTimeout{30000};
+    /// WebView2 only: the profile folder; empty keeps the default.
+    std::filesystem::path userDataFolder{};
+    ContentPolicy         contentPolicy{};
+    WindowOptions         window{};
+    /// WKWebView and WebView2: keep the native window hidden and avoid activating the application.
+    bool visible{true};
+    /// Test injections (WKWebView, WebKitGTK): answers `<input type="file">` without a dialog (an empty list cancels).
+    std::function<std::vector<std::string>()> chooseFiles{};
+    /// Test injection: a non-empty folder receives downloads without a save panel.
+    std::filesystem::path downloadDirectory{};
+    /// Test injection: called with the destination of each finished download.
+    std::function<void(const std::string&)> downloadFinished{};
+    /// Test injection: answers `alert`, `confirm` and `prompt` without a box (WKWebView, WebKitGTK, WebView2).
+    ScriptDialogHandler answerScriptDialog{};
+    /// Per-launch proof of this view (ADR-020): given to documents of the application's origin only, at the start of the
+    /// document, for WebFront.js to present in its handshake. Set by WebFront; empty gives the view no association.
+    ViewLaunch launch{};
+
+    /// A secondary window is built from the first one's: its visibility, its startup deadline and its test injections.
+    void inherit(const ViewOptions& first) {
+        visible            = first.visible;
+        startupTimeout     = first.startupTimeout;
+        chooseFiles        = first.chooseFiles;
+        downloadDirectory  = first.downloadDirectory;
+        downloadFinished   = first.downloadFinished;
+        answerScriptDialog = first.answerScriptDialog;
+    }
 };
 
 /**

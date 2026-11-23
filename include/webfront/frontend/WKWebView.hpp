@@ -34,28 +34,8 @@ namespace webfront::frontend {
 struct WKWebViewFrontend;  // names the executor's host (UIExecutor.hpp)
 
 
-/** @brief Per-opening options for the optional macOS frontend. */
-struct WKWebViewOptions {
-    /** @brief The initial document must finish loading within this interval; no bridge connection is required. */
-    std::chrono::milliseconds startupTimeout{30000};
-    ContentPolicy             contentPolicy{};
-    WindowOptions             window{};
-    /** @brief Keep the native window hidden and avoid activating the application. A WindowServer is still required. */
-    bool                      visible{true};
-    /** @brief Test injection: answers `<input type="file">` without a dialog (an empty list cancels). Unset shows the system panel. */
-    std::function<std::vector<std::string>()> chooseFiles{};
-    /** @brief Test injection: a non-empty folder receives downloads without a save panel. */
-    std::filesystem::path downloadDirectory{};
-    /** @brief Test injection: called with the destination of each finished download. */
-    std::function<void(const std::string&)> downloadFinished{};
-    /** @brief Test injection: answers `alert`, `confirm` and `prompt` without a box. Unset shows an NSAlert sheet on the window.
-     *  `beforeunload` is not handled by WKWebView: the public WKUIDelegate has no method for it, and it does not reach the confirm
-     *  method. A page that relies on it can lose unsaved changes on navigation or close; WebFront does not confirm it. */
-    ScriptDialogHandler answerScriptDialog{};
-    /** @brief Per-launch proof of this view (ADR-020): given to documents of the application's origin only, at the start of
-     *  the document, for WebFront.js to present in its handshake. Set by WebFront; empty gives the view no association. */
-    ViewLaunch launch{};
-};
+/** @brief Per-opening options for the optional macOS frontend (the common ViewOptions). */
+using WKWebViewOptions = ViewOptions;
 
 }  // namespace webfront::frontend
 
@@ -1205,8 +1185,7 @@ inline void openSecondary(std::string_view address, std::string_view port, std::
         std::string(page),
         [&](Session& primary) {
             // The first window's visibility and startup delay: a hidden application never shows a window or takes the focus.
-            options.visible        = primary.options.visible;
-            options.startupTimeout = primary.options.startupTimeout;
+            options.inherit(primary.options);
             auto child             = std::make_shared<Session>(applicationUrl(address, port, page, options.launch.origin), std::move(options));
             child->secondary       = true;
             child->sharedDataStore = send(send(primary.view, "configuration"), "websiteDataStore");

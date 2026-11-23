@@ -27,17 +27,8 @@
 
 namespace webfront::frontend {
 
-/** @brief Per-opening runtime deadline, persistent profile directory and embedded-content rules. */
-struct WebView2Options {
-    std::chrono::milliseconds startupTimeout{std::chrono::seconds{30}};
-    std::filesystem::path     userDataFolder{};
-    ContentPolicy             contentPolicy{};
-    WindowOptions             window{};
-    /** @brief Keep the native window hidden while retaining the real controller and message loop. */
-    bool                      visible{true};
-    /** @brief Per-launch proof of this view (ADR-020), given to top-level documents of the application's origin at their creation. */
-    ViewLaunch                launch{};
-};
+/** @brief Per-opening runtime deadline, persistent profile directory and embedded-content rules (the common ViewOptions). */
+using WebView2Options = ViewOptions;
 
 }  // namespace webfront::frontend
 
@@ -1053,6 +1044,7 @@ inline void openSecondary(std::string_view address, std::string_view port, std::
             session->contentPolicy = webfront::detail::BoundContentPolicy{frontend::detail::applicationUrl(address, port, "", options.launch.origin), options.contentPolicy};
             session->viewLaunch    = options.launch;
             session->url           = utf16(frontend::detail::applicationUrl(address, port, page, options.launch.origin));
+            session->answerScriptDialog = primary.answerScriptDialog;
             session->createWindow(primary.shown(), options.window);
             return session;
         },
@@ -1085,6 +1077,7 @@ inline void open(std::string_view address,
     session->contentPolicy = std::move(contentPolicy);
     session->viewLaunch    = options.launch;
     session->url       = utf16(frontend::detail::applicationUrl(address, port, file, options.launch.origin));
+    session->answerScriptDialog = options.answerScriptDialog;
     if (prepare)
         prepare(*session);
     const auto profile = options.userDataFolder.empty() ? userDataFolder() : std::filesystem::absolute(options.userDataFolder);
