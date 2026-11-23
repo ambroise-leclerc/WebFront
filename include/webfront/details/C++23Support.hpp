@@ -1,6 +1,12 @@
-/// @date 31/01/2022 10:17:42
-/// @author Ambroise Leclerc
-/// @brief C++23 missing functionnalities for selected targets
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-01-31
+//
+// WebFront — compatibility
+// Role: C++23 library facilities that selected targets lack.
+// Thread: worker-safe | Alloc: zero-hot-path
+// LLM: compatibility shim; remove entries as toolchains catch up
+
 #pragma once
 #include <bit>
 #include <cstdint>

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-14
+//
+// WebFront — tests/driver
+// Role: Deadline of the non-interactive wf driver, so a stalled test run ends with a diagnostic.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: test driver; one deadline per run
+
 #pragma once
 
 #include <algorithm>

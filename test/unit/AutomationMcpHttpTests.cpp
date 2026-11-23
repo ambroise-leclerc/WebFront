@@ -1,5 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-22
+//
+// WebFront — tests/unit
+// Role: MCP over Streamable HTTP: header screening, authentication, admission bounds and JSON-RPC answers.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: security tests; mirror the order of checks of McpHttp.hpp
+
 // MCP over Streamable HTTP served by the application (ADR-025): header screening, MCP sessions, the loopback listener
 // on real sockets and its activation through enableAutomation.
+
 #include "TemporaryDirectory.hpp"
 #include <webfront/automation/Enable.hpp>
 #include <webfront/automation/McpHttp.hpp>

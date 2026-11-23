@@ -1,4 +1,12 @@
-/// @brief Intent journal of the developer store: publishing several files as one all-or-nothing change.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-22
+//
+// WebFront — system
+// Role: Intent journal of the developer store: publishing several files as one all-or-nothing change.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: crash recovery logic; tests inject faults at each step, keep the step names stable
+
 #pragma once
 
 #include "DeveloperFiles.hpp"

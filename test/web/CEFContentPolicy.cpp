@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-18
+//
+// WebFront — tests/web
+// Role: CEF integration test of the content policy: popups, navigation and menus under real Chromium.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: requires WEBFRONT_EMBED_CEF; exits nonzero on the first failed check
+
 #include <webfront/frontend/CEF.hpp>
 #include <webfront/system/NativeFS.hpp>
 #include <webfront/WebFront.hpp>

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-18
+//
+// WebFront — tests/fuzz
+// Role: libFuzzer entry point of the WebSocket frame parser.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: fuzz entry point; the parser must never read past the buffer
+
 #include <webfront/http/WebSocket.hpp>
 
 #include <algorithm>

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-28
+//
+// WebFront — tests/unit
+// Role: The Jasmine instrumentation of a consumer's page: configuration, report file and failure paths.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: uses report files in temporary directories
+
 #include <webfront/testing/Bdd.hpp>
 #include <webfront/testing/Capture.hpp>
 #include <webfront/testing/Jasmine.hpp>

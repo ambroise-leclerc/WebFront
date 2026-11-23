@@ -1,5 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-30
+//
+// WebFront — tests/unit
+// Role: The C++26 reflection layer produces the descriptors a C++23 application writes by hand.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: GCC 16 only
+
 // The optional C++26 layer of the forms (#383), compiled only with reflection (GCC 16: -std=c++26 -freflection): the
 // descriptors that describe<T>() reflects from annotations must equal the hand-written C++23 ones.
+
 #include "FormsHarness.hpp"
 #include "FormsSettings.hpp"
 #include <webfront/components/forms/Form.hpp>

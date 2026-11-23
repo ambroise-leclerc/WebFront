@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2023-05-01
+//
+// WebFront — tests/unit
+// Role: File system concepts and the Multi provider: first provider wins.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: pins provider ordering
+
 #include "Mocks.hpp"
 #include <webfront/system/FileSystem.hpp>
 #include <webfront/testing/Bdd.hpp>

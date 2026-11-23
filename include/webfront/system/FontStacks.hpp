@@ -1,9 +1,19 @@
-/// @brief Development-time check of CSS font stacks (#611).
-///
-/// WebKitGTK resolves every family of a stack that is absent, or generic and not a classic keyword, by walking all the
-/// installed fonts, for each weight and style the page uses: a stack of four or more such families costs hundreds of
-/// milliseconds on the first layout of a machine with a full font set. The check only counts families; it cannot know
-/// which are installed, so it is a hint printed by the development file system, never an error.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-19
+//
+// WebFront — system
+// Role: Development-time check of CSS font stacks that cost the WebKitGTK first layout.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: a hint printed by the development file system, never an error
+
+// Development-time check of CSS font stacks (#611).
+//
+// WebKitGTK resolves every family of a stack that is absent, or generic and not a classic keyword, by walking all the
+// installed fonts, for each weight and style the page uses: a stack of four or more such families costs hundreds of
+// milliseconds on the first layout of a machine with a full font set. The check only counts families; it cannot know
+// which are installed, so it is a hint printed by the development file system, never an error.
+
 #pragma once
 
 #include <algorithm>

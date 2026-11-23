@@ -1,4 +1,12 @@
-/// @brief Trusted versioned JSON Schema contract, projected into CLI discovery and MCP schemas.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-28
+//
+// WebFront — automation
+// Role: Trusted, versioned JSON Schema contract projected into CLI discovery and MCP schemas.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: contract source of truth; OperationError and TransportError separate refusals from unknown outcomes
+
 #pragma once
 #include "Json.hpp"
 

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-21
+//
+// WebFront — tls
+// Role: TLS 1.3 handshake messages: ClientHello parsing, ServerHello and record headers.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: protocol parser; every length is bounds-checked, fuzz-sensitive
+
 #pragma once
 #include "Wire.hpp"
 

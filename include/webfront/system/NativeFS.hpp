@@ -1,6 +1,12 @@
-/// @date 26/04/2023 16:39:42
-/// @author Ambroise Leclerc
-/// @brief Native file system providing direct access to the operating system's file system.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2023-04-26
+//
+// WebFront — system
+// Role: Native file system giving direct access to the operating system's files.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: development only, not a production sandbox
+
 #pragma once
 
 #include "FileSystem.hpp"

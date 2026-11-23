@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-16
+//
+// WebFront — tests/unit
+// Role: The WebView2 frontend against mocks: view registration and policy.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: Windows only
+
 #include "WebView2ControllerMock.hpp"
 #include "WebView2PolicyMocks.hpp"
 #include <webfront/frontend/WebView2.hpp>

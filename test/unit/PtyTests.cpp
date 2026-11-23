@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-19
+//
+// WebFront — tests/unit
+// Role: The native pseudoterminal: output ring, resize, child lifecycle and cleanup.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: runs a probe child program
+
 #include "TemporaryDirectory.hpp"
 #include <webfront/Pty.hpp>
 #include <webfront/testing/Bdd.hpp>

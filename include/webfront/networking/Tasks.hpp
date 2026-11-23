@@ -1,4 +1,12 @@
-/// @brief Coroutine helpers and structured ownership shared by HTTP and WebSocket tasks.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-13
+//
+// WebFront — networking
+// Role: Coroutine helpers and structured ownership shared by the HTTP and WebSocket tasks.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: TaskScope joins explicitly; I/O errors surface as std::system_error
+
 #pragma once
 
 #include "../tooling/Logger.hpp"

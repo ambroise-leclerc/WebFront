@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-17
+//
+// WebFront — tests/unit
+// Role: URL building and launching of the system browser frontend.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: launch is replaced by a recorder
+
 #include <webfront/frontend/DefaultBrowser.hpp>
 #include <webfront/frontend/Url.hpp>
 #include <webfront/testing/Bdd.hpp>

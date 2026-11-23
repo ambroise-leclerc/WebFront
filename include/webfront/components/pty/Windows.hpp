@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-19
+//
+// WebFront — components/pty
+// Role: Windows ConPTY pseudoterminal backend: pseudoconsole, child launch, resize and cleanup.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: optional component; handles are owned by PtyHandle, mirror Unix.hpp behavior
+
 #pragma once
 
 #include "../../automation/Credentials.hpp"

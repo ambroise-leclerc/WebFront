@@ -1,4 +1,12 @@
-/** @brief Application-owned, bounded LRU of fully validated gzip identity representations. */
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-25
+//
+// WebFront — http
+// Role: Application-owned, bounded LRU of fully validated gzip identity representations.
+// Thread: thread-safe | Alloc: unrestricted
+// LLM: cache with a byte budget; entries are validated before they are cached
+
 #pragma once
 
 #include "Gzip.hpp"

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-20
+//
+// WebFront — examples
+// Role: Developer stage of the Game of Life walkthrough: the application opens the developer environment on a project.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: uses NativeApp::bootstrap("developer"); options live in LifeDeveloperOptions.hpp
+
 #include "../PortOption.hpp"
 #include "Life.hpp"
 #include "LifeDeveloperOptions.hpp"

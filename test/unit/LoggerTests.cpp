@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-01-29
+//
+// WebFront — tests/unit
+// Role: The logging facilities: levels, sinks, generation-checked identifiers and concurrency.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: restores the global level after each scenario
+
 #include "../driver/RequestLog.hpp"
 #include <webfront/testing/Bdd.hpp>
 #include <webfront/tooling/Logger.hpp>

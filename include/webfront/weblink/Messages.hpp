@@ -1,6 +1,12 @@
-/// @date 13/02/2022 21:24:42
-/// @author Ambroise Leclerc
-/// @brief Messages exchanged between webfront clients and server
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-02-13
+//
+// WebFront — weblink
+// Role: Messages exchanged between WebFront clients and the server: binary encoding and decoding of values and commands.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: bridge wire format; evolve together with WebFront.js and add unit and browser tests
+
 #pragma once
 
 #include "../BridgeError.hpp"

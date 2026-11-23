@@ -1,4 +1,12 @@
-/// @brief Shared correlation state for future and sender based browser calls.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-18
+//
+// WebFront — weblink
+// Role: Shared correlation state for future and sender based browser calls.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: internal; completion may arrive from the io_context thread, error mapping lives here
+
 #pragma once
 #include "../BridgeError.hpp"
 #include "Messages.hpp"

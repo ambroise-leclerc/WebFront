@@ -1,9 +1,19 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-23
+//
+// WebFront — tests/driver
+// Role: Non-interactive wf driver: options, engine selection (CEF, WebView2, native) and the run of one wf command.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: test driver; usage errors are reported before an engine that needs a display starts
+
 // The driver of the browser tests: runs one wf command of the developer environment without interaction, in an
 // application that may add its own pages and C++ callbacks. webfront-wf (WebFrontWf.cpp) is the plain driver; the
 // browser integration test (JasmineTest.cpp) adds the callbacks its specs call and checks what C++ observed.
 //
 // Exit status: the command's own status; 64 usage; 70 bootstrap failure (archive missing, wrong integrity, incompatible
 // protocol or API); 71 time limit of the driver; 72 the browser closed without a result.
+
 #pragma once
 
 #include "../unit/TemporaryDirectory.hpp"

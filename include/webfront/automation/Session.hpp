@@ -1,4 +1,12 @@
-/// @brief Optional local developer session controller. Permissions are fixed by its native owner.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-28
+//
+// WebFront — automation
+// Role: Optional local developer session controller; permissions are fixed by its native owner.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: opt-in; grants are fixed at construction, newer operations report the first version that implements them
+
 #pragma once
 
 #include "../system/DeveloperPaths.hpp"

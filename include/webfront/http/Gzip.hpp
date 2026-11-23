@@ -1,4 +1,12 @@
-/** @brief Bounded, header-only gzip decoding for embedded HTTP assets (RFC 1951/1952). */
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — http
+// Role: Bounded, header-only gzip decoding of embedded HTTP assets (RFC 1951/1952).
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: decoder with hard output limits; fuzzed, never trust compressed sizes
+
 #pragma once
 
 #include "BuffersPolicy.hpp"

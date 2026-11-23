@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-14
+//
+// WebFront — tests/unit
+// Role: Subscriptions to connecting and disconnecting browsers.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: pins UISubscription lifetime
+
 #include <webfront/testing/Bdd.hpp>
 #include <webfront/UISubscribers.hpp>
 

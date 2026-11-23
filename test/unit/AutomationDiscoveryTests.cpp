@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-08
+//
+// WebFront — tests/unit
+// Role: Per-user discovery records of automation sessions: publication, listing and removal.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: uses private temporary directories
+
 #include "TemporaryDirectory.hpp"
 #include <webfront/automation/Discovery.hpp>
 #include <webfront/automation/Enable.hpp>

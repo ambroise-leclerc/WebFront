@@ -1,4 +1,12 @@
-/** @brief Ordinary consumer: the facade header supplies its complete API without imports. */
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-01
+//
+// WebFront — tests/unit
+// Role: Ordinary consumer: the facade header supplies its complete API without imports.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: compile and link check of the module-free facade
+
 #include <webfront/tooling/Logger.hpp>
 
 int main() {

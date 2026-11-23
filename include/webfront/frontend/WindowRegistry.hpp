@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
-/// @brief The toolkit-independent part of the native frontends' windows: the registry of the secondary windows and the
-/// session of one open() (#652, #616).
+// Author: Ambroise Leclerc
+// Created: 2026-11-23
+//
+// WebFront — frontend
+// Role: The toolkit-independent registry of the secondary windows and the session of one open().
+// Thread: ui-loop | Alloc: heap-init
+// LLM: shared by the native frontends; mutated on the interface thread only
+
+// The toolkit-independent part of the native frontends' windows: the registry of the secondary windows and the
+// session of one open() (#652, #616).
+
 #pragma once
 
 #include "NativeWindow.hpp"

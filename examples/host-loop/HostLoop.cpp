@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-13
+//
+// WebFront — examples
+// Role: Host-loop example application: runs the Boing Ball beside a native window or a system browser, or as a benchmark.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: example entry point; see docs/HOST_INTEGRATION.md for the three integration paths
+
 #include "../PortOption.hpp"
 #include "HostLoopCapture.hpp"
 #include "HostLoopUI.hpp"

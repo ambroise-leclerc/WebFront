@@ -1,4 +1,12 @@
-/** @brief Module-free consumer regressions for WebFront's optional diagnostic facade. */
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-01
+//
+// WebFront — tests/unit
+// Role: Module-free consumer regressions of WebFront's optional diagnostic facade.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: requires the mddlog option
+
 #include <webfront/testing/Bdd.hpp>
 #include <webfront/tooling/Logger.hpp>
 

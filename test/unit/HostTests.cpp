@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-01
+//
+// WebFront — tests/unit
+// Role: The capabilities a test's owner grants to specs: authorized programs and private temporary spaces.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: runs probe programs without a shell
+
 #include <webfront/testing/Bdd.hpp>
 #include <webfront/testing/Host.hpp>
 #include <webfront/testing/Process.hpp>

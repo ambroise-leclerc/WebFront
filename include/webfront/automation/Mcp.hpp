@@ -1,4 +1,12 @@
-/// @brief Deliberately limited MCP profile, shared by stdio and Streamable HTTP: lifecycle, ping and bounded developer tools.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-28
+//
+// WebFront — automation
+// Role: Deliberately limited MCP profile shared by stdio and Streamable HTTP: lifecycle, ping and bounded developer tools.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: protocol layer; the transport counts only valid JSON-RPC messages as session activity
+
 #pragma once
 #include "Instructions.hpp"
 #include "Session.hpp"

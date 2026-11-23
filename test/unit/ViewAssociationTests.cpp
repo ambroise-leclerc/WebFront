@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
-/// @brief A connection proves it comes from the view of an embedded frontend by the secret of the launch (#453, ADR-020).
+// Author: Ambroise Leclerc
+// Created: 2026-11-04
+//
+// WebFront — tests/unit
+// Role: A connection proves it comes from the view of an embedded frontend by the secret of the launch.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: security tests of ADR-020 rule 3
+
+// A connection proves it comes from the view of an embedded frontend by the secret of the launch (#453, ADR-020).
+
 #include "InjectableNetworking.hpp"
 #include <webfront/networking/TCPNetworkingStdnet.hpp>
 #include <webfront/system/DefaultFS.hpp>

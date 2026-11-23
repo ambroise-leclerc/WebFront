@@ -1,6 +1,15 @@
-/** @brief Facade declarations shared by the ordinary header and the module-consuming TU.
- * Include after the standard headers in Logger.hpp, or after import std.
- */
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-01
+//
+// WebFront — tooling
+// Role: Facade declarations shared by the ordinary header and the module-consuming translation unit.
+// Thread: thread-safe | Alloc: heap-init
+// LLM: module-free declarations; no module types may appear in this header
+
+// Facade declarations shared by the ordinary header and the module-consuming TU.
+// Include after the standard headers in Logger.hpp, or after import std.
+
 #pragma once
 
 namespace webfront::log {

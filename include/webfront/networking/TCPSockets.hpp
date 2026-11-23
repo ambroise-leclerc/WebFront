@@ -1,6 +1,12 @@
-/// @date 26/01/2022 11:38:19
-/// @author Ambroise Leclerc
-/// @brief A BSD socket/ winsock implementation
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-01-26
+//
+// WebFront — networking
+// Role: A BSD sockets and Winsock implementation of the networking provider.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: legacy portable fallback; OS differences are confined to the abstraction layer at the top
+
 #pragma once
 #include "BasicNetworking.hpp"
 

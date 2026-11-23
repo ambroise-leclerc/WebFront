@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-19
+//
+// WebFront — tests/fixtures
+// Role: Child program that the PTY tests run to observe the terminal it receives.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: test fixture; not a public example
+
 #include <array>
 #include <cerrno>
 #include <chrono>

@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
-/// @brief C++ callbacks that answer a JavaScript call later: their result, failures, stop, disconnection and shutdown (#459).
+// Author: Ambroise Leclerc
+// Created: 2026-11-05
+//
+// WebFront — tests/unit
+// Role: C++ callbacks that answer a JavaScript call later: result, failure, stop, disconnection and shutdown.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: uses a deferred networking mock
+
+// C++ callbacks that answer a JavaScript call later: their result, failures, stop, disconnection and shutdown (#459).
+
 #include "InjectableNetworking.hpp"
 #include <webfront/networking/TCPNetworkingStdnet.hpp>
 #include <webfront/system/DefaultFS.hpp>

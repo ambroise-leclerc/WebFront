@@ -1,15 +1,25 @@
-/// @brief Typed access to the native window of an embedded frontend (ADR-020, prerequisite of the parented native dialogs).
-///
-/// A frontend that owns a window publishes it in a `NativeWindowHost` while its loop runs: `publish()` once the window
-/// exists, `retract()` before it is destroyed. Everything else reads it through a `NativeWindow` handle, whose `get()`
-/// answers a `NativeWindowHandle` only
-///  - while the window is published (before open() it is `notOpen`, after the loop ended it is `closed`), and
-///  - on the interface thread of the frontend (ADR-006's executor): from any other thread it is `wrongThread`, because
-///    a toolkit object may be used on that thread only.
-/// The pointer is not owned and not reference counted: use it inside the interface-thread operation that asked for it
-/// and never keep it. A window the user has just closed can still be published until the loop returns, so a consumer
-/// that needs certainty checks the object with its toolkit (`IsWindow`, `-[NSWindow isVisible]`, `GTK_IS_WINDOW`).
-/// The system browser has no such window: its frontends publish none.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-09
+//
+// WebFront — frontend
+// Role: Typed access to the native window of an embedded frontend (ADR-020), readable only on its interface thread.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: public contract; get() answers only while the window is published and on the interface thread
+
+// Typed access to the native window of an embedded frontend (ADR-020, prerequisite of the parented native dialogs).
+//
+// A frontend that owns a window publishes it in a `NativeWindowHost` while its loop runs: `publish()` once the window
+// exists, `retract()` before it is destroyed. Everything else reads it through a `NativeWindow` handle, whose `get()`
+// answers a `NativeWindowHandle` only
+//  - while the window is published (before open() it is `notOpen`, after the loop ended it is `closed`), and
+//  - on the interface thread of the frontend (ADR-006's executor): from any other thread it is `wrongThread`, because
+//    a toolkit object may be used on that thread only.
+// The pointer is not owned and not reference counted: use it inside the interface-thread operation that asked for it
+// and never keep it. A window the user has just closed can still be published until the loop returns, so a consumer
+// that needs certainty checks the object with its toolkit (`IsWindow`, `-[NSWindow isVisible]`, `GTK_IS_WINDOW`).
+// The system browser has no such window: its frontends publish none.
+
 #pragma once
 
 #include "UIExecutor.hpp"

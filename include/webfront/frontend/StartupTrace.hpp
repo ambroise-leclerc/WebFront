@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
-/// @brief The startup trace (WEBFRONT_STARTUP_TRACE=1) and the presentation of the native windows, shared by the native
-/// frontends (#652).
+// Author: Ambroise Leclerc
+// Created: 2026-11-23
+//
+// WebFront — frontend
+// Role: The startup trace (WEBFRONT_STARTUP_TRACE=1) and the presentation of native windows shared by the native frontends.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: diagnostic only; output goes to standard error, keep it free of side effects
+
+// The startup trace (WEBFRONT_STARTUP_TRACE=1) and the presentation of the native windows, shared by the native
+// frontends (#652).
+
 #pragma once
 
 #include <chrono>

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-21
+//
+// WebFront — tls
+// Role: Finite field arithmetic and secret-safe comparison and wiping helpers for the TLS curves.
+// Thread: bridge-io | Alloc: zero-hot-path
+// LLM: cryptographic primitive; keep constant-time behavior, verify with test vectors
+
 #pragma once
 
 #include <array>

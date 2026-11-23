@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-20
+//
+// WebFront — tests/web
+// Role: Integration test of the developer environment journey: bootstrap, project creation and wf commands in a real browser.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: real-browser test; fixtures are served locally, no public network
+
 #include "../../examples/life/Life.hpp"
 #include "../driver/RequestLog.hpp"
 #include "../unit/TemporaryDirectory.hpp"

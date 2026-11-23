@@ -1,4 +1,12 @@
-/** @brief Bounded browser transport lane: context, saturation, failures, reentrance and WebLink lifecycle. */
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-02
+//
+// WebFront — tests/unit
+// Role: The bounded browser transport lane: context, saturation, failures, reentrance and WebLink lifecycle.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: requires the mddlog option
+
 #include "InjectableNetworking.hpp"
 #include <webfront/testing/Bdd.hpp>
 #include <webfront/tooling/Logger.hpp>

@@ -1,4 +1,12 @@
-/// @brief Native capabilities granted by a test's owner to its specs: authorized programs and private temporary spaces.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-01
+//
+// WebFront — testing
+// Role: Native capabilities a test's owner grants to its specs: authorized programs and private temporary spaces.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: test support; grants come from CTest configuration, specs can request nothing else
+
 #pragma once
 
 #include "../utils/Json.hpp"

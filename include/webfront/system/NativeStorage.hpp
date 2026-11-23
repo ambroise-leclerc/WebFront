@@ -1,5 +1,15 @@
-/// @brief Writable storage on the host's file system, confined to a declared root while resolving every path (ADR-002,
-/// ADR-020): operations are relative to directories already opened, never a check of a path followed by an open by name.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-05
+//
+// WebFront — system
+// Role: Writable storage on the host file system, confined to a declared root: operations are relative to opened directories (ADR-002, ADR-020).
+// Thread: thread-safe | Alloc: unrestricted
+// LLM: security sensitive; never check a path then open it by name
+
+// Writable storage on the host's file system, confined to a declared root while resolving every path (ADR-002,
+// ADR-020): operations are relative to directories already opened, never a check of a path followed by an open by name.
+
 #pragma once
 
 #include "Storage.hpp"

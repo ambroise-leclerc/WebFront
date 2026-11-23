@@ -1,6 +1,12 @@
-/// @date 29/01/2022 13:58:42
-/// @author Ambroise Leclerc
-/// @brief C++20 missing functionalities for selected targets
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-01-29
+//
+// WebFront — compatibility
+// Role: C++20 library facilities that selected targets lack.
+// Thread: worker-safe | Alloc: zero-hot-path
+// LLM: compatibility shim; remove entries as toolchains catch up
+
 #pragma once
 
 #include <version>

@@ -1,4 +1,12 @@
-/// @brief Subscriptions to connecting and disconnecting browsers (BasicWF::subscribeUIStarted, subscribeUIClosed).
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-14
+//
+// WebFront — core
+// Role: Subscriptions to connecting and disconnecting browsers (BasicWF::subscribeUIStarted, subscribeUIClosed).
+// Thread: thread-safe | Alloc: unrestricted
+// LLM: public API; UISubscription stays safe after the application is destroyed
+
 #pragma once
 
 #include <algorithm>

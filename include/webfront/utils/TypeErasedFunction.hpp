@@ -1,6 +1,12 @@
-/// @date 12/02/2022 11:05:42
-/// @author Ambroise Leclerc
-/// @brief Type erased functions for uniform storable functions
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-02-12
+//
+// WebFront — utils
+// Role: Type-erased storable functions and the traits that deduce callback signatures.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: foundation of cppFunction deduction; generic lambdas need explicit signatures
+
 #pragma once
 #include <array>
 #include <cstddef>

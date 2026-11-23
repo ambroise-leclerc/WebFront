@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-21
+//
+// WebFront — tls
+// Role: TLS 1.3 stream provider layered on TCPStdnet: handshake, reads and writes on the server I/O context.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: security sensitive; the caller enforces the handshake deadline (http::Server does)
+
 #pragma once
 #include "../networking/Tasks.hpp"
 #include "../networking/TCPNetworkingStdnet.hpp"

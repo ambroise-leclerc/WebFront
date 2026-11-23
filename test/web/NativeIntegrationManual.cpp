@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-10
+//
+// WebFront — tests/web
+// Role: Manual integration program for the native frontends: prints each check and what to look at.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: manual only; requires a display and a human, not part of CTest
+
 // Manual validation of the native integration of the frontends (#450: the interface-thread executor of #462 and the
 // native window of #463) with a real browser or window and a real native dialog. Never built or run by CTest/CI:
 //
@@ -8,6 +17,7 @@
 // It opens a page, and a native file dialog that closes by itself after `dialog-ms` (1500 by default; raise it to look at
 // the dialog). `[ok]`/`[FAIL]` lines are checked by the program and decide the exit status; `[look]` lines are what only
 // a person can confirm. Results are recorded in docs/validation/native-integration-450.md.
+
 #include <webfront/WebFront.hpp>
 
 #include <atomic>

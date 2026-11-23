@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-18
+//
+// WebFront — tests/unit
+// Role: The content policy: origins, popups and warnings.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: pins the defaults of docs/CONTENT_POLICY.md
+
 #include "Mocks.hpp"
 #include <webfront/ContentPolicy.hpp>
 #include <webfront/http/HTTPServer.hpp>

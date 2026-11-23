@@ -1,4 +1,12 @@
-/// @brief Lazy, cancellable C++ to browser calls using C++26 sender completions.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-18
+//
+// WebFront — core
+// Role: Lazy, cancellable C++ to browser calls using C++26 sender completions.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: internal; cancellation is local, a late reply is discarded; see docs/ASYNC_EXECUTION.md
+
 #pragma once
 #include "http/WebSocket.hpp"
 #include "weblink/CallFrame.hpp"

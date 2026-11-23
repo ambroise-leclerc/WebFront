@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — frontend
+// Role: The NativeWebView alias selecting the opt-in native web view of the current platform.
+// Thread: ui-loop | Alloc: zero-hot-path
+// LLM: aliases only; availability follows the WEBFRONT_EMBED_* options
+
 #pragma once
 
 #if defined(_WIN32)

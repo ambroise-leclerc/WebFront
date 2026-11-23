@@ -1,6 +1,12 @@
-/// @date 16/01/2022 22:27:42
-/// @author Ambroise Leclerc
-/// @brief WebSocket protocol implementation - RFC6455
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-01-16
+//
+// WebFront — http
+// Role: WebSocket protocol implementation (RFC 6455): frame header, masking and the read and write loops.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: bridge transport; loops are coroutines closed only on the io_context thread
+
 #pragma once
 #include "../networking/BasicNetworking.hpp"
 #include "../networking/Tasks.hpp"

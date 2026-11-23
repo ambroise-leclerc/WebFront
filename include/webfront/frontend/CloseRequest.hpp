@@ -1,9 +1,19 @@
-/// @brief Asking the window of an embedded frontend to close, from any thread (#567).
-///
-/// A host application that keeps its own loop ends a WebFront session with `BasicWF::requestClose()`, which forwards to the
-/// frontend's optional `static bool requestClose()`. The embedded adapters implement it with `requestWindowClose`: the
-/// toolkit call that closes the window runs on the interface thread (UIExecutor.hpp), with the window the frontend
-/// published (NativeWindow.hpp). The window then closes as it does for the user, so `open()` returns the same way.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-13
+//
+// WebFront — frontend
+// Role: Asking the window of an embedded frontend to close, from any thread.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: public contract behind BasicWF::requestClose(); the toolkit call runs on the interface thread
+
+// Asking the window of an embedded frontend to close, from any thread (#567).
+//
+// A host application that keeps its own loop ends a WebFront session with `BasicWF::requestClose()`, which forwards to the
+// frontend's optional `static bool requestClose()`. The embedded adapters implement it with `requestWindowClose`: the
+// toolkit call that closes the window runs on the interface thread (UIExecutor.hpp), with the window the frontend
+// published (NativeWindow.hpp). The window then closes as it does for the user, so `open()` returns the same way.
+
 #pragma once
 
 #include "NativeWindow.hpp"

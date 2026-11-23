@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-18
+//
+// WebFront — tests/web
+// Role: Lifecycle test shared by the real frontends: start, show, close, restart and failure stages with a watchdog.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: real-browser test; a stage is selected through the bridge by the specs
+
 #include "../driver/TestFrontend.hpp"
 #include <webfront/system/NativeFS.hpp>
 #include <webfront/UIThread.hpp>

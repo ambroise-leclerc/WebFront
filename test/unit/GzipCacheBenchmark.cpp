@@ -1,4 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-25
+//
+// WebFront — tests/unit
+// Role: Benchmark of the validated gzip cache, cold and warm, for GET and HEAD.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: measures only; never fails on timing
+
 // Optional manual benchmark: cmake --build <build> --target gzip_cache_benchmark
+
 #include "GzipFixtures.hpp"
 #include <webfront/http/HTTPServer.hpp>
 #include <webfront/networking/NetworkingMock.hpp>

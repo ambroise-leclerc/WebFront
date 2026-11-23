@@ -1,6 +1,12 @@
-/// @date 26/01/2022 11:38:14
-/// @author Ambroise Leclerc
-/// @brief a Networking mock implementation for testing purposes
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-01-26
+//
+// WebFront — networking
+// Role: A deterministic networking mock with inspectable sends and receives, for unit tests.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: test support; StoppedSender stands for an operation that never completes
+
 #pragma once
 #include "BasicNetworking.hpp"
 #include "Tasks.hpp"

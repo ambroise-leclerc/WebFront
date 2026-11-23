@@ -1,8 +1,18 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-24
+//
+// WebFront — tests/web
+// Role: Transport benchmark of the WebKitGTK frontend through a direct channel.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: Linux only; benchmark
+
 // ADR-017 (#363): measures the HTML bridge (WebSocket to the embedded server) against WebKitGTK's own message channel,
 // in the same window and with the same echo calls (transport-benchmark.html, TransportBenchmark.hpp). The direct channel is
 // registered here, through the C ABI the adapter already loaded: script message handlers with a reply for JS to C++, and
 // webkit_web_view_evaluate_javascript for C++ to JS. It fails on a wrong echo, never on a timing.
 //   webkitgtk_transport_benchmark [<report.json>]    (working directory: test/web, needs a display)
+
 #include "TransportBenchmark.hpp"
 
 #include <cstdio>

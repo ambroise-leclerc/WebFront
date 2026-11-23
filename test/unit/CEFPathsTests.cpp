@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-02
+//
+// WebFront — tests/unit
+// Role: Location of the CEF framework relative to the executable on macOS.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: pure path tests
+
 #include <webfront/frontend/CEFPaths.hpp>
 #include <webfront/testing/Bdd.hpp>
 

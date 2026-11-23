@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-16
+//
+// WebFront — tests/web
+// Role: Lifecycle cases of the WebView2 frontend: apartment, runtime deadline and failure diagnostics.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: Windows only; each case expects a precise diagnostic
+
 #include "../driver/TestFrontend.hpp"
 #include <webfront/system/NativeFS.hpp>
 #include <webfront/utils/Json.hpp>

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-20
+//
+// WebFront — tests/unit
+// Role: The developer environment on the C++ side: bootstrap, store, journal and wf command plumbing.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: large; quiet frontends stand for the window
+
 #include "TemporaryDirectory.hpp"
 #include <webfront/DeveloperApp.hpp>
 #include <webfront/http/MimeType.hpp>

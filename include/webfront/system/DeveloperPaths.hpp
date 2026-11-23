@@ -1,4 +1,12 @@
-/// @brief Path containment helpers of the developer store.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-21
+//
+// WebFront — system
+// Role: Path containment helpers of the developer store, with the Windows extended-length forms.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: security sensitive; a path outside the project must never resolve
+
 #pragma once
 
 #include "SafePath.hpp"

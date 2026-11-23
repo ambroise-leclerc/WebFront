@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-30
+//
+// WebFront — tests/unit
+// Role: Forms and inspectors: building, validation, events and TypeScript declarations.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: pins docs/FORMS.md behavior
+
 #include "FormsHarness.hpp"
 #include "FormsSettings.hpp"
 #include <webfront/components/forms/Form.hpp>

@@ -1,6 +1,12 @@
-/// @date 04/02/2022 13:15:27
-/// @author Ambroise Leclerc
-/// @brief A functor which invokes a corresponding javascript function
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-02-04
+//
+// WebFront — core
+// Role: A functor that invokes a corresponding JavaScript function, fire-and-forget or returning a std::future.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: public API; the untyped form is fire-and-forget, the typed form returns a future
+
 #pragma once
 #include "http/WebSocket.hpp"
 #include "tooling/HexDump.hpp"

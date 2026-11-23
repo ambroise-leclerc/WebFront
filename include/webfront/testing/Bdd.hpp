@@ -1,24 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
-/// @file
-/// @brief A minimal behaviour-driven test framework in a single header.
-///
-/// A scenario is a named object that registers itself; its sections are lambdas:
-/// @code
-/// const Scenario jsFunction{"JsFunction", [] {
-///     WebFrontMock webFront;
-///     given("A print JsFunction", [&] {
-///         when("print is called", [&] {
-///             then("the call is encoded", [&] { require(encoded.size() == 8); });
-///         });
-///     });
-/// }};
-/// @endcode
-/// As in Catch2, a scenario runs again from its start until each of its leaf sections has run once, a single new leaf
-/// per pass, and a section is identified by its name and by where it is written. `require` ends the scenario at the
-/// first failure, `check` records it and goes on.
-///
-/// The header includes only light standard headers, and the code that runs sections and catches exceptions is compiled
-/// once, behind a pointer no optimizer follows, rather than once per lambda: both keep the tests quick to compile.
+// Author: Ambroise Leclerc
+// Created: 2026-11-14
+//
+// WebFront — testing
+// Role: A minimal behaviour-driven test framework in a single header: scenarios whose sections are lambdas.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: public maintained interface (docs/BDD.md); scenarios register themselves at static initialization
+
+// A minimal behaviour-driven test framework in a single header.
+//
+// A scenario is a named object that registers itself; its sections are lambdas:
+// @code
+// const Scenario jsFunction{"JsFunction", [] {
+//     WebFrontMock webFront;
+//     given("A print JsFunction", [&] {
+//         when("print is called", [&] {
+//             then("the call is encoded", [&] { require(encoded.size() == 8); });
+//         });
+//     });
+// }};
+// @endcode
+// As in Catch2, a scenario runs again from its start until each of its leaf sections has run once, a single new leaf
+// per pass, and a section is identified by its name and by where it is written. `require` ends the scenario at the
+// first failure, `check` records it and goes on.
+//
+// The header includes only light standard headers, and the code that runs sections and catches exceptions is compiled
+// once, behind a pointer no optimizer follows, rather than once per lambda: both keep the tests quick to compile.
+
 #pragma once
 
 #include <algorithm>

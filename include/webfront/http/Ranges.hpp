@@ -1,4 +1,12 @@
-/// @brief Byte range requests (RFC 9110 §14): which part of a representation a `Range` header selects.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-04
+//
+// WebFront — http
+// Role: Byte range requests (RFC 9110 section 14): which part of a representation a Range header selects.
+// Thread: bridge-io | Alloc: zero-hot-path
+// LLM: pure parser; oversized numbers saturate instead of overflowing
+
 #pragma once
 
 #include <algorithm>

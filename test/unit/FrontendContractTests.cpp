@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-18
+//
+// WebFront — tests/unit
+// Role: The contract of the frontends: lifecycle, UI executor hosting, close requests, startup deadline and secondary windows.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: largest contract test; fake frontends and a contract io context
+
 #include "Mocks.hpp"
 #include "TemporaryDirectory.hpp"
 #include <webfront/networking/NetworkingMock.hpp>

@@ -1,4 +1,12 @@
-/** @brief WebFront-owned module-consuming TU; the facade header remains independent of modules. */
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-01
+//
+// WebFront — build/mddlog
+// Role: WebFront-owned module-consuming translation unit implementing the logger facade over mddlog; the facade header stays independent of modules.
+// Thread: thread-safe | Alloc: unrestricted
+// LLM: compiled only when modules are available; keep module types out of LoggerApi.hpp
+
 import std;
 import mddlog.core.loglevel;
 import mddlog.adapter.textlogger;

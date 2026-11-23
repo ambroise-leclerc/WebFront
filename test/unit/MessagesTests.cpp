@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-02-13
+//
+// WebFront — tests/unit
+// Role: Encoding and decoding of every bridge message and value type.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: wire format tests (ADR-003); any protocol change needs cases here
+
 #include "InlineTaskScope.hpp"
 #include <webfront/http/WebSocket.hpp>
 #include <webfront/networking/NetworkingMock.hpp>

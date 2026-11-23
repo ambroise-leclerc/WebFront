@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-09
+//
+// WebFront — tests/unit
+// Role: The interface-thread executor: scheduling, stop, close and thread of completion.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: pins ADR-006 completion rules
+
 #include <webfront/frontend/UIExecutor.hpp>
 #include <webfront/testing/Bdd.hpp>
 

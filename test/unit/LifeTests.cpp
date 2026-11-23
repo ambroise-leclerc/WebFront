@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-20
+//
+// WebFront — tests/unit
+// Role: The Game of Life rules of the examples.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: pure computation tests
+
 #include "../../examples/life/Life.hpp"
 #include "../../examples/life/LifeDeveloperOptions.hpp"
 #include "TemporaryDirectory.hpp"

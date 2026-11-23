@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
-/// @brief The static facade shared by the embedded frontends (#652): what a native frontend declares once, the base provides.
+// Author: Ambroise Leclerc
+// Created: 2026-11-23
+//
+// WebFront — frontend
+// Role: The static facade shared by the embedded frontends: what a native frontend declares once, the base provides.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: frontend base; read ViewOptions and the startup deadline rules before adding an adapter
+
+// The static facade shared by the embedded frontends (#652): what a native frontend declares once, the base provides.
+
 #pragma once
 
 #include "../ContentPolicy.hpp"

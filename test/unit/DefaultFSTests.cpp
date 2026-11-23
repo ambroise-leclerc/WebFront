@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-07-22
+//
+// WebFront — tests/unit
+// Role: The default file system: precedence of the embedded script, the document root and the fallback page.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: uses temporary roots
+
 #include "TemporaryDirectory.hpp"
 #include <webfront/system/DefaultFS.hpp>
 #include <webfront/testing/Bdd.hpp>

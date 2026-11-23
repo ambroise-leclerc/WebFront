@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
-/// @brief Scenarios of a project that consumes the public webfront::bdd framework.
+// Author: Ambroise Leclerc
+// Created: 2026-11-23
+//
+// WebFront — tests/cmake
+// Role: Scenarios of a project that consumes the public webfront::bdd framework.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: consumer fixture; verifies the installed Bdd interface from another project
+
 #include <webfront/testing/Bdd.hpp>
 
 using namespace webfront::bdd;

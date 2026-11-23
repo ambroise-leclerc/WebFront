@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-16
+//
+// WebFront — examples
+// Role: CUDA unit of the host-loop example: the ray-traced Boing Ball computed on the device.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: optional CUDA build; device memory is allocated lazily and freed by cudaRelease
+
 // The CUDA renderer of the Boing Ball: one thread per pixel runs the same pixel() as the CPU renderer.
 // Compiled by nvcc at C++17; includes no WebFront header.
 

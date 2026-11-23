@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — tests/web
+// Role: Lifecycle cases of the WKWebView frontend: repeated show, main thread rules and failure diagnostics.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: macOS only; each case expects a precise diagnostic
+
 #include "../driver/TestFrontend.hpp"
 #include <webfront/system/NativeFS.hpp>
 #include <webfront/WebFront.hpp>

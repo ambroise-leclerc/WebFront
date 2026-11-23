@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-02-13
+//
+// WebFront — tests/unit
+// Role: Type-erased functions and the signature deduction of callbacks.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: pins which callbacks need explicit signatures
+
 #include <webfront/testing/Bdd.hpp>
 #include <webfront/utils/TypeErasedFunction.hpp>
 

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-25
+//
+// WebFront — examples
+// Role: Command line of WebFrontLifeDeveloper: project directory and optional pinned environment tarball.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: example support; no argument selects life-project in the current directory
+
 #pragma once
 
 #include <filesystem>

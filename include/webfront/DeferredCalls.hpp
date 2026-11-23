@@ -1,4 +1,12 @@
-/// @brief The JavaScript calls a C++ callback has not answered yet, per browser connection.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-05
+//
+// WebFront — core
+// Role: The JavaScript calls a C++ callback has not answered yet, per browser connection.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: internal; completion may come from any thread, keep the per-connection ownership rules intact
+
 #pragma once
 
 #include "Task.hpp"

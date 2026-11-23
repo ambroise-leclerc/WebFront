@@ -1,4 +1,12 @@
-/// @brief Explicitly bind an automation controller to one developer window. No callbacks in normal applications.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-28
+//
+// WebFront — automation
+// Role: Explicitly binds an automation controller to one developer window; no callbacks exist in ordinary applications.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: opt-in security surface; only a browser proving the launch URL's secret is selected
+
 #pragma once
 #include "../WebFront.hpp"
 #include "PageAuthentication.hpp"

@@ -1,6 +1,12 @@
-/// @date 16/01/2022 22:27:42
-/// @author Ambroise Leclerc
-/// @brief Encoders/Decoders for HTTP/WS (URI, BASE64, SHA-1)
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-01-16
+//
+// WebFront — http
+// Role: Encoders and decoders for HTTP and WebSocket: URI, Base64 and SHA-1.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: pure functions; used by the WebSocket handshake, keep behavior bit-exact
+
 #pragma once
 #include "../details/C++20Support.hpp"
 #include "../details/C++23Support.hpp"

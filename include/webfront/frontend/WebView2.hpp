@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-16
+//
+// WebFront — frontend
+// Role: Opt-in Windows WebView2 frontend: STA apartment, controller and environment creation.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: opt-in adapter (WEBFRONT_EMBED_WEBVIEW2); needs the Evergreen runtime, apartment rules are strict
+
 #pragma once
 
 #include "../ContentPolicy.hpp"

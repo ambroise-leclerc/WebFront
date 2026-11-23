@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-21
+//
+// WebFront — tests/unit
+// Role: Browser profile leases: first instance, sibling instance directories and stale cleanup.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: uses scratch directories
+
 #include <webfront/frontend/ProfileLease.hpp>
 #include <webfront/testing/Bdd.hpp>
 

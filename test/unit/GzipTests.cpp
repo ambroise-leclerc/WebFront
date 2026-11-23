@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — tests/unit
+// Role: The gzip decoder: valid streams, malformed input and limits.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: fuzzed in test/fuzz
+
 #include "GzipFixtures.hpp"
 #include <webfront/http/Gzip.hpp>
 #include <webfront/http/GzipCache.hpp>

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-27
+//
+// WebFront — examples
+// Role: Game of Life variant with a C++ panel inside a React page.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: see docs/REACT.md; entry point of the react variant
+
 #include "LifeReact.hpp"
 
 #include "../../PortOption.hpp"

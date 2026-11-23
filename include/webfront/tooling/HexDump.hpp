@@ -1,6 +1,12 @@
-/// @date 16/01/2022 22:27:42
-/// @author Ambroise Leclerc
-/// @brief HexDump tool for debugging/development purposes
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-01-16
+//
+// WebFront — tooling
+// Role: HexDump of a container or buffer, for debugging and development.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: diagnostic only; not for hot paths
+
 #pragma once
 #include "../details/C++20Support.hpp"
 

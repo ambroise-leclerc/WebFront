@@ -1,22 +1,32 @@
-/// @brief Opt-in automation of a consumer's own developer window.
-///
-/// `enableAutomation(app, options)` mounts the controller (`Session`) and the page binding (`Binding`) on an application
-/// that already called `bootstrap("developer")`, then serves MCP from this process, over Streamable HTTP on a loopback
-/// listener of its own (ADR-025), and publishes a discovery record. An MCP client connects to `mcpUrl()` with the private
-/// configuration `clientConfiguration()`; no other program is involved. Check, build, test, preview, inspect and interact
-/// run in the page of the application, whose `cppFunction` callbacks stay registered. Nothing is registered unless this
-/// function is called, and the grants are fixed here by the native owner. Automation does not exist in a distribution
-/// build: this header refuses to compile with `WEBFRONT_DISTRIBUTION`.
-///
-/// ```cpp
-/// webfront::NativeApp app{project};
-/// app.bootstrap("developer");
-/// app.cppFunction("bf.render", render);
-/// auto automation = webfront::automation::enableAutomation(app, {.grants = {"check", "build", "inspect", "interact"}});
-/// app.show(automation->launchPage());
-/// automation->close();
-/// app.shutdown();
-/// ```
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-08
+//
+// WebFront — automation
+// Role: Opt-in automation of a consumer's own developer window: enableAutomation mounts the controller, the page binding and the MCP listener.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: public entry point (ADR-025); nothing is registered unless called, grants are fixed by the native owner
+
+// Opt-in automation of a consumer's own developer window.
+//
+// `enableAutomation(app, options)` mounts the controller (`Session`) and the page binding (`Binding`) on an application
+// that already called `bootstrap("developer")`, then serves MCP from this process, over Streamable HTTP on a loopback
+// listener of its own (ADR-025), and publishes a discovery record. An MCP client connects to `mcpUrl()` with the private
+// configuration `clientConfiguration()`; no other program is involved. Check, build, test, preview, inspect and interact
+// run in the page of the application, whose `cppFunction` callbacks stay registered. Nothing is registered unless this
+// function is called, and the grants are fixed here by the native owner. Automation does not exist in a distribution
+// build: this header refuses to compile with `WEBFRONT_DISTRIBUTION`.
+//
+// ```cpp
+// webfront::NativeApp app{project};
+// app.bootstrap("developer");
+// app.cppFunction("bf.render", render);
+// auto automation = webfront::automation::enableAutomation(app, {.grants = {"check", "build", "inspect", "interact"}});
+// app.show(automation->launchPage());
+// automation->close();
+// app.shutdown();
+// ```
+
 #pragma once
 #if defined(WEBFRONT_DISTRIBUTION) && WEBFRONT_DISTRIBUTION
     #error "WebFront automation does not exist in a distribution build (WEBFRONT_DISTRIBUTION, ADR-025): gate enableAutomation out of it"

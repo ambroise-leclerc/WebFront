@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-23
+//
+// WebFront — tests/unit
+// Role: Safe relative paths received from the browser.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: security tests
+
 #include <webfront/system/SafePath.hpp>
 #include <webfront/testing/Bdd.hpp>
 

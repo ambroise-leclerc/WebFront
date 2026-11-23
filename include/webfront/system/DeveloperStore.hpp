@@ -1,4 +1,12 @@
-/// @brief Explicit development project access and staged publication, without shell access.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-20
+//
+// WebFront — system
+// Role: Explicit development project access and staged publication, without shell access.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: not a sandbox; recovery of group publications runs when a project is opened
+
 #pragma once
 
 #include "../utils/Json.hpp"

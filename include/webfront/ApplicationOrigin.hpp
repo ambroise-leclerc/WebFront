@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-18
+//
+// WebFront — core
+// Role: Canonical application authority (host, port, scheme) shared by the HTTP server and the frontend URL builders.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: pure string helpers; keep in sync with the origin checks of ContentPolicy.hpp
+
 #pragma once
 
 #include <stdexcept>

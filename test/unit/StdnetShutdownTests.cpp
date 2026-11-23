@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-13
+//
+// WebFront — tests/unit
+// Role: Shutdown of the stdnet provider: cancellation of pending operations and joining.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: pins the structured shutdown contract
+
 #include "../../examples/PortOption.hpp"
 #include "InjectableNetworking.hpp"
 #include <webfront/http/HTTPServer.hpp>

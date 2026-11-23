@@ -1,11 +1,17 @@
-/**
- * @file PathUtils.hpp
- * @brief Header-only utilities for path resolution and file discovery
- *
- * This header-only library provides utilities for finding files in various
- * search paths, particularly useful for locating resource files in development
- * and testing contexts.
- */
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2025-08-16
+//
+// WebFront — tooling
+// Role: Search helpers locating a file or the document root from the working directory and its parents.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: development convenience; not for production path resolution
+
+// Header-only utilities for path resolution and file discovery
+//
+// This header-only library provides utilities for finding files in various
+// search paths, particularly useful for locating resource files in development
+// and testing contexts.
 
 #pragma once
 

@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
-/// @brief The binding of HTTP reads to the browser client of a connection: token, cookie, transport, neutralized content (#469, ADR-020).
+// Author: Ambroise Leclerc
+// Created: 2026-11-04
+//
+// WebFront — tests/unit
+// Role: Binding of HTTP reads to the browser client of a connection: token, cookie, transport and neutral answers.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: security tests of ADR-020 rule 4
+
+// The binding of HTTP reads to the browser client of a connection: token, cookie, transport, neutralized content (#469, ADR-020).
+
 #include "InjectableNetworking.hpp"
 #include "Mocks.hpp"
 #include <webfront/http/HTTPServer.hpp>

@@ -1,6 +1,12 @@
-/// @date 31/01/2022 21:19:42
-/// @author Ambroise Leclerc
-/// @brief WebLink represents a connexion to an HTML/JS renderer
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-01-31
+//
+// WebFront — weblink
+// Role: WebLink: one connection to an HTML/JS renderer, routing bridge messages in both directions.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: core of the bridge; read the connection lifecycle before touching send paths
+
 #pragma once
 #include "../http/WebSocket.hpp"
 #include "../tooling/Logger.hpp"

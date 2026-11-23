@@ -1,4 +1,14 @@
-/// Dynamic routes of the HTTP server (#454): registration, priority, streamed replies, failures and shutdown.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-03
+//
+// WebFront — tests/unit
+// Role: Dynamic routes of the HTTP server: registration, priority, streamed replies, failures and shutdown.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: connections are accepted at once with mock requests
+
+// Dynamic routes of the HTTP server (#454): registration, priority, streamed replies, failures and shutdown.
+
 #include "InjectableNetworking.hpp"
 #include "Mocks.hpp"
 #include "TemporaryDirectory.hpp"

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2025-08-16
+//
+// WebFront — system
+// Role: Windows header compatibility definitions included before any platform header.
+// Thread: worker-safe | Alloc: zero-hot-path
+// LLM: include-order shim; keep it minimal
+
 #pragma once
 
 // Windows compatibility header - centralizes Windows-specific macro definitions

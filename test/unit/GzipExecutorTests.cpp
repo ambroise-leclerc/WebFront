@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-25
+//
+// WebFront — tests/unit
+// Role: The gzip worker: bounded jobs and waiters, cancellation and shutdown.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: pins DecodeLimits behavior
+
 #include "GzipFixtures.hpp"
 #include <webfront/http/HTTPServer.hpp>
 #include <webfront/networking/TCPNetworkingStdnet.hpp>

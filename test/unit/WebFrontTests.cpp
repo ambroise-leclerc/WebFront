@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-05-31
+//
+// WebFront — tests/unit
+// Role: The application object: construction, callbacks, browsers, calls in both directions and shutdown.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: largest application test; uses link and io context mocks
+
 #include "InjectableNetworking.hpp"
 #include "Mocks.hpp"
 #include "Version.hpp"

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-02-06
+//
+// WebFront — tests/unit
+// Role: MimeType lookup by file extension.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: small pure tests
+
 #include <webfront/http/MimeType.hpp>
 #include <webfront/testing/Bdd.hpp>
 

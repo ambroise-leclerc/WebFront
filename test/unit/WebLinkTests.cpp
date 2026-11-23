@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-07-21
+//
+// WebFront — tests/unit
+// Role: WebLink: connection lifecycle, routing of messages and logs.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: uses the networking mock
+
 #include "InjectableNetworking.hpp"
 #include <webfront/http/WebSocket.hpp>
 #include <webfront/testing/Bdd.hpp>

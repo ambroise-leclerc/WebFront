@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — tests/unit
+// Role: The navigation, popup and response decisions of the WebKitGTK frontend, and its sandbox environment.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: logic only, no GTK needed
+
 #include "TemporaryDirectory.hpp"
 #include <webfront/frontend/WebKitGTKPolicy.hpp>
 #include <webfront/testing/Bdd.hpp>

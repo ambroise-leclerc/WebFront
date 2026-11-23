@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2023-05-08
+//
+// WebFront — tests/unit
+// Role: The native file system: reads, newline handling and failure cases.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: uses a temporary test environment
+
 #include "TemporaryDirectory.hpp"
 #include <webfront/system/NativeFS.hpp>
 #include <webfront/testing/Bdd.hpp>

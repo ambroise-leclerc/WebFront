@@ -1,4 +1,12 @@
-/// @brief Server-owned thread running blocking application work (route handlers, file reads) off the I/O context.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-03
+//
+// WebFront — http
+// Role: Server-owned threads running blocking application work (route handlers, file reads) off the I/O context.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: completes senders on worker threads; the awaiting task resumes on the I/O context with continues_on
+
 #pragma once
 #include "../networking/Tasks.hpp"
 

@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
-/// @brief The registry of the secondary windows and the session of one open(), shared by the native frontends (#652, #616).
+// Author: Ambroise Leclerc
+// Created: 2026-11-23
+//
+// WebFront — tests/unit
+// Role: The registry of secondary windows and the session of one open(), shared by the native frontends.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: fake sessions stand for toolkit windows
+
+// The registry of the secondary windows and the session of one open(), shared by the native frontends (#652, #616).
+
 #include <webfront/frontend/EmbeddedFrontend.hpp>
 #include <webfront/frontend/Frontend.hpp>
 #include <webfront/frontend/StartupTrace.hpp>

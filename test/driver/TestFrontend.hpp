@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-26
+//
+// WebFront — tests/driver
+// Role: Frontend of the test driver: serves a project without opening a window.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: test driver; satisfies FrontendType
+
 #pragma once
 #include <webfront/WebFront.hpp>
 

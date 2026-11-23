@@ -1,18 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
-/// @brief Binds the plain HTTP reads of a page (`<img>`, `<video>`, `fetch`, a download) to the browser client whose
-/// connection received the read token (#469, ADR-020 rule 4).
-///
-/// A read URL carries a token, but an URL is a capability to whoever holds it, and `<img>` or `<video>` cannot add a header.
-/// A bound read therefore also needs a cookie. After its handshake, a connection receives through the bridge a one-time
-/// secret and exchanges it, by a same-origin `fetch`, for a `HttpOnly`, `SameSite=Strict` cookie named after the *client*
-/// (the browser profile) it identifies. A cookie is shared by the tabs of a profile, so the binding designates a client, not
-/// a connection; the connections of one profile that present the cookie belong to one client. Two concurrent exchanges of
-/// a blank profile create two clients and two cookies of different names, which coexist.
-///
-/// The cookie proves possession, nothing more: another page of the same origin in the same profile reads the URL, as it
-/// already shares storage, cookies and the authority of the bridge (ADR-008). It does not replace the origin check of the
-/// bridge. The *transport* is declared, never deduced: only the view of an embedded frontend is local; any other
-/// connection reads only if the application declared its deployment (RemoteFileTransport).
+// Author: Ambroise Leclerc
+// Created: 2026-11-04
+//
+// WebFront — core
+// Role: Binds the plain HTTP reads of a page to the browser client whose connection received the read token (ADR-020 rule 4).
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: security contract; read the header comment before touching tokens or cookies
+
+// Binds the plain HTTP reads of a page (`<img>`, `<video>`, `fetch`, a download) to the browser client whose
+// connection received the read token (#469, ADR-020 rule 4).
+//
+// A read URL carries a token, but an URL is a capability to whoever holds it, and `<img>` or `<video>` cannot add a header.
+// A bound read therefore also needs a cookie. After its handshake, a connection receives through the bridge a one-time
+// secret and exchanges it, by a same-origin `fetch`, for a `HttpOnly`, `SameSite=Strict` cookie named after the *client*
+// (the browser profile) it identifies. A cookie is shared by the tabs of a profile, so the binding designates a client, not
+// a connection; the connections of one profile that present the cookie belong to one client. Two concurrent exchanges of
+// a blank profile create two clients and two cookies of different names, which coexist.
+//
+// The cookie proves possession, nothing more: another page of the same origin in the same profile reads the URL, as it
+// already shares storage, cookies and the authority of the bridge (ADR-008). It does not replace the origin check of the
+// bridge. The *transport* is declared, never deduced: only the view of an embedded frontend is local; any other
+// connection reads only if the application declared its deployment (RemoteFileTransport).
+
 #pragma once
 
 #include "automation/Credentials.hpp"

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-27
+//
+// WebFront — tests/unit
+// Role: The React store: coalesced snapshots per browser and their delivery.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: pins docs/REACT.md behavior
+
 #include "InjectableNetworking.hpp"
 #include <webfront/components/react/Store.hpp>
 #include <webfront/testing/Bdd.hpp>

@@ -1,6 +1,16 @@
-/// @brief Native loopback sockets and private files of the MCP listener (McpHttp.hpp): non-inheritable sockets with bounded
-/// reads and writes, a new owner-only directory outside the project, and files published whole and read without following a
-/// swapped path.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-28
+//
+// WebFront — automation
+// Role: Native loopback sockets and private files of the MCP listener: non-inheritable sockets, owner-only directories, whole-file publication.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: security sensitive; never follow a swapped path, keep reads and writes bounded
+
+// Native loopback sockets and private files of the MCP listener (McpHttp.hpp): non-inheritable sockets with bounded
+// reads and writes, a new owner-only directory outside the project, and files published whole and read without following a
+// swapped path.
+
 #pragma once
 #include "Credentials.hpp"
 #include "Session.hpp"

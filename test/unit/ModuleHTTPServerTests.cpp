@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-07-16
+//
+// WebFront — tests/unit
+// Role: Serving of an embedded gzip module by the HTTP server.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: asset served the way WebFront.js is
+
 #include "Mocks.hpp"
 #include <webfront/http/HTTPServer.hpp>
 #include <webfront/networking/NetworkingMock.hpp>

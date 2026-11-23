@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-16
+//
+// WebFront — examples
+// Role: The animated Boing Ball scene and its CPU ray tracer, a pure function of time.
+// Thread: worker-safe | Alloc: zero-hot-path
+// LLM: deterministic computation; the CUDA unit must produce the same image
+
 #pragma once
 
 // The Boing Ball scene: the colour of one pixel as a function of the scene of a frame. The CPU renderer and the CUDA

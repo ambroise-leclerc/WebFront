@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2025-08-16
+//
+// WebFront — frontend
+// Role: Optional CEF frontend: embedded Chromium window, subprocess handling and bridge to the frontend contract.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: opt-in adapter (WEBFRONT_EMBED_CEF); CEF callbacks run on its own threads, read the executor host first
+
 #pragma once
 
 #include "../ContentPolicy.hpp"

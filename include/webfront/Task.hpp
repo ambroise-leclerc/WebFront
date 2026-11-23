@@ -1,4 +1,12 @@
-/// @brief Application coroutines owned by WebFront, with optional individual cancellation.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-18
+//
+// WebFront — core
+// Role: Application coroutines owned by WebFront, with optional individual cancellation.
+// Thread: thread-safe | Alloc: unrestricted
+// LLM: public API; spawn is callable from any thread, discarding a TaskHandle does not stop the task
+
 #pragma once
 #include "networking/Tasks.hpp"
 

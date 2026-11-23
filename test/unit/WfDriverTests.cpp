@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-24
+//
+// WebFront — tests/unit
+// Role: The options and usage errors of the non-interactive wf driver.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: pins test/driver/WfDriver.hpp parsing
+
 #include "../driver/WfDriver.hpp"
 #include <webfront/testing/Bdd.hpp>
 

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-29
+//
+// WebFront — frontend
+// Role: WindowOptions: title, size and media settings that an application gives to an embedded window.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: public API; fields a toolkit cannot honour are ignored
+
 #pragma once
 
 #include <array>

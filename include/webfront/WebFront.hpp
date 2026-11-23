@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
-/// @date 18/01/2022 19:34:27
-/// @author Ambroise Leclerc
-/// @brief WebFront UI main objet
+// Author: Ambroise Leclerc
+// Created: 2022-01-18
+//
+// WebFront — core
+// Role: Main orchestration API: BasicWF owns the HTTP server, the connected browsers, the registered callbacks and the server thread.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: public API; read AGENTS.md invariants and the class contracts before the implementation
+
 #pragma once
 
 #include "BridgeError.hpp"

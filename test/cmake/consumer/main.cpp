@@ -1,4 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-13
+//
+// WebFront — tests/cmake
+// Role: Application of a project that embeds WebFront through its CMake package.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: consumer fixture of the portability tier
+
 // Check before standard headers can supply their vendor defaults.
+
 #if defined(_GLIBCXX_ASSERTIONS) || defined(_LIBCPP_HARDENING_MODE) || defined(_MSVC_STL_HARDENING)
     #error WebFront must not impose standard library hardening on consumers
 #endif

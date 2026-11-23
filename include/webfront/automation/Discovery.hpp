@@ -1,10 +1,20 @@
-/// @brief Per-user discovery of the automation sessions their owners chose to share.
-///
-/// An application that enables automation publishes one small record in a private per-user directory, so that a human or
-/// an agent finds the running instances instead of being told where they are. A record names the project, the grants, the
-/// process, the private directory, the MCP URL and the path of the client configuration. It never holds the token, which
-/// only that private configuration file contains: reading a record does not allow operating the session. Records are
-/// removed on closure; one whose process is gone is dropped by the next listing, with the private directory named after it.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-08
+//
+// WebFront — automation
+// Role: Per-user discovery of the automation sessions their owners chose to share, as records in a private directory.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: records never hold the token; stale records are dropped by the next listing
+
+// Per-user discovery of the automation sessions their owners chose to share.
+//
+// An application that enables automation publishes one small record in a private per-user directory, so that a human or
+// an agent finds the running instances instead of being told where they are. A record names the project, the grants, the
+// process, the private directory, the MCP URL and the path of the client configuration. It never holds the token, which
+// only that private configuration file contains: reading a record does not allow operating the session. Records are
+// removed on closure; one whose process is gone is dropped by the next listing, with the private directory named after it.
+
 #pragma once
 #include "Channel.hpp"
 #include "Json.hpp"

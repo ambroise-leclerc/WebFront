@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — frontend
+// Role: Opt-in macOS WKWebView frontend driving Cocoa through the Objective-C runtime.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: opt-in adapter (WEBFRONT_EMBED_WKWEBVIEW); main thread only, no engine download
+
 #pragma once
 
 #include "../ContentPolicy.hpp"

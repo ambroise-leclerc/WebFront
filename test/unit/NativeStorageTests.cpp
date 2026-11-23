@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-05
+//
+// WebFront — tests/unit
+// Role: The host file system storage: confinement, links, replacement, quotas and failure cases.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: security tests; pins ADR-002 and ADR-020 behavior
+
 #include "TemporaryDirectory.hpp"
 #include <webfront/system/NativeStorage.hpp>
 #include <webfront/testing/Bdd.hpp>

@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
-/// @brief Typed access to the native window of an embedded frontend, and its link to a connection (#463, ADR-020).
+// Author: Ambroise Leclerc
+// Created: 2026-11-09
+//
+// WebFront — tests/unit
+// Role: Typed access to the native window of an embedded frontend and its link to a connection.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: pins notOpen, closed and wrongThread answers
+
+// Typed access to the native window of an embedded frontend, and its link to a connection (#463, ADR-020).
+
 #include "InjectableNetworking.hpp"
 #include <webfront/frontend/NativeWindow.hpp>
 #include <webfront/networking/TCPNetworkingStdnet.hpp>

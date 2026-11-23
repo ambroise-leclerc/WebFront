@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
-/// @brief Broadcasting to every connected browser, and the threads of callbacks and browser calls (#401).
+// Author: Ambroise Leclerc
+// Created: 2026-10-30
+//
+// WebFront — tests/unit
+// Role: Broadcasting to every connected browser, and the threads of callbacks and browser calls.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: pins the backlog policy and thread rules of Broadcast.hpp
+
+// Broadcasting to every connected browser, and the threads of callbacks and browser calls (#401).
+
 #include "InjectableNetworking.hpp"
 #include <webfront/networking/TCPNetworkingStdnet.hpp>
 #include <webfront/system/DefaultFS.hpp>

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — frontend
+// Role: Opt-in Linux WebKitGTK frontend: GTK window, web view and sandbox handling loaded at run time.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: opt-in adapter; see docs/WEBKITGTK.md, main thread only and sandbox off only in development
+
 #pragma once
 
 #include "../ContentPolicy.hpp"

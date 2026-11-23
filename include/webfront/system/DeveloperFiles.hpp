@@ -1,4 +1,12 @@
-/// @brief Path and file helpers of the developer store: project containment, staging and replacement.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-21
+//
+// WebFront — system
+// Role: Path and file helpers of the developer store: project containment, staging and replacement.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: developer store internals; abandoned transactions and old staging are cleaned automatically
+
 #pragma once
 
 #include "DeveloperPaths.hpp"

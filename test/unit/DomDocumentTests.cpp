@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-27
+//
+// WebFront — tests/unit
+// Role: The DOM document API: handles, batched writes, events and reads against a recording browser.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: pins docs/DOM.md behavior
+
 #include <webfront/dom/Document.hpp>
 #include <webfront/testing/Bdd.hpp>
 

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-01-21
+//
+// WebFront — tests/unit
+// Role: WebSocket framing, masking, handshake and secure transport.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: RFC 6455 behavior
+
 #include "InjectableNetworking.hpp"
 #include "InlineTaskScope.hpp"
 #include <webfront/http/WebSocket.hpp>

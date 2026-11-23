@@ -1,11 +1,21 @@
-/// @brief A minimal interface-thread loop for the system browser (ADR-020, #462).
-///
-/// The system browser owns its window and no toolkit loop runs in the application. `run(host, stop)` makes the calling
-/// thread (the main thread, for the native dialogs) the interface thread: it attaches `host`, runs the platform's loop
-/// until `stop.request()` and closes `host`. The loop is the Windows message pump (a message-only window, which a modal
-/// dialog's own loop also dispatches), AppKit's run loop with `NSApplication` in the Accessory policy (no Dock icon) or the
-/// GLib main loop. A platform whose runtime cannot be loaded makes `run` throw before attaching: the executor then stays
-/// unavailable.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-09
+//
+// WebFront — frontend
+// Role: A minimal interface-thread loop for the system browser (Windows pump, AppKit run loop or GLib main loop).
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: platform loops loaded at run time; run() throws before attaching when the runtime is missing
+
+// A minimal interface-thread loop for the system browser (ADR-020, #462).
+//
+// The system browser owns its window and no toolkit loop runs in the application. `run(host, stop)` makes the calling
+// thread (the main thread, for the native dialogs) the interface thread: it attaches `host`, runs the platform's loop
+// until `stop.request()` and closes `host`. The loop is the Windows message pump (a message-only window, which a modal
+// dialog's own loop also dispatches), AppKit's run loop with `NSApplication` in the Accessory policy (no Dock icon) or the
+// GLib main loop. A platform whose runtime cannot be loaded makes `run` throw before attaching: the executor then stays
+// unavailable.
+
 #pragma once
 
 #include "UIExecutor.hpp"

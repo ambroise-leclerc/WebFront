@@ -1,12 +1,22 @@
-/// @brief MCP over Streamable HTTP, served by the application itself on its own loopback listener (ADR-025).
-///
-/// `mcphttp::Server` listens on 127.0.0.1 only, on a port of its own (never the page's), and answers one path, `/mcp`,
-/// with the limited MCP profile of `Mcp.hpp`: JSON responses only, no server stream. Every request is screened on its
-/// headers before its body is read: exact `Host` (DNS rebinding), no `Origin` nor `Sec-Fetch-*` (web pages), then a
-/// session Bearer token compared in constant time, then the media types and the announced length. The token is written
-/// with the URL in `mcp.json`, a private client configuration in the instance's private directory, never in the project.
-/// Admission bounds the peers that have not authenticated: a bounded queue of unauthenticated peers with a two-second deadline,
-/// and separate workers for the authenticated requests.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-22
+//
+// WebFront — automation
+// Role: MCP over Streamable HTTP, served by the application itself on its own loopback listener (ADR-025).
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: security sensitive; every request is screened on headers before its body is read
+
+// MCP over Streamable HTTP, served by the application itself on its own loopback listener (ADR-025).
+//
+// `mcphttp::Server` listens on 127.0.0.1 only, on a port of its own (never the page's), and answers one path, `/mcp`,
+// with the limited MCP profile of `Mcp.hpp`: JSON responses only, no server stream. Every request is screened on its
+// headers before its body is read: exact `Host` (DNS rebinding), no `Origin` nor `Sec-Fetch-*` (web pages), then a
+// session Bearer token compared in constant time, then the media types and the announced length. The token is written
+// with the URL in `mcp.json`, a private client configuration in the instance's private directory, never in the project.
+// Admission bounds the peers that have not authenticated: a bounded queue of unauthenticated peers with a two-second deadline,
+// and separate workers for the authenticated requests.
+
 #pragma once
 #if defined(WEBFRONT_DISTRIBUTION) && WEBFRONT_DISTRIBUTION
     #error "WebFront automation does not exist in a distribution build (WEBFRONT_DISTRIBUTION, ADR-025)"

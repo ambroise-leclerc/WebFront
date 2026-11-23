@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-02
+//
+// WebFront — tests/web
+// Role: A server that refuses WebSocket upgrades, to test the browser's failure path.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: test support; the client must reject webFront.ready
+
 #pragma once
 
 #include <webfront/networking/Tasks.hpp>

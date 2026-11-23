@@ -1,4 +1,12 @@
-/// @brief Opt-in developer environment (terminal and wf commands) running in the application window. Downloaded code has project/bridge authority.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-20
+//
+// WebFront — core
+// Role: Opt-in developer environment (terminal and wf commands) running in the application window.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: public API; downloaded code has project and bridge authority, read DeveloperBootstrapOptions first
+
 #pragma once
 
 #include "system/DeveloperFS.hpp"

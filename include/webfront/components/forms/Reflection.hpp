@@ -1,7 +1,17 @@
-/// @brief Optional C++26 layer (ADR-018, #383): describe<T>() produces by static reflection (P2996, annotations P3394,
-/// expansion statements P1306) the same descriptors that a C++23 application writes by hand with field() and choice().
-/// Members are annotated with [[=forms::Label{"..."}]] and [[=forms::Range{min, max}]]. Without reflection
-/// (`__cpp_impl_reflection`, GCC 16 with -std=c++26 -freflection) this header declares nothing: the core stays C++23.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-30
+//
+// WebFront — components/forms
+// Role: Optional C++26 layer producing descriptors by static reflection (GCC 16 only); declares nothing without reflection.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: optional component; guarded by __cpp_impl_reflection, the core stays C++23
+
+// Optional C++26 layer (ADR-018, #383): describe<T>() produces by static reflection (P2996, annotations P3394,
+// expansion statements P1306) the same descriptors that a C++23 application writes by hand with field() and choice().
+// Members are annotated with [[=forms::Label{"..."}]] and [[=forms::Range{min, max}]]. Without reflection
+// (`__cpp_impl_reflection`, GCC 16 with -std=c++26 -freflection) this header declares nothing: the core stays C++23.
+
 #pragma once
 #include "Description.hpp"
 

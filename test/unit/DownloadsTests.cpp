@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-02
+//
+// WebFront — tests/unit
+// Role: Staging directories of native downloads: creation, atomic replacement and reaping.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: uses temporary directories
+
 #include <webfront/frontend/Downloads.hpp>
 #include <webfront/testing/Bdd.hpp>
 

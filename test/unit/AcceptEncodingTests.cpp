@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — tests/unit
+// Role: Accept-Encoding negotiation: tokens, parameters, quality values and wildcards.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: pure parser tests; cases mirror RFC 9110
+
 #include <webfront/http/HTTPServer.hpp>
 #include <webfront/testing/Bdd.hpp>
 

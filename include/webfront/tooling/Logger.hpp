@@ -1,6 +1,12 @@
-/// @date 28/01/2022 16:51:42
-/// @author Ambroise Leclerc
-/// @brief Logging facilities
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-01-28
+//
+// WebFront — tooling
+// Role: Logging facilities: sinks with generation-checked identifiers and a thread-safe dispatch.
+// Thread: thread-safe | Alloc: unrestricted
+// LLM: diagnostic API; a SinkId stays harmless after its slot is reused
+
 #pragma once
 
 #if defined(WEBFRONT_USE_MDDLOG) && WEBFRONT_USE_MDDLOG

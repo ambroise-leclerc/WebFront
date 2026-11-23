@@ -1,6 +1,16 @@
-/// @brief Optional type descriptors (ADR-018, #383): the name, label, kind, bounds and accessors of each member of a C++
-/// type, written by hand in C++23 or produced by the C++26 reflection layer (Reflection.hpp). Form.hpp builds forms and
-/// inspectors from them; typescriptDeclaration() writes the TypeScript declaration that `wf check` verifies.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-30
+//
+// WebFront — components/forms
+// Role: Optional type descriptors (ADR-018): name, label, kind, bounds and accessors of each member, plus TypeScript declarations.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: optional component; read docs/FORMS.md, descriptors are consumed by Form.hpp and `wf check`
+
+// Optional type descriptors (ADR-018, #383): the name, label, kind, bounds and accessors of each member of a C++
+// type, written by hand in C++23 or produced by the C++26 reflection layer (Reflection.hpp). Form.hpp builds forms and
+// inspectors from them; typescriptDeclaration() writes the TypeScript declaration that `wf check` verifies.
+
 #pragma once
 #include "../../utils/Json.hpp"
 

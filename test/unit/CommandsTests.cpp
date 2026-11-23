@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-22
+//
+// WebFront — tests/unit
+// Role: Terminal commands of an application: discovery, output streaming, cancellation and reserved names.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: uses a fake application
+
 #include "InjectableNetworking.hpp"
 #include <webfront/Commands.hpp>
 #include <webfront/testing/Bdd.hpp>

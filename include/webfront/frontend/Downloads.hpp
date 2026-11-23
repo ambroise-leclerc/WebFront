@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-02
+//
+// WebFront — frontend
+// Role: Private staging directories that make a native frontend's file downloads atomic and crash-safe.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: shared by the native frontends; stale staging directories are reaped after a week
+
 #pragma once
 
 #include <cerrno>

@@ -1,4 +1,12 @@
-/// @brief The failure of a bridge call, with a code that lets the caller tell failures apart.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-05
+//
+// WebFront — core
+// Role: The failure of a bridge call, with a code that lets the caller tell failures apart.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: public API; reserved `webfront.` codes are part of the wire contract with WebFront.js
+
 #pragma once
 
 #include <cstddef>

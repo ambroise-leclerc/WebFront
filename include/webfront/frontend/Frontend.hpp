@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-05-31
+//
+// WebFront — frontend
+// Role: The FrontendType concept, the default system-browser frontend and the contract every frontend satisfies.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: public contract; a frontend decides whether the server stops when open() returns
+
 #pragma once
 
 #include "../ContentPolicy.hpp"

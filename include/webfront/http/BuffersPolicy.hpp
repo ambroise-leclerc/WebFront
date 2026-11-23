@@ -1,6 +1,12 @@
-/// @date 28/02/2026
-/// @author Ambroise Leclerc
-/// @brief Configurable buffer sizes policy for WebFront internal buffers
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-02-28
+//
+// WebFront — http
+// Role: Configurable buffer sizes (maxMessageSize and others) of the WebFront internal buffers.
+// Thread: worker-safe | Alloc: zero-hot-path
+// LLM: policy concept and defaults; limits here bound the bridge wire format (ADR-003)
+
 #pragma once
 
 #include <concepts>

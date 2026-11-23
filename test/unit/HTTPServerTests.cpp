@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-01-16
+//
+// WebFront — tests/unit
+// Role: The HTTP server: requests, headers, files, resources and error replies.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: uses the networking mock
+
 #include "InjectableNetworking.hpp"
 #include "Mocks.hpp"
 #include <webfront/http/HTTPServer.hpp>

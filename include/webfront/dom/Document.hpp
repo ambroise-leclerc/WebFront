@@ -1,4 +1,12 @@
-/// @brief Per-connection DOM handles, batched mutations and explicit asynchronous reads.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-27
+//
+// WebFront — dom
+// Role: Per-connection DOM handles, batched mutations, events and explicit asynchronous reads.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: optional API; see docs/DOM.md, writes are batched and reads go through the sender
+
 #pragma once
 #include "../Task.hpp"
 #include "../weblink/DomBatch.hpp"

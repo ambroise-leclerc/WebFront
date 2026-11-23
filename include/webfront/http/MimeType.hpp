@@ -1,6 +1,12 @@
-/// @date 04/02/2022 15:39:42
-/// @author Ambroise Leclerc
-/// @brief MimeType constructible from a filename's extension and convertible to string
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-02-04
+//
+// WebFront — http
+// Role: MimeType, constructible from a file name's extension and convertible to string.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: small lookup table; extend it together with the tests
+
 #pragma once
 #include <array>
 #include <string_view>

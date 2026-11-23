@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-18
+//
+// WebFront — tests/unit
+// Role: Application coroutines: app.spawn, ui.spawn, individual cancellation and drain at shutdown.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: pins the Task ownership contract of AGENTS.md
+
 #include "InjectableNetworking.hpp"
 #include <webfront/testing/Bdd.hpp>
 #include <webfront/WebFront.hpp>

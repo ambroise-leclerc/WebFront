@@ -1,4 +1,12 @@
-/// @brief Optional native pseudoterminal for an application-selected program.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-19
+//
+// WebFront — core
+// Role: Optional native pseudoterminal for an application-selected program, with a bounded output ring.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: optional component; one worker thread owns the child, see docs/PTY.md
+
 #pragma once
 
 #ifdef _WIN32

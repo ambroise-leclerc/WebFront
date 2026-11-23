@@ -1,4 +1,12 @@
-/// @brief The short instructions an MCP client receives with `initialize`, including hosts running local models.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-28
+//
+// WebFront — automation
+// Role: The short instructions an MCP client receives with initialize, including hosts running local models.
+// Thread: worker-safe | Alloc: zero-hot-path
+// LLM: static text; keep it in step with the four tools of the contract
+
 #pragma once
 #include <string_view>
 namespace webfront::automation {

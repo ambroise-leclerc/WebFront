@@ -1,5 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-13
+//
+// WebFront — tests/driver
+// Role: Logs the HTTP requests the driver's server receives, for test diagnostics.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: test driver; only request lines are logged
+
 // HTTP diagnostics for native test processes. Keep bridge traffic out of the transcript so CTest's output cap
 // does not discard the resource requests we need when a session frame fails to load (#542).
+
 #pragma once
 
 #include <webfront/tooling/Logger.hpp>

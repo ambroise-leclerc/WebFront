@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2025-08-16
+//
+// WebFront — frontend
+// Role: Opens a URL in the system browser: per-platform command line, WSL included.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: default frontend plumbing; quoting of the command line is security sensitive
+
 #pragma once
 #include "../system/WindowsCompat.hpp"
 #include "Url.hpp"

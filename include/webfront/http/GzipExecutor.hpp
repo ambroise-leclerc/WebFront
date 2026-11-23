@@ -1,4 +1,12 @@
-/** @brief Lazy, server-owned gzip worker with bounded jobs, waiters and owned payload storage. */
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-25
+//
+// WebFront — http
+// Role: Lazy, server-owned gzip worker with bounded jobs, waiters and owned payload storage.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: decoding runs off the I/O context; limits live in DecodeLimits
+
 #pragma once
 #include "../networking/Tasks.hpp"
 #include "Gzip.hpp"

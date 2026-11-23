@@ -1,6 +1,12 @@
-/// @date 01/03/2023 22:39:42
-/// @author Ambroise Leclerc
-/// @brief Provides access to local or virtual file system.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2023-03-01
+//
+// WebFront — system
+// Role: The fs concepts and Multi provider: access to local or virtual file systems, first provider wins.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: public contract; read the concepts (IsData, EncodedData) before writing a provider
+
 #pragma once
 
 #include "../details/C++23Support.hpp"

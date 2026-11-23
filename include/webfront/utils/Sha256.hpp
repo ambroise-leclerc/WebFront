@@ -1,4 +1,12 @@
-/// @brief SHA-256 (FIPS 180-4), computed incrementally: a file is digested block by block, without loading it whole.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-15
+//
+// WebFront — utils
+// Role: SHA-256 (FIPS 180-4) computed incrementally, so a file is digested block by block.
+// Thread: worker-safe | Alloc: zero-hot-path
+// LLM: pure computation; verify changes against the standard test vectors
+
 #pragma once
 
 #include <algorithm>

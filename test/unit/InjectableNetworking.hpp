@@ -1,4 +1,12 @@
-/// @brief Socket mock driving a WebLink from the test thread, with injectable write failures.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-02
+//
+// WebFront — tests/unit
+// Role: Socket mock driving a WebLink from the test thread, with injectable write failures.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: test helper; senders complete when the test says so
+
 #pragma once
 #include "InlineTaskScope.hpp"
 #include <webfront/http/WebSocket.hpp>

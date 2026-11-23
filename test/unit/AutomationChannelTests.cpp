@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-28
+//
+// WebFront — tests/unit
+// Role: The loopback sockets and private files of the MCP listener.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: security tests; bounded reads and swapped paths
+
 #include "TemporaryDirectory.hpp"
 #include <webfront/automation/Channel.hpp>
 #include <webfront/testing/Bdd.hpp>

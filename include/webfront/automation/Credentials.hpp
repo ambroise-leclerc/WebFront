@@ -1,4 +1,12 @@
-/// @brief OS entropy and shared credential comparison, independent of session/transport ownership.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-29
+//
+// WebFront — automation
+// Role: OS entropy and shared credential comparison, independent of session and transport ownership.
+// Thread: worker-safe | Alloc: zero-hot-path
+// LLM: security sensitive; sameToken is constant-time for equal lengths
+
 #pragma once
 #include "Platform.hpp"
 

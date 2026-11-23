@@ -1,4 +1,12 @@
-/// @brief Opt-in Jasmine instrumentation of a consumer's real page, enabled by a CTest configuration.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-28
+//
+// WebFront — testing
+// Role: Opt-in Jasmine instrumentation of a consumer's real page, enabled by a CTest configuration.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: test support; inert unless the runner sets its environment variables
+
 #pragma once
 
 #include "../utils/Json.hpp"

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-01-16
+//
+// WebFront — tests/unit
+// Role: URI, Base64 and SHA-1 encoders and decoders.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: known-answer tests
+
 #include <webfront/http/Encodings.hpp>
 #include <webfront/testing/Bdd.hpp>
 

@@ -1,4 +1,12 @@
-/// @brief Runs one native program for a test, without a shell, with bounded time and output.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-01
+//
+// WebFront — testing
+// Role: Runs one native program for a test, without a shell, with bounded time and output.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: test support; arguments are never interpreted by a shell
+
 #pragma once
 
 #include <algorithm>

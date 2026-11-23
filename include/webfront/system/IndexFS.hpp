@@ -1,6 +1,12 @@
-/// @date 26/04/2023 22:39:42
-/// @author Ambroise Leclerc
-/// @brief Virtual file system providing access to WebFront.js, favicon.ico and a minimal index.html.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2023-04-26
+//
+// WebFront — system
+// Role: Virtual file system serving WebFront.js, favicon.ico and a minimal index.html.
+// Thread: bridge-io | Alloc: zero-hot-path
+// LLM: serves embedded assets; the asset list is closed (ADR-016)
+
 #pragma once
 
 #include "DomInterpreterData.hpp"

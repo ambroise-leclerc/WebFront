@@ -1,4 +1,12 @@
-/// @brief Authenticate page callbacks without putting a reusable secret on their wire messages.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-29
+//
+// WebFront — automation
+// Role: Authenticates page callbacks without putting a reusable secret on their wire messages (HMAC over a sequence).
+// Thread: bridge-io | Alloc: heap-init
+// LLM: security sensitive; read ADR-025 before changing the payload layout
+
 #pragma once
 #include "../utils/Sha256.hpp"
 #include "Channel.hpp"

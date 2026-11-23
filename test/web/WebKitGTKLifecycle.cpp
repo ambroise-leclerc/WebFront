@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — tests/web
+// Role: Lifecycle cases of the WebKitGTK frontend: display, sandbox, repeated show and failure diagnostics.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: Linux only; each case expects a precise diagnostic
+
 #include <webfront/system/NativeFS.hpp>
 #include <webfront/WebFront.hpp>
 

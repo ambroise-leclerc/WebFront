@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — tests/unit
+// Role: Content negotiation of embedded and encoded assets by the HTTP server.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: uses encoded asset file systems
+
 #include "GzipFixtures.hpp"
 #include <webfront/http/HTTPServer.hpp>
 #include <webfront/networking/NetworkingMock.hpp>

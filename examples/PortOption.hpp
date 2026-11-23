@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-20
+//
+// WebFront — examples
+// Role: Handles `--port <n>` and `--port=<n>` of an example and makes it the default port of the applications that follow.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: example support; prints the reason and returns false on an invalid value
+
 #pragma once
 
 #include <webfront/WebFront.hpp>

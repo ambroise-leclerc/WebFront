@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-24
+//
+// WebFront — tests/unit
+// Role: The embedded core assets: closed list, decoded budget and byte-exact content.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: guards ADR-016; amend the ADR together with this test
+
 #include <webfront/system/DeveloperBootstrapData.hpp>
 #include <webfront/system/DeveloperIndexHtmlData.hpp>
 #include <webfront/system/DomInterpreterData.hpp>

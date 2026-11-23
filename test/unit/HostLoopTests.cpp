@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-16
+//
+// WebFront — tests/unit
+// Role: The host-loop example: the Boing scene, quality settings and capture helpers.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: keeps the example honest without a window
+
 #include "../../examples/host-loop/BoingHost.hpp"
 #include "../../examples/host-loop/HostLoopCapture.hpp"
 #include <webfront/testing/Bdd.hpp>

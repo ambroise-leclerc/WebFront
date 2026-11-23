@@ -1,11 +1,21 @@
-/// @brief Proof that a connection comes from the view of an embedded frontend of this application (ADR-020, rule 3).
-///
-/// An address proves nothing: a remote browser behind a local proxy or an SSH tunnel, or another user of the machine,
-/// also arrives from the loopback. The adapter of an embedded frontend therefore hands a per-launch secret to its own
-/// view, in the process, and WebFront.js presents it in the WebSocket handshake. The secret is random, compared in
-/// constant time, never served over HTTP and never given to the system browser (a command line or a history could
-/// disclose it, and a remote browser would present it first). It does not protect against a script admitted into the
-/// view (ADR-008): such a script shares the authority of the bridge and could read the secret before WebFront.js.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-04
+//
+// WebFront — core
+// Role: Proof that a connection comes from the view of an embedded frontend of this application (ADR-020 rule 3).
+// Thread: bridge-io | Alloc: heap-init
+// LLM: security contract; the secret never travels over HTTP, read the header comment first
+
+// Proof that a connection comes from the view of an embedded frontend of this application (ADR-020, rule 3).
+//
+// An address proves nothing: a remote browser behind a local proxy or an SSH tunnel, or another user of the machine,
+// also arrives from the loopback. The adapter of an embedded frontend therefore hands a per-launch secret to its own
+// view, in the process, and WebFront.js presents it in the WebSocket handshake. The secret is random, compared in
+// constant time, never served over HTTP and never given to the system browser (a command line or a history could
+// disclose it, and a remote browser would present it first). It does not protect against a script admitted into the
+// view (ADR-008): such a script shares the authority of the bridge and could read the secret before WebFront.js.
+
 #pragma once
 
 #include "ApplicationOrigin.hpp"

@@ -1,7 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2023-05-12
+//
+// WebFront — tests/web
+// Role: The C++ callbacks of the Jasmine browser integration specs (webtest): bridge types, errors, lists and limits.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: real-browser test; the process status is that of wf test, or 1 if a call was not observed
+
 // The browser integration test: the specs of test/web/suite run under `wf test` in the developer environment of an
 // application that registers the C++ callbacks they call. Usage is that of webfront-wf (test/driver/WfDriver.hpp), e.g.
 //   webtest --project <copy of test/web/suite, after wf install> --registry-dir <registry> -- test --timeout 120
 // The status is that of `wf test`, and 1 when the specs passed but C++ did not observe every call they make.
+
 #include <webfront/components/forms/Form.hpp>
 #include <webfront/PtyPage.hpp>
 #include <webfront/system/FileSystem.hpp>

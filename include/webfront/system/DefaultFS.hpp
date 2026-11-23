@@ -1,5 +1,15 @@
-/// @brief Default filesystem for webfront::WebFront: embedded bridge script, an optional local
-/// development root, and an embedded fallback page - composed with the precedence documented below.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-07-22
+//
+// WebFront — system
+// Role: Default file system of webfront::WebFront: embedded bridge script, optional local development root and embedded fallback page.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: order is normative, the embedded WebFront.js can never be shadowed by a document root
+
+// Default filesystem for webfront::WebFront: embedded bridge script, an optional local
+// development root, and an embedded fallback page - composed with the precedence documented below.
+
 #pragma once
 
 #include "FileSystem.hpp"

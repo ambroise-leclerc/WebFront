@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
-/// @brief Tests Bdd.hpp: the order of the sections, the outcome of each kind of failure, the filters and the exit codes.
-/// Some scenarios fail on purpose: main() runs each one and compares what it did with what is expected.
+// Author: Ambroise Leclerc
+// Created: 2026-11-14
+//
+// WebFront — tests/unit
+// Role: Tests of Bdd.hpp: section order, the outcome of each kind of failure, filters and the report.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: some scenarios fail on purpose, main() compares what each did with what is expected
+
+// Tests Bdd.hpp: the order of the sections, the outcome of each kind of failure, the filters and the exit codes.
+// Some scenarios fail on purpose: main() runs each one and compares what it did with what is expected.
+
 #include <webfront/testing/Bdd.hpp>
 
 #include <chrono>

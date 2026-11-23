@@ -1,4 +1,14 @@
-/// Byte range requests (#455): the selection of a range, and its use by files and by dynamic routes.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-04
+//
+// WebFront — tests/unit
+// Role: Byte range requests: the selection of a range and its use by files and dynamic routes.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: pins RFC 9110 behavior
+
+// Byte range requests (#455): the selection of a range, and its use by files and by dynamic routes.
+
 #include "GzipFixtures.hpp"
 #include "InjectableNetworking.hpp"
 #include "Mocks.hpp"

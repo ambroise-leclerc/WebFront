@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — tests/web
+// Role: Translation unit that includes WKWebView.hpp to check the header is self-contained.
+// Thread: ui-loop | Alloc: zero-hot-path
+// LLM: macOS only; compile check
+
 #include <webfront/frontend/WKWebView.hpp>
 
 static_assert(requires {

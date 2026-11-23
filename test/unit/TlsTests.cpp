@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-21
+//
+// WebFront — tests/unit
+// Role: The TLS implementation: primitives, handshake parsing and records against known answers.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: known-answer tests
+
 #include "TemporaryDirectory.hpp"
 #include <webfront/http/Encodings.hpp>
 #include <webfront/testing/Bdd.hpp>

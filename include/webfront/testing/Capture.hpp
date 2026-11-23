@@ -1,4 +1,12 @@
-/// @brief Screenshots and image sequences of the web view, written to a directory owned by a test run.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-01
+//
+// WebFront — testing
+// Role: Screenshots and image sequences of the web view, written to a directory owned by a test run.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: test support; a worker blocked on a dead window is detached after a grace period
+
 #pragma once
 
 #include "../frontend/Capture.hpp"

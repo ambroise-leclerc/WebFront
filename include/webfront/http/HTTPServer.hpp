@@ -1,6 +1,12 @@
-/// @date 16/01/2022 22:27:42
-/// @author Ambroise Leclerc
-/// @brief HTTPServer minimal implementation for WebSocket support - RFC1945
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-01-16
+//
+// WebFront — http
+// Role: Minimal HTTP server with WebSocket upgrade: connection coroutines awaiting the senders of a network provider.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: core transport; connections are coroutines on the io_context thread, owned by a counting_scope
+
 #pragma once
 #include "../ApplicationOrigin.hpp"
 #include "../ContentPolicy.hpp"

@@ -1,6 +1,11 @@
-/// @date 12/05/2023 13:20:27
-/// @author Ambroise Leclerc
-/// @brief Mocks
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2023-05-12
+//
+// WebFront — tests/unit
+// Role: Mocks shared by the unit tests.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: test helper
 
 #pragma once
 

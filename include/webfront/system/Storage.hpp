@@ -1,5 +1,15 @@
-/// @brief Writable storage confined to a root the application declares: the contract the services of ADR-020 read and
-/// write through, whatever stores the bytes (a desktop file system, a simulated tree, FatFs or LittleFS on a device).
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-05
+//
+// WebFront — system
+// Role: The Storage contract: writable storage confined to a declared root, with stable bridge error codes.
+// Thread: thread-safe | Alloc: unrestricted
+// LLM: public contract of ADR-020; StorageErrc values are wire visible as storage.<name>
+
+// Writable storage confined to a root the application declares: the contract the services of ADR-020 read and
+// write through, whatever stores the bytes (a desktop file system, a simulated tree, FatFs or LittleFS on a device).
+
 #pragma once
 
 #include "FileSystem.hpp"

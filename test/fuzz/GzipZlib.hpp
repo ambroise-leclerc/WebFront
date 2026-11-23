@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-25
+//
+// WebFront — tests/fuzz
+// Role: Reference decoding with zlib and comparison with the WebFront gzip decoder.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: fuzz support; uses zlib only in tests
+
 #pragma once
 
 #include <webfront/http/Gzip.hpp>

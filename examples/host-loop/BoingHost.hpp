@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-16
+//
+// WebFront — examples
+// Role: Host of the Boing Ball example: engines, image quality and the frames the host loop produces for the browser.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: example of an application keeping its own loop; see docs/HOST_LOOP_EXAMPLE.md
+
 #pragma once
 
 // The host application of the example: it owns the scene, its clock, the renderers and its loop. Nothing here knows

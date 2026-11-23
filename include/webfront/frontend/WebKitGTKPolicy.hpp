@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — frontend
+// Role: Navigation, new-window and response decisions of the WebKitGTK frontend, applying the bound content policy.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: decision logic kept free of GTK calls so unit tests can reach it
+
 #pragma once
 
 #include "../ContentPolicy.hpp"

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-21
+//
+// WebFront — tls
+// Role: Parsing of PEM certificates and private keys (EC P-256) for the TLS server provider.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: security sensitive; secrets are wiped on destruction
+
 #pragma once
 #include "detail/Wire.hpp"
 

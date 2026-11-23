@@ -1,9 +1,19 @@
-/// @brief A WebFront application on a thread of its own, for a host that keeps its calling thread (#567).
-///
-/// `show()` runs an embedded window's loop on the thread that calls it. A host application that already has its own loop
-/// on its main thread gives WebFront another one with `UIThread<App>`: that thread constructs the application (the
-/// frontend's initialization has the same thread affinity as its window), runs the host's `setup`, then `show()`.
-/// See docs/HOST_INTEGRATION.md for the three integration paths and the threads involved.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-13
+//
+// WebFront — core
+// Role: A WebFront application on a thread of its own, for a host that keeps its calling thread.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: public API; see docs/HOST_INTEGRATION.md, refused at compile time for main-thread frontends
+
+// A WebFront application on a thread of its own, for a host that keeps its calling thread (#567).
+//
+// `show()` runs an embedded window's loop on the thread that calls it. A host application that already has its own loop
+// on its main thread gives WebFront another one with `UIThread<App>`: that thread constructs the application (the
+// frontend's initialization has the same thread affinity as its window), runs the host's `setup`, then `show()`.
+// See docs/HOST_INTEGRATION.md for the three integration paths and the threads involved.
+
 #pragma once
 
 #include "WebFront.hpp"

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-27
+//
+// WebFront — tests/unit
+// Role: Encoding of DOM mutation batches: operations, LEB128 operands and bounds.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: wire format tests (ADR-003)
+
 #include <webfront/testing/Bdd.hpp>
 #include <webfront/weblink/DomBatch.hpp>
 

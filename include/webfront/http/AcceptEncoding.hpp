@@ -1,4 +1,12 @@
-/** @brief HTTP encoding token, parameter and wildcard negotiation for embedded assets. */
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — http
+// Role: HTTP Accept-Encoding negotiation: tokens, parameters, quality values and wildcards for embedded assets.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: pure parser; keep RFC 9110 semantics, covered by unit tests
+
 #pragma once
 
 #include <algorithm>

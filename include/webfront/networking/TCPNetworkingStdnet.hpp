@@ -1,8 +1,18 @@
-/// @brief WebFront networking provider backed by stdnet (prospective C++29 <network>).
-///
-/// Operations are the senders of stdnet, awaited by coroutines.
-/// Usage:  using NetProvider = webfront::networking::TCPStdnet;
-///         BasicWF<NetProvider, MyFS> webFront(port, docRoot);
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-13
+//
+// WebFront — networking
+// Role: WebFront networking provider backed by stdnet: operations are senders awaited by coroutines.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: default provider (TCPStdnet); all socket objects close on the io_context thread
+
+// WebFront networking provider backed by stdnet (prospective C++29 <network>).
+//
+// Operations are the senders of stdnet, awaited by coroutines.
+// Usage:  using NetProvider = webfront::networking::TCPStdnet;
+//         BasicWF<NetProvider, MyFS> webFront(port, docRoot);
+
 #pragma once
 
 #include "BasicNetworking.hpp"

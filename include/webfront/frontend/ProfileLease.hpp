@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-21
+//
+// WebFront — frontend
+// Role: A browser profile directory kept across runs but never used by two live processes at once.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: lock-file based; the first instance keeps the directory, others get a sibling .instances directory
+
 #pragma once
 
 /// A browser profile directory that persists across runs but is never used by two live processes at once.

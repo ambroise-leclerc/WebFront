@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-19
+//
+// WebFront — components/pty
+// Role: Options and validation of a native pseudoterminal: size, program, environment.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: optional component; prepare() fills terminal defaults before the platform backend starts
+
 #pragma once
 
 #include <cstdint>

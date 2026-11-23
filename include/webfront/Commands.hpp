@@ -1,5 +1,15 @@
-/// @brief Terminal commands of an application: coroutines that the developer environment's terminal discovers and
-/// runs, one browser session at a time, streaming their output and cancelled by Ctrl+C, a disconnection or shutdown.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-22
+//
+// WebFront — core
+// Role: Terminal commands of an application: coroutines the developer environment's terminal discovers and runs, one browser session at a time.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: public API; read the command contract and reserved names before the registration code
+
+// Terminal commands of an application: coroutines that the developer environment's terminal discovers and
+// runs, one browser session at a time, streaming their output and cancelled by Ctrl+C, a disconnection or shutdown.
+
 #pragma once
 
 #include "networking/Tasks.hpp"

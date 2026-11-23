@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2023-03-16
+//
+// WebFront — tests/unit
+// Role: The IndexFS embedded provider: WebFront.js, favicon and the minimal index page.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: pins the closed asset list
+
 #include <webfront/system/IndexFS.hpp>
 #include <webfront/testing/Bdd.hpp>
 #include <webfront/tooling/HexDump.hpp>

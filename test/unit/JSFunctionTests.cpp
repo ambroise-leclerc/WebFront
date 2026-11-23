@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-02-03
+//
+// WebFront — tests/unit
+// Role: The JsFunction encodings sent to the browser: scalars, strings, tuples and typed arrays.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: wire format tests (ADR-003)
+
 #include <webfront/http/BuffersPolicy.hpp>
 #include <webfront/JsFunction.hpp>
 #include <webfront/networking/NetworkingMock.hpp>

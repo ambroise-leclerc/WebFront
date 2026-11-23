@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-28
+//
+// WebFront — tests/unit
+// Role: The automation session controller and page binding: grants, operations and page authentication.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: uses a binding application with a fake UI
+
 #include "TemporaryDirectory.hpp"
 #include <webfront/automation/Binding.hpp>
 #include <webfront/automation/Mcp.hpp>
