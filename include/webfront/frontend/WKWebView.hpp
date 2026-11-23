@@ -933,7 +933,7 @@ struct Session {
                 }
             }
         });
-        decision(error ? 0 : policy);
+        decision(failure ? 0 : policy);
     }
 };
 
