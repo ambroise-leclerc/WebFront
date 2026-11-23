@@ -15,6 +15,7 @@
 #include "../networking/Tasks.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -26,6 +27,7 @@
 #include <mutex>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -400,6 +402,14 @@ template <typename Tag>
     return host;
 }
 
+/// @brief Thrown on the interface thread by a frontend's `openSecondaryWindow` while its first window cannot host another
+/// yet (WebView2 creates its environment after open() started). invokeOnUIThreadWhenReady() tries again from another
+/// thread; on the interface thread it reaches the caller, as the std::logic_error it is.
+class WindowNotReady : public std::logic_error {
+public:
+    explicit WindowNotReady(const std::string& message) : std::logic_error(message) { }
+};
+
 namespace detail {
 
 /// One blocking invocation (invokeOnUIThread): deletes itself when its operation completes, whatever the outcome.
@@ -452,6 +462,23 @@ void invokeOnUIThread(const UIExecutor& executor, Function function) {
     ex::start(invocation->operation);
     if (auto error = answer.get())
         std::rethrow_exception(error);
+}
+
+/// @brief invokeOnUIThread(), run again every 10 ms while `function` throws WindowNotReady (#646). The interface thread
+/// cannot wait for itself: there, WindowNotReady reaches the caller. The frontend bounds the wait: a first window that
+/// never becomes ready closes, and the call then fails as invokeOnUIThread() does.
+template <typename Function>
+void invokeOnUIThreadWhenReady(const UIExecutor& executor, Function function) {
+    for (;;) {
+        try {
+            invokeOnUIThread(executor, function);
+            return;
+        } catch (const WindowNotReady&) {
+            if (executor.onUIThread())
+                throw;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
 }
 
 }  // namespace webfront::frontend

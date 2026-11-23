@@ -647,6 +647,7 @@ int checkHostClose() {
 // closing the second leaves the first usable, closing the first closes the second. A frontend that cannot show a second
 // window must refuse the call with an exception instead of opening a browser.
 constexpr const char* secondPage = "second-window.html?name=editor";
+constexpr const char* earlyPage  = "second-window.html?name=early";
 
 class SecondWindows {
     std::mutex                              mutex;
@@ -734,6 +735,42 @@ public:
     }
 };
 
+// Runs `function` on the interface thread once started; the future gives the executor's outcome (ran, stopped, unavailable).
+template <typename Function>
+class OnInterfaceThread {
+    struct Receiver {
+        using receiver_concept = webfront::networking::ex::receiver_tag;
+        OnInterfaceThread* self;
+        auto               get_env() const noexcept {
+            return webfront::networking::ex::prop{webfront::networking::ex::get_stop_token, webfront::networking::ex::never_stop_token{}};
+        }
+        void set_value() && noexcept {
+            self->function();
+            self->done.set_value(Outcome::ran);
+        }
+        void set_stopped() && noexcept {
+            self->done.set_value(Outcome::stopped);
+        }
+        void set_error(std::exception_ptr) && noexcept {
+            self->done.set_value(Outcome::unavailable);
+        }
+    };
+    Function              function;
+    std::promise<Outcome> done;
+    decltype(webfront::networking::ex::connect(std::declval<decltype(std::declval<webfront::frontend::UIExecutor>().schedule())>(),
+                                              std::declval<Receiver>())) operation;
+
+public:
+    OnInterfaceThread(const webfront::frontend::UIExecutor& executor, Function work)
+        : function(std::move(work)), operation(webfront::networking::ex::connect(executor.schedule(), Receiver{this})) { }
+    std::future<Outcome> outcome() {
+        return done.get_future();
+    }
+    void start() noexcept {
+        webfront::networking::ex::start(operation);
+    }
+};
+
 int checkSecondWindow() {
     App app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
     lifecycleStage = LifecycleStage::startingInstrumented;
@@ -756,6 +793,14 @@ int checkSecondWindow() {
                 if (!condition)
                     throw std::runtime_error(message);
             };
+            if constexpr (App::supportsSecondaryWindow) {
+                // As soon as the interface loop runs, before the first page connected (WebView2 is still creating its
+                // environment then), a second window opens: the call waits for the first one instead of refusing (#646).
+                const auto executor = app.uiExecutor();
+                for (int attempt = 0; attempt < 2000 && !executor.available(); ++attempt)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                app.openSecondaryWindow(earlyPage);
+            }
             check(windows.ready("main"), "The first window did not connect");
             if constexpr (!App::supportsSecondaryWindow) {
                 bool refused = false;
@@ -766,6 +811,12 @@ int checkSecondWindow() {
                 }
                 check(refused, "A frontend without a second window did not refuse the call");
             } else {
+                check(windows.ready("early"), "The window opened as the first one started did not connect");
+                check(app.requestClose(earlyPage), "The close request of the early window was refused");
+                for (int attempt = 0; attempt < 200 && app.requestClose(earlyPage); ++attempt)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+                check(!app.requestClose(earlyPage), "The early window did not close");
+                windows.forget("early");
                 windows.window("main").jsFunction("windowTests.setStorage")(std::string("from-main"));
                 // The round trip orders the fire-and-forget write before creating the second view.
                 check(windows.window("main").template jsFunction<std::string>("windowTests.getStorage")().get() == "from-main", "The first window could not write storage");
@@ -780,7 +831,7 @@ int checkSecondWindow() {
                 // The same page again brings the window to the front: no third connection.
                 app.openSecondaryWindow(secondPage, options);
                 check(windows.window("editor").template jsFunction<std::string>("windowTests.name")().get() == "editor", "The second window did not answer");
-                check(windows.connectionCount() == 2, "Opening the same page again opened another window");
+                check(windows.connectionCount() == 3, "Opening the same page again opened another window");  // main, early, editor
                 // A change made from one window is seen by both (shared cppFunction, pushed jsFunction).
                 windows.window("editor").jsFunction("windowTests.bump")();
                 check(windows.saw("main", 1) && windows.saw("editor", 1), "A change made in one window did not reach both");
@@ -796,6 +847,41 @@ int checkSecondWindow() {
                 check(windows.ready("editor"), "The second window did not reopen");
                 windows.window("main").jsFunction("windowTests.bump")();
                 check(windows.saw("editor", 2) && windows.saw("main", 2), "The reopened window does not share the state");
+                // A request that the loop runs after the first window closed, in the same pass, is refused: the window it
+                // would build would be destroyed with the first one at once, and its caller told it exists (#646). Both
+                // operations are queued from one operation of the interface thread, so the next pass runs them in order.
+                enum class Late { pending, opened, refused, failed };
+                std::atomic<Late> late{Late::pending};
+                std::atomic<bool> closeAccepted{false};
+                const auto        executor = app.uiExecutor();
+                OnInterfaceThread lateOpen(executor, [&]() noexcept {
+                    try {
+                        app.openSecondaryWindow("second-window.html?name=late");
+                        late = Late::opened;
+                    } catch (const std::logic_error&) {
+                        late = Late::refused;
+                    } catch (...) {
+                        late = Late::failed;
+                    }
+                });
+                OnInterfaceThread closeThenOpen(executor, [&]() noexcept {
+                    closeAccepted = app.requestClose();
+                    lateOpen.start();
+                });
+                auto lateOutcome  = lateOpen.outcome();
+                auto closeOutcome = closeThenOpen.outcome();
+                closeThenOpen.start();
+                check(closeOutcome.wait_for(std::chrono::seconds(20)) == std::future_status::ready && closeOutcome.get() == Outcome::ran,
+                      "The operation that closes the first window did not run");
+                check(closeAccepted, "The close request of the first window was refused");
+                check(lateOutcome.wait_for(std::chrono::seconds(20)) == std::future_status::ready, "The late request did not complete");
+                const auto lateRan = lateOutcome.get() == Outcome::ran;
+                check(late != Late::failed, "A request made as the first window closed failed with an unexpected exception");
+                // These frontends close the first window when the request runs, so the late request sees it closed; WebView2
+                // posts WM_CLOSE and may legitimately open the window before the first one closes it.
+                if constexpr (std::same_as<Frontend, webfront::frontend::WebKitGTKFrontend> || std::same_as<Frontend, webfront::frontend::WKWebViewFrontend>)
+                    check(lateRan && late == Late::refused, "A second window was opened after the first one had closed");
+                return;
             }
             check(app.requestClose(), "The close request of the first window was refused");
         } catch (const std::exception& error) {

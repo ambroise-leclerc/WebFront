@@ -1288,6 +1288,99 @@ const Scenario secondaryStaleSession{"A secondary window is never opened in a se
     });
 }};
 
+namespace {
+// A frontend whose first window cannot host a second one for its first `refusals` attempts, as WebView2 while its
+// environment is being created (#646). Its loop drains the interface-thread executor until the test closes the window.
+struct NotReadyFrontend : ContractFrontend<frontend::Action::closeServerAfterOpen> {
+    static inline std::atomic<int>      refusals = 0;
+    static inline std::atomic<int>      attempts = 0;
+    static inline std::atomic<int>      opened   = 0;
+    static inline std::function<void()> insideOpen;  // run on the interface thread once the session exists
+
+    [[nodiscard]] static frontend::UIExecutor uiExecutor() {
+        return frontend::uiExecutorHostOf<NotReadyFrontend>().executor();
+    }
+    static void open(std::string_view, std::string_view) {
+        auto& host = frontend::uiExecutorHostOf<NotReadyFrontend>();
+        host.attach([] { });
+        struct Detach {
+            ~Detach() {
+                frontend::uiExecutorHostOf<NotReadyFrontend>().close();
+            }
+        } detach;
+        const auto state = ContractIoContext::current;
+        {
+            std::lock_guard lock(state->mutex);
+            state->openThread      = std::this_thread::get_id();
+            state->frontendEntered = true;
+            state->windowCreated   = true;
+            state->changed.notify_all();
+        }
+        if (insideOpen)
+            insideOpen();
+        for (;;) {
+            host.drain();
+            std::unique_lock lock(state->mutex);
+            if (state->changed.wait_for(lock, std::chrono::milliseconds(1), [&] { return state->closeWindow; }))
+                return;
+        }
+    }
+    static void openSecondaryWindow(std::string_view, std::string_view, std::string_view, const ContentPolicy&, const WindowOptions&, const ViewLaunch&) {
+        ++attempts;
+        if (refusals > 0) {
+            --refusals;
+            throw frontend::WindowNotReady("the first window is not ready");
+        }
+        ++opened;
+    }
+    static bool closeSecondaryWindow(std::string_view) {
+        return false;
+    }
+};
+}  // namespace
+
+const Scenario secondaryWaitsForFirstWindow{"A second window requested while the first is not ready waits for it (#646)", [] {
+    given("an application whose first window refuses a second one for its first attempts", [&] {
+        using Frontend = NotReadyFrontend;
+        Frontend::attempts = 0;
+        Frontend::opened   = 0;
+        HostApp<Frontend> app;
+        static_assert(HostApp<Frontend>::supportsSecondaryWindow);
+        const auto state = ContractIoContext::current;
+        bool       refusedOnInterfaceThread = false;
+        Frontend::insideOpen = [&] {
+            Frontend::refusals = 1;
+            try {
+                app.openSecondaryWindow("one.html");
+            } catch (const frontend::WindowNotReady&) {
+                refusedOnInterfaceThread = true;
+            }
+            Frontend::refusals = 3;
+        };
+        // Closes the window on every exit, also by a failed requirement, so that show() returns before the join.
+        struct CloseWindow {
+            std::shared_ptr<LoopState> state;
+            ~CloseWindow() {
+                std::lock_guard lock(state->mutex);
+                state->closeWindow = true;
+                state->changed.notify_all();
+                Frontend::insideOpen = nullptr;
+            }
+        };
+        std::jthread showing([&] { app.show(); });
+        CloseWindow  close{state};
+        requireEventually([&] { return windowOpen(state); });
+        when("another thread asks for a second window", [&] {
+            app.openSecondaryWindow("one.html");
+            then("the call tries again until the window opens; the interface thread, which cannot wait, is refused", [&] {
+                check(refusedOnInterfaceThread);
+                check(Frontend::opened == 1);
+                check(Frontend::attempts == 5);  // one on the interface thread, three refused and the one that opened
+            });
+        });
+    });
+}};
+
 const Scenario secondWindowRefused{"A frontend without a second window refuses openSecondaryWindow with an exception", [] {
     given("an application whose frontend shows one window", [&] {
         HostApp<HostFrontend<>> app;

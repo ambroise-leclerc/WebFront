@@ -1034,7 +1034,8 @@ struct Windows {
 /// On the interface thread: opens `file` in a window of its own, or brings the window already showing it to the front.
 inline void openSecondary(const std::string& address, const std::string& port, const std::string& file, OpenOptions options, SandboxMode mode) {
     auto& windows = Windows::instance();
-    if (!windows.primary)
+    // A first window that closed still runs its loop until the pass ends: a window built now would be destroyed with it.
+    if (!windows.primary || windows.primary->closed)
         throw std::logic_error("WebKitGTKFrontend: no window of the application is open; show() it before opening another");
     if (const auto found = windows.secondary.find(file); found != windows.secondary.end()) {
         api().windowPresent(found->second->window);
@@ -1049,10 +1050,15 @@ inline void openSecondary(const std::string& address, const std::string& port, c
         Windows::instance().retire(file);
     };
     // Registered only once started: a window whose start throws is not left in the table, and its page can be opened again.
-    // One that closed during start() retired itself from a table that did not hold it yet: it is not kept.
+    // One that closed during start() retired itself from a table that did not hold it yet, without a word: the caller is
+    // still waiting, so the failure is thrown to it.
     session->start(applicationUrl(address, port, file, options.launch.origin));
-    if (!session->closed)
-        windows.secondary[file] = std::move(session);
+    if (session->closed) {
+        if (session->failure)
+            std::rethrow_exception(session->failure);
+        throw std::runtime_error("WebKitGTKFrontend: the secondary window of '" + file + "' closed while it started");
+    }
+    windows.secondary[file] = std::move(session);
 }
 
 /// On the interface thread: asks the secondary window showing `file` to close, as its user would. False when there is none.
@@ -1148,7 +1154,8 @@ struct BasicWebKitGTKFrontend {
     /// Opens `page` in a second window beside the one open() runs, or brings the window already showing that page to the
     /// front (#616). Callable from any thread while open() runs; it returns once the window exists, and throws
     /// std::logic_error when no window is open. The window shares the application's network session: its cookies,
-    /// storage and downloads (tracked by the first window). Its `WindowOptions::media` is that of the first window.
+    /// storage and downloads (tracked by the first window). Its `WindowOptions::media` is that of the first window. A window
+    /// that cannot start throws its failure.
     static void openSecondaryWindow([[maybe_unused]] std::string_view address, [[maybe_unused]] std::string_view port,
                                     [[maybe_unused]] std::string_view page, [[maybe_unused]] const ContentPolicy& policy,
                                     [[maybe_unused]] const WindowOptions& window, [[maybe_unused]] const ViewLaunch& launch) {

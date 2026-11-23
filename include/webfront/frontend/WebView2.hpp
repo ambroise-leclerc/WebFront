@@ -1064,6 +1064,7 @@ inline void reapSecondaryWindows() {
 }
 
 /// On the interface thread: opens `page` in a window of its own, or brings the window already showing it to the front.
+/// Throws WindowNotReady while the first window's environment is being created (show() has just started).
 inline void openSecondary(std::string_view address, std::string_view port, std::string_view page, const WebView2Options& options) {
     auto& windows = Windows::instance();
     if (!windows.primary)
@@ -1077,8 +1078,10 @@ inline void openSecondary(std::string_view address, std::string_view port, std::
         }
         return;
     }
-    if (windows.primary->closed || !windows.primary->environment)
-        throw std::logic_error("WebView2Frontend: the first window is not ready (its browser is not created yet, or it is closing)");
+    if (windows.primary->closed)
+        throw std::logic_error("WebView2Frontend: no window of the application is open; show() it before opening another");
+    if (!windows.primary->environment)
+        throw WindowNotReady("WebView2Frontend: the first window is not ready (its browser is being created); call it later");
     auto session           = std::make_shared<Session>(options.startupTimeout);
     session->secondary     = true;
     session->contentPolicy = webfront::detail::BoundContentPolicy{frontend::detail::applicationUrl(address, port, "", options.launch.origin), options.contentPolicy};
@@ -1090,9 +1093,14 @@ inline void openSecondary(std::string_view address, std::string_view port, std::
     session->createWindow(windows.primary->shown(), options.window);
     session->startSecondary(windows.primary->environment.Get());
     // Registered only once started: a window whose start throws is not left in the table, and its page can be opened again.
-    // One that closed during the start retired itself from a table that did not hold it yet: it is not kept.
-    if (!session->closed)
-        windows.secondary[key] = std::move(session);
+    // One that closed during the start retired itself from a table that did not hold it yet, without a word: the caller is
+    // still waiting, so the failure is thrown to it.
+    if (session->closed) {
+        if (session->failure)
+            std::rethrow_exception(session->failure);
+        throw std::runtime_error("WebView2Frontend: the secondary window of '" + key + "' closed while it started");
+    }
+    windows.secondary[key] = std::move(session);
 }
 
 /// On the interface thread: closes the secondary window showing `page`, as its user would. False when there is none.
@@ -1197,13 +1205,17 @@ struct WebView2Frontend {
     /// Opens `page` in a second window beside the one open() runs, or brings the window already showing that page to the
     /// front (#616). Callable from any thread while open() runs; it returns once the window exists, and throws
     /// std::logic_error when no window is open. The window shares the environment of the first: its profile (cookies,
-    /// storage) and its browser process.
+    /// storage) and its browser process. A call made while that environment is being created waits for it, except on the
+    /// interface thread, where it throws std::logic_error. A window that cannot start throws its failure.
     static void openSecondaryWindow([[maybe_unused]] std::string_view address, [[maybe_unused]] std::string_view port,
                                     [[maybe_unused]] std::string_view page, [[maybe_unused]] const ContentPolicy& policy,
                                     [[maybe_unused]] const WindowOptions& window, [[maybe_unused]] const ViewLaunch& launch) {
 #if defined(WEBFRONT_EMBED_WEBVIEW2) && defined(_WIN32)
         try {
-            invokeOnUIThread(uiExecutor(), [&] {
+            // Just after show() started, the first window's environment is still being created: a caller on another thread
+            // waits for it. The first window's watchdog bounds the wait: it closes the window if the runtime never answers,
+            // and the call is then refused.
+            invokeOnUIThreadWhenReady(uiExecutor(), [&] {
                 detail::webview2::openSecondary(address, port, page, WebView2Options{.contentPolicy = policy, .window = window, .launch = launch});
             });
         } catch (const UIExecutorUnavailable&) {

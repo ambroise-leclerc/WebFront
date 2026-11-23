@@ -469,7 +469,9 @@ struct Session {
             if (window)
                 send<void>(window, "orderOut:", static_cast<id>(nullptr));
             if (closedHook) {
-                try { closedHook(); } catch (...) { }
+                try {
+                    closedHook();
+                } catch (...) {}
             }
             return;
         }
@@ -1198,28 +1200,35 @@ inline Class viewClass() {
 
 // All windows belong to the active AppKit session and are used on the main thread.
 struct Windows {
-    Session* primary = nullptr;
+    Session*                                        primary = nullptr;
     std::map<std::string, std::unique_ptr<Session>> secondary;
-    std::vector<std::unique_ptr<Session>> finished;
-    static Windows& instance() { static Windows windows; return windows; }
+    std::vector<std::unique_ptr<Session>>           finished;
+
+    static Windows& instance() {
+        static Windows windows;
+        return windows;
+    }
     void retire(const std::string& page) {
         const auto found = secondary.find(page);
-        if (found == secondary.end()) return;
+        if (found == secondary.end())
+            return;
         // run() returned long ago for this window, so nothing else can report a page that failed to load.
         if (found->second->error) {
             try {
                 std::rethrow_exception(found->second->error);
             } catch (const std::exception& failure) {
                 std::fprintf(stderr, "WKWebViewFrontend: the secondary window of '%s' closed: %s\n", page.c_str(), failure.what());
-            } catch (...) {
-            }
+            } catch (...) {}
         }
         finished.push_back(std::move(found->second));
         secondary.erase(found);
-        dispatch_async_f(dispatch_get_main_queue(), nullptr, +[](void*) {
-            auto retired = std::move(instance().finished);
-            retired.clear();
-        });
+        dispatch_async_f(
+            dispatch_get_main_queue(),
+            nullptr,
+            +[](void*) {
+                auto retired = std::move(instance().finished);
+                retired.clear();
+            });
     }
     void clear() {
         secondary.clear();
@@ -1230,29 +1239,41 @@ struct Windows {
 
 inline void openSecondary(std::string_view address, std::string_view port, std::string_view page, WKWebViewOptions options) {
     auto& windows = Windows::instance();
-    if (!windows.primary)
+    // A first window that closed still runs its loop until the pass ends: a window built now would be destroyed with it.
+    if (!windows.primary || windows.primary->closed)
         throw std::logic_error("WKWebView: no application window is open");
     std::string key(page);
     if (const auto found = windows.secondary.find(key); found != windows.secondary.end()) {
         send<void>(found->second->window, "makeKeyAndOrderFront:", static_cast<id>(nullptr));
         return;
     }
-    auto child = std::make_unique<Session>(applicationUrl(address, port, page, options.launch.origin), std::move(options));
-    child->secondary = true;
+    // The first window's visibility and startup delay: a hidden application never shows a window or takes the focus.
+    options.visible        = windows.primary->options.visible;
+    options.startupTimeout = windows.primary->options.startupTimeout;
+    auto child             = std::make_unique<Session>(applicationUrl(address, port, page, options.launch.origin), std::move(options));
+    child->secondary       = true;
     child->sharedDataStore = send(send(windows.primary->view, "configuration"), "websiteDataStore");
     child->create();
-    child->closedHook = [key] { Windows::instance().retire(key); };
+    child->closedHook = [key] {
+        Windows::instance().retire(key);
+    };
     // Registered only once started: a window whose start throws is not left in the table, and its page can be opened again.
-    // One that closed during start() already retired itself from a table that did not hold it yet: it is not kept.
+    // One that closed during start() already retired itself from a table that did not hold it yet, without a word: the
+    // caller is still waiting, so the failure is thrown to it.
     child->start();
-    if (!child->closed)
-        windows.secondary[key] = std::move(child);
+    if (child->closed) {
+        if (child->error)
+            std::rethrow_exception(child->error);
+        throw std::runtime_error("WKWebView: the secondary window of '" + key + "' closed while it started");
+    }
+    windows.secondary[key] = std::move(child);
 }
 
 inline bool closeSecondary(std::string_view page) {
-    auto& windows = Windows::instance();
-    const auto found = windows.secondary.find(std::string(page));
-    if (found == windows.secondary.end() || found->second->closed) return false;
+    auto&      windows = Windows::instance();
+    const auto found   = windows.secondary.find(std::string(page));
+    if (found == windows.secondary.end() || found->second->closed)
+        return false;
     found->second->close();
     return true;
 }
@@ -1291,11 +1312,13 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
             host.close();
         }
     } closing{host, windowHost};
-    auto& windows = Windows::instance();
+    auto& windows   = Windows::instance();
     windows.primary = &window;
     struct Others {
         Windows& windows;
-        ~Others() { windows.clear(); }
+        ~Others() {
+            windows.clear();
+        }
     } others{windows};
     window.run();
 }
@@ -1327,9 +1350,12 @@ struct WKWebViewFrontend {
 #endif
     }
 
-    static void openSecondaryWindow([[maybe_unused]] std::string_view address, [[maybe_unused]] std::string_view port,
-                                    [[maybe_unused]] std::string_view page, [[maybe_unused]] const ContentPolicy& policy,
-                                    [[maybe_unused]] const WindowOptions& window, [[maybe_unused]] const ViewLaunch& launch) {
+    static void openSecondaryWindow([[maybe_unused]] std::string_view     address,
+                                    [[maybe_unused]] std::string_view     port,
+                                    [[maybe_unused]] std::string_view     page,
+                                    [[maybe_unused]] const ContentPolicy& policy,
+                                    [[maybe_unused]] const WindowOptions& window,
+                                    [[maybe_unused]] const ViewLaunch&    launch) {
 #if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
         try {
             invokeOnUIThread(uiExecutor(), [&] {
@@ -1346,8 +1372,12 @@ struct WKWebViewFrontend {
 #if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
         bool closed = false;
         try {
-            invokeOnUIThread(uiExecutor(), [&] { closed = detail::wkwebview::closeSecondary(page); });
-        } catch (const UIExecutorUnavailable&) { return false; }
+            invokeOnUIThread(uiExecutor(), [&] {
+                closed = detail::wkwebview::closeSecondary(page);
+            });
+        } catch (const UIExecutorUnavailable&) {
+            return false;
+        }
         return closed;
 #else
         return false;

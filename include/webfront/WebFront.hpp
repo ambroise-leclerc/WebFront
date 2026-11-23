@@ -1318,12 +1318,19 @@ public:
      * window already shows brings that window to the front instead of opening another. A window is identified by the page
      * string exactly as given, query included: "a.html?x=1" and "a.html?x=2" are two windows, and requestClose(page) takes
      * the string that opened it. Closing the window of show() closes the others with it; closing a secondary window leaves
-     * the rest running. A page that fails to load in a secondary window closes it and the failure is written to stderr: open()
-     * has returned by then, so nothing can throw it.
+     * the rest running. A window that cannot start (its view refuses the navigation) throws the failure to the caller; a page
+     * that fails to load later closes its window and the failure is written to stderr: this call has returned by then, so
+     * nothing can throw it. The window follows the first one's visibility: a hidden application shows none.
      *
-     * Callable from any thread, while show() runs; it returns once the window exists. Throws std::logic_error when this
-     * application is not showing a window, and when the frontend cannot show a second window (today the WebKitGTK,
-     * WKWebView and WebView2 frontends can; the system browser and CEF refuse). Window placement is left to the toolkit.
+     * Callable from any thread while show() runs, and it waits for the interface thread: it returns once the window exists
+     * (on the interface thread itself it runs at once). Called from a `cppFunction` callback, it holds the server's thread
+     * until then, and with it every exchange of the application, also while a modal dialog keeps the interface thread busy;
+     * there, run it on the interface thread instead (an operation scheduled with `app.uiExecutor()`), where it does not wait.
+     * Under WebView2, a call made just after show() started waits until the first window's browser is created; on the
+     * interface thread that call throws std::logic_error instead. Throws std::logic_error when this application is not
+     * showing a window (also once the first window has closed), and when the frontend cannot show a second window (today the
+     * WebKitGTK, WKWebView and WebView2 frontends can; the system browser and CEF refuse). Window placement is left to the
+     * toolkit.
      */
     void openSecondaryWindow(std::string_view page, WindowOptions options = {}) {
         if constexpr (supportsSecondaryWindow) {
@@ -1339,7 +1346,9 @@ public:
             if (options.background.empty())
                 options.background = windowOptions.background;
             try {
-                frontend::invokeOnUIThread(executor, [&] {
+                // Called on the interface thread, the frontend cannot wait for its first window to become ready: a caller on
+                // another thread tries again while it is not (WebView2 just after show() started).
+                frontend::invokeOnUIThreadWhenReady(executor, [&] {
                     if (showEpoch.load() != epoch || executor.session() != session)
                         throw std::logic_error("webfront::BasicWF::openSecondaryWindow(): the interface session has ended");
                     Frontend::openSecondaryWindow(httpAddress, httpPort, page, contentPolicy, options,
@@ -1355,7 +1364,8 @@ public:
 
     /** @brief Asks the secondary window showing `page` to close, as if the user had closed it; callable from any thread.
      * Returns false when no such window is open (or the frontend has none). The window of show() ends with
-     * requestClose().
+     * requestClose(). Unlike requestClose(), it waits for the interface thread, as openSecondaryWindow() does: from a
+     * `cppFunction` callback, run it on the interface thread instead.
      */
     bool requestClose(std::string_view page) {
         if constexpr (supportsSecondaryWindow && requires { { Frontend::closeSecondaryWindow(page) } -> std::same_as<bool>; }) {
