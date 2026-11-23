@@ -86,8 +86,8 @@ struct FakeHooks {
 
 using Registry = frontend::detail::WindowRegistry<FakeSession, FakeHooks>;
 
-void openPage(Registry& windows, const std::string& page, bool closeOnStart = false, std::exception_ptr failOnStart = {}) {
-    windows.open(
+bool openPage(Registry& windows, const std::string& page, bool closeOnStart = false, std::exception_ptr failOnStart = {}) {
+    return windows.open(
         page,
         [&](FakeSession&) {
             auto session          = std::make_shared<FakeSession>(page);
@@ -193,12 +193,14 @@ const Scenario secondaryWindowRegistry{"The registry of the secondary windows is
 
         when("a window opens a page while the others are destroyed", [&] {
             openPage(windows, "a.html");
+            bool lateOpened           = true;
             FakeSession::destroyProbe = [&] {
-                openPage(windows, "late.html");  // a destructor cannot be refused by an exception: it is ignored
+                lateOpened = openPage(windows, "late.html");  // a destructor cannot be refused by an exception: it is told false
             };
             windows.clear();
             FakeSession::destroyProbe = nullptr;
-            then("no window outlives the session", [&] {
+            then("no window outlives the session, and the request is told it was refused", [&] {
+                check(!lateOpened);
                 check(windows.secondary.empty());
                 check(!happened("create late.html"));
             });
@@ -311,10 +313,13 @@ struct FakeFrontend : EmbeddedFrontend<FakeFrontend> {
     static inline std::vector<std::string> opened;
     static void openNative(std::string_view address, std::string_view port, std::string_view file, const Options& options) {
         opened.push_back(std::string(address) + ":" + std::string(port) + "/" + std::string(file) + (options.window.title.empty() ? "" : " " + options.window.title) +
-                         (options.launch.secret.empty() ? "" : " launched"));
+                         (options.launch.secret.empty() ? "" : " launched") + (options.contentPolicy.devToolsEnabled ? "" : " nodevtools"));
     }
     static void closeNative(const NativeWindowHandle&) { }
-    static void openSecondaryNative(std::string_view, std::string_view, std::string_view, const Options&) { }
+    static inline std::vector<std::string> openedSecondary;
+    static void openSecondaryNative(std::string_view, std::string_view, std::string_view page, const Options& options) {
+        openedSecondary.push_back(std::string(page) + (options.contentPolicy.devToolsEnabled ? "" : " nodevtools") + " " + options.window.title + " " + options.launch.secret);
+    }
     static bool closeSecondaryNative(std::string_view) { return true; }
 };
 
@@ -333,6 +338,27 @@ struct ConfiguredFrontend : EmbeddedFrontend<ConfiguredFrontend> {
         opened.push_back(std::string(file) + " " + options.window.title + " " + options.launch.secret);
     }
     static void closeNative(const NativeWindowHandle&) { }
+};
+
+// A configured frontend with secondary windows (WebView2FrontendWithOptions): a secondary window does not ask the provider.
+struct ConfiguredSecondaryFrontend : EmbeddedFrontend<ConfiguredSecondaryFrontend> {
+    static constexpr bool             secondaryWindows = true;
+    static constexpr bool             compiled         = true;
+    static constexpr std::string_view name             = "ConfiguredSecondaryFrontend";
+    using Host    = ConfiguredSecondaryFrontend;
+    using Options = ViewOptions;
+    static inline int                      providerCalls = 0;
+    static inline std::vector<std::string> openedSecondary;
+    static ViewOptions defaultOptions() {
+        ++providerCalls;
+        throw std::runtime_error("the provider failed");
+    }
+    static void openNative(std::string_view, std::string_view, std::string_view, const Options&) { }
+    static void closeNative(const NativeWindowHandle&) { }
+    static void openSecondaryNative(std::string_view, std::string_view, std::string_view page, const Options& options) {
+        openedSecondary.push_back(std::string(page) + " " + options.window.title + " " + options.launch.secret);
+    }
+    static bool closeSecondaryNative(std::string_view) { return true; }
 };
 
 struct AbsentFrontend : EmbeddedFrontend<AbsentFrontend> {
@@ -374,9 +400,11 @@ const Scenario embeddedFrontendFacade{"The facade of the embedded frontends give
             FakeFrontend::open("1.2.3.4", "9003", "d.html", ContentPolicy{}, WindowOptions{.title = "T"});
             FakeFrontend::open("1.2.3.4", "9004", "e.html", ContentPolicy{}, WindowOptions{}, ViewLaunch{"secret", "origin"});
             FakeFrontend::open("1.2.3.4", "9005", "f.html", ViewOptions{.window = {.title = "O"}});
+            FakeFrontend::open("1.2.3.4", "9006", "g.html", ContentPolicy{.devToolsEnabled = false});
             then("each reaches the toolkit with its settings", [&] {
                 check(FakeFrontend::opened == std::vector<std::string>{"127.0.0.1:9000/a.html", "1.2.3.4:9001/b.html", "1.2.3.4:9002/c.html",
-                                                                       "1.2.3.4:9003/d.html T", "1.2.3.4:9004/e.html launched", "1.2.3.4:9005/f.html O"});
+                                                                       "1.2.3.4:9003/d.html T", "1.2.3.4:9004/e.html launched", "1.2.3.4:9005/f.html O",
+                                                                       "1.2.3.4:9006/g.html nodevtools"});
             });
         });
         when("no window is open", [&] {
@@ -396,6 +424,31 @@ const Scenario embeddedFrontendFacade{"The facade of the embedded frontends give
         then("a call replaces only the settings it passes", [&] {
             check(ConfiguredFrontend::opened == std::vector<std::string>{"a.html configured configured-secret", "b.html own configured-secret", "c.html own own-secret"});
         });
+    });
+    given("a configured frontend with a window open", [&] {
+        auto& host = uiExecutorHostOf<ConfiguredSecondaryFrontend>();
+        host.attach([] {});  // this thread is the interface thread: the calls run on it
+        ConfiguredSecondaryFrontend::providerCalls = 0;
+        ConfiguredSecondaryFrontend::openedSecondary.clear();
+        FakeFrontend::openedSecondary.clear();
+        when("a secondary window is opened", [&] {
+            ConfiguredSecondaryFrontend::openSecondaryWindow("127.0.0.1", "9000", "a.html", ContentPolicy{}, WindowOptions{.title = "second"}, ViewLaunch{"secret", ""});
+            then("the provider is not asked, and the call's settings arrive", [&] {
+                check(ConfiguredSecondaryFrontend::providerCalls == 0);
+                check(ConfiguredSecondaryFrontend::openedSecondary == std::vector<std::string>{"a.html second secret"});
+            });
+        });
+        host.close();
+    });
+    given("a frontend with a window open and a policy of its own", [&] {
+        auto& host = uiExecutorHostOf<FakeHost>();
+        host.attach([] {});
+        FakeFrontend::openedSecondary.clear();
+        FakeFrontend::openSecondaryWindow("127.0.0.1", "9000", "a.html", ContentPolicy{.devToolsEnabled = false}, WindowOptions{.title = "T"}, ViewLaunch{"s", ""});
+        then("the secondary window receives the policy", [&] {
+            check(FakeFrontend::openedSecondary == std::vector<std::string>{"a.html nodevtools T s"});
+        });
+        host.close();
     });
     given("a frontend whose engine is not part of the build", [&] {
         then("every entry point explains what to enable", [&] {

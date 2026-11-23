@@ -80,20 +80,17 @@ namespace webfront::frontend::detail {
 class StartupTrace {
     std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
 
+    /// Read at each milestone, not once: an application may set the variable between two openings. On Windows the process
+    /// environment block is read, which SetEnvironmentVariableW changes and the C runtime's copy does not follow.
     [[nodiscard]] static bool enabled() noexcept {
-        static const bool value = [] {
-#if defined(_MSC_VER)
-            char*  text   = nullptr;  // any length: a buffer too small for the value would read as "not set"
-            size_t length = 0;
-            const bool set = _dupenv_s(&text, &length, "WEBFRONT_STARTUP_TRACE") == 0 && text && *text && std::string_view{text} != "0";
-            std::free(text);
-            return set;
+#if defined(_WIN32)
+        wchar_t     text[2] = {};
+        const DWORD length  = GetEnvironmentVariableW(L"WEBFRONT_STARTUP_TRACE", text, 2);  // a longer value returns its size: not "0"
+        return length > 0 && !(length == 1 && text[0] == L'0');
 #else
-            const auto* text = std::getenv("WEBFRONT_STARTUP_TRACE");
-            return text && *text && std::string_view{text} != "0";
+        const auto* text = std::getenv("WEBFRONT_STARTUP_TRACE");
+        return text && *text && std::string_view{text} != "0";
 #endif
-        }();
-        return value;
     }
 
 public:

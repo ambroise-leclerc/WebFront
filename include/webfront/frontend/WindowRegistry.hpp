@@ -92,17 +92,21 @@ public:
      * `create(Session& primary)` builds the window and returns a `std::shared_ptr<Session>`; `start(Session&, Session& primary)`
      * starts its load and returns. Either may throw (a window whose creation or start throws is not registered, and its page
      * can be opened again). Throws std::logic_error when the first window is not open: one that closed still runs its loop
-     * until the pass ends, and a window built now would be destroyed with it.
+     * until the pass ends, and a window built now would be destroyed with it. False, with a word on standard error, when
+     * the session is ending (clear() runs): the request comes from the teardown of a window, which an exception would
+     * turn into the end of the process, so it is refused without one.
      */
     template <typename Create, typename Start>
-    void open(const std::string& page, Create&& create, Start&& start) {
-        if (clearing)
-            return;  // asked by the teardown of a window of a session that is ending: an exception would end the process
+    bool open(const std::string& page, Create&& create, Start&& start) {
+        if (clearing) {
+            std::fprintf(stderr, "%.*s: the window of '%s' was not opened: the session is ending\n", static_cast<int>(Hooks::name.size()), Hooks::name.data(), page.c_str());
+            return false;
+        }
         if (!primary || primary->closed)
             throw std::logic_error(std::string(Hooks::name) + ": no window of the application is open; show() it before opening another");
         if (const auto found = secondary.find(page); found != secondary.end()) {
             hooks.present(*found->second);
-            return;
+            return true;
         }
         std::shared_ptr<Session> session = create(*primary);
         session->closedHook              = [this, page] {
@@ -117,6 +121,7 @@ public:
             throw std::runtime_error(std::string(Hooks::name) + ": the secondary window of '" + page + "' closed while it started");
         }
         secondary[page] = std::move(session);
+        return true;
     }
 
     /// On the interface thread: asks the secondary window showing `page` to close, as its user would. False when there is none.
@@ -152,11 +157,14 @@ public:
     InterfaceSession(UIExecutorHost& uiHost, NativeWindowHost& nativeHost, Registry& registry, typename std::remove_pointer_t<decltype(Registry::primary)>& primary, std::function<void()> wake, NativeWindowHandle handle)
         : host(uiHost), windowHost(nativeHost), windows(registry) {
         host.attach(std::move(wake));
+        bool published = false;
         try {
             windowHost.publish(std::move(handle));
+            published       = true;
             windows.primary = &primary;
         } catch (...) {
-            windowHost.retract();
+            if (published)  // only what this constructor did: a publish that threw left another window's handle in place
+                windowHost.retract();
             host.close();
             throw;
         }

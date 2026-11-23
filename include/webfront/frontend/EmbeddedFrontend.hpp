@@ -36,7 +36,9 @@ namespace detail {
 /// What an embedded frontend is asked when it opens a window, the same for the first window and the secondary ones. A
 /// frontend honours the settings that its toolkit has (a field it has no use for is ignored) and its own startup deadline.
 struct ViewOptions {
-    /// The initial document must finish loading within this interval; no bridge connection is required.
+    /// The initial navigation must succeed within this interval; no bridge connection is required. What ends the wait
+    /// depends on the engine: WKWebView, the end of the load; WebKitGTK, the commit of the navigation (resources still
+    /// loading are not waited for); WebView2, the creation of its browser, before the navigation starts.
     std::chrono::milliseconds startupTimeout{30000};
     ContentPolicy         contentPolicy{};
     WindowOptions         window{};
@@ -48,7 +50,9 @@ struct ViewOptions {
     std::filesystem::path downloadDirectory{};
     /// Test injection: called with the destination of each finished download.
     std::function<void(const std::string&)> downloadFinished{};
-    /// Test injection: answers `alert`, `confirm` and `prompt` without a box (WKWebView, WebKitGTK, WebView2).
+    /// Test injection: answers `alert`, `confirm` and `prompt` without a box (WKWebView, WebKitGTK, WebView2). WKWebView
+    /// does not handle `beforeunload` (its public WKUIDelegate has no method for it): a page that relies on it can lose
+    /// unsaved changes on navigation or close, and WebFront does not confirm it.
     ScriptDialogHandler answerScriptDialog{};
     /// Per-launch proof of this view (ADR-020): given to documents of the application's origin only, at the start of the
     /// document, for WebFront.js to present in its handshake. Set by WebFront; empty gives the view no association.
@@ -124,7 +128,7 @@ struct EmbeddedFrontend {
         if constexpr (!Derived::compiled) {
             unavailable();
         } else {
-            auto options = optionsOf(policy, &window, &launch);
+            auto options = secondaryOptionsOf(policy, window, launch);
             try {
                 onUIThread([&] {
                     Derived::openSecondaryNative(address, port, page, options);
@@ -191,6 +195,16 @@ private:
             options.window = *window;
         if (launch)
             options.launch = *launch;
+        return options;
+    }
+    // A secondary window takes the first window's settings (ViewOptions::inherit, or the engine's own session), so it starts
+    // from default options: the application's provider is not asked, and its failure cannot stop a window that is only brought to the front.
+    template <typename D = Derived>
+    static typename D::Options secondaryOptionsOf(const ContentPolicy& policy, const WindowOptions& window, const ViewLaunch& launch) {
+        typename D::Options options{};
+        options.contentPolicy = policy;
+        options.window        = window;
+        options.launch        = launch;
         return options;
     }
     template <typename Function>
