@@ -269,7 +269,7 @@ const Scenario interfaceSessionOrder{"The session of an open() attaches, publish
     });
 }};
 
-namespace {
+namespace window_registry_fakes {  // named, not anonymous: the clang warning for unused constants of anonymous types
 struct FakeHost;
 struct UnavailableHost;
 
@@ -318,7 +318,8 @@ constexpr bool offersSecondaryWindow = requires(std::string_view text, const Con
 };
 static_assert(offersSecondaryWindow<FakeFrontend> && !offersSecondaryWindow<SingleWindowFrontend>);
 static_assert(FrontendType<FakeFrontend> && FrontendType<AbsentFrontend> && FrontendType<SingleWindowFrontend>);
-}  // namespace
+}  // namespace window_registry_fakes
+using namespace window_registry_fakes;
 
 const Scenario embeddedFrontendFacade{"The facade of the embedded frontends gives every overload of open()", {"window-registry"}, [] {
     given("a frontend that declares its toolkit calls", [&] {
