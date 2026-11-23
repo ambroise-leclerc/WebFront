@@ -183,12 +183,7 @@ int main(int argc, char** argv) {
         return status;
     } catch (const webfront::automation::mcphttp::BindError& error) {
         std::cerr << "automation_host: " << error.what() << '\n';
-#ifdef _WIN32
-        const auto addressInUse = WSAEADDRINUSE;
-#else
-        const auto addressInUse = EADDRINUSE;
-#endif
-        if (error.code().value() == addressInUse)
+        if (error.addressInUse())
             return 73;
         return 1;
     } catch (const std::exception& error) {

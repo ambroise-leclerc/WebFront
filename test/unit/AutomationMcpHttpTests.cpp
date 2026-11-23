@@ -685,12 +685,7 @@ const Scenario stableMcp{"A fixed MCP token and port survive activation and auth
             open->close();
             break;
         } catch (const mcphttp::BindError& error) {
-#ifdef _WIN32
-            const auto addressInUse = WSAEADDRINUSE;
-#else
-            const auto addressInUse = EADDRINUSE;
-#endif
-            if (error.code().value() != addressInUse || attempt == 4)
+            if (!error.addressInUse() || attempt == 4)
                 throw;
         }
     }
@@ -727,4 +722,21 @@ const Scenario unauthenticatedMcpBanner{"An unauthenticated MCP listener warns a
     require(captured.str().find("WARNING: MCP authentication disabled") != std::string::npos);
     require(captured.str().find(automation->mcpUrl()) != std::string::npos);
     automation->close();
+    captured.str("");
+    captured.clear();
+    auto silent = enableAutomation(app, {.disableMcpAuthentication = true, .discovery = root.path() / "sessions", .announce = false});
+    require(captured.str().empty());
+    require(silent->banner().find("WARNING: MCP authentication disabled") != std::string::npos);
+    silent->close();
+}};
+
+const Scenario mcpBindError{"MCP bind errors identify an occupied address", [] {
+    using namespace mcphttptests;
+#ifdef _WIN32
+    const int occupied = WSAEADDRINUSE;
+#else
+    const int occupied = EADDRINUSE;
+#endif
+    require(mcphttp::BindError{std::error_code{occupied, std::system_category()}, 1234}.addressInUse());
+    require(!mcphttp::BindError{std::make_error_code(std::errc::permission_denied), 1234}.addressInUse());
 }};

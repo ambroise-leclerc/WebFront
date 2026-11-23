@@ -360,6 +360,14 @@ class BindError : public std::system_error {
 public:
     BindError(std::error_code cause, unsigned short port)
         : std::system_error(cause, "WebFront cannot listen for MCP on 127.0.0.1:" + std::to_string(port)) { }
+    /// Whether the native error reports that the requested port is already in use.
+    [[nodiscard]] bool addressInUse() const noexcept {
+#ifdef _WIN32
+        return code().value() == WSAEADDRINUSE;
+#else
+        return code().value() == EADDRINUSE;
+#endif
+    }
 };
 
 /// The loopback listener. It writes `mcp.json` into `directory` (an existing private directory outside the project) and

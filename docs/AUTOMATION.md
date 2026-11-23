@@ -73,7 +73,7 @@ auto automation = webfront::automation::enableAutomation(
 
 The application includes `<cstdlib>`, `<stdexcept>` and `<string>` for this example; MSVC reports `std::getenv` as deprecated (C4996), so use `_dupenv_s` or define `_CRT_SECURE_NO_WARNINGS` there. A configured token must be 32–1024 visible ASCII characters without spaces; length alone does not guarantee randomness. To opt in to an unauthenticated listener instead, use `.disableMcpAuthentication = true` and omit `mcpToken`; its client configuration has no Authorization header. In that mode any Authorization header, including an incorrect Bearer, is ignored.
 
-The startup banner warns when authentication is disabled. It appears in the developer terminal and on stderr; as with the normal banner, `announce = false` suppresses the stderr copy.
+The startup banner warns when authentication is disabled. It appears on stderr and, once the window connects, in the developer terminal. With `announce = false` there is no stderr warning; the terminal still receives the banner when it connects, and `automation->banner()` still returns it.
 
 These options are for trusted development environments. A different local user can occupy the fixed port while the application is stopped and receive a durable Bearer sent by the client, then reuse it when the application starts. Without authentication, any local process that reaches the listener can exercise its grants. A fake server can also send misleading responses. Loopback, strict Host, Origin and Sec-Fetch checks remain enabled in both modes; they do not authenticate the server to the client.
 
