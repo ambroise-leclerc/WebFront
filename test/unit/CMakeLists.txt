@@ -470,4 +470,4 @@ set_tests_properties(AutomationAbsentFromDistribution PROPERTIES PASS_REGULAR_EX
 add_test(NAME BddConsumer COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DBUILD_DIR=${CMAKE_BINARY_DIR}
     -DWORK=${CMAKE_CURRENT_BINARY_DIR}/bdd-consumer "-DGENERATOR=${CMAKE_GENERATOR}" "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}"
     -DCONFIG=$<CONFIG> -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckBddConsumer.cmake)
-set_tests_properties(BddConsumer PROPERTIES TIMEOUT 300)
+set_tests_properties(BddConsumer PROPERTIES TIMEOUT 300 LABELS portability)
