@@ -462,8 +462,8 @@ struct Session {
     }
 
     void close() noexcept {
-        if (closed)
-            return;
+        if (secondary && closed)
+            return;  // the primary window repeats its stop request: the loop may have started since the first call
         closed = true;
         if (secondary) {
             if (window)
@@ -1205,6 +1205,15 @@ struct Windows {
     void retire(const std::string& page) {
         const auto found = secondary.find(page);
         if (found == secondary.end()) return;
+        // run() returned long ago for this window, so nothing else can report a page that failed to load.
+        if (found->second->error) {
+            try {
+                std::rethrow_exception(found->second->error);
+            } catch (const std::exception& failure) {
+                std::fprintf(stderr, "WKWebViewFrontend: the secondary window of '%s' closed: %s\n", page.c_str(), failure.what());
+            } catch (...) {
+            }
+        }
         finished.push_back(std::move(found->second));
         secondary.erase(found);
         dispatch_async_f(dispatch_get_main_queue(), nullptr, +[](void*) {
@@ -1233,9 +1242,11 @@ inline void openSecondary(std::string_view address, std::string_view port, std::
     child->sharedDataStore = send(send(windows.primary->view, "configuration"), "websiteDataStore");
     child->create();
     child->closedHook = [key] { Windows::instance().retire(key); };
-    auto& stored = windows.secondary[key];
-    stored = std::move(child);
-    stored->start();
+    // Registered only once started: a window whose start throws is not left in the table, and its page can be opened again.
+    // One that closed during start() already retired itself from a table that did not hold it yet: it is not kept.
+    child->start();
+    if (!child->closed)
+        windows.secondary[key] = std::move(child);
 }
 
 inline bool closeSecondary(std::string_view page) {

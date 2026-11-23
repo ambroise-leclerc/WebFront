@@ -17,6 +17,7 @@
 #include <concepts>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <stdexcept>
 #include <string_view>
 #include <utility>
@@ -186,6 +187,9 @@ inline std::filesystem::path userDataFolder() {
 /// Posted to the window to make its STA start the queued capture requests.
 inline constexpr UINT captureMessage = WM_APP + 0x4C1;
 inline constexpr UINT drainMessage   = WM_APP + 0x4C3;  // UIExecutor: run what the interface thread was asked
+inline constexpr UINT reapMessage    = WM_APP + 0x4C4;  // secondary windows (#616): destroy those that closed
+
+inline void reapSecondaryWindows();  // defined with the registry of the windows, after Session
 
 struct CaptureJob {
     std::promise<CaptureResult> done;
@@ -316,6 +320,10 @@ public:
     ScriptDialogHandler                              answerScriptDialog;
     bool                                             closed       = false;
     UINT_PTR                                         startupTimer = 0;
+    // A window opened beside the application's own (#616): it shares the environment (profile, browser process) of the first,
+    // runs no loop of its own and reports its closing to closedHook, once, instead of ending the session.
+    bool                                             secondary    = false;
+    std::function<void()>                            closedHook;
     std::shared_ptr<CaptureQueue>                    captureQueue = std::make_shared<CaptureQueue>();
     CaptureRegistration                              captureRegistration;
 
@@ -387,6 +395,12 @@ public:
         view.Reset();
         controller.Reset();
         environment.Reset();
+        if (closedHook) {
+            auto hook = std::exchange(closedHook, {});
+            try {
+                hook();
+            } catch (...) { }
+        }
     }
 
     void fail() noexcept {
@@ -463,7 +477,9 @@ public:
         if (!window)
             throw std::runtime_error("WebView2: cannot create window");
         // Bounds initialization errors and an unresponsive runtime must not leave an empty window forever.
-        startupTimer = SetTimer(nullptr, 0, startupTimeoutMilliseconds, nullptr);
+        // A secondary window is not pumped by a session of its own: its watchdog belongs to the window, whose procedure runs
+        // whichever loop dispatches it.
+        startupTimer = secondary ? SetTimer(window, startupTimerId, startupTimeoutMilliseconds, nullptr) : SetTimer(nullptr, 0, startupTimeoutMilliseconds, nullptr);
         if (!startupTimer)
             throw std::runtime_error("WebView2: cannot start startup timer");
         if (visible) {
@@ -476,6 +492,17 @@ public:
                 throw std::runtime_error("WebView2: cannot start presentation timer");
             ShowWindow(window, SW_SHOW);
         }
+    }
+
+    /// Whether the window is shown (the first window's choice, which a secondary window follows).
+    [[nodiscard]] bool shown() const noexcept {
+        return visibleWindow;
+    }
+
+    /// A secondary window: the browser of the first window's environment, which has no creation of its own to wait for.
+    void startSecondary(ICoreWebView2Environment* shared) {
+        environment = shared;
+        createController();
     }
 
     void start(const std::filesystem::path& profile, EnvironmentFactory createEnvironment = CreateCoreWebView2EnvironmentWithOptions) {
@@ -527,6 +554,7 @@ private:
     // Bound to the window and handled by its procedure, so that the delay also runs during the system's modal loops
     // (moving or resizing by the title bar), which dispatch window messages without going through dispatchNextMessage().
     static constexpr UINT_PTR presentTimerId = 0x5746;
+    static constexpr UINT_PTR startupTimerId = 0x5747;
     void stopPresentTimer() noexcept {
         if (presentTimer && window)
             KillTimer(window, presentTimer);
@@ -569,9 +597,18 @@ private:
     }
 
     void stopStartupTimer() noexcept {
-        if (startupTimer)
-            KillTimer(nullptr, startupTimer);
+        if (startupTimer && (!secondary || window))
+            KillTimer(secondary ? window : nullptr, startupTimer);
         startupTimer = 0;
+    }
+
+    void secondaryStartupTimedOut() noexcept {
+        presentWindow();  // nothing invisible is left to interact with
+        try {
+            throw std::runtime_error(std::format("WebView2: runtime startup timed out after {} milliseconds", startupTimeoutMilliseconds));
+        } catch (...) {
+            fail();
+        }
     }
 
     void checkStartupTimeout(const MSG& message) {
@@ -757,6 +794,9 @@ private:
             case drainMessage:
                 uiExecutorHostOf<WebView2Frontend>().drain();
                 return true;
+            case reapMessage:
+                reapSecondaryWindows();
+                return true;
             case WM_CLOSE:
                 close();
                 DestroyWindow(handle);
@@ -777,6 +817,10 @@ private:
             self = static_cast<Session*>(reinterpret_cast<CREATESTRUCTW*>(lParam)->lpCreateParams);
             SetWindowLongPtrW(handle, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
             self->window = handle;
+        }
+        if (self && self->secondary && message == WM_TIMER && wParam == startupTimerId && self->startupTimer) {
+            self->secondaryStartupTimedOut();
+            return 0;
         }
         if (self && message == WM_TIMER && wParam == presentTimerId && self->presentTimer) {
             self->trace("present delay expired");
@@ -942,7 +986,8 @@ private:
         if (GetFocus() == window)
             restoreFocus();
         captureQueue->open(window);
-        captureRegistration = CaptureRegistration{captureProvider(captureQueue)};
+        if (!secondary)  // the capture of the application is that of its own window
+            captureRegistration = CaptureRegistration{captureProvider(captureQueue)};
         if (viewReady)
             viewReady();
         installViewAssociationThenNavigate(view.Get());
@@ -996,6 +1041,99 @@ public:
     }
 };
 
+/// The windows of the application beside the first one (#616). Every member is used on the interface thread only.
+struct Windows {
+    Session*                                        primary = nullptr;
+    std::map<std::string, std::shared_ptr<Session>> secondary;
+    std::vector<std::shared_ptr<Session>>           finished;  // closed, destroyed from a message of the first window
+
+    static Windows& instance() {
+        static Windows windows;
+        return windows;
+    }
+    void retire(const std::string& page) {
+        const auto found = secondary.find(page);
+        if (found == secondary.end())
+            return;
+        // open() returned long ago, so nothing else can report a page that failed (navigation, runtime, process lost).
+        if (found->second->failure) {
+            try {
+                std::rethrow_exception(found->second->failure);
+            } catch (const std::exception& error) {
+                std::fprintf(stderr, "WebView2Frontend: the secondary window of '%s' closed: %s\n", page.c_str(), error.what());
+            } catch (...) {
+            }
+        }
+        finished.push_back(std::move(found->second));
+        secondary.erase(found);
+        // Never destroyed in its own callback: the first window's procedure does it on its next message.
+        if (primary && primary->window)
+            PostMessageW(primary->window, reapMessage, 0, 0);
+    }
+    void reap() {
+        auto closed = std::move(finished);
+        finished.clear();
+        closed.clear();
+    }
+    /// The first window ended: the others end with it.
+    void clear() {
+        auto windows = std::move(secondary);
+        secondary.clear();
+        for (auto& [page, session] : windows)
+            session->closedHook = nullptr;
+        finished.clear();
+        windows.clear();
+        primary = nullptr;
+    }
+};
+
+inline void reapSecondaryWindows() {
+    Windows::instance().reap();
+}
+
+/// On the interface thread: opens `page` in a window of its own, or brings the window already showing it to the front.
+inline void openSecondary(std::string_view address, std::string_view port, std::string_view page, const WebView2Options& options) {
+    auto& windows = Windows::instance();
+    if (!windows.primary)
+        throw std::logic_error("WebView2Frontend: no window of the application is open; show() it before opening another");
+    const std::string key(page);
+    if (const auto found = windows.secondary.find(key); found != windows.secondary.end()) {
+        if (const auto handle = found->second->window) {
+            if (IsIconic(handle))
+                ShowWindow(handle, SW_RESTORE);
+            SetForegroundWindow(handle);
+        }
+        return;
+    }
+    if (windows.primary->closed || !windows.primary->environment)
+        throw std::logic_error("WebView2Frontend: the first window is not ready (its browser is not created yet, or it is closing)");
+    auto session           = std::make_shared<Session>(options.startupTimeout);
+    session->secondary     = true;
+    session->contentPolicy = webfront::detail::BoundContentPolicy{frontend::detail::applicationUrl(address, port, "", options.launch.origin), options.contentPolicy};
+    session->viewLaunch    = options.launch;
+    session->url           = utf16(frontend::detail::applicationUrl(address, port, page, options.launch.origin));
+    session->closedHook    = [key] {
+        Windows::instance().retire(key);
+    };
+    session->createWindow(windows.primary->shown(), options.window);
+    session->startSecondary(windows.primary->environment.Get());
+    // Registered only once started: a window whose start throws is not left in the table, and its page can be opened again.
+    // One that closed during the start retired itself from a table that did not hold it yet: it is not kept.
+    if (!session->closed)
+        windows.secondary[key] = std::move(session);
+}
+
+/// On the interface thread: closes the secondary window showing `page`, as its user would. False when there is none.
+inline bool closeSecondary(const std::string& page) {
+    auto&      windows = Windows::instance();
+    const auto found   = windows.secondary.find(page);
+    if (found == windows.secondary.end() || found->second->closed || !found->second->window)
+        return false;
+    const auto session = found->second;  // kept alive while the window procedure retires it
+    SendMessageW(session->window, WM_CLOSE, 0, 0);  // the same thread: closed and retired when this returns
+    return true;
+}
+
 inline void open(std::string_view address,
                  std::string_view port,
                  std::string_view file,
@@ -1042,6 +1180,14 @@ inline void open(std::string_view address,
             host.close();
         }
     } closing{host, windowHost};
+    auto& windows   = Windows::instance();
+    windows.primary = session.get();
+    struct Others {
+        Windows& windows;
+        ~Others() {
+            windows.clear();
+        }
+    } others{windows};
     session->run();
 }
 
@@ -1075,6 +1221,43 @@ struct WebView2Frontend {
     /// The HWND of the window, readable on that thread while open() runs (see NativeWindow.hpp).
     [[nodiscard]] static NativeWindow nativeWindow() {
         return nativeWindowHostOf<WebView2Frontend>().window();
+    }
+
+    /// Opens `page` in a second window beside the one open() runs, or brings the window already showing that page to the
+    /// front (#616). Callable from any thread while open() runs; it returns once the window exists, and throws
+    /// std::logic_error when no window is open. The window shares the environment of the first: its profile (cookies,
+    /// storage) and its browser process.
+    static void openSecondaryWindow([[maybe_unused]] std::string_view address, [[maybe_unused]] std::string_view port,
+                                    [[maybe_unused]] std::string_view page, [[maybe_unused]] const ContentPolicy& policy,
+                                    [[maybe_unused]] const WindowOptions& window, [[maybe_unused]] const ViewLaunch& launch) {
+#if defined(WEBFRONT_EMBED_WEBVIEW2) && defined(_WIN32)
+        try {
+            invokeOnUIThread(uiExecutor(), [&] {
+                detail::webview2::openSecondary(address, port, page, WebView2Options{.contentPolicy = policy, .window = window, .launch = launch});
+            });
+        } catch (const UIExecutorUnavailable&) {
+            throw std::logic_error("WebView2Frontend: no window of the application is open; show() it before opening another");
+        }
+#else
+        throw std::runtime_error("WebView2Frontend is unavailable. Configure on Windows with -DWEBFRONT_EMBED_WEBVIEW2=ON");
+#endif
+    }
+
+    /// Closes the secondary window showing `page`, from any thread; false when none is open.
+    static bool closeSecondaryWindow([[maybe_unused]] std::string_view page) {
+#if defined(WEBFRONT_EMBED_WEBVIEW2) && defined(_WIN32)
+        bool closed = false;
+        try {
+            invokeOnUIThread(uiExecutor(), [&] {
+                closed = detail::webview2::closeSecondary(std::string(page));
+            });
+        } catch (const UIExecutorUnavailable&) {
+            return false;
+        }
+        return closed;
+#else
+        return false;
+#endif
     }
 
     static void initialize() { }

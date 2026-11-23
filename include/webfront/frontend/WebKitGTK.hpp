@@ -86,6 +86,7 @@ public:
     void (*windowChild)(Object, Object)                                           = symbol<decltype(windowChild)>("gtk_window_set_child");
     void (*widgetOpacity)(Object, double)                                         = symbol<decltype(widgetOpacity)>("gtk_widget_set_opacity");
     void (*windowPresent)(Object)                                                 = symbol<decltype(windowPresent)>("gtk_window_present");
+    void (*widgetVisible)(Object, int)                                            = symbol<decltype(widgetVisible)>("gtk_widget_set_visible");
     void (*windowDestroy)(Object)                                                 = symbol<decltype(windowDestroy)>("gtk_window_destroy");
     Object (*loopNew)(Object, int)                                                = symbol<decltype(loopNew)>("g_main_loop_new");
     void (*loopRun)(Object)                                                       = symbol<decltype(loopRun)>("g_main_loop_run");
@@ -452,6 +453,10 @@ struct Session : FailureState {
         closed           = true;
         mediaScope.reset();
         a.loopQuit(loop);
+        // A secondary window is destroyed later, from an idle callback: it disappears now, so that the close request that
+        // reported it closed is not answered while the window is still on screen.
+        if (first && secondary && window)
+            a.widgetVisible(window, 0);
         if (first && closedHook) {
             try {
                 closedHook();
@@ -999,6 +1004,16 @@ struct Windows {
         const auto found = secondary.find(page);
         if (found == secondary.end())
             return;
+        // open() returned long ago, so nothing else can report a page that failed (HTTP error, navigation timeout, web
+        // process lost): the failure is written, then the window is reaped.
+        if (found->second->failure) {
+            try {
+                std::rethrow_exception(found->second->failure);
+            } catch (const std::exception& error) {
+                std::fprintf(stderr, "WebKitGTKFrontend: the secondary window of '%s' closed: %s\n", page.c_str(), error.what());
+            } catch (...) {
+            }
+        }
         finished.push_back(std::move(found->second));
         secondary.erase(found);
         if (!reaper)
@@ -1033,9 +1048,11 @@ inline void openSecondary(const std::string& address, const std::string& port, c
     session->closedHook = [file] {
         Windows::instance().retire(file);
     };
-    auto& stored = windows.secondary[file];
-    stored       = std::move(session);
-    stored->start(applicationUrl(address, port, file, options.launch.origin));
+    // Registered only once started: a window whose start throws is not left in the table, and its page can be opened again.
+    // One that closed during start() retired itself from a table that did not hold it yet: it is not kept.
+    session->start(applicationUrl(address, port, file, options.launch.origin));
+    if (!session->closed)
+        windows.secondary[file] = std::move(session);
 }
 
 /// On the interface thread: asks the secondary window showing `file` to close, as its user would. False when there is none.

@@ -1302,24 +1302,29 @@ public:
         }
     }
 
+    /// Whether the frontend can show a second window of the application (see openSecondaryWindow()).
+    static constexpr bool supportsSecondaryWindow =
+        requires(std::string_view text, const ContentPolicy& policy, const WindowOptions& window, const ViewLaunch& launch) {
+            Frontend::openSecondaryWindow(text, text, text, policy, window, launch);
+            { Frontend::uiExecutor() } -> std::same_as<frontend::UIExecutor>;
+        };
+
     /** @brief Opens `page` in a second native window beside the one show() runs, served by the same server (#616).
      *
      * The page reaches the same `cppFunction`s and the same `jsFunction` subscribers as the first one (each window is
      * one more connected browser: `onUIStarted` and `subscribeUIStarted` see it), and receives the same view-association
      * proof, so it is an embedded view of this application and not an external browser. The title, the size and the
      * background come from `options` (an empty background takes the application's). Opening a page that a secondary
-     * window already shows brings that window to the front instead of opening another. Closing the window of show()
-     * closes the others with it; closing a secondary window leaves the rest running.
+     * window already shows brings that window to the front instead of opening another. A window is identified by the page
+     * string exactly as given, query included: "a.html?x=1" and "a.html?x=2" are two windows, and requestClose(page) takes
+     * the string that opened it. Closing the window of show() closes the others with it; closing a secondary window leaves
+     * the rest running. A page that fails to load in a secondary window closes it and the failure is written to stderr: open()
+     * has returned by then, so nothing can throw it.
      *
      * Callable from any thread, while show() runs; it returns once the window exists. Throws std::logic_error when this
-     * application is not showing a window, and when the frontend cannot show a second window (today the WebKitGTK
-     * and WKWebView frontends can; the system browser, CEF and WebView2 refuse). Window placement is left to the toolkit.
+     * application is not showing a window, and when the frontend cannot show a second window (today the WebKitGTK,
+     * WKWebView and WebView2 frontends can; the system browser and CEF refuse). Window placement is left to the toolkit.
      */
-    static constexpr bool supportsSecondaryWindow =
-        requires(std::string_view text, const ContentPolicy& policy, const WindowOptions& window, const ViewLaunch& launch) {
-            Frontend::openSecondaryWindow(text, text, text, policy, window, launch);
-            { Frontend::uiExecutor() } -> std::same_as<frontend::UIExecutor>;
-        };
     void openSecondaryWindow(std::string_view page, WindowOptions options = {}) {
         if constexpr (supportsSecondaryWindow) {
             if (showEpoch.load() % 2 == 0)
