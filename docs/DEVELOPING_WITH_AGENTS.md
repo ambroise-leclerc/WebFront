@@ -63,6 +63,8 @@ argument. The [developer environment reference](DEVELOPER_ENVIRONMENT.md) has th
 
 ## Running wf yourself, through MCP
 
+For a client configured once, the application can set a fixed `mcpPort` and provide the same `mcpToken` on each launch. Copy the first private `mcp.json` URL and Bearer header into the client user configuration, outside the project. Start the application before connecting. This opt-in mode accepts the local server impersonation risk described in [AUTOMATION.md](AUTOMATION.md); the default remains a fresh session token.
+
 The application runs the same commands in its own window and serves them over MCP: in a development build, it is the MCP
 server, at a URL of its own. An MCP client connects to that URL; no other program is built or launched.
 
@@ -92,7 +94,7 @@ for a project whose output you accept to regenerate.
 WebFront MCP (grants: check, build, ...): http://127.0.0.1:PORT/mcp - client configuration: /home/me/.local/state/webfront/sessions/SESSION/mcp.json
 ```
 
-Each running instance has its own port, so the URL is printed rather than known in advance. `mcp.json` is the client
+By default each running instance has its own port, so the URL is printed rather than known in advance. `mcp.json` is the client
 configuration of that instance, URL and Bearer token together, in a private directory outside the project:
 
 ```json

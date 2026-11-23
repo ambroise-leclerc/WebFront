@@ -52,12 +52,32 @@ change them.
 | `grants` | none | The granted operations: `check`, `build`, `test`, `preview`, `inspect`, `interact` (click/fill), `call`, and the setup grants `init`, `create`, `install`, `restore`, `embed`. None leaves only session discovery. |
 | `callbacks` | none | The application callbacks `call` may invoke, by exact name (see below). |
 | `mcpPort` | 0 | The port of the listener; 0 lets the OS choose. A chosen port is never replaced: when it is taken the activation throws a `std::system_error` that names the address, the port and the cause. |
+| `mcpToken` | absent | An application-supplied Bearer token, retained across launches if the application supplies the same value. Absent selects a fresh random token per session. Use a long random secret outside the project. |
+| `disableMcpAuthentication` | false | Explicitly allow local clients without a Bearer token. Cannot be combined with `mcpToken`. |
 | `directory` | a new directory named after the session in the discovery directory | A new private directory outside the project for `mcp.json`. |
 | `discovery` | the per-user sessions directory | Where the record goes (tests use their own). |
 | `timeout` | 120 s | The native deadline of one operation. |
 | `startupTimeout` | 120 s | How long the window may take to claim the session. |
 | `closeGrace` | 5 s | How long a revoked window may take to close before `onUnresponsive`. |
 | `onUnresponsive` | ends the process with status 72 | What to do with a window that did not close. |
+
+For a client configured once, set `mcpPort` to a fixed nonzero port and supply the same `mcpToken` on every launch, for example from a private environment variable read by the application. Copy the URL and Authorization header from the first `mcp.json` into the client's **user** configuration, outside the project. Start the application before connecting; retry after starting it if the connection is refused. Rotate the token by changing the application-supplied value and updating the client. A second instance can use the default options; a second listener on the chosen port fails explicitly.
+
+```cpp
+const char* token = std::getenv("MY_APP_MCP_TOKEN");
+if (!token || !*token)
+    throw std::runtime_error("Set MY_APP_MCP_TOKEN to a private random token");
+auto automation = webfront::automation::enableAutomation(
+    app, {.grants = {"check", "build"}, .mcpPort = 19002, .mcpToken = std::string{token}});
+```
+
+The application includes `<cstdlib>`, `<stdexcept>` and `<string>` for this example; MSVC reports `std::getenv` as deprecated (C4996), so use `_dupenv_s` or define `_CRT_SECURE_NO_WARNINGS` there. A configured token must be 32–1024 visible ASCII characters without spaces; length alone does not guarantee randomness. To opt in to an unauthenticated listener instead, use `.disableMcpAuthentication = true` and omit `mcpToken`; its client configuration has no Authorization header. In that mode any Authorization header, including an incorrect Bearer, is ignored.
+
+The startup banner warns when authentication is disabled. It appears on stderr and, once the window connects, in the developer terminal. With `announce = false` there is no stderr warning; the terminal still receives the banner when it connects, and `automation->banner()` still returns it.
+
+These options are for trusted development environments. A different local user can occupy the fixed port while the application is stopped and receive a durable Bearer sent by the client, then reuse it when the application starts. Without authentication, any local process that reaches the listener can exercise its grants. A fake server can also send misleading responses. Loopback, strict Host, Origin and Sec-Fetch checks remain enabled in both modes; they do not authenticate the server to the client.
+
+After a crash or forced termination, the private `mcp.json` can remain on disk with the durable token. Session discovery prunes known files in default session directories when it detects a dead process, but cleanup can be delayed or fail; an explicitly supplied `directory` is not pruned by discovery. Inspect and remove stale private files as needed, and rotate a token if it may have been exposed.
 
 All executable operations are denied unless granted. The setup grants write the manifest, the lock, the cache, a new starter
 directory or the generated provider header; grant them only for a project whose registry you trust. `install` and `restore`
@@ -116,9 +136,11 @@ operation of `webfront.start`, not one MCP tool per callback, so the tool list s
   served with TLS, whatever the application's own address and TLS listener. `mcpPort` chooses a port; a chosen port is never
   replaced: when it is taken the activation throws a `std::system_error` that names the address, the port and the cause.
   Each instance has its own URL, so several applications run side by side and the agent picks one by its URL.
-- **Token.** Every request carries `Authorization: Bearer <token>`, a 256-bit value from the OS, compared in constant time
-  before the body is parsed; otherwise 401 with `WWW-Authenticate: Bearer` (no OAuth server is announced). The token lives as
-  long as the session: closing it, a deadline or a lost window closes the listener and removes the file.
+- **Token.** By default every request carries `Authorization: Bearer <token>`, a 256-bit value from the OS. Before parsing the
+  body, the listener compares equal-length tokens in constant time and rejects a length mismatch immediately; a failed check gets
+  401 with `WWW-Authenticate: Bearer` (no OAuth server is announced). The token lives as
+  long as the session by default: closing it, a deadline or a lost window closes the listener and removes the file. A supplied
+  `mcpToken` remains valid across launches until the application changes it; authentication can be explicitly disabled.
 - **Client configuration.** `mcp.json` (mode 0600 in a 0700 directory on POSIX, owner-only ACL on Windows) holds the URL and
   the header, ready for a client that takes a configuration file (`claude --mcp-config PATH/mcp.json`). The token appears in
   no page, URL, command line, log, banner or discovery record. Never copy it into the project, its `.mcp.json` included: the

@@ -79,6 +79,10 @@ struct AutomationOptions {
     /// The port of the MCP listener: 0 (the default) lets the OS choose; a chosen port is never replaced, its being taken
     /// makes the activation throw.
     unsigned short mcpPort = 0;
+    /// Optional durable Bearer token, supplied by the application; absent selects a random token per session.
+    std::optional<std::string> mcpToken{};
+    /// Explicitly allow local MCP clients without a token. Development only.
+    bool disableMcpAuthentication = false;
     /// A new private directory outside the project that receives the client configuration (`mcp.json`). Empty (the
     /// default), a directory named after the session is created in the discovery directory.
     std::filesystem::path directory{};
@@ -119,10 +123,11 @@ public:
         : session(make(app, options)),
           discoveryDirectory(options.discovery.empty() ? discovery::defaultDirectory() : options.discovery),
           privateDirectory(channel::outsideProject(*session, privateDirectoryFor(options, discoveryDirectory, *session))),
-          mcp(session, privateDirectory.path, options.mcpPort),
+          mcp(session, privateDirectory.path, options.mcpPort, options.mcpToken, !options.disableMcpAuthentication),
           registration(discoveryDirectory, record(*session, privateDirectory.path, mcp)),
           grants(std::move(options.grants)),
           callbackNames(std::move(options.callbacks)),
+          authenticationDisabled(options.disableMcpAuthentication),
           grace(options.closeGrace),
           unresponsive(std::move(options.onUnresponsive)),
           launched(Clock::now()),
@@ -195,7 +200,8 @@ public:
         std::string names;
         for (const auto& callback : callbackNames)
             names += (names.empty() ? "" : ", ") + callback;
-        const auto granted = "grants: " + (list.empty() ? std::string{"none"} : list) + (names.empty() ? "" : "; callbacks: " + names);
+        const auto granted = std::string{authenticationDisabled ? "WARNING: MCP authentication disabled; local processes can use granted operations; " : ""}
+                           + "grants: " + (list.empty() ? std::string{"none"} : list) + (names.empty() ? "" : "; callbacks: " + names);
         return "WebFront MCP (" + granted + "): " + mcp.url() + " - client configuration: " + mcp.configuration().generic_string();
     }
     /// `base` marked as shared with an agent, for a window title: automation must be visible to the person using it.
@@ -228,6 +234,7 @@ private:
         privateDirectory.cleanup();
     }
     static std::shared_ptr<Session> make(App& app, const AutomationOptions& options) {
+        mcphttp::validateTokenOptions(options.mcpToken, !options.disableMcpAuthentication);
         if (options.startupTimeout <= std::chrono::seconds::zero())
             throw std::invalid_argument("Automation startupTimeout must be positive");
         if (options.closeGrace < std::chrono::milliseconds::zero())
@@ -262,6 +269,7 @@ private:
     discovery::Registration       registration;
     std::vector<std::string>      grants;
     std::vector<std::string>      callbackNames;
+    bool                          authenticationDisabled;
     std::chrono::milliseconds     grace;
     std::function<void()>         unresponsive;
     std::mutex                    revocation;
@@ -276,6 +284,7 @@ private:
 /// `shutdown()`.
 template <typename App>
 std::unique_ptr<Automation<App>> enableAutomation(App& app, AutomationOptions options) {
+    mcphttp::validateTokenOptions(options.mcpToken, !options.disableMcpAuthentication);
     return std::make_unique<Automation<App>>(app, std::move(options));
 }
 }  // namespace webfront::automation
