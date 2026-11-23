@@ -285,8 +285,6 @@ inline CaptureProvider captureProvider(std::shared_ptr<CaptureTarget> target) {
 struct Session {
     explicit Session(std::string url, WKWebViewOptions options = {})
         : url(std::move(url)), options(std::move(options)), contentPolicy(this->url, this->options.contentPolicy) {
-        if (this->options.startupTimeout.count() <= 0)
-            throw std::invalid_argument("WKWebView: startupTimeout must be positive");
     }
 
     std::string                          url;

@@ -28,7 +28,7 @@ namespace detail {
 /// otherwise wrap around when it becomes the unsigned argument of the timer.
 [[nodiscard]] inline unsigned timerMilliseconds(std::chrono::milliseconds timeout, std::string_view frontend) {
     if (timeout.count() < 1 || timeout.count() > std::numeric_limits<int>::max())
-        throw std::invalid_argument(std::string(frontend) + ": startupTimeout must be between 1 and " + std::to_string(std::numeric_limits<int>::max()) + " milliseconds");
+        throw std::invalid_argument(std::string(frontend) + ": startupTimeout must be positive and at most " + std::to_string(std::numeric_limits<int>::max()) + " milliseconds");
     return static_cast<unsigned>(timeout.count());
 }
 }  // namespace detail

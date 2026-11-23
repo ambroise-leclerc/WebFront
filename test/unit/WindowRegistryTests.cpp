@@ -504,11 +504,11 @@ const Scenario startupTimeoutRange{"A startup deadline a timer cannot hold is re
         FakeFrontend::opened.clear();
         ViewOptions options;
         options.startupTimeout = milliseconds{-1};
-        checkThrows<std::invalid_argument>([&] { FakeFrontend::open("127.0.0.1", "9000", "a.html", options); }, contains("FakeFrontend: startupTimeout must be between 1 and"));
+        checkThrows<std::invalid_argument>([&] { FakeFrontend::open("127.0.0.1", "9000", "a.html", options); }, contains("FakeFrontend: startupTimeout must be positive and at most"));
         check(FakeFrontend::opened.empty());
     });
     then("zero, negative and oversized deadlines are refused with the frontend's name", [&] {
         for (const auto bad : {milliseconds{0}, milliseconds{-1}, milliseconds{-86400000}, milliseconds{4294967296LL}})
-            checkThrows<std::invalid_argument>([&] { (void)frontend::detail::timerMilliseconds(bad, "FakeFrontend"); }, contains("FakeFrontend: startupTimeout must be between 1 and"));
+            checkThrows<std::invalid_argument>([&] { (void)frontend::detail::timerMilliseconds(bad, "FakeFrontend"); }, contains("FakeFrontend: startupTimeout must be positive and at most"));
     });
 }};
