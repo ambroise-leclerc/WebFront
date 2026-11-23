@@ -184,13 +184,17 @@ are retained for investigation; diagnostics alone do not establish a correction.
   fixed-version runtime packaging, application installers and accessibility remain application work.
 - `WebView2Frontend::open()` releases the STA it initialized. When a window is closed while the runtime is still
   starting, or by a page that closes it on a load failure, the WebView2 runtime (observed with 157.0.4341.46) can keep a
-  COM initialization of its own: the thread is then still in an STA when `open()` returns (#564, #638). Measured on the
-  Windows CI runner under load, over 600 `show()` calls per page (`WebView2Lifecycle-repeated-show`): a page whose bridge
-  connection is rejected and that closes the window (`rejected-ready.html`) left an STA twice; a page that closes its
-  window (the encoded-path page) and a page that ran to its end and closed it (`no-bridge.html`) left none. In the one case
-  where another `show()` followed on the same thread, the remainder was gone after that
-  `show()`, so it can be a delayed release rather than a permanent one; one case does not prove it. Do not rely on the thread being out of its STA immediately after
-  `open()` returns; the test checks the apartment only after a page that ran to its end and records it for every page.
+  COM initialization of its own: the thread is then still in an STA (apartment type 3, qualifier 0) when `open()` returns
+  (#564, #638). Measured on the Windows CI runner under load, over repeated `show()` calls of the
+  `WebView2Lifecycle-repeated-show` case (the repetition and its apartment log were temporary): a page whose bridge
+  connection is rejected and that closes the window (`rejected-ready.html`) left an STA in 2 of 600 calls, then in 1 of 1031
+  with `open()` dispatching the messages queued on the thread before it released its apartment, so that drain does not
+  remove it and was not kept; a page that closes its window (the encoded-path page) and a page that ran to its end and
+  closed it (`no-bridge.html`) left none in more than 1600 calls each. That is 3 cases in about 1600 calls after a load
+  failure, of the order of one in 500; the cause is not established. In the one case where another `show()` followed on the
+  same thread, the remainder was gone after that `show()`, so it can be a delayed release rather than a permanent one; one
+  case does not prove it. Do not rely on the thread being out of its STA immediately after `open()` returns. The test
+  checks the apartment only after a page that ran to its end.
 - The low-level DOM batch command and optional embedded interpreter are implemented; see
   [the wire contract](adr/ADR-003-protocole-binaire-et-bornes.md#commande-dom-dombatch-code-5-version-1).
   The per-connection document/node API, events (callbacks or `co_await node.next(name)`) and grouped

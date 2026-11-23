@@ -27,8 +27,8 @@ these entries stays in the GitHub releases and the Git history.
 - Run the MSVC code analysis in a pull request into `develop` that changes Windows code, and list the reruns each job needed before going green with `FlakeReport.py --days` (#628, `docs/TEST_TIERS.md`, `docs/TEST_PERFORMANCE.md`).
 
 ### Fixed
+- Check the leftover STA of a WebView2 window only after a page that ran to its end, not after one that closes the window on a load failure: the runtime can keep a COM initialization of its own then, in about one `show()` in 500 under load, and the limit is documented with its measurements (#638, `docs/PROJECT_STATUS.md`).
 - Refuse every `Sec-Fetch-*` request header on the MCP listener, including `Sec-Fetch-Dest`, in both authenticated and unauthenticated modes (#637).
-- Check the leftover STA of a WebView2 window only after a page that ran to its end, not after one that closes the window on a load failure, and record the apartment `WebView2Lifecycle-repeated-show` finds after each `show()`, so that a failure or a passing run says which page leaves one (#638, `docs/PROJECT_STATUS.md`).
 - Pass the compiler analysis on the Windows pseudoterminal when it cannot prove the attribute list non-null (C6387), stop a unit test from opening the developer's real browser (the directory of its replacement opener was removed before the shell found it), and keep an accepted connection whose `TCP_NODELAY` the system refuses, as macOS does after a reset (#628).
 
 ## [1.1.0] - 2026-11-20
