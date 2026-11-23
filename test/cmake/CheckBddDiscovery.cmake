@@ -157,3 +157,22 @@ file(READ "${odd_dir}/odd-tests.cmake" odd_cases)
 if(NOT odd_cases MATCHES "odd\]==\]dir")
     message(FATAL_ERROR "The executable path was altered:\n${odd_cases}")
 endif()
+
+# An executable under a directory whose name holds ';' stays one argument of its case (#648).
+set(semicolon_dir "${WORK}/build;debug")
+file(MAKE_DIRECTORY "${semicolon_dir}")
+file(COPY "${PROBE}" DESTINATION "${semicolon_dir}")
+file(WRITE "${semicolon_dir}/executable.txt" "${semicolon_dir}/${probe_name}")
+file(WRITE "${semicolon_dir}/emulator.txt" "")
+file(WRITE "${semicolon_dir}/semicolon-properties.cmake"
+    "set(properties [==[]==])\nset(bdd_executable_file [===[${semicolon_dir}/executable.txt]===])\nset(bdd_emulator_file [===[${semicolon_dir}/emulator.txt]===])\nset(bdd_output [===[${semicolon_dir}/semicolon-tests.cmake]===])\nset(bdd_prefix [==[]==])\n")
+execute_process(COMMAND "${CMAKE_COMMAND}" "-DPROPERTIES_FILE=${semicolon_dir}/semicolon-properties.cmake" -P "${SCRIPT}"
+    RESULT_VARIABLE semicolon_result ERROR_VARIABLE semicolon_error)
+if(NOT semicolon_result EQUAL 0)
+    message(FATAL_ERROR "The discovery failed for an executable under a directory holding ';': ${semicolon_error}")
+endif()
+file(READ "${semicolon_dir}/semicolon-tests.cmake" semicolon_cases)
+string(FIND "${semicolon_cases}" "[==[${semicolon_dir}/${probe_name}]==] --exact" whole_path)
+if(whole_path EQUAL -1)
+    message(FATAL_ERROR "The executable path was split:\n${semicolon_cases}")
+endif()
