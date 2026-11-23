@@ -1136,7 +1136,7 @@ public:
                 }
             }
         } showing{*this};
-        // A frontend that can be asked to close shows one window at a time: a show() that did not take the ownership must
+        // A frontend that can be asked to close has one primary session at a time: a show() that did not take the ownership must
         // not open one that nobody could close (the first may end before this one attaches, and the frontend would accept it).
         if constexpr (frontend::endsOnRequest<Frontend>) {
             if (!showing.owns)
@@ -1313,20 +1313,34 @@ public:
      *
      * Callable from any thread, while show() runs; it returns once the window exists. Throws std::logic_error when this
      * application is not showing a window, and when the frontend cannot show a second window (today the WebKitGTK
-     * frontend can; the system browser, CEF, WKWebView and WebView2 refuse). Window placement is left to the toolkit.
+     * and WKWebView frontends can; the system browser, CEF and WebView2 refuse). Window placement is left to the toolkit.
      */
     static constexpr bool supportsSecondaryWindow =
         requires(std::string_view text, const ContentPolicy& policy, const WindowOptions& window, const ViewLaunch& launch) {
             Frontend::openSecondaryWindow(text, text, text, policy, window, launch);
+            { Frontend::uiExecutor() } -> std::same_as<frontend::UIExecutor>;
         };
     void openSecondaryWindow(std::string_view page, WindowOptions options = {}) {
         if constexpr (supportsSecondaryWindow) {
             if (showEpoch.load() % 2 == 0)
                 throw std::logic_error("webfront::BasicWF::openSecondaryWindow(): this application is not showing a window; call show() first");
+            const auto epoch = showEpoch.load();
+            const auto executor = Frontend::uiExecutor();
+            const auto session = executor.session();
+            if (!session || session->thread != showThread.load() || showEpoch.load() != epoch)
+                throw std::logic_error("webfront::BasicWF::openSecondaryWindow(): this application has no active interface session");
             if (options.background.empty())
                 options.background = windowOptions.background;
-            Frontend::openSecondaryWindow(httpAddress, httpPort, page, contentPolicy, options,
-                                          ViewLaunch{viewSecret, detail::browserOrigin(httpAddress, httpPort, networking::secureTransport<Net>)});
+            try {
+                frontend::invokeOnUIThread(executor, [&] {
+                    if (showEpoch.load() != epoch || executor.session() != session)
+                        throw std::logic_error("webfront::BasicWF::openSecondaryWindow(): the interface session has ended");
+                    Frontend::openSecondaryWindow(httpAddress, httpPort, page, contentPolicy, options,
+                                                  ViewLaunch{viewSecret, detail::browserOrigin(httpAddress, httpPort, networking::secureTransport<Net>)});
+                });
+            } catch (const frontend::UIExecutorUnavailable&) {
+                throw std::logic_error("webfront::BasicWF::openSecondaryWindow(): the interface session has ended");
+            }
         } else {
             throw std::logic_error("webfront::BasicWF::openSecondaryWindow(): this frontend cannot show a second window of the application");
         }
@@ -1337,10 +1351,24 @@ public:
      * requestClose().
      */
     bool requestClose(std::string_view page) {
-        if constexpr (requires { { Frontend::closeSecondaryWindow(page) } -> std::same_as<bool>; }) {
-            if (showEpoch.load() % 2 == 0)
+        if constexpr (supportsSecondaryWindow && requires { { Frontend::closeSecondaryWindow(page) } -> std::same_as<bool>; }) {
+            const auto epoch = showEpoch.load();
+            if (epoch % 2 == 0)
                 return false;
-            return Frontend::closeSecondaryWindow(page);
+            const auto executor = Frontend::uiExecutor();
+            const auto session = executor.session();
+            if (!session || session->thread != showThread.load() || showEpoch.load() != epoch)
+                return false;
+            bool closed = false;
+            try {
+                frontend::invokeOnUIThread(executor, [&] {
+                    if (showEpoch.load() == epoch && executor.session() == session)
+                        closed = Frontend::closeSecondaryWindow(page);
+                });
+            } catch (const frontend::UIExecutorUnavailable&) {
+                return false;
+            }
+            return closed;
         } else {
             return false;
         }

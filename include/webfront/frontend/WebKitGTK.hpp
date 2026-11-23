@@ -530,7 +530,8 @@ struct Session : FailureState {
         trace("view created");
         captureTarget->view = view;
         captureTarget->pending.open();
-        captureRegistration = CaptureRegistration{captureProvider(captureTarget)};
+        if (!secondary)
+            captureRegistration = CaptureRegistration{captureProvider(captureTarget)};
     }
 
     void applyBackground() {
@@ -1016,7 +1017,7 @@ struct Windows {
 };
 
 /// On the interface thread: opens `file` in a window of its own, or brings the window already showing it to the front.
-inline void openSecondary(const std::string& address, const std::string& port, const std::string& file, OpenOptions options) {
+inline void openSecondary(const std::string& address, const std::string& port, const std::string& file, OpenOptions options, SandboxMode mode) {
     auto& windows = Windows::instance();
     if (!windows.primary)
         throw std::logic_error("WebKitGTKFrontend: no window of the application is open; show() it before opening another");
@@ -1028,7 +1029,7 @@ inline void openSecondary(const std::string& address, const std::string& port, c
     session->secondary     = true;
     session->sharedNetwork = windows.primary->network;
     session->launch        = options.launch;
-    session->create();
+    session->create(mode);
     session->closedHook = [file] {
         Windows::instance().retire(file);
     };
@@ -1138,7 +1139,7 @@ struct BasicWebKitGTKFrontend {
         try {
             invokeOnUIThread(uiExecutor(), [&] {
                 detail::webkitgtk::openSecondary(std::string(address), std::string(port), std::string(page),
-                                                 {.contentPolicy = policy, .window = window, .launch = launch});
+                                                 {.contentPolicy = policy, .window = window, .launch = launch}, Mode);
             });
         } catch (const UIExecutorUnavailable&) {
             throw std::logic_error("WebKitGTKFrontend: no window of the application is open; show() it before opening another");

@@ -409,9 +409,9 @@ struct UIInvocation {
         using receiver_concept = ex::receiver_tag;
         UIInvocation* self;
         void          finish(std::exception_ptr error) noexcept {
-            auto done = std::move(self->done);
+            auto completion = std::move(self->done);
             delete self;
-            done.set_value(std::move(error));
+            completion.set_value(std::move(error));
         }
         void set_value() noexcept {
             std::exception_ptr error;

@@ -7,6 +7,8 @@
     const name = new URLSearchParams(location.search).get("name") || "main";
     window.windowTests = {
         name: () => name,
+        setStorage: value => { localStorage.setItem("shared-test", value); },
+        getStorage: () => localStorage.getItem("shared-test") || "",
         bump: () => { webFront.cppFunction("bump")().catch(() => {}); },
         changed: value => { webFront.cppFunction("seen")(name, value).catch(() => {}); },
     };

@@ -1184,6 +1184,59 @@ const Scenario nativeOrBrowserFrontendForwards{"NativeOrBrowserFrontend forwards
     });
 }};
 
+namespace {
+struct SecondaryContractFrontend : SharedWindowFrontend<true> {
+    static inline int opened = 0;
+    static inline int closed = 0;
+    static void openSecondaryWindow(std::string_view, std::string_view, std::string_view, const ContentPolicy&, const WindowOptions&, const ViewLaunch&) {
+        ++opened;
+    }
+    static bool closeSecondaryWindow(std::string_view) {
+        ++closed;
+        return true;
+    }
+};
+}
+
+const Scenario secondaryOwnership{"Only the owner can operate secondary windows", [] {
+    given("two applications sharing a frontend", [&] {
+        using Shared = SecondaryContractFrontend;
+        Shared::opened = 0;
+        Shared::closed = 0;
+        HostApp<Shared> owner;
+        const auto state = ContractIoContext::current;
+        HostApp<Shared> other;
+        std::atomic<bool> done{false};
+        std::atomic<bool> success{false};
+        Shared::insideOpen = [&] {
+            try {
+                owner.openSecondaryWindow("one.html");
+                const bool closed = owner.requestClose("one.html");
+                bool refused = false;
+                try { other.openSecondaryWindow("one.html"); } catch (const std::logic_error&) { refused = true; }
+                success = closed && refused && !other.requestClose("one.html");
+            } catch (...) { }
+            ContractIoContext::current = state;
+            done = true;
+        };
+        std::jthread showing([&] { owner.show(); });
+        requireEventually([&] { return done.load(); });
+        then("only the owning application reaches the frontend", [&] {
+            check(success);
+            check(Shared::opened == 1);
+            check(Shared::closed == 1);
+        });
+        requireEventually([&] { return windowOpen(state); });
+        {
+            std::lock_guard lock(state->mutex);
+            state->closeWindow = true;
+            state->changed.notify_all();
+        }
+        showing.join();
+        Shared::insideOpen = nullptr;
+    });
+}};
+
 const Scenario secondWindowRefused{"A frontend without a second window refuses openSecondaryWindow with an exception", [] {
     given("an application whose frontend shows one window", [&] {
         HostApp<HostFrontend<>> app;

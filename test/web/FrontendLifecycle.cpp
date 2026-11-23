@@ -766,6 +766,9 @@ int checkSecondWindow() {
                 }
                 check(refused, "A frontend without a second window did not refuse the call");
             } else {
+                windows.window("main").jsFunction("windowTests.setStorage")(std::string("from-main"));
+                // The round trip orders the fire-and-forget write before creating the second view.
+                check(windows.window("main").template jsFunction<std::string>("windowTests.getStorage")().get() == "from-main", "The first window could not write storage");
                 webfront::WindowOptions options;
                 options.title  = "Second window";
                 options.width  = 640;
@@ -773,6 +776,7 @@ int checkSecondWindow() {
                 app.openSecondaryWindow(secondPage, options);
                 check(windows.ready("editor"), "The second window did not connect");
                 check(windows.isEmbedded("main") && windows.isEmbedded("editor"), "A window of the application lacks the proof of an embedded view");
+                check(windows.window("editor").template jsFunction<std::string>("windowTests.getStorage")().get() == "from-main", "The second window does not share storage");
                 // The same page again brings the window to the front: no third connection.
                 app.openSecondaryWindow(secondPage, options);
                 check(windows.window("editor").template jsFunction<std::string>("windowTests.name")().get() == "editor", "The second window did not answer");
