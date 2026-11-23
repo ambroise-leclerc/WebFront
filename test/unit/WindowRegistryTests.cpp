@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
 /// @brief The registry of the secondary windows and the session of one open(), shared by the native frontends (#652, #616).
 #include <webfront/testing/Bdd.hpp>
+#include <webfront/frontend/EmbeddedFrontend.hpp>
+#include <webfront/frontend/Frontend.hpp>
+#include <webfront/frontend/StartupTrace.hpp>
 #include <webfront/frontend/WindowRegistry.hpp>
 
 #include <algorithm>
@@ -12,6 +15,7 @@
 #include <vector>
 
 using namespace webfront::bdd;
+using namespace webfront;
 using namespace webfront::frontend;
 
 namespace {
@@ -77,7 +81,7 @@ struct FakeHooks {
     }
 };
 
-using Registry = detail::WindowRegistry<FakeSession, FakeHooks>;
+using Registry = frontend::detail::WindowRegistry<FakeSession, FakeHooks>;
 
 void openPage(Registry& windows, const std::string& page, bool closeOnStart = false, std::exception_ptr failOnStart = {}) {
     windows.open(
@@ -221,14 +225,14 @@ const Scenario interfaceSessionOrder{"The session of an open() attaches, publish
         };
         when("the session is held", [&] {
             {
-                detail::InterfaceSession<Registry> session(host, windowHost, windows, first, [] {}, {.kind = NativeWindowKind::gtk, .pointer = &handle, .portalParent = {}});
+                frontend::detail::InterfaceSession<Registry> session(host, windowHost, windows, first, [] {}, {.kind = NativeWindowKind::gtk, .pointer = &handle, .portalParent = {}});
                 then("the executor is available, the window published and the first window registered", [&] {
                     check(host.executor().available());
                     check(windows.primary == &first);
                 });
                 andWhen("another open() starts", [&] {
                     then("it is refused", [&] {
-                        checkThrows<std::logic_error>([&] { detail::InterfaceSession<Registry>::refuseSecond(host, "FakeFrontend"); },
+                        checkThrows<std::logic_error>([&] { frontend::detail::InterfaceSession<Registry>::refuseSecond(host, "FakeFrontend"); },
                                                       contains("FakeFrontend: open() is already running"));
                     });
                 });
@@ -243,7 +247,7 @@ const Scenario interfaceSessionOrder{"The session of an open() attaches, publish
             });
             andWhen("a later open() starts", [&] {
                 then("it is accepted", [&] {
-                    checkNothrow([&] { detail::InterfaceSession<Registry>::refuseSecond(host, "FakeFrontend"); });
+                    checkNothrow([&] { frontend::detail::InterfaceSession<Registry>::refuseSecond(host, "FakeFrontend"); });
                 });
             });
         });
@@ -256,11 +260,120 @@ const Scenario interfaceSessionOrder{"The session of an open() attaches, publish
         int         handle = 0;
         then("a second session throws and leaves the first loop attached", [&] {
             checkThrows<std::logic_error>([&] {
-                detail::InterfaceSession<Registry> session(host, nativeWindowHostOf<PublishTag>(), windows, first, [] {}, {.kind = NativeWindowKind::gtk, .pointer = &handle, .portalParent = {}});
+                frontend::detail::InterfaceSession<Registry> session(host, nativeWindowHostOf<PublishTag>(), windows, first, [] {}, {.kind = NativeWindowKind::gtk, .pointer = &handle, .portalParent = {}});
             });
             check(host.executor().available());
             check(windows.primary == nullptr);
         });
         host.close();
+    });
+}};
+
+namespace {
+struct FakeHost;
+struct UnavailableHost;
+
+// A native frontend as a toolkit declares it: the facade supplies the rest.
+struct FakeFrontend : EmbeddedFrontend<FakeFrontend> {
+    static constexpr bool             requiresMainThread = false;
+    static constexpr bool             secondaryWindows   = true;
+    static constexpr bool             compiled           = true;
+    static constexpr std::string_view name               = "FakeFrontend";
+    static constexpr std::string_view enable             = "Configure it.";
+    using Host    = FakeHost;
+    using Options = ViewOptions;
+    static inline std::vector<std::string> opened;
+    static void openNative(std::string_view address, std::string_view port, std::string_view file, const Options& options) {
+        opened.push_back(std::string(address) + ":" + std::string(port) + "/" + std::string(file) + (options.window.title.empty() ? "" : " " + options.window.title) +
+                         (options.launch.secret.empty() ? "" : " launched"));
+    }
+    static void closeNative(const NativeWindowHandle&) { }
+    static void openSecondaryNative(std::string_view, std::string_view, std::string_view, const Options&) { }
+    static bool closeSecondaryNative(std::string_view) { return true; }
+};
+
+struct AbsentFrontend : EmbeddedFrontend<AbsentFrontend> {
+    static constexpr bool             secondaryWindows = true;
+    static constexpr bool             compiled         = false;
+    static constexpr std::string_view name             = "AbsentFrontend";
+    static constexpr std::string_view enable           = "Configure on Nowhere with -DNOWHERE=ON";
+    using Host    = UnavailableHost;
+    using Options = ViewOptions;
+};
+
+struct SingleWindowFrontend : EmbeddedFrontend<SingleWindowFrontend> {
+    static constexpr bool             secondaryWindows = false;
+    static constexpr bool             compiled         = true;
+    static constexpr std::string_view name             = "SingleWindowFrontend";
+    using Host    = SingleWindowFrontend;
+    using Options = ViewOptions;
+    static void openNative(std::string_view, std::string_view, std::string_view, const Options&) { }
+    static void closeNative(const NativeWindowHandle&) { }
+};
+
+template <typename Frontend>
+constexpr bool offersSecondaryWindow = requires(std::string_view text, const ContentPolicy& policy, const WindowOptions& window, const ViewLaunch& launch) {
+    Frontend::openSecondaryWindow(text, text, text, policy, window, launch);
+    Frontend::closeSecondaryWindow(text);
+};
+static_assert(offersSecondaryWindow<FakeFrontend> && !offersSecondaryWindow<SingleWindowFrontend>);
+static_assert(FrontendType<FakeFrontend> && FrontendType<AbsentFrontend> && FrontendType<SingleWindowFrontend>);
+}  // namespace
+
+const Scenario embeddedFrontendFacade{"The facade of the embedded frontends gives every overload of open()", {"window-registry"}, [] {
+    given("a frontend that declares its toolkit calls", [&] {
+        FakeFrontend::opened.clear();
+        when("it is opened with every form the application uses", [&] {
+            FakeFrontend::open("9000", "a.html");
+            FakeFrontend::open("1.2.3.4", "9001", "b.html");
+            FakeFrontend::open("1.2.3.4", "9002", "c.html", ContentPolicy{});
+            FakeFrontend::open("1.2.3.4", "9003", "d.html", ContentPolicy{}, WindowOptions{.title = "T"});
+            FakeFrontend::open("1.2.3.4", "9004", "e.html", ContentPolicy{}, WindowOptions{}, ViewLaunch{"secret", "origin"});
+            FakeFrontend::open("1.2.3.4", "9005", "f.html", ViewOptions{.window = {.title = "O"}});
+            then("each reaches the toolkit with its settings", [&] {
+                check(FakeFrontend::opened == std::vector<std::string>{"127.0.0.1:9000/a.html", "1.2.3.4:9001/b.html", "1.2.3.4:9002/c.html",
+                                                                       "1.2.3.4:9003/d.html T", "1.2.3.4:9004/e.html launched", "1.2.3.4:9005/f.html O"});
+            });
+        });
+        when("no window is open", [&] {
+            then("nothing can be closed, and a second window is refused with the frontend's name", [&] {
+                check(!FakeFrontend::requestClose());
+                check(!FakeFrontend::closeSecondaryWindow("a.html"));
+                checkThrows<std::logic_error>([&] { FakeFrontend::openSecondaryWindow("127.0.0.1", "9000", "a.html", {}, {}, {}); },
+                                              contains("FakeFrontend: no window of the application is open"));
+            });
+        });
+    });
+    given("a frontend whose engine is not part of the build", [&] {
+        then("every entry point explains what to enable", [&] {
+            const auto message = equals("AbsentFrontend is unavailable. Configure on Nowhere with -DNOWHERE=ON");
+            checkThrows<std::runtime_error>([&] { AbsentFrontend::initialize(); }, message);
+            checkThrows<std::runtime_error>([&] { AbsentFrontend::open("9000", "a.html"); }, message);
+            checkThrows<std::runtime_error>([&] { AbsentFrontend::openSecondaryWindow("127.0.0.1", "9000", "a.html", {}, {}, {}); }, message);
+            check(!AbsentFrontend::requestClose());
+        });
+    });
+}};
+
+const Scenario windowPresentation{"A window is made opaque once, by the first frame or by the delay", {"window-registry"}, [] {
+    given("a presentation", [&] {
+        frontend::detail::Presentation presentation;
+        int                  announced = 0;
+        presentation.windowShown = [&] { ++announced; };
+        when("the delay expires and then the page paints", [&] {
+            check(presentation.begin(false));
+            presentation.announce();
+            check(!presentation.begin(true));
+            then("it was shown once, by the delay", [&] {
+                check(announced == 1 && presentation.shown && !presentation.byFrame);
+            });
+        });
+        when("the first frame comes first", [&] {
+            check(presentation.begin(true));
+            check(!presentation.begin(false));
+            then("the frame made it opaque", [&] {
+                check(presentation.byFrame);
+            });
+        });
     });
 }};

@@ -544,7 +544,7 @@ void mediaOptOutIsScoped() {
         // The documented window: process-wide until the load starts, so the opt-out is visible to the application here.
         const auto during = std::getenv("GST_PLUGIN_SYSTEM_PATH_1_0");
         exposedAtStart    = during && std::string_view(during) == session.mediaPlugins.string();
-        session.windowShown = [&] {
+        session.presentation.windowShown = [&] {
             shown = true;
         };
     };
@@ -599,9 +599,9 @@ void mediaOptOutIsScoped() {
 void firstFramePresentation(bool noFrame) {
     bool shown = false, byFrame = false;
     ScenarioFrontend::configure = [&](gtk::Session& session) {
-        session.windowShown = [&] {
+        session.presentation.windowShown = [&] {
             shown   = true;
-            byFrame = session.shownByFrame;
+            byFrame = session.presentation.byFrame;
         };
     };
     ScenarioFrontend::finished = [&](gtk::Session&) {

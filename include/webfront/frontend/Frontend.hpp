@@ -7,6 +7,7 @@
 #include "CEF.hpp"
 #include "CloseRequest.hpp"
 #include "DefaultBrowser.hpp"
+#include "EmbeddedFrontend.hpp"
 #include "NativeWebView.hpp"
 #include "NativeWindow.hpp"
 #include "UIExecutor.hpp"
@@ -192,31 +193,14 @@ private:
     }
 };
 
-struct CEFFrontend {
-    static constexpr Action action{Action::closeServerAfterOpen};
+struct CEFFrontend : EmbeddedFrontend<CEFFrontend> {
     // CEF is initialized and run on the process main thread; another thread is not a qualified configuration.
-    static constexpr bool requiresMainThread = true;
-
-    /// Asks the window to close, from any thread; false when no window is open (see CloseRequest.hpp).
-    static bool requestClose([[maybe_unused]] std::optional<UISession> session = std::nullopt) noexcept {
-#ifdef WEBFRONT_EMBED_CEF
-        return detail::requestWindowClose(uiExecutor(), nativeWindow(), [](const NativeWindowHandle& window) {
-            cef::closeBrowser(window.pointer);
-        }, session);
-#else
-        return false;
-#endif
-    }
-
-    /// CEF's UI thread while open() runs its message loop (see UIExecutor.hpp).
-    [[nodiscard]] static UIExecutor uiExecutor() {
-        return uiExecutorHostOf<CEFFrontend>().executor();
-    }
-
-    /// The application's CefBrowser, readable on CEF's UI thread while open() runs (see NativeWindow.hpp).
-    [[nodiscard]] static NativeWindow nativeWindow() {
-        return nativeWindowHostOf<CEFFrontend>().window();
-    }
+    static constexpr bool             requiresMainThread = true;
+    static constexpr bool             secondaryWindows   = false;  // (#616)
+    static constexpr bool             compiled           = true;   // without CEF the functions of cef:: throw their own diagnostic
+    static constexpr std::string_view name               = "CEFFrontend";
+    using Host    = CEFFrontend;
+    using Options = ViewOptions;
 
     static void initialize() {
         try {
@@ -225,22 +209,13 @@ struct CEFFrontend {
             std::exit(e.exit_code());
         }
     }
-
-    static void open(std::string_view port, std::string_view file) {
-        cef::open(port, file);
+    static void openNative(std::string_view address, std::string_view port, std::string_view file, const Options& options) {
+        cef::open(address, port, file, options.contentPolicy, options.window, options.launch);
     }
-    static void open(std::string_view address, std::string_view port, std::string_view file) {
-        cef::open(address, port, file);
-    }
-    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy) {
-        cef::open(address, port, file, policy);
-    }
-    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window) {
-        cef::open(address, port, file, policy, window);
-    }
-    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window,
-                     const ViewLaunch& launch) {
-        cef::open(address, port, file, policy, window, launch);
+    static void closeNative([[maybe_unused]] const NativeWindowHandle& window) {
+#ifdef WEBFRONT_EMBED_CEF
+        cef::closeBrowser(window.pointer);
+#endif
     }
 };
 
@@ -403,18 +378,9 @@ struct NativeOrBrowserFrontendFor {
         else
             Browser::open(port, file);
     }
-    static void open(std::string_view address, std::string_view port, std::string_view file) {
-        open(address, port, file, ContentPolicy{}, WindowOptions{});
-    }
-    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy) {
-        open(address, port, file, policy, WindowOptions{});
-    }
-    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window) {
-        open(address, port, file, policy, window, ViewLaunch{});
-    }
     /// The launch proof goes to the native window only: the system browser is never given a secret (ADR-020).
-    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window,
-                     const ViewLaunch& launch) {
+    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy = {}, const WindowOptions& window = {},
+                     const ViewLaunch& launch = {}) {
         if (usesNativeWindow())
             detail::openWith<Native>(address, port, file, policy, window, launch);
         else

@@ -5,11 +5,13 @@
 #include "Capture.hpp"
 #include "CloseRequest.hpp"
 #include "Downloads.hpp"
+#include "EmbeddedFrontend.hpp"
 #include "../ViewAssociation.hpp"
 #include "ScriptDialogs.hpp"
 #include "NativeWindow.hpp"
 #include "UIExecutor.hpp"
 #include "Url.hpp"
+#include "StartupTrace.hpp"
 #include "Window.hpp"
 #include "WindowRegistry.hpp"
 
@@ -29,18 +31,8 @@
 
 namespace webfront::frontend {
 
-namespace detail::wkwebview {
-/// The interface thread of the window: attached for the duration of open(), on the main thread.
-inline UIExecutorHost& executorHost() {
-    static UIExecutorHost host;
-    return host;
-}
-/// The NSWindow, published to consumers while open() runs (see NativeWindow.hpp).
-inline NativeWindowHost& windowHost() {
-    static NativeWindowHost host{executorHost().executor()};
-    return host;
-}
-}  // namespace detail::wkwebview
+struct WKWebViewFrontend;  // names the executor's host (UIExecutor.hpp)
+
 
 /** @brief Per-opening options for the optional macOS frontend. */
 struct WKWebViewOptions {
@@ -336,15 +328,14 @@ struct Session {
     id                                   app = nullptr, window = nullptr, view = nullptr, delegate = nullptr, timer = nullptr;
     /// The window is shown nearly transparent and made opaque at the page's first frame, or when this timer expires.
     id                                   presentTimer = nullptr;
-    bool                                 presented = false, presentedByFrame = false;
     /// Test hook: false does not show the window when the document finishes loading, so only the delay can.
     bool                                 revealOnLoad = true;
     /// Seconds before the window is shown even if the document has not loaded. A test lengthens it so that a slow
     /// first launch of the web content process cannot make the delay win against the load it observes.
     double                               presentDelay = 1.0;
     /// Test hook: called on the main thread when the window has been made opaque.
-    std::function<void()>                windowShown;
-    const std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
+    frontend::detail::Presentation       presentation;
+    frontend::detail::StartupTrace       trace;
     id                                   previousDelegate = nullptr, previousMenu = nullptr;
     long                                 previousActivationPolicy = 0;
     bool                                 installed = false, running = false, closed = false, loaded = false;
@@ -402,34 +393,10 @@ struct Session {
         }
     }
 
-    /// Milliseconds since the process was executed, so the trace covers the loading of the frameworks too.
-    static long long millisecondsSinceExec() noexcept {
-        int         mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, static_cast<int>(getpid())};
-        kinfo_proc  info{};
-        std::size_t size = sizeof(info);
-        if (sysctl(mib, 4, &info, &size, nullptr, 0) != 0)
-            return -1;
-        const timeval started = info.kp_proc.p_un.__p_starttime;
-        timeval       now{};
-        gettimeofday(&now, nullptr);
-        return static_cast<long long>(now.tv_sec - started.tv_sec) * 1000 + (now.tv_usec - started.tv_usec) / 1000;
-    }
-    /// WEBFRONT_STARTUP_TRACE=1 reports the milestones of the view's start on standard error.
-    void trace(const char* milestone) const noexcept {
-        static const bool enabled = [] {
-            const auto* value = std::getenv("WEBFRONT_STARTUP_TRACE");
-            return value && *value && std::string_view{value} != "0";
-        }();
-        if (enabled)
-            std::fprintf(stderr, "WebFront startup: %s at %lld ms (session %lld ms)\n", milestone, millisecondsSinceExec(),
-                         static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - created).count()));
-    }
     /// Makes the window opaque, once: at the page's first frame, or when the delay has expired.
     void presentWindow(bool byFrame) {
-        if (presented || closed || !window)
+        if (closed || !window || !presentation.begin(byFrame))
             return;
-        presented        = true;
-        presentedByFrame = byFrame;
         if (presentTimer) {
             send<void>(presentTimer, "invalidate");
             send<void>(presentTimer, "release");
@@ -438,8 +405,7 @@ struct Session {
         if (options.visible)
             send<void>(window, "setAlphaValue:", 1.0);
         trace("window shown");
-        if (windowShown)
-            windowShown();
+        presentation.announce();
     }
 
     /// Dismisses the panels attached to the window: their completion handlers run, so WebKit gets its answers.
@@ -1275,10 +1241,10 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
     // The AppKit loop drains the main queue: a wake is a block on it. Closing completes pending operations stopped,
     // also when run() throws or returns at once because the window already closed. The window is published once the
     // loop is attached (this is the interface thread) and withdrawn before the session releases it.
-    auto& host = executorHost();
+    auto& host = uiExecutorHostOf<WKWebViewFrontend>();
     frontend::detail::InterfaceSession<Windows> interfaceSession(
         host,
-        detail::wkwebview::windowHost(),
+        nativeWindowHostOf<WKWebViewFrontend>(),
         Windows::instance(),
         window,
         [&host] {
@@ -1301,99 +1267,33 @@ inline void requestSessionClose(void* window) {
 namespace webfront::frontend {
 
 /** @brief Optional macOS embedded window. Main thread only; see docs/WKWEBVIEW.md. */
-struct WKWebViewFrontend {
-    static constexpr Action action{Action::closeServerAfterOpen};
-    static constexpr bool   requiresMainThread = true;  // AppKit
-
-    /// Asks the window to close, from any thread; false when no window is open (see CloseRequest.hpp).
-    static bool requestClose([[maybe_unused]] std::optional<UISession> session = std::nullopt) noexcept {
+struct WKWebViewFrontend : EmbeddedFrontend<WKWebViewFrontend> {
+    static constexpr bool             requiresMainThread = true;  // AppKit
+    static constexpr bool             secondaryWindows   = true;
+    static constexpr std::string_view name               = "WKWebViewFrontend";
+    static constexpr std::string_view enable             = "Configure on macOS with -DWEBFRONT_EMBED_WKWEBVIEW=ON";
+    using Host    = WKWebViewFrontend;
+    using Options = WKWebViewOptions;
 #if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
-        return detail::requestWindowClose(uiExecutor(), nativeWindow(), [](const NativeWindowHandle& window) {
-            detail::wkwebview::requestSessionClose(window.pointer);
-        }, session);
-#else
-        return false;
-#endif
-    }
-
-    static void openSecondaryWindow([[maybe_unused]] std::string_view     address,
-                                    [[maybe_unused]] std::string_view     port,
-                                    [[maybe_unused]] std::string_view     page,
-                                    [[maybe_unused]] const ContentPolicy& policy,
-                                    [[maybe_unused]] const WindowOptions& window,
-                                    [[maybe_unused]] const ViewLaunch&    launch) {
-#if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
-        try {
-            invokeOnUIThread(uiExecutor(), [&] {
-                detail::wkwebview::openSecondary(address, port, page, WKWebViewOptions{.contentPolicy = policy, .window = window, .launch = launch});
-            });
-        } catch (const UIExecutorUnavailable&) {
-            throw std::logic_error("WKWebView: no application window is open");
-        }
-#else
-        initialize();
-#endif
-    }
-    static bool closeSecondaryWindow([[maybe_unused]] std::string_view page) {
-#if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
-        bool closed = false;
-        try {
-            invokeOnUIThread(uiExecutor(), [&] {
-                closed = detail::wkwebview::closeSecondary(page);
-            });
-        } catch (const UIExecutorUnavailable&) {
-            return false;
-        }
-        return closed;
-#else
-        return false;
-#endif
-    }
-
-    static void initialize() {
-#if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
+    static constexpr bool compiled = true;
+    static void initializeNative() {
         detail::wkwebview::initialize();
-#else
-        throw std::runtime_error("WKWebViewFrontend is unavailable. Configure on macOS with -DWEBFRONT_EMBED_WKWEBVIEW=ON");
-#endif
     }
-
-    /// The main thread while open() runs the AppKit loop (see UIExecutor.hpp).
-    [[nodiscard]] static UIExecutor uiExecutor() {
-        return detail::wkwebview::executorHost().executor();
-    }
-
-    /// The NSWindow, readable on the main thread while open() runs (see NativeWindow.hpp).
-    [[nodiscard]] static NativeWindow nativeWindow() {
-        return detail::wkwebview::windowHost().window();
-    }
-
-    static void open(std::string_view port, std::string_view file) {
-        open("127.0.0.1", port, file);
-    }
-    template <typename Options>
-        requires std::same_as<std::remove_cvref_t<Options>, WKWebViewOptions>
-    static void open(std::string_view address, std::string_view port, std::string_view file, Options&& options) {
-#if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
+    static void openNative(std::string_view address, std::string_view port, std::string_view file, const Options& options) {
         detail::wkwebview::open(address, port, file, options);
+    }
+    static void closeNative(const NativeWindowHandle& window) {
+        detail::wkwebview::requestSessionClose(window.pointer);
+    }
+    static void openSecondaryNative(std::string_view address, std::string_view port, std::string_view page, const Options& options) {
+        detail::wkwebview::openSecondary(address, port, page, options);
+    }
+    static bool closeSecondaryNative(std::string_view page) {
+        return detail::wkwebview::closeSecondary(page);
+    }
 #else
-        (void)address;
-        (void)port;
-        (void)file;
-        (void)options;
-        initialize();
+    static constexpr bool compiled = false;
 #endif
-    }
-    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy = {}) {
-        open(address, port, file, WKWebViewOptions{.contentPolicy = policy});
-    }
-    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window) {
-        open(address, port, file, WKWebViewOptions{.contentPolicy = policy, .window = window});
-    }
-    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window,
-                     const ViewLaunch& launch) {
-        open(address, port, file, WKWebViewOptions{.contentPolicy = policy, .window = window, .launch = launch});
-    }
 };
 
 }  // namespace webfront::frontend

@@ -6,12 +6,14 @@
 #include "Capture.hpp"
 #include "CloseRequest.hpp"
 #include "DefaultBrowser.hpp"
+#include "EmbeddedFrontend.hpp"
 #include "Downloads.hpp"
 #include "NativeWindow.hpp"
 #include "ProfileLease.hpp"
 #include "ScriptDialogs.hpp"
 #include "UIExecutor.hpp"
 #include "Url.hpp"
+#include "StartupTrace.hpp"
 #include "Window.hpp"
 #include "WindowRegistry.hpp"
 #include "../ViewAssociation.hpp"
@@ -342,6 +344,7 @@ struct Session : FailureState {
     std::function<void()>                navigationCancelled;
     /// Per-launch proof of this view (ADR-020), given at the start of the top-level documents of the application's origin.
     ViewLaunch launch;
+    std::chrono::milliseconds startupTimeout{30000};  // the initial document must load within this interval
     /// A window opened beside the application's own (#616): it shares the network session (cookies, storage and downloads)
     /// of the first one, runs no loop of its own and reports its closing to `closedHook` instead of ending the loop.
     Api::Object           sharedNetwork = nullptr;
@@ -371,11 +374,9 @@ struct Session : FailureState {
     bool                                 initialNavigation = true;
     unsigned                             navigationTimer   = 0;
     unsigned                             presentTimer      = 0;  // presents the window anyway when the first frame is late
-    bool                                 presented         = false;
     bool                                 firstNotified     = false;  // the page's first notification of the session came, whenever it did
-    bool                                 shownByFrame      = false;  // the page's first frame, not the delay, made the window opaque
-    std::function<void()>                windowShown;               // test hook: called once the window is made opaque
-    std::chrono::steady_clock::time_point created          = std::chrono::steady_clock::now();
+    frontend::detail::Presentation       presentation;
+    frontend::detail::StartupTrace       trace;
     unsigned                             portalTimer       = 0;  // retries the Wayland export until the toplevel can be exported
     int                                  portalAttempts    = 0;
     std::uint64_t                        portalGeneration  = 0;  // the publication this session's identifier belongs to
@@ -387,8 +388,6 @@ struct Session : FailureState {
     std::shared_ptr<CaptureTarget>       captureTarget = std::make_shared<CaptureTarget>();
     CaptureRegistration                  captureRegistration;
 
-    /// The window is presented at the latest this long after the load starts, painted or not.
-    static constexpr unsigned maximumPresentDelayMs = 1000;
 
     explicit Session(webfront::detail::BoundContentPolicy rules, WindowOptions settings = {})
         : policy(std::move(rules)), windowOptions(resolveWindow(std::move(settings))) {}
@@ -547,40 +546,6 @@ struct Session : FailureState {
 
     /// The window is mapped at once but fully transparent: WebKit paints, and animation frames run, only in a mapped view, so
     /// the first frame can be awaited. Without a compositing manager the opacity is ignored and the window shows as before.
-    /// Milliseconds since the process was executed (field 22 of /proc/self/stat against the uptime), so that the trace of a
-    /// start covers the loading of the libraries and the toolkit's initialization, not only the session.
-    static long long millisecondsSinceExec() {
-        try {
-            std::ifstream stat("/proc/self/stat");
-            std::string   text;
-            std::getline(stat, text);
-            const auto close = text.rfind(')');  // the command name may contain spaces
-            if (close == std::string::npos)
-                return -1;
-            std::istringstream fields(text.substr(close + 2));
-            std::string        field;
-            for (int index = 3; index <= 22 && fields >> field; ++index)
-                if (index == 22) {
-                    std::ifstream uptime("/proc/uptime");
-                    double        seconds = 0;
-                    uptime >> seconds;
-                    const double ticks = static_cast<double>(sysconf(_SC_CLK_TCK));
-                    return static_cast<long long>((seconds - std::stod(field) / ticks) * 1000.0);
-                }
-        } catch (...) {
-        }
-        return -1;
-    }
-    /// WEBFRONT_STARTUP_TRACE=1 reports the milestones of the view's start, in milliseconds since the process was executed.
-    void trace(const char* milestone) const {
-        static const bool enabled = [] {
-            const auto* value = std::getenv("WEBFRONT_STARTUP_TRACE");
-            return value && *value && std::string_view{value} != "0";
-        }();
-        if (enabled)
-            std::fprintf(stderr, "WebFront startup: %s at %lld ms (session %lld ms)\n", milestone, millisecondsSinceExec(),
-                         static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - created).count()));
-    }
     void presentHidden() {
         a.widgetOpacity(window, 0.01);  // GTK does not draw a widget at 0, and WebKit would wait for a frame forever
         a.windowPresent(window);
@@ -589,20 +554,17 @@ struct Session : FailureState {
     }
     /// Shows the window once the page painted its first frame, or when the delay expired.
     void presentWindow(bool byFrame) {
-        if (presented || closed)
+        if (closed || !presentation.begin(byFrame))
             return;
-        presented     = true;
-        shownByFrame  = byFrame;
         stopPresentTimer();
         a.widgetOpacity(window, 1.0);
         trace("window shown");
-        if (windowShown)
-            windowShown();
+        presentation.announce();
     }
     static void onFirstFrame(Api::Object, Api::Object, Session* self) noexcept {
         if (!self->firstNotified) {  // a reload injects the probe again: only the first notification is a milestone
             self->firstNotified = true;
-            self->trace(self->presented ? "first frame (after the delay)" : "first frame");
+            self->trace(self->presentation.shown ? "first frame (after the delay)" : "first frame");
         }
         self->guard([self] {
             self->presentWindow(true);
@@ -899,7 +861,7 @@ struct Session : FailureState {
     static int onNavigationTimeout(void* data) noexcept {
         auto* self            = static_cast<Session*>(data);
         self->navigationTimer = 0;
-        self->failAndClose("initial navigation timed out after 30 seconds; check the local server");
+        self->failAndClose("initial navigation timed out after " + std::to_string(self->startupTimeout.count()) + " milliseconds; check the local server");
         return 0;
     }
 
@@ -956,8 +918,8 @@ struct Session : FailureState {
         rethrowIfFailed();
         if (closed)
             return;
-        navigationTimer = a.timeoutAdd(30'000, onNavigationTimeout, this);
-        presentTimer = a.timeoutAdd(maximumPresentDelayMs, onPresentTimeout, this);
+        navigationTimer = a.timeoutAdd(static_cast<unsigned>(startupTimeout.count()), onNavigationTimeout, this);
+        presentTimer = a.timeoutAdd(frontend::detail::Presentation::maximumDelayMs, onPresentTimeout, this);
         presentHidden();
         trace("load started");
         a.load(view, url.c_str());
@@ -968,8 +930,8 @@ struct Session : FailureState {
 
     /// Starts the load of a secondary window and returns: the loop of the application's own window drives it.
     void start(const std::string& url) {
-        navigationTimer = a.timeoutAdd(30'000, onNavigationTimeout, this);
-        presentTimer    = a.timeoutAdd(maximumPresentDelayMs, onPresentTimeout, this);
+        navigationTimer = a.timeoutAdd(static_cast<unsigned>(startupTimeout.count()), onNavigationTimeout, this);
+        presentTimer    = a.timeoutAdd(frontend::detail::Presentation::maximumDelayMs, onPresentTimeout, this);
         presentHidden();
         a.load(view, url.c_str());
     }
@@ -980,6 +942,7 @@ struct OpenOptions {
     WindowOptions                 window{};
     std::function<void(Session&)> configure{};
     ViewLaunch                    launch{};
+    std::chrono::milliseconds     startupTimeout{30000};  // the initial document must load within this interval
 };
 
 /// What the registry of the secondary windows (WindowRegistry.hpp) asks of GTK: reaping is an idle callback.
@@ -1030,6 +993,7 @@ inline void openSecondary(const std::string& address, const std::string& port, c
             session->secondary     = true;
             session->sharedNetwork = primary.network;
             session->launch        = options.launch;
+            session->startupTimeout = primary.startupTimeout;  // the first window's delay
             session->create(mode);
             return session;
         },
@@ -1048,7 +1012,8 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
     // One window per process: a second open() on the main thread is refused before it creates a window.
     frontend::detail::InterfaceSession<Windows>::refuseSecond(uiExecutorHostOf<WebKitGTKHost>(), WindowHooks::name);
     Session session(webfront::detail::BoundContentPolicy{applicationUrl(address, port, "", options.launch.origin), options.contentPolicy}, options.window);
-    session.launch = options.launch;
+    session.launch         = options.launch;
+    session.startupTimeout = options.startupTimeout;
     session.create(mode);
     if (options.configure)
         options.configure(session);
@@ -1082,107 +1047,41 @@ namespace webfront::frontend {
 
 /** @brief Optional Linux WebKitGTK 6.0 window. Construct and open on the process main thread. */
 template <detail::webkitgtk::SandboxMode Mode>
-struct BasicWebKitGTKFrontend {
+struct BasicWebKitGTKFrontend : EmbeddedFrontend<BasicWebKitGTKFrontend<Mode>> {
     static constexpr detail::webkitgtk::SandboxMode sandboxMode = Mode;
-    /// The main thread while open() runs the GLib loop (see UIExecutor.hpp).
-    [[nodiscard]] static UIExecutor uiExecutor() {
-        return uiExecutorHostOf<WebKitGTKHost>().executor();
-    }
-
-    /// The GtkWindow, readable on the main thread while open() runs (see NativeWindow.hpp).
-    [[nodiscard]] static NativeWindow nativeWindow() {
-        return nativeWindowHostOf<WebKitGTKHost>().window();
-    }
-
-    static constexpr Action action{Action::closeServerAfterOpen};
-    static constexpr bool   requiresMainThread = true;  // GTK is initialized and run on the process main thread
-
-    /// Asks the window to close, from any thread; false when no window is open (see CloseRequest.hpp).
-    static bool requestClose([[maybe_unused]] std::optional<UISession> session = std::nullopt) noexcept {
+    static constexpr bool                           requiresMainThread = true;  // GTK is initialized and run on the process main thread
+    static constexpr bool                           secondaryWindows   = true;  // they share the first window's network session
+    static constexpr std::string_view               name               = "WebKitGTKFrontend";
+    static constexpr std::string_view               enable             = "Configure on Linux with -DWEBFRONT_EMBED_WEBKITGTK=ON";
 #if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
-        return detail::requestWindowClose(uiExecutor(), nativeWindow(), [](const NativeWindowHandle& window) {
-            // gtk_window_close ignores a window that is not realized, and the window is presented only after the first frame:
-            // a request made before that must still end the session, so the close-request signal is emitted itself.
-            int handled = 0;
-            detail::webkitgtk::api().emitByName(window.pointer, "close-request", &handled);
-        }, session);
+    static constexpr bool compiled = true;
+    using Options                  = detail::webkitgtk::OpenOptions;
 #else
-        return false;
+    static constexpr bool compiled = false;
+    using Options                  = ViewOptions;
 #endif
-    }
-    /// Opens `page` in a second window beside the one open() runs, or brings the window already showing that page to the
-    /// front (#616). Callable from any thread while open() runs; it returns once the window exists, and throws
-    /// std::logic_error when no window is open. The window shares the application's network session: its cookies,
-    /// storage and downloads (tracked by the first window). Its `WindowOptions::media` is that of the first window. A window
-    /// that cannot start throws its failure.
-    static void openSecondaryWindow([[maybe_unused]] std::string_view address, [[maybe_unused]] std::string_view port,
-                                    [[maybe_unused]] std::string_view page, [[maybe_unused]] const ContentPolicy& policy,
-                                    [[maybe_unused]] const WindowOptions& window, [[maybe_unused]] const ViewLaunch& launch) {
-#if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
-        try {
-            invokeOnUIThread(uiExecutor(), [&] {
-                detail::webkitgtk::openSecondary(std::string(address), std::string(port), std::string(page),
-                                                 {.contentPolicy = policy, .window = window, .launch = launch}, Mode);
-            });
-        } catch (const UIExecutorUnavailable&) {
-            throw std::logic_error("WebKitGTKFrontend: no window of the application is open; show() it before opening another");
-        }
-#else
-        initialize();
-#endif
-    }
+    using Host = WebKitGTKHost;
 
-    /// Asks the secondary window showing `page` to close, from any thread; false when none is open.
-    static bool closeSecondaryWindow([[maybe_unused]] std::string_view page) {
 #if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
-        bool closed = false;
-        try {
-            invokeOnUIThread(uiExecutor(), [&] {
-                closed = detail::webkitgtk::closeSecondary(std::string(page));
-            });
-        } catch (const UIExecutorUnavailable&) {
-            return false;
-        }
-        return closed;
-#else
-        return false;
-#endif
-    }
-
-    static void             initialize() {
-#if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
+    static void initializeNative() {
         detail::webkitgtk::initialize(Mode);
-#else
-        throw std::runtime_error("WebKitGTKFrontend is unavailable. Configure on Linux with -DWEBFRONT_EMBED_WEBKITGTK=ON");
+    }
+    static void openNative(std::string_view address, std::string_view port, std::string_view page, const Options& options) {
+        detail::webkitgtk::open(address, port, page, options, Mode);
+    }
+    static void closeNative(const NativeWindowHandle& window) {
+        // gtk_window_close ignores a window that is not realized, and the window is presented only after the first frame:
+        // a request made before that must still end the session, so the close-request signal is emitted itself.
+        int handled = 0;
+        detail::webkitgtk::api().emitByName(window.pointer, "close-request", &handled);
+    }
+    static void openSecondaryNative(std::string_view address, std::string_view port, std::string_view page, const Options& options) {
+        detail::webkitgtk::openSecondary(std::string(address), std::string(port), std::string(page), options, Mode);
+    }
+    static bool closeSecondaryNative(std::string_view page) {
+        return detail::webkitgtk::closeSecondary(std::string(page));
+    }
 #endif
-    }
-    static void open(std::string_view port, std::string_view page) {
-        open("127.0.0.1", port, page);
-    }
-    static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy = {}) {
-        open(address, port, page, policy, WindowOptions{});
-    }
-    static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy, const WindowOptions& window) {
-#if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
-        detail::webkitgtk::open(address, port, page, {.contentPolicy = policy, .window = window}, Mode);
-#else
-        (void)window;
-        (void)address;
-        (void)port;
-        (void)page;
-        (void)policy;
-        initialize();
-#endif
-    }
-    static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy, const WindowOptions& window,
-                     const ViewLaunch& launch) {
-#if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
-        detail::webkitgtk::open(address, port, page, {.contentPolicy = policy, .window = window, .launch = launch}, Mode);
-#else
-        (void)launch;
-        open(address, port, page, policy, window);
-#endif
-    }
 };
 
 }  // namespace webfront::frontend
