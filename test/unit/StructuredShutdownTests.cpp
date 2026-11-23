@@ -1,8 +1,8 @@
 #include "InlineTaskScope.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/http/HTTPServer.hpp>
 #include <webfront/networking/NetworkingMock.hpp>
 #include <webfront/system/DefaultFS.hpp>
-#include <webfront/testing/Bdd.hpp>
 
 #include <algorithm>
 #include <deque>
@@ -67,7 +67,7 @@ struct ShutdownSocket : webfront::networking::SocketMock {
     ShutdownSocket() : trace(ShutdownContext::current->trace) {
         ++trace->liveSockets;
     }
-    ShutdownSocket(ShutdownSocket&& other) noexcept : trace(std::move(other.trace)) {}
+    ShutdownSocket(ShutdownSocket&& other) noexcept : trace(std::move(other.trace)) { }
     ~ShutdownSocket() {
         if (trace)
             --trace->liveSockets;
@@ -98,7 +98,7 @@ struct ShutdownSender {
         Receiver                                                receiver;
         bool                                                    produce;
         std::optional<ex::stop_callback_for_t<StopToken, Stop>> callback;
-        Operation(Receiver value, bool emit) : receiver(std::move(value)), produce(emit) {}
+        Operation(Receiver value, bool emit) : receiver(std::move(value)), produce(emit) { }
         void start() noexcept {
             if (produce) {
                 ex::set_value(std::move(receiver), T{});
@@ -115,8 +115,8 @@ struct ShutdownSender {
 
 struct ShutdownAcceptor : webfront::networking::SocketBaseMock {
     bool accepted = false;
-    explicit ShutdownAcceptor(ShutdownContext&) {}
-    void open(auto) {}
+    explicit ShutdownAcceptor(ShutdownContext&) { }
+    void open(auto) { }
     bool is_open() const {
         return true;
     }
@@ -139,27 +139,27 @@ struct ShutdownNet : webfront::networking::NetworkingMock {
 }  // namespace
 
 const Scenario serverDrain{"Server drain joins its pending connection without draining unrelated work", [] {
-                               std::shared_ptr<ShutdownTrace> trace;
-                               given("a server with an accepted socket and a pending read", [&] {
-                                   {
-                                       webfront::http::Server<ShutdownNet, webfront::fs::DefaultFS> server("127.0.0.1", "0");
-                                       trace = ShutdownContext::current->trace;
-                                       require(trace->liveSockets == 1);
-                                       when("shutdown cancellation is queued on the context", [&] {
-                                           server.drain();
-                                           then("the connection is destroyed before drain returns", [&] {
-                                               check(trace->liveSockets == 0);
-                                           });
-                                           andThen("join does not require unrelated context work to finish", [&] {
-                                               check(trace->foreignCompletions == 0);
-                                           });
-                                       });
-                                   }
-                                   then("no connection outlives the server", [&] {
-                                       check(trace->liveSockets == 0);
-                                   });
-                               });
-                           }};
+    std::shared_ptr<ShutdownTrace> trace;
+    given("a server with an accepted socket and a pending read", [&] {
+        {
+            webfront::http::Server<ShutdownNet, webfront::fs::DefaultFS> server("127.0.0.1", "0");
+            trace = ShutdownContext::current->trace;
+            require(trace->liveSockets == 1);
+            when("shutdown cancellation is queued on the context", [&] {
+                server.drain();
+                then("the connection is destroyed before drain returns", [&] {
+                    check(trace->liveSockets == 0);
+                });
+                andThen("join does not require unrelated context work to finish", [&] {
+                    check(trace->foreignCompletions == 0);
+                });
+            });
+        }
+        then("no connection outlives the server", [&] {
+            check(trace->liveSockets == 0);
+        });
+    });
+}};
 
 namespace {
 webfront::networking::Task failingTask(int failure) {
@@ -171,28 +171,28 @@ webfront::networking::Task failingTask(int failure) {
 }
 }  // namespace
 const Scenario trackedTask{"Tracked task errors are logged and do not prevent joining", [] {
-                               namespace log = webfront::log;
-                               std::vector<std::string> lines;
-                               log::setLogLevel(log::Error);
-                               auto handle = log::addSinks([&](std::string_view text) {
-                                   lines.emplace_back(text);
-                               });
-                               given("tasks that fail with standard and nonstandard exceptions", [&] {
-                                   webfront::testing::InlineTaskScope scope;
-                                   when("they are spawned into a scope", [&] {
-                                       webfront::networking::Spawn(scope, ex::inline_scheduler{}, failingTask(0));
-                                       webfront::networking::Spawn(scope, ex::inline_scheduler{}, failingTask(1));
-                                       webfront::networking::Spawn(scope, ex::inline_scheduler{}, failingTask(2));
-                                       log::removeSinks(handle);
-                                       then("both errors are logged and the scope can be drained", [&] {
-                                           check(lines.size() == 2);
-                                           check(std::ranges::any_of(lines, [](const auto& line) {
-                                               return line.ends_with("Network task failed: tracked failure");
-                                           }));
-                                           check(std::ranges::any_of(lines, [](const auto& line) {
-                                               return line.ends_with("Network task failed");
-                                           }));
-                                       });
-                                   });
-                               });
-                           }};
+    namespace log = webfront::log;
+    std::vector<std::string> lines;
+    log::setLogLevel(log::Error);
+    auto handle = log::addSinks([&](std::string_view text) {
+        lines.emplace_back(text);
+    });
+    given("tasks that fail with standard and nonstandard exceptions", [&] {
+        webfront::testing::InlineTaskScope scope;
+        when("they are spawned into a scope", [&] {
+            webfront::networking::Spawn(scope, ex::inline_scheduler{}, failingTask(0));
+            webfront::networking::Spawn(scope, ex::inline_scheduler{}, failingTask(1));
+            webfront::networking::Spawn(scope, ex::inline_scheduler{}, failingTask(2));
+            log::removeSinks(handle);
+            then("both errors are logged and the scope can be drained", [&] {
+                check(lines.size() == 2);
+                check(std::ranges::any_of(lines, [](const auto& line) {
+                    return line.ends_with("Network task failed: tracked failure");
+                }));
+                check(std::ranges::any_of(lines, [](const auto& line) {
+                    return line.ends_with("Network task failed");
+                }));
+            });
+        });
+    });
+}};

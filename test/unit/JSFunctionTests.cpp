@@ -1,7 +1,7 @@
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/http/BuffersPolicy.hpp>
 #include <webfront/JsFunction.hpp>
 #include <webfront/networking/NetworkingMock.hpp>
-#include <webfront/testing/Bdd.hpp>
 
 #include <algorithm>
 #include <array>
@@ -94,81 +94,79 @@ struct WebFrontMock {
 };
 
 const Scenario jsFunctionScenario{"JsFunction", [] {
-                                      WebFrontMock webFront;
-                                      WebLinkId    id{1};
+    WebFrontMock webFront;
+    WebLinkId    id{1};
 
-                                      given("A print JsFunction", [&] {
-                                          JsFunction  print("print", webFront, id, 1);
-                                          std::string text{"maFunction"};
+    given("A print JsFunction", [&] {
+        JsFunction  print("print", webFront, id, 1);
+        std::string text{"maFunction"};
 
-                                          when("print is called with a boolean (true) parameter", [&] {
-                                              print(true);
-                                              then("encoded data should be", [&] {
-                                                  require(checkType(0, msg::CodedType::smallString));
-                                                  require(checkSize8(1, 5));
-                                                  require(checkString(2, "print"));
-                                                  require(checkType(7, msg::CodedType::booleanTrue));
-                                              });
-                                          });
+        when("print is called with a boolean (true) parameter", [&] {
+            print(true);
+            then("encoded data should be", [&] {
+                require(checkType(0, msg::CodedType::smallString));
+                require(checkSize8(1, 5));
+                require(checkString(2, "print"));
+                require(checkType(7, msg::CodedType::booleanTrue));
+            });
+        });
 
-                                          when("print is called with a bunch of different types of parameters", [&] {
-                                              print(false, "text data", 45, text, bigText);
-                                              then("encoded data should be", [&] {
-                                                  require(checkType(0, msg::CodedType::smallString));
-                                                  require(checkSize8(1, 5));
-                                                  require(checkString(2, "print"));
-                                                  require(checkType(7, msg::CodedType::booleanFalse));
-                                                  require(checkType(8, msg::CodedType::smallString));
-                                                  require(checkSize8(9, 9));
-                                                  require(checkString(10, "text data"));
-                                                  require(checkType(19, msg::CodedType::number));
-                                                  require(checkNumber(20, 45));
-                                                  require(checkType(28, msg::CodedType::smallString));
-                                                  require(checkSize8(29, 10));
-                                                  require(checkString(30, "maFunction"));
-                                                  require(checkType(40, msg::CodedType::string));
-                                                  require(checkSize16(41, 1980));
-                                              });
-                                          });
+        when("print is called with a bunch of different types of parameters", [&] {
+            print(false, "text data", 45, text, bigText);
+            then("encoded data should be", [&] {
+                require(checkType(0, msg::CodedType::smallString));
+                require(checkSize8(1, 5));
+                require(checkString(2, "print"));
+                require(checkType(7, msg::CodedType::booleanFalse));
+                require(checkType(8, msg::CodedType::smallString));
+                require(checkSize8(9, 9));
+                require(checkString(10, "text data"));
+                require(checkType(19, msg::CodedType::number));
+                require(checkNumber(20, 45));
+                require(checkType(28, msg::CodedType::smallString));
+                require(checkSize8(29, 10));
+                require(checkString(30, "maFunction"));
+                require(checkType(40, msg::CodedType::string));
+                require(checkSize16(41, 1980));
+            });
+        });
 
-                                          when("print is called with a string too long for a message", [&] {
-                                              encodedBuffer.assign(1, 0xEE);
-                                              then("the call throws before anything is sent", [&] {
-                                                  requireThrows<std::length_error>([&] {
-                                                      print(std::string(http::defaultMaxMessageSize, 'x'));
-                                                  });
-                                                  require(encodedBuffer == std::vector<uint8_t>{0xEE});
-                                              });
-                                          });
+        when("print is called with a string too long for a message", [&] {
+            encodedBuffer.assign(1, 0xEE);
+            then("the call throws before anything is sent", [&] {
+                requireThrows<std::length_error>([&] { print(std::string(http::defaultMaxMessageSize, 'x')); });
+                require(encodedBuffer == std::vector<uint8_t>{0xEE});
+            });
+        });
 
-                                          when("print is reused for numeric arrays", [&] {
-                                              vector<uint16_t> values{1, 256, 65535};
-                                              print(values);
+        when("print is reused for numeric arrays", [&] {
+            vector<uint16_t> values{1, 256, 65535};
+            print(values);
 
-                                              then("the array uses its typed wire representation", [&] {
-                                                  require(checkType(7, msg::CodedType::arrayU16));
-                                                  require(checkSize32(8, 3));
-                                                  uint16_t first{};
-                                                  uint16_t second{};
-                                                  uint16_t third{};
-                                                  copy_n(&encodedBuffer[12], 2, reinterpret_cast<uint8_t*>(&first));
-                                                  copy_n(&encodedBuffer[14], 2, reinterpret_cast<uint8_t*>(&second));
-                                                  copy_n(&encodedBuffer[16], 2, reinterpret_cast<uint8_t*>(&third));
-                                                  require(array{first, second, third} == array<uint16_t, 3>{1, 256, 65535});
-                                              });
+            then("the array uses its typed wire representation", [&] {
+                require(checkType(7, msg::CodedType::arrayU16));
+                require(checkSize32(8, 3));
+                uint16_t first{};
+                uint16_t second{};
+                uint16_t third{};
+                copy_n(&encodedBuffer[12], 2, reinterpret_cast<uint8_t*>(&first));
+                copy_n(&encodedBuffer[14], 2, reinterpret_cast<uint8_t*>(&second));
+                copy_n(&encodedBuffer[16], 2, reinterpret_cast<uint8_t*>(&third));
+                require(array{first, second, third} == array<uint16_t, 3>{1, 256, 65535});
+            });
 
-                                              when("the same function object is called again", [&] {
-                                                  array<uint8_t, 2> next{4, 5};
-                                                  print(span<const uint8_t>{next});
+            when("the same function object is called again", [&] {
+                array<uint8_t, 2> next{4, 5};
+                print(span<const uint8_t>{next});
 
-                                                  then("message counters and payload offsets are reset", [&] {
-                                                      require(checkType(7, msg::CodedType::smallArrayU8));
-                                                      require(checkSize8(8, 2));
-                                                      require(encodedBuffer[9] == 4);
-                                                      require(encodedBuffer[10] == 5);
-                                                      require(encodedBuffer.size() == 11);
-                                                  });
-                                              });
-                                          });
-                                      });
-                                  }};
+                then("message counters and payload offsets are reset", [&] {
+                    require(checkType(7, msg::CodedType::smallArrayU8));
+                    require(checkSize8(8, 2));
+                    require(encodedBuffer[9] == 4);
+                    require(encodedBuffer[10] == 5);
+                    require(encodedBuffer.size() == 11);
+                });
+            });
+        });
+    });
+}};

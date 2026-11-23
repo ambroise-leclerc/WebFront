@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
 /// @brief Broadcasting to every connected browser, and the threads of callbacks and browser calls (#401).
 #include "InjectableNetworking.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/networking/TCPNetworkingStdnet.hpp>
 #include <webfront/system/DefaultFS.hpp>
-#include <webfront/testing/Bdd.hpp>
 #include <webfront/WebFront.hpp>
 
 #ifdef _WIN32
@@ -32,7 +32,7 @@ using namespace std::chrono_literals;
 
 namespace {
 const std::string broadcastUpgradeRequest = "GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-                                            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+                                   "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
 
 // The payload of a browser's call to a C++ function, without a reply (call identifier 0).
 template <typename Net>
@@ -57,228 +57,220 @@ struct OneBrowserNet : testing::InjectableNetworking {
 }  // namespace
 
 const Scenario broadcastKeeps{"A broadcast keeps only the latest call for a browser with too many pending writes", {"broadcast"}, [] {
-                                  using Socket = testing::InjectableSocket;
-                                  Socket::reset();
-                                  OneBrowserNet::accepted = false;
-                                  BasicWF<OneBrowserNet, fs::DefaultFS> app{WebFrontConfig{.port = "0"}};
-                                  auto                                  latest = app.broadcast("onState", {.maxPendingWrites = 1});
-                                  auto                                  every  = app.broadcast("onEvent");
-                                  Socket::receive(std::as_bytes(std::span(broadcastUpgradeRequest)));
-                                  require(app.connectedBrowsers() == 1);
+    using Socket = testing::InjectableSocket;
+    Socket::reset();
+    OneBrowserNet::accepted = false;
+    BasicWF<OneBrowserNet, fs::DefaultFS> app{WebFrontConfig{.port = "0"}};
+    auto                                  latest = app.broadcast("onState", {.maxPendingWrites = 1});
+    auto                                  every  = app.broadcast("onEvent");
+    Socket::receive(std::as_bytes(std::span(broadcastUpgradeRequest)));
+    require(app.connectedBrowsers() == 1);
 
-                                  given("a browser whose handshake has not completed", [&] {
-                                      latest(std::string{"before-handshake"});
-                                      then("it is not started yet and receives nothing", [&] {
-                                          require(!Socket::wrote("before-handshake"));
-                                      });
-                                  });
-                                  given("a started browser whose network completes writes only when the test says so", [&] {
-                                      msg::Handshake handshake;
-                                      Socket::receive(testing::clientFrame(
-                                          std::span(reinterpret_cast<const std::byte*>(handshake.header().data()), handshake.header().size())));
-                                      Socket::deferWrites();
-                                      Socket::completeDeferredWrites();  // the handshake acknowledgement
-
-                                      when("three states are broadcast while the first one is still being written", [&] {
-                                          latest(std::string{"state-1"});
-                                          latest(std::string{"state-2"});
-                                          latest(std::string{"state-3"});
-                                          then("only the first is written before the network completes it", [&] {
-                                              require(Socket::wrote("state-1"));
-                                              require(!Socket::wrote("state-3"));
-                                          });
-                                          andWhen("the network completes the writes", [&] {
-                                              while (Socket::completeDeferredWrites() != 0) {}
-                                              then("the latest state follows and the intermediate one was skipped", [&] {
-                                                  require(Socket::wrote("state-3"));
-                                                  require(!Socket::wrote("state-2"));
-                                              });
-                                              then("a later state is written at once", [&] {
-                                                  latest(std::string{"state-4"});
-                                                  require(Socket::wrote("state-4"));
-                                              });
-                                          });
-                                      });
-                                      when("states are broadcast through temporary function objects while the first one is still being written", [&] {
-                                          app.broadcast("onState", {.maxPendingWrites = 1})(std::string{"temporary-1"});
-                                          app.broadcast("onState", {.maxPendingWrites = 1})(std::string{"temporary-2"});
-                                          app.broadcast("onState", {.maxPendingWrites = 1})(std::string{"temporary-3"});
-                                          while (Socket::completeDeferredWrites() != 0) {}
-                                          then("they share the browser's held call: the intermediate one was skipped", [&] {
-                                              require(Socket::wrote("temporary-1"));
-                                              require(Socket::wrote("temporary-3"));
-                                              require(!Socket::wrote("temporary-2"));
-                                          });
-                                      });
-                                      when("states are broadcast while an event of another function is still being written", [&] {
-                                          every(std::string{"event-0"});
-                                          latest(std::string{"state-1"});
-                                          latest(std::string{"state-2"});
-                                          latest(std::string{"state-3"});
-                                          while (Socket::completeDeferredWrites() != 0) {}
-                                          then("the event does not count toward the limit of the states", [&] {
-                                              require(Socket::wrote("event-0"));
-                                              require(Socket::wrote("state-1"));
-                                              require(Socket::wrote("state-3"));
-                                              require(!Socket::wrote("state-2"));
-                                          });
-                                      });
-                                      when("events are broadcast without a limit while the first one is still being written", [&] {
-                                          every(std::string{"event-1"});
-                                          every(std::string{"event-2"});
-                                          every(std::string{"event-3"});
-                                          while (Socket::completeDeferredWrites() != 0) {}
-                                          then("every one is written", [&] {
-                                              require(Socket::wrote("event-1"));
-                                              require(Socket::wrote("event-2"));
-                                              require(Socket::wrote("event-3"));
-                                          });
-                                      });
-                                      Socket::deferWrites(false);
-                                      while (Socket::completeDeferredWrites() != 0) {}
-                                  });
-                                  app.shutdown();
-                                  Socket::reset();
-                              }};
-
-const Scenario broadcastLimit{"A broadcast limit must allow at least one pending write", {"broadcast"}, [] {
-                                  testing::InjectableSocket::reset();
-                                  OneBrowserNet::accepted = false;
-                                  BasicWF<OneBrowserNet, fs::DefaultFS> app{WebFrontConfig{.port = "0"}};
-                                  requireThrows<std::invalid_argument>([&] {
-                                      (void)app.broadcast("onState", {.maxPendingWrites = 0});
-                                  });
-                                  app.shutdown();
-                                  testing::InjectableSocket::reset();
-                              }};
-
-const Scenario browserReceives{"A browser receives a broadcast made while its onUIStarted handlers run after what they sent", {"broadcast"}, [] {
-                                   using Socket = testing::InjectableSocket;
-                                   using App    = BasicWF<OneBrowserNet, fs::DefaultFS>;
-                                   Socket::reset();
-                                   OneBrowserNet::accepted = false;
-                                   App         app{WebFrontConfig{.port = "0"}};
-                                   auto        onState = app.broadcast("onState", {.maxPendingWrites = 1});
-                                   std::size_t visitedWhileStarting{};
-                                   app.onUIStarted([&](App::UI ui) {
-                                       onState(std::string{"broadcast-while-starting"});
-                                       app.forEachUI([&](App::UI) {
-                                           ++visitedWhileStarting;
-                                       });
-                                       ui.jsFunction("initial")(std::string{"initial-state"});
-                                   });
-                                   Socket::receive(std::as_bytes(std::span(broadcastUpgradeRequest)));
-
-                                   when("the browser completes its handshake", [&] {
-                                       msg::Handshake handshake;
-                                       Socket::receive(testing::clientFrame(
-                                           std::span(reinterpret_cast<const std::byte*>(handshake.header().data()), handshake.header().size())));
-                                       then("the handler's initial state comes first, then the broadcast", [&] {
-                                           require(Socket::wrote("initial-state"));
-                                           require(Socket::wrote("broadcast-while-starting"));
-                                           require(Socket::writtenAt("initial-state") < Socket::writtenAt("broadcast-while-starting"));
-                                       });
-                                       then("forEachUI skipped the browser while its handlers ran, and visits it afterwards", [&] {
-                                           require(visitedWhileStarting == 0);
-                                           std::size_t visited{};
-                                           app.forEachUI([&](App::UI) {
-                                               ++visited;
-                                           });
-                                           require(visited == 1);
-                                       });
-                                   });
-                                   app.shutdown();
-                                   Socket::reset();
-                               }};
-
-const Scenario browserWhose{
-    "A browser whose onUIStarted handlers run keeps only the latest calls within the limit",
-    {"broadcast"},
-    [] {
-        using Socket = testing::InjectableSocket;
-        using App    = BasicWF<OneBrowserNet, fs::DefaultFS>;
-        Socket::reset();
-        OneBrowserNet::accepted = false;
-        App  app{WebFrontConfig{.port = "0"}};
-        auto latest = app.broadcast("onState", {.maxPendingWrites = 1});
-        auto pair   = app.broadcast("onState", {.maxPendingWrites = 2});
-        auto every  = app.broadcast("onEvent");
-        app.onUIStarted([&](App::UI) {
-            latest(std::string{"starting-1"});
-            every(std::string{"event-1"});
-            latest(std::string{"starting-2"});
-            every(std::string{"event-2"});
-            latest(std::string{"starting-3"});
+    given("a browser whose handshake has not completed", [&] {
+        latest(std::string{"before-handshake"});
+        then("it is not started yet and receives nothing", [&] {
+            require(!Socket::wrote("before-handshake"));
         });
-        Socket::receive(std::as_bytes(std::span(broadcastUpgradeRequest)));
+    });
+    given("a started browser whose network completes writes only when the test says so", [&] {
+        msg::Handshake handshake;
+        Socket::receive(testing::clientFrame(std::span(reinterpret_cast<const std::byte*>(handshake.header().data()), handshake.header().size())));
+        Socket::deferWrites();
+        Socket::completeDeferredWrites();  // the handshake acknowledgement
 
-        when("the browser completes its handshake", [&] {
-            msg::Handshake handshake;
-            Socket::receive(testing::clientFrame(std::span(reinterpret_cast<const std::byte*>(handshake.header().data()), handshake.header().size())));
-            then("only the latest limited call made meanwhile is sent, after the unlimited ones made before it", [&] {
-                require(Socket::wrote("starting-3"));
-                require(!Socket::wrote("starting-1"));
-                require(!Socket::wrote("starting-2"));
+        when("three states are broadcast while the first one is still being written", [&] {
+            latest(std::string{"state-1"});
+            latest(std::string{"state-2"});
+            latest(std::string{"state-3"});
+            then("only the first is written before the network completes it", [&] {
+                require(Socket::wrote("state-1"));
+                require(!Socket::wrote("state-3"));
+            });
+            andWhen("the network completes the writes", [&] {
+                while (Socket::completeDeferredWrites() != 0) {}
+                then("the latest state follows and the intermediate one was skipped", [&] {
+                    require(Socket::wrote("state-3"));
+                    require(!Socket::wrote("state-2"));
+                });
+                then("a later state is written at once", [&] {
+                    latest(std::string{"state-4"});
+                    require(Socket::wrote("state-4"));
+                });
+            });
+        });
+        when("states are broadcast through temporary function objects while the first one is still being written", [&] {
+            app.broadcast("onState", {.maxPendingWrites = 1})(std::string{"temporary-1"});
+            app.broadcast("onState", {.maxPendingWrites = 1})(std::string{"temporary-2"});
+            app.broadcast("onState", {.maxPendingWrites = 1})(std::string{"temporary-3"});
+            while (Socket::completeDeferredWrites() != 0) { }
+            then("they share the browser's held call: the intermediate one was skipped", [&] {
+                require(Socket::wrote("temporary-1"));
+                require(Socket::wrote("temporary-3"));
+                require(!Socket::wrote("temporary-2"));
+            });
+        });
+        when("states are broadcast while an event of another function is still being written", [&] {
+            every(std::string{"event-0"});
+            latest(std::string{"state-1"});
+            latest(std::string{"state-2"});
+            latest(std::string{"state-3"});
+            while (Socket::completeDeferredWrites() != 0) { }
+            then("the event does not count toward the limit of the states", [&] {
+                require(Socket::wrote("event-0"));
+                require(Socket::wrote("state-1"));
+                require(Socket::wrote("state-3"));
+                require(!Socket::wrote("state-2"));
+            });
+        });
+        when("events are broadcast without a limit while the first one is still being written", [&] {
+            every(std::string{"event-1"});
+            every(std::string{"event-2"});
+            every(std::string{"event-3"});
+            while (Socket::completeDeferredWrites() != 0) {}
+            then("every one is written", [&] {
                 require(Socket::wrote("event-1"));
                 require(Socket::wrote("event-2"));
-                require(Socket::writtenAt("event-2") < Socket::writtenAt("starting-3"));
+                require(Socket::wrote("event-3"));
             });
         });
-        when("calls of one function use different limits while the first is still being written", [&] {
-            msg::Handshake handshake;
-            Socket::receive(testing::clientFrame(std::span(reinterpret_cast<const std::byte*>(handshake.header().data()), handshake.header().size())));
-            Socket::deferWrites();
-            Socket::completeDeferredWrites();  // the handshake acknowledgement
-            while (Socket::completeDeferredWrites() != 0) {}
-            pair(std::string{"pair-1"});
-            pair(std::string{"pair-2"});
-            latest(std::string{"single-3"});
-            latest(std::string{"single-4"});
-            pair(std::string{"pair-5"});
-            while (Socket::completeDeferredWrites() != 0) {}
-            then("each call applies its own limit within the browser's queue of that function", [&] {
-                require(Socket::wrote("pair-1"));
-                require(Socket::wrote("pair-2"));
-                require(!Socket::wrote("single-3"));
-                require(!Socket::wrote("single-4"));
-                require(Socket::wrote("pair-5"));
-                require(Socket::writtenAt("pair-2") < Socket::writtenAt("pair-5"));
-            });
-            Socket::deferWrites(false);
-            while (Socket::completeDeferredWrites() != 0) {}
+        Socket::deferWrites(false);
+        while (Socket::completeDeferredWrites() != 0) {}
+    });
+    app.shutdown();
+    Socket::reset();
+}};
+
+const Scenario broadcastLimit{"A broadcast limit must allow at least one pending write", {"broadcast"}, [] {
+    testing::InjectableSocket::reset();
+    OneBrowserNet::accepted = false;
+    BasicWF<OneBrowserNet, fs::DefaultFS> app{WebFrontConfig{.port = "0"}};
+    requireThrows<std::invalid_argument>([&] { (void)app.broadcast("onState", {.maxPendingWrites = 0}); });
+    app.shutdown();
+    testing::InjectableSocket::reset();
+}};
+
+const Scenario browserReceives{"A browser receives a broadcast made while its onUIStarted handlers run after what they sent", {"broadcast"}, [] {
+    using Socket = testing::InjectableSocket;
+    using App    = BasicWF<OneBrowserNet, fs::DefaultFS>;
+    Socket::reset();
+    OneBrowserNet::accepted = false;
+    App         app{WebFrontConfig{.port = "0"}};
+    auto        onState = app.broadcast("onState", {.maxPendingWrites = 1});
+    std::size_t visitedWhileStarting{};
+    app.onUIStarted([&](App::UI ui) {
+        onState(std::string{"broadcast-while-starting"});
+        app.forEachUI([&](App::UI) {
+            ++visitedWhileStarting;
         });
-        app.shutdown();
-        Socket::reset();
-    }};
+        ui.jsFunction("initial")(std::string{"initial-state"});
+    });
+    Socket::receive(std::as_bytes(std::span(broadcastUpgradeRequest)));
+
+    when("the browser completes its handshake", [&] {
+        msg::Handshake handshake;
+        Socket::receive(testing::clientFrame(std::span(reinterpret_cast<const std::byte*>(handshake.header().data()), handshake.header().size())));
+        then("the handler's initial state comes first, then the broadcast", [&] {
+            require(Socket::wrote("initial-state"));
+            require(Socket::wrote("broadcast-while-starting"));
+            require(Socket::writtenAt("initial-state") < Socket::writtenAt("broadcast-while-starting"));
+        });
+        then("forEachUI skipped the browser while its handlers ran, and visits it afterwards", [&] {
+            require(visitedWhileStarting == 0);
+            std::size_t visited{};
+            app.forEachUI([&](App::UI) {
+                ++visited;
+            });
+            require(visited == 1);
+        });
+    });
+    app.shutdown();
+    Socket::reset();
+}};
+
+const Scenario browserWhose{"A browser whose onUIStarted handlers run keeps only the latest calls within the limit", {"broadcast"}, [] {
+    using Socket = testing::InjectableSocket;
+    using App    = BasicWF<OneBrowserNet, fs::DefaultFS>;
+    Socket::reset();
+    OneBrowserNet::accepted = false;
+    App  app{WebFrontConfig{.port = "0"}};
+    auto latest = app.broadcast("onState", {.maxPendingWrites = 1});
+    auto pair   = app.broadcast("onState", {.maxPendingWrites = 2});
+    auto every  = app.broadcast("onEvent");
+    app.onUIStarted([&](App::UI) {
+        latest(std::string{"starting-1"});
+        every(std::string{"event-1"});
+        latest(std::string{"starting-2"});
+        every(std::string{"event-2"});
+        latest(std::string{"starting-3"});
+    });
+    Socket::receive(std::as_bytes(std::span(broadcastUpgradeRequest)));
+
+    when("the browser completes its handshake", [&] {
+        msg::Handshake handshake;
+        Socket::receive(testing::clientFrame(std::span(reinterpret_cast<const std::byte*>(handshake.header().data()), handshake.header().size())));
+        then("only the latest limited call made meanwhile is sent, after the unlimited ones made before it", [&] {
+            require(Socket::wrote("starting-3"));
+            require(!Socket::wrote("starting-1"));
+            require(!Socket::wrote("starting-2"));
+            require(Socket::wrote("event-1"));
+            require(Socket::wrote("event-2"));
+            require(Socket::writtenAt("event-2") < Socket::writtenAt("starting-3"));
+        });
+    });
+    when("calls of one function use different limits while the first is still being written", [&] {
+        msg::Handshake handshake;
+        Socket::receive(testing::clientFrame(std::span(reinterpret_cast<const std::byte*>(handshake.header().data()), handshake.header().size())));
+        Socket::deferWrites();
+        Socket::completeDeferredWrites();  // the handshake acknowledgement
+        while (Socket::completeDeferredWrites() != 0) { }
+        pair(std::string{"pair-1"});
+        pair(std::string{"pair-2"});
+        latest(std::string{"single-3"});
+        latest(std::string{"single-4"});
+        pair(std::string{"pair-5"});
+        while (Socket::completeDeferredWrites() != 0) { }
+        then("each call applies its own limit within the browser's queue of that function", [&] {
+            require(Socket::wrote("pair-1"));
+            require(Socket::wrote("pair-2"));
+            require(!Socket::wrote("single-3"));
+            require(!Socket::wrote("single-4"));
+            require(Socket::wrote("pair-5"));
+            require(Socket::writtenAt("pair-2") < Socket::writtenAt("pair-5"));
+        });
+        Socket::deferWrites(false);
+        while (Socket::completeDeferredWrites() != 0) { }
+    });
+    app.shutdown();
+    Socket::reset();
+}};
 
 const Scenario heldBroadcast{"A held broadcast reaches the browser after a later call of another function", {"broadcast"}, [] {
-                                 using Socket = testing::InjectableSocket;
-                                 Socket::reset();
-                                 OneBrowserNet::accepted = false;
-                                 BasicWF<OneBrowserNet, fs::DefaultFS> app{WebFrontConfig{.port = "0"}};
-                                 auto                                  latest = app.broadcast("onState", {.maxPendingWrites = 1});
-                                 auto                                  every  = app.broadcast("onReset");
-                                 Socket::receive(std::as_bytes(std::span(broadcastUpgradeRequest)));
-                                 msg::Handshake handshake;
-                                 Socket::receive(
-                                     testing::clientFrame(std::span(reinterpret_cast<const std::byte*>(handshake.header().data()), handshake.header().size())));
-                                 Socket::deferWrites();
-                                 Socket::completeDeferredWrites();  // the handshake acknowledgement
+    using Socket = testing::InjectableSocket;
+    Socket::reset();
+    OneBrowserNet::accepted = false;
+    BasicWF<OneBrowserNet, fs::DefaultFS> app{WebFrontConfig{.port = "0"}};
+    auto                                  latest = app.broadcast("onState", {.maxPendingWrites = 1});
+    auto                                  every  = app.broadcast("onReset");
+    Socket::receive(std::as_bytes(std::span(broadcastUpgradeRequest)));
+    msg::Handshake handshake;
+    Socket::receive(testing::clientFrame(std::span(reinterpret_cast<const std::byte*>(handshake.header().data()), handshake.header().size())));
+    Socket::deferWrites();
+    Socket::completeDeferredWrites();  // the handshake acknowledgement
 
-                                 when("a state is held back, then another function is called", [&] {
-                                     latest(std::string{"state-1"});
-                                     latest(std::string{"state-2"});
-                                     every(std::string{"reset-after-state-2"});
-                                     while (Socket::completeDeferredWrites() != 0) {}
-                                     then("the other function's call is written before the held state, as documented", [&] {
-                                         require(Socket::writtenAt("reset-after-state-2") < Socket::writtenAt("state-2"));
-                                     });
-                                 });
-                                 Socket::deferWrites(false);
-                                 while (Socket::completeDeferredWrites() != 0) {}
-                                 app.shutdown();
-                                 Socket::reset();
-                             }};
+    when("a state is held back, then another function is called", [&] {
+        latest(std::string{"state-1"});
+        latest(std::string{"state-2"});
+        every(std::string{"reset-after-state-2"});
+        while (Socket::completeDeferredWrites() != 0) { }
+        then("the other function's call is written before the held state, as documented", [&] {
+            require(Socket::writtenAt("reset-after-state-2") < Socket::writtenAt("state-2"));
+        });
+    });
+    Socket::deferWrites(false);
+    while (Socket::completeDeferredWrites() != 0) { }
+    app.shutdown();
+    Socket::reset();
+}};
 
 namespace {
 using Stdnet = networking::TCPStdnet;
@@ -361,142 +353,142 @@ struct Observed {
 }  // namespace
 
 const Scenario callbacksRun{"Callbacks run one at a time on the server thread, and browser calls are made from any thread", {"broadcast"}, [] {
-                                using App = BasicWF<Stdnet, fs::DefaultFS>;
-                                App        app{WebFrontConfig{.port = "0"}};
-                                Observed   observed;
-                                std::mutex applicationLock;  // also taken by a callback
-                                app.onUIStarted([&](App::UI) {
-                                    observed.record();
-                                    ++observed.started;
-                                });
-                                auto closedSubscription = app.subscribeUIClosed([&](App::UI) {
-                                    observed.record();
-                                    ++observed.closed;
-                                });
-                                app.cppFunction("report", [&](App::UI ui) {
-                                    observed.record();
-                                    std::scoped_lock lock{applicationLock};
-                                    ui.jsFunction("reported")(std::string{"reported-ack"});
-                                    ++observed.calls;
-                                });
-                                std::promise<void> unblock;
-                                auto               unblocked = unblock.get_future().share();
-                                std::atomic<bool>  blocking{false};
-                                app.cppFunction("block", [&] {
-                                    blocking = true;
-                                    unblocked.wait();
-                                });
-                                std::thread server([&] {
-                                    app.run();
-                                });
-                                const auto  serverThread = server.get_id();
+    using App = BasicWF<Stdnet, fs::DefaultFS>;
+    App        app{WebFrontConfig{.port = "0"}};
+    Observed   observed;
+    std::mutex applicationLock;  // also taken by a callback
+    app.onUIStarted([&](App::UI) {
+        observed.record();
+        ++observed.started;
+    });
+    auto closedSubscription = app.subscribeUIClosed([&](App::UI) {
+        observed.record();
+        ++observed.closed;
+    });
+    app.cppFunction("report", [&](App::UI ui) {
+        observed.record();
+        std::scoped_lock lock{applicationLock};
+        ui.jsFunction("reported")(std::string{"reported-ack"});
+        ++observed.calls;
+    });
+    std::promise<void> unblock;
+    auto               unblocked = unblock.get_future().share();
+    std::atomic<bool>  blocking{false};
+    app.cppFunction("block", [&] {
+        blocking = true;
+        unblocked.wait();
+    });
+    std::thread server([&] {
+        app.run();
+    });
+    const auto  serverThread = server.get_id();
 
-                                auto first  = std::make_unique<Browser>(app.port());
-                                auto second = std::make_unique<Browser>(app.port());
-                                broadcastWaitUntil([&] {
-                                    return observed.started == 2;
-                                });
-                                require(observed.started == 2);
+    auto first  = std::make_unique<Browser>(app.port());
+    auto second = std::make_unique<Browser>(app.port());
+    broadcastWaitUntil([&] {
+        return observed.started == 2;
+    });
+    require(observed.started == 2);
 
-                                when("another thread broadcasts a state", [&] {
-                                    auto onState = app.broadcast("siliconForge.onState");
-                                    onState(std::string{"broadcast-state"});
-                                    then("every started browser receives it", [&] {
-                                        require(first->receiveUntil("broadcast-state"));
-                                        require(second->receiveUntil("broadcast-state"));
-                                    });
-                                });
-                                when("another thread calls each browser through forEachUI", [&] {
-                                    std::vector<WebLinkId> visited;
-                                    bool                   documentRefused = true;
-                                    app.forEachUI([&](App::UI ui) {
-                                        visited.push_back(ui.id());
-                                        ui.jsFunction("each")(std::string{"each-ui-" + std::to_string(ui.id())});
-                                        try {
-                                            static_cast<void>(ui.document());
-                                            documentRefused = false;
-                                        } catch (const std::logic_error&) {}
-                                    });
-                                    then("each started browser is visited once and receives its call, but its document needs the server thread", [&] {
-                                        require(visited.size() == 2);
-                                        require(documentRefused);
-                                        require(first->receiveUntil("each-ui-"));
-                                        require(second->receiveUntil("each-ui-"));
-                                    });
-                                });
-                                when("both browsers call C++ while another thread broadcasts under a lock the callback also takes", [&] {
-                                    auto onState = app.broadcast("siliconForge.onState", {.maxPendingWrites = 2});
-                                    for (int i = 0; i < 20; ++i) {
-                                        first->call("report");
-                                        second->call("report");
-                                        std::scoped_lock lock{applicationLock};
-                                        onState(std::string{"locked-state"});
-                                        app.forEachUI([](App::UI ui) {
-                                            ui.jsFunction("locked")(std::string{"locked-call"});
-                                        });
-                                    }
-                                    broadcastWaitUntil([&] {
-                                        return observed.calls == 40;
-                                    });
-                                    then("no call deadlocks and the callbacks never overlap", [&] {
-                                        require(observed.calls == 40);
-                                        require(observed.maxRunning == 1);
-                                        require(first->receiveUntil("reported-ack"));
-                                        require(second->receiveUntil("locked-call"));
-                                    });
-                                });
-                                when("a callback blocks the server thread", [&] {
-                                    first->call("block");
-                                    broadcastWaitUntil([&] {
-                                        return blocking.load();
-                                    });
-                                    require(blocking);
-                                    auto       calls  = std::async(std::launch::async, [&] {
-                                        auto onState = app.broadcast("siliconForge.onState", {.maxPendingWrites = 1});
-                                        onState(std::string{"while-blocked"});
-                                        onState(std::string{"while-blocked"});
-                                        app.forEachUI([](App::UI ui) {
-                                            ui.jsFunction("blocked")(std::string{"while-blocked"});
-                                            static_cast<void>(ui.pendingWrites());
-                                        });
-                                    });
-                                    const bool called = waitReady(calls, 5s);
-                                    unblock.set_value();
-                                    then("browser calls from another thread return without waiting for it", [&] {
-                                        require(called);
-                                        require(second->receiveUntil("while-blocked"));
-                                    });
-                                });
-                                if (blocking == false)
-                                    unblock.set_value();
+    when("another thread broadcasts a state", [&] {
+        auto onState = app.broadcast("siliconForge.onState");
+        onState(std::string{"broadcast-state"});
+        then("every started browser receives it", [&] {
+            require(first->receiveUntil("broadcast-state"));
+            require(second->receiveUntil("broadcast-state"));
+        });
+    });
+    when("another thread calls each browser through forEachUI", [&] {
+        std::vector<WebLinkId> visited;
+        bool                   documentRefused = true;
+        app.forEachUI([&](App::UI ui) {
+            visited.push_back(ui.id());
+            ui.jsFunction("each")(std::string{"each-ui-" + std::to_string(ui.id())});
+            try {
+                static_cast<void>(ui.document());
+                documentRefused = false;
+            } catch (const std::logic_error&) { }
+        });
+        then("each started browser is visited once and receives its call, but its document needs the server thread", [&] {
+            require(visited.size() == 2);
+            require(documentRefused);
+            require(first->receiveUntil("each-ui-"));
+            require(second->receiveUntil("each-ui-"));
+        });
+    });
+    when("both browsers call C++ while another thread broadcasts under a lock the callback also takes", [&] {
+        auto onState = app.broadcast("siliconForge.onState", {.maxPendingWrites = 2});
+        for (int i = 0; i < 20; ++i) {
+            first->call("report");
+            second->call("report");
+            std::scoped_lock lock{applicationLock};
+            onState(std::string{"locked-state"});
+            app.forEachUI([](App::UI ui) {
+                ui.jsFunction("locked")(std::string{"locked-call"});
+            });
+        }
+        broadcastWaitUntil([&] {
+            return observed.calls == 40;
+        });
+        then("no call deadlocks and the callbacks never overlap", [&] {
+            require(observed.calls == 40);
+            require(observed.maxRunning == 1);
+            require(first->receiveUntil("reported-ack"));
+            require(second->receiveUntil("locked-call"));
+        });
+    });
+    when("a callback blocks the server thread", [&] {
+        first->call("block");
+        broadcastWaitUntil([&] {
+            return blocking.load();
+        });
+        require(blocking);
+        auto       calls  = std::async(std::launch::async, [&] {
+            auto onState = app.broadcast("siliconForge.onState", {.maxPendingWrites = 1});
+            onState(std::string{"while-blocked"});
+            onState(std::string{"while-blocked"});
+            app.forEachUI([](App::UI ui) {
+                ui.jsFunction("blocked")(std::string{"while-blocked"});
+                static_cast<void>(ui.pendingWrites());
+            });
+        });
+        const bool called = waitReady(calls, 5s);
+        unblock.set_value();
+        then("browser calls from another thread return without waiting for it", [&] {
+            require(called);
+            require(second->receiveUntil("while-blocked"));
+        });
+    });
+    if (blocking == false)
+        unblock.set_value();
 
-                                when("a browser disconnects", [&] {
-                                    second.reset();
-                                    broadcastWaitUntil([&] {
-                                        return observed.closed == 1;
-                                    });
-                                    then("its closure is reported, and a broadcast reaches the remaining browser", [&] {
-                                        require(observed.closed == 1);
-                                        app.broadcast("siliconForge.onState", {.maxPendingWrites = 1})(std::string{"after-close"});
-                                        require(first->receiveUntil("after-close"));
-                                    });
-                                });
-                                first.reset();
-                                second.reset();
-                                broadcastWaitUntil([&] {
-                                    return app.connectedBrowsers() == 0;
-                                });
-                                app.stop();
-                                server.join();
-                                app.shutdown();
-                                then("every callback ran on the server thread", [&] {
-                                    std::scoped_lock lock{observed.mutex};
-                                    require(!observed.threads.empty());
-                                    require(std::ranges::all_of(observed.threads, [&](std::thread::id id) {
-                                        return id == serverThread;
-                                    }));
-                                });
-                            }};
+    when("a browser disconnects", [&] {
+        second.reset();
+        broadcastWaitUntil([&] {
+            return observed.closed == 1;
+        });
+        then("its closure is reported, and a broadcast reaches the remaining browser", [&] {
+            require(observed.closed == 1);
+            app.broadcast("siliconForge.onState", {.maxPendingWrites = 1})(std::string{"after-close"});
+            require(first->receiveUntil("after-close"));
+        });
+    });
+    first.reset();
+    second.reset();
+    broadcastWaitUntil([&] {
+        return app.connectedBrowsers() == 0;
+    });
+    app.stop();
+    server.join();
+    app.shutdown();
+    then("every callback ran on the server thread", [&] {
+        std::scoped_lock lock{observed.mutex};
+        require(!observed.threads.empty());
+        require(std::ranges::all_of(observed.threads, [&](std::thread::id id) {
+            return id == serverThread;
+        }));
+    });
+}};
 
 namespace webfront::testing {
 template <typename Application>
@@ -508,97 +500,89 @@ struct ConnectionIds {
 };
 }  // namespace webfront::testing
 
-const Scenario uIKept{
-    "A UI kept after its connection closed reaches no browser once its identifier is reused",
-    {"broadcast", "ui"},
-    [] {
-        using App = BasicWF<Stdnet, fs::DefaultFS>;
-        App                  app{WebFrontConfig{.port = "0"}};
-        std::mutex           mutex;
-        std::vector<App::UI> started;
-        std::atomic<int>     closed{0};
-        auto                 startedSubscription = app.subscribeUIStarted([&](App::UI ui) {
-            std::scoped_lock lock{mutex};
-            started.push_back(ui);
-        });
-        auto                 closedSubscription  = app.subscribeUIClosed([&](App::UI) {
-            ++closed;
-        });
-        std::thread          server([&] {
-            app.run();
-        });
-        const auto           startedCount = [&] {
-            std::scoped_lock lock{mutex};
-            return started.size();
-        };
+const Scenario uIKept{"A UI kept after its connection closed reaches no browser once its identifier is reused", {"broadcast", "ui"}, [] {
+    using App = BasicWF<Stdnet, fs::DefaultFS>;
+    App                                app{WebFrontConfig{.port = "0"}};
+    std::mutex                         mutex;
+    std::vector<App::UI>               started;
+    std::atomic<int>                   closed{0};
+    auto                               startedSubscription = app.subscribeUIStarted([&](App::UI ui) {
+        std::scoped_lock lock{mutex};
+        started.push_back(ui);
+    });
+    auto                               closedSubscription = app.subscribeUIClosed([&](App::UI) {
+        ++closed;
+    });
+    std::thread                        server([&] {
+        app.run();
+    });
+    const auto startedCount = [&] {
+        std::scoped_lock lock{mutex};
+        return started.size();
+    };
 
-        webfront::testing::ConnectionIds<App>::startAt(app, 65535);
-        auto first = std::make_unique<Browser>(app.port());
-        broadcastWaitUntil([&] {
-            return startedCount() == 1;
-        });
-        require(startedCount() == 1);
-        const App::UI stale = [&] {
-            std::scoped_lock lock{mutex};
-            return started.front();
-        }();
-        require(stale.id() == 65535);
+    webfront::testing::ConnectionIds<App>::startAt(app, 65535);
+    auto first = std::make_unique<Browser>(app.port());
+    broadcastWaitUntil([&] {
+        return startedCount() == 1;
+    });
+    require(startedCount() == 1);
+    const App::UI stale = [&] {
+        std::scoped_lock lock{mutex};
+        return started.front();
+    }();
+    require(stale.id() == 65535);
 
-        first.reset();
-        broadcastWaitUntil([&] {
-            return closed == 1 && app.connectedBrowsers() == 0;
-        });
-        require(app.connectedBrowsers() == 0);
+    first.reset();
+    broadcastWaitUntil([&] {
+        return closed == 1 && app.connectedBrowsers() == 0;
+    });
+    require(app.connectedBrowsers() == 0);
 
-        // The identifier counter wraps back to the identifier the closed connection had.
-        webfront::testing::ConnectionIds<App>::startAt(app, 65535);
-        auto second = std::make_unique<Browser>(app.port());
-        broadcastWaitUntil([&] {
-            return startedCount() == 2;
-        });
-        require(startedCount() == 2);
-        const App::UI current = [&] {
-            std::scoped_lock lock{mutex};
-            return started.back();
-        }();
+    // The identifier counter wraps back to the identifier the closed connection had.
+    webfront::testing::ConnectionIds<App>::startAt(app, 65535);
+    auto second = std::make_unique<Browser>(app.port());
+    broadcastWaitUntil([&] {
+        return startedCount() == 2;
+    });
+    require(startedCount() == 2);
+    const App::UI current = [&] {
+        std::scoped_lock lock{mutex};
+        return started.back();
+    }();
 
-        given("a later browser that received the identifier of the closed one", [&] {
-            require(current.id() == stale.id());
-            then("the stale value does not equal it, and the value of the live connection does", [&] {
-                require(!(stale == current));
-                require(current == current);
+    given("a later browser that received the identifier of the closed one", [&] {
+        require(current.id() == stale.id());
+        then("the stale value does not equal it, and the value of the live connection does", [&] {
+            require(!(stale == current));
+            require(current == current);
+        });
+        then("the stale value drops calls, fails typed calls, and has nothing pending", [&] {
+            stale.jsFunction("onStale")(std::string{"stale-call"});
+            auto typed = stale.jsFunction<std::string>("typedStale")();
+            require(typed.wait_for(0s) == std::future_status::ready);  // failed at once: the later browser never replies
+            requireThrows<std::runtime_error>([&] { (void)typed.get(); });
+            requireThrows<ConnectionError>([&] { stale.addScript("stale-script"); });
+            require(stale.pendingWrites() == 0);
+            current.jsFunction("onCurrent")(std::string{"current-call"});
+            require(second->receiveUntil("current-call"));
+            require(!second->receiveUntil("stale-call", 100ms));
+        });
+        then("forEachUI visits the later connection's value only", [&] {
+            std::vector<App::UI> visited;
+            app.forEachUI([&](App::UI ui) {
+                visited.push_back(ui);
             });
-            then("the stale value drops calls, fails typed calls, and has nothing pending", [&] {
-                stale.jsFunction("onStale")(std::string{"stale-call"});
-                auto typed = stale.jsFunction<std::string>("typedStale")();
-                require(typed.wait_for(0s) == std::future_status::ready);  // failed at once: the later browser never replies
-                requireThrows<std::runtime_error>([&] {
-                    (void)typed.get();
-                });
-                requireThrows<ConnectionError>([&] {
-                    stale.addScript("stale-script");
-                });
-                require(stale.pendingWrites() == 0);
-                current.jsFunction("onCurrent")(std::string{"current-call"});
-                require(second->receiveUntil("current-call"));
-                require(!second->receiveUntil("stale-call", 100ms));
-            });
-            then("forEachUI visits the later connection's value only", [&] {
-                std::vector<App::UI> visited;
-                app.forEachUI([&](App::UI ui) {
-                    visited.push_back(ui);
-                });
-                require(visited.size() == 1);
-                require(visited.front() == current);
-                require(!(visited.front() == stale));
-            });
+            require(visited.size() == 1);
+            require(visited.front() == current);
+            require(!(visited.front() == stale));
         });
-        second.reset();
-        broadcastWaitUntil([&] {
-            return app.connectedBrowsers() == 0;
-        });
-        app.stop();
-        server.join();
-        app.shutdown();
-      }
-};
+    });
+    second.reset();
+    broadcastWaitUntil([&] {
+        return app.connectedBrowsers() == 0;
+    });
+    app.stop();
+    server.join();
+    app.shutdown();
+}};

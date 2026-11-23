@@ -1,13 +1,13 @@
 /// @brief Socket mock driving a WebLink from the test thread, with injectable write failures.
 #pragma once
 #include "InlineTaskScope.hpp"
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/http/WebSocket.hpp>
 #include <webfront/networking/NetworkingMock.hpp>
-#include <webfront/testing/Bdd.hpp>
 
 #include <algorithm>
-#include <array>
 #include <atomic>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -34,8 +34,9 @@ public:
         std::function<void()>                             stop;
     };
     using sender_concept        = networking::ex::sender_t;
-    using completion_signatures = networking::ex::
-        completion_signatures<networking::ex::set_value_t(std::size_t), networking::ex::set_error_t(std::error_code), networking::ex::set_stopped_t()>;
+    using completion_signatures = networking::ex::completion_signatures<networking::ex::set_value_t(std::size_t),
+                                                                       networking::ex::set_error_t(std::error_code),
+                                                                       networking::ex::set_stopped_t()>;
 
     explicit ManualSender(std::function<void(Completion)> start) : onStart(std::move(start)) {}
 
@@ -45,16 +46,12 @@ public:
         using StopToken = networking::ex::stop_token_of_t<networking::ex::env_of_t<Receiver>>;
         struct OnStop {
             Operation* operation;
-            void       operator()() noexcept {
-                operation->finish([](Receiver& receiver) {
-                    networking::ex::set_stopped(std::move(receiver));
-                });
-            }
+            void       operator()() noexcept { operation->finish([](Receiver& receiver) { networking::ex::set_stopped(std::move(receiver)); }); }
         };
 
-        Receiver                                                              receiver;
-        std::function<void(Completion)>                                       onStart;
-        std::shared_ptr<bool>                                                 finished = std::make_shared<bool>(false);  // outlives the operation
+        Receiver                                                    receiver;
+        std::function<void(Completion)>                             onStart;
+        std::shared_ptr<bool>                                       finished = std::make_shared<bool>(false);  // outlives the operation
         std::optional<networking::ex::stop_callback_for_t<StopToken, OnStop>> stopCallback;
 
         Operation(Receiver r, std::function<void(Completion)> start) : receiver(std::move(r)), onStart(std::move(start)) {}
@@ -62,33 +59,24 @@ public:
         void start() noexcept {
             auto token = networking::ex::get_stop_token(networking::ex::get_env(receiver));
             if (token.stop_requested()) {
-                finish([](Receiver& r) {
-                    networking::ex::set_stopped(std::move(r));
-                });
+                finish([](Receiver& r) { networking::ex::set_stopped(std::move(r)); });
                 return;  // completing may destroy this operation: touch no member afterwards
             }
             stopCallback.emplace(std::move(token), OnStop{this});
             onStart({[this, done = finished](std::error_code error, std::size_t size) {
-                         if (*done)
-                             return;
+                         if (*done) return;
                          finish([&](Receiver& r) {
-                             if (error)
-                                 networking::ex::set_error(std::move(r), error);
-                             else
-                                 networking::ex::set_value(std::move(r), size);
+                             if (error) networking::ex::set_error(std::move(r), error);
+                             else networking::ex::set_value(std::move(r), size);
                          });
                      },
                      [this, done = finished] {
-                         if (!*done)
-                             finish([](Receiver& r) {
-                                 networking::ex::set_stopped(std::move(r));
-                             });
+                         if (!*done) finish([](Receiver& r) { networking::ex::set_stopped(std::move(r)); });
                      }});
         }
 
         void finish(auto signal) {
-            if (*finished)
-                return;
+            if (*finished) return;
             *finished = true;
             stopCallback.reset();
             signal(receiver);
@@ -126,27 +114,19 @@ public:
     }
 
     void close() {}
-    void shutdown(shutdown_type) {
-        ++shutdowns;
-    }
+    void shutdown(shutdown_type) { ++shutdowns; }
 
     /// The peer address of the next accepted connection, as the server reads it for trustLoopbackClients.
     static inline std::atomic<bool> peerIsLoopback{false};
     struct PeerAddress {
         bool loopback;
-        bool is_loopback() const {
-            return loopback;
-        }
+        bool is_loopback() const { return loopback; }
     };
     struct PeerEndpoint {
         bool        loopback;
-        PeerAddress address() const {
-            return {loopback};
-        }
+        PeerAddress address() const { return {loopback}; }
     };
-    PeerEndpoint remote_endpoint(std::error_code&) const {
-        return {peerIsLoopback.load()};
-    }
+    PeerEndpoint remote_endpoint(std::error_code&) const { return {peerIsLoopback.load()}; }
 
     /// The read the WebSocket is waiting for: the test completes it, or the task is stopped.
     static ManualSender read(networking::buffers::MutableBuffer buffer) {
@@ -172,8 +152,7 @@ public:
 
     /// Stops a pending read, as the WebSocket does when it is stopped.
     static void reset() {
-        if (readCompletion.stop)
-            std::exchange(readCompletion, {}).stop();
+        if (readCompletion.stop) std::exchange(readCompletion, {}).stop();
         std::lock_guard lock(mutex);
         written.clear();
         writeError = {};
@@ -186,9 +165,7 @@ public:
     }
 
     /// How many times the server shut a socket down: the end of a connection it answered.
-    static int shutdownCount() {
-        return shutdowns;
-    }
+    static int shutdownCount() { return shutdowns; }
 
     /// Everything the server wrote.
     static std::string writtenText() {
@@ -201,13 +178,9 @@ public:
         std::lock_guard lock(mutex);
         discarding = true;
     }
-    static std::uint64_t discardedBytes() {
-        return discarded;
-    }
+    static std::uint64_t discardedBytes() { return discarded; }
 
-    static int readCallCount() {
-        return readCalls;
-    }
+    static int readCallCount() { return readCalls; }
 
     static bool hasWrittenData() {
         std::lock_guard lock(mutex);
@@ -259,8 +232,8 @@ public:
 
     /// The write of these buffers: complete at once, or when completeDeferredWrites() runs.
     static ManualSender write(const auto& buffers) {
-        std::error_code  error;
-        std::size_t      transferred = 0;
+        std::error_code error;
+        std::size_t     transferred = 0;
         InjectableSocket socket;
         for (const auto& buffer : buffers) {
             transferred += socket.write_some(buffer, error);
@@ -271,9 +244,7 @@ public:
             {
                 std::lock_guard lock(mutex);
                 if (deferring) {
-                    deferred.push_back([completion, error, transferred] {
-                        completion.complete(error, transferred);
-                    });
+                    deferred.push_back([completion, error, transferred] { completion.complete(error, transferred); });
                     return;
                 }
             }
@@ -289,7 +260,7 @@ private:
     inline static std::error_code                    writeError;
     inline static bool                               deferring = false;
     inline static std::vector<std::function<void()>> deferred;
-    inline static int                                readCalls = 0;
+    inline static int                                readCalls  = 0;
     inline static std::atomic<int>                   shutdowns{0};
     inline static bool                               discarding = false;
     inline static std::atomic<std::uint64_t>         discarded{0};
@@ -299,12 +270,8 @@ class InjectableNetworking : public networking::NetworkingMock {
 public:
     using Socket = InjectableSocket;
 
-    static ManualSender Receive(Socket&, MutableBuffer buffer) {
-        return InjectableSocket::read(buffer);
-    }
-    static ManualSender Send(Socket&, const auto& buffers) {
-        return InjectableSocket::write(buffers);
-    }
+    static ManualSender Receive(Socket&, MutableBuffer buffer) { return InjectableSocket::read(buffer); }
+    static ManualSender Send(Socket&, const auto& buffers) { return InjectableSocket::write(buffers); }
 };
 
 /// Mask a browser-to-server frame: by default a binary message in one frame (FIN set, opcode 2).

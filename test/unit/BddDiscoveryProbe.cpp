@@ -4,7 +4,7 @@
 
 using namespace webfront::bdd;
 
-const Scenario openBracket{"A [b title", [] {}};
-const Scenario semicolon{"Second; one", [] {}};
-const Scenario closeBracket{"Third ]x", [] {}};
-const Scenario pairedBrackets{"Fourth [tag] title", [] {}};
+const Scenario openBracket{"A [b title", [] { }};
+const Scenario semicolon{"Second; one", [] { }};
+const Scenario closeBracket{"Third ]x", [] { }};
+const Scenario pairedBrackets{"Fourth [tag] title", [] { }};
