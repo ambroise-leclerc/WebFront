@@ -6,14 +6,14 @@
 #include "Capture.hpp"
 #include "CloseRequest.hpp"
 #include "DefaultBrowser.hpp"
-#include "EmbeddedFrontend.hpp"
 #include "Downloads.hpp"
+#include "EmbeddedFrontend.hpp"
 #include "NativeWindow.hpp"
 #include "ProfileLease.hpp"
 #include "ScriptDialogs.hpp"
+#include "StartupTrace.hpp"
 #include "UIExecutor.hpp"
 #include "Url.hpp"
-#include "StartupTrace.hpp"
 #include "Window.hpp"
 #include "WindowRegistry.hpp"
 #include "../ViewAssociation.hpp"
@@ -21,8 +21,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <fstream>
-#include <sstream>
 #include <filesystem>
 #include <functional>
 #include <future>

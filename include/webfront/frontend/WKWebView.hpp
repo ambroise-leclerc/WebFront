@@ -8,10 +8,10 @@
 #include "EmbeddedFrontend.hpp"
 #include "../ViewAssociation.hpp"
 #include "ScriptDialogs.hpp"
+#include "StartupTrace.hpp"
 #include "NativeWindow.hpp"
 #include "UIExecutor.hpp"
 #include "Url.hpp"
-#include "StartupTrace.hpp"
 #include "Window.hpp"
 #include "WindowRegistry.hpp"
 
@@ -59,8 +59,6 @@ using WKWebViewOptions = ViewOptions;
     #include <objc/message.h>
     #include <objc/runtime.h>
     #include <pthread.h>
-    #include <sys/sysctl.h>
-    #include <sys/time.h>
     #include <unistd.h>
 
 namespace webfront::frontend::detail::wkwebview {
@@ -1156,7 +1154,7 @@ struct WindowHooks {
         dispatch_async_f(
             dispatch_get_main_queue(), nullptr, +[](void*) { reapSecondaryWindows(); });
     }
-    void cancelReap() { }
+    void cancelReap() { }  // nothing is pending that clear() must withdraw: a late reap() finds the registry empty
     void present(Session& session) {
         // A hidden window stays hidden: ordering it to the front would show it.
         if (session.options.visible)

@@ -83,9 +83,11 @@ class StartupTrace {
     [[nodiscard]] static bool enabled() noexcept {
         static const bool value = [] {
 #if defined(_MSC_VER)
-            char   text[8]{};
+            char*  text   = nullptr;  // any length: a buffer too small for the value would read as "not set"
             size_t length = 0;
-            return getenv_s(&length, text, sizeof text, "WEBFRONT_STARTUP_TRACE") == 0 && length > 1 && std::string_view{text} != "0";
+            const bool set = _dupenv_s(&text, &length, "WEBFRONT_STARTUP_TRACE") == 0 && text && *text && std::string_view{text} != "0";
+            std::free(text);
+            return set;
 #else
             const auto* text = std::getenv("WEBFRONT_STARTUP_TRACE");
             return text && *text && std::string_view{text} != "0";

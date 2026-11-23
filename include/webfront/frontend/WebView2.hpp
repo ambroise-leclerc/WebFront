@@ -9,10 +9,10 @@
 #include "EmbeddedFrontend.hpp"
 #include "../ViewAssociation.hpp"
 #include "ScriptDialogs.hpp"
+#include "StartupTrace.hpp"
 #include "NativeWindow.hpp"
 #include "UIExecutor.hpp"
 #include "Url.hpp"
-#include "StartupTrace.hpp"
 #include "Window.hpp"
 #include "WindowRegistry.hpp"
 
@@ -1001,7 +1001,7 @@ struct WindowHooks {
         if (windows.primary && windows.primary->window)
             PostMessageW(windows.primary->window, reapMessage, 0, 0);
     }
-    void cancelReap() { }
+    void cancelReap() { }  // nothing is pending that clear() must withdraw: a late reap() finds the registry empty
     void present(Session& session) {
         // A hidden window stays hidden and does not take the focus.
         if (const auto handle = session.window; handle && IsWindowVisible(handle)) {
