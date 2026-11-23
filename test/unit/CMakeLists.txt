@@ -51,7 +51,7 @@ add_test(NAME BddDiscovery COMMAND ${CMAKE_COMMAND} -DPROBE=$<TARGET_FILE:bdd_di
     -DSCRIPT=${PROJECT_SOURCE_DIR}/cmake/WebFrontBdd.cmake -DWORK=${CMAKE_CURRENT_BINARY_DIR}/bdd-discovery
     "-DGENERATOR=${CMAKE_GENERATOR}" "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}"
     -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckBddDiscovery.cmake)
-set_tests_properties(BddSelfTest BddDiscovery PROPERTIES TIMEOUT 30 LABELS fast)
+set_tests_properties(BddSelfTest BddDiscovery PROPERTIES TIMEOUT 120 LABELS fast)
 
 set(TESTS_LIST)
 list(APPEND TESTS_LIST TlsTests.cpp)

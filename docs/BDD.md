@@ -70,7 +70,7 @@ wait for an asynchronous state. The header documents each of them (Doxygen).
 
 A value of `PROPERTIES` that holds a `;` is not supported: CMake splits it into several values before the function sees it (`ENVIRONMENT "A=1;B=2"` becomes two), so give such a variable to `ctest` through its own environment instead.
 
-Call it once per target without `SHARDS`: a second such call on the same target overwrites the first one's files. A call with `SHARDS` registers its cases at once and can accompany it.
+Call it once per target without `SHARDS`: a second such call on the same target is refused (it would overwrite the first one's files). A call with `SHARDS` registers its cases at once and can accompany it. A value of `PROPERTIES` must not contain `]==]`.
 
 After each build the executable lists its scenarios (`--list`) and a post-build step writes one CTest case per scenario,
 `Scenario: <title>`, whatever brackets or semicolons the title holds. Each case runs `<target> --exact <title>`; a

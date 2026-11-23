@@ -50,3 +50,28 @@ if(WIN32 AND GENERATOR STREQUAL "Ninja")
         message(FATAL_ERROR "The post-build command did not preserve the property")
     endif()
 endif()
+
+# A second call without SHARDS on a target, and a property value that would break the generated file, are refused (#648).
+file(MAKE_DIRECTORY "${WORK}/refusals")
+file(WRITE "${WORK}/refusals/main.cpp" "int main() {}\n")
+function(configure_probe name calls)
+    file(WRITE "${WORK}/refusals/CMakeLists.txt"
+        "cmake_minimum_required(VERSION 3.31)\nproject(Refusal LANGUAGES CXX)\ninclude([==[${SCRIPT}]==])\nenable_testing()\nadd_executable(probe main.cpp)\n${calls}\n")
+    execute_process(COMMAND "${CMAKE_COMMAND}" -S "${WORK}/refusals" -B "${WORK}/refusals/build" -G "${GENERATOR}"
+        "-DCMAKE_CXX_COMPILER=${CXX_COMPILER}" RESULT_VARIABLE status OUTPUT_VARIABLE out ERROR_VARIABLE err)
+    set(status "${status}" PARENT_SCOPE)
+    set(log "${out}${err}" PARENT_SCOPE)
+endfunction()
+
+configure_probe(twice "webfront_bdd_discover_tests(probe)\nwebfront_bdd_discover_tests(probe)")
+if(status EQUAL 0 OR NOT log MATCHES "already registered")
+    message(FATAL_ERROR "A second call on a target was not refused (${status}):\n${log}")
+endif()
+configure_probe(bracket "webfront_bdd_discover_tests(probe PROPERTIES ENVIRONMENT [=[A=]==]]=])")
+if(status EQUAL 0 OR NOT log MATCHES "must not contain")
+    message(FATAL_ERROR "A property holding ]==] was not refused (${status}):\n${log}")
+endif()
+configure_probe(both "webfront_bdd_discover_tests(probe)\nwebfront_bdd_discover_tests(probe SHARDS 2)")
+if(NOT status EQUAL 0)
+    message(FATAL_ERROR "A call with SHARDS must accompany a call without:\n${log}")
+endif()
