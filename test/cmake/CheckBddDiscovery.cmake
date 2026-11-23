@@ -126,3 +126,34 @@ if(NOT status EQUAL 0)
     message(FATAL_ERROR "A prefix holding ]==] must be accepted:
 ${log}")
 endif()
+
+# An executable excluded from the default build stays excluded: discovery does not bring it back (#648).
+file(WRITE "${WORK}/refusals/CMakeLists.txt"
+    "cmake_minimum_required(VERSION 3.31)\nproject(Excluded LANGUAGES CXX)\ninclude([==[${SCRIPT}]==])\nenable_testing()\nadd_executable(probe EXCLUDE_FROM_ALL main.cpp)\nwebfront_bdd_discover_tests(probe)\n")
+file(REMOVE_RECURSE "${WORK}/refusals/excluded")
+execute_process(COMMAND "${CMAKE_COMMAND}" -S "${WORK}/refusals" -B "${WORK}/refusals/excluded" -G "${GENERATOR}"
+    "-DCMAKE_CXX_COMPILER=${CXX_COMPILER}" RESULT_VARIABLE configured_excluded ERROR_VARIABLE excluded_error OUTPUT_VARIABLE excluded_output)
+execute_process(COMMAND "${CMAKE_COMMAND}" --build "${WORK}/refusals/excluded" RESULT_VARIABLE built_excluded ERROR_VARIABLE excluded_error2 OUTPUT_VARIABLE excluded_output2)
+file(GLOB_RECURSE built_probe "${WORK}/refusals/excluded/probe" "${WORK}/refusals/excluded/probe.exe")
+if(NOT configured_excluded EQUAL 0 OR NOT built_excluded EQUAL 0 OR built_probe)
+    message(FATAL_ERROR "A complete build compiled an executable excluded from it (${configured_excluded}, ${built_excluded}): ${built_probe}\n${excluded_error}${excluded_error2}")
+endif()
+
+# A path that holds ]==] reaches the discovery script intact, as the executable and as the file that names it.
+set(odd_dir "${WORK}/odd]==]dir")
+file(MAKE_DIRECTORY "${odd_dir}")
+get_filename_component(probe_name "${PROBE}" NAME)
+file(COPY "${PROBE}" DESTINATION "${odd_dir}")
+file(WRITE "${odd_dir}/executable.txt" "${odd_dir}/${probe_name}")
+file(WRITE "${odd_dir}/emulator.txt" "")
+file(WRITE "${odd_dir}/odd-properties.cmake"
+    "set(properties [==[]==])\nset(bdd_executable_file [===[${odd_dir}/executable.txt]===])\nset(bdd_emulator_file [===[${odd_dir}/emulator.txt]===])\nset(bdd_output [===[${odd_dir}/odd-tests.cmake]===])\nset(bdd_prefix [==[]==])\n")
+execute_process(COMMAND "${CMAKE_COMMAND}" "-DPROPERTIES_FILE=${odd_dir}/odd-properties.cmake" -P "${SCRIPT}"
+    RESULT_VARIABLE odd_result ERROR_VARIABLE odd_error)
+if(NOT odd_result EQUAL 0)
+    message(FATAL_ERROR "The discovery failed for an executable in a directory holding ]==]: ${odd_error}")
+endif()
+file(READ "${odd_dir}/odd-tests.cmake" odd_cases)
+if(NOT odd_cases MATCHES "odd\]==\]dir")
+    message(FATAL_ERROR "The executable path was altered:\n${odd_cases}")
+endif()

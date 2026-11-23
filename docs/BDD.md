@@ -72,7 +72,7 @@ A value of `PROPERTIES` is kept as one argument whatever it holds (a `;`, a trai
 
 Call it once per target without `SHARDS`: a second such call on the same target is refused (it would overwrite the first one's files). A call with `SHARDS` registers its cases at once and can accompany it.
 
-A change of `PROPERTIES` or `TEST_PREFIX` links the executable again (Makefile and Ninja generators), so that building the target alone registers the new values; a complete build does it with any generator.
+A change of `PROPERTIES` or `TEST_PREFIX` links the executable again (Makefile and Ninja generators), so that building the target alone registers the new values; a complete build does it with any generator, unless the executable is `EXCLUDE_FROM_ALL` (set before the call), which discovery never brings back.
 
 After each build the executable lists its scenarios (`--list`) and a post-build step writes one CTest case per scenario,
 `Scenario: <title>`, whatever brackets or semicolons the title holds. Each case runs `<target> --exact <title>`; a

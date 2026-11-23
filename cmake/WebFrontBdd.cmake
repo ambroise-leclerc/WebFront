@@ -59,10 +59,11 @@ if(CMAKE_SCRIPT_MODE_FILE)
     # emulator, the output and the prefix): on a command line, a ';' in any of them would split the argument.
     # Keep properties in a generated file too: passing shell metacharacters through a Windows post-build command is unreliable.
     include("${PROPERTIES_FILE}")
-    if(DEFINED bdd_executable)
-        set(EXECUTABLE "${bdd_executable}")
+    if(DEFINED bdd_executable_file)
+        # Those two hold nothing but the value, written by file(GENERATE): a path may hold any text, brackets included.
+        file(READ "${bdd_executable_file}" EXECUTABLE)
+        file(READ "${bdd_emulator_file}" EMULATOR)
         set(OUTPUT "${bdd_output}")
-        set(EMULATOR ${bdd_emulator})
         bdd_unescape(PREFIX "${bdd_prefix}")
     endif()
     # With CMAKE_CROSSCOMPILING_EMULATOR the executable cannot run alone: the emulator lists the scenarios and runs each case.
@@ -201,22 +202,37 @@ function(webfront_bdd_discover_tests target)
     # it) and the script that discovers the cases unescapes them. A change of any of them makes the file newer than the cases
     # generated from it.
     bdd_escape(escaped_prefix "${arg_TEST_PREFIX}")
+    # The executable and its emulator are only known when the build system is generated, and may hold any text: each is alone
+    # in a file that the script reads, rather than inside an argument with a delimiter that its value could close.
+    set(executable_file "${base}_executable-$<CONFIG>.txt")
+    set(emulator_file "${base}_emulator-$<CONFIG>.txt")
+    file(GENERATE OUTPUT "${executable_file}" CONTENT "$<TARGET_FILE:${target}>")
+    file(GENERATE OUTPUT "${emulator_file}" CONTENT "$<TARGET_PROPERTY:${target},CROSSCOMPILING_EMULATOR>")
+    bdd_quote(quoted_executable_file "${executable_file}")
+    bdd_quote(quoted_emulator_file "${emulator_file}")
+    bdd_quote(quoted_output "${output}")
     string(CONCAT properties_content
         "set(properties [==[${escaped_properties}]==])\n"
-        "set(bdd_executable [==[$<TARGET_FILE:${target}>]==])\n"
-        "set(bdd_output [==[${output}]==])\n"
-        "set(bdd_emulator [==[$<TARGET_PROPERTY:${target},CROSSCOMPILING_EMULATOR>]==])\n"
+        "set(bdd_executable_file ${quoted_executable_file})\n"
+        "set(bdd_emulator_file ${quoted_emulator_file})\n"
+        "set(bdd_output ${quoted_output})\n"
         "set(bdd_prefix [==[${escaped_prefix}]==])\n")
     file(GENERATE OUTPUT "${properties_file}" CONTENT "${properties_content}")
     set(discovery_command "${CMAKE_COMMAND}" "-DPROPERTIES_FILE=${properties_file}" -P "${CMAKE_CURRENT_FUNCTION_LIST_FILE}")
     # Right after each build of the target, so that building it alone registers its cases...
     add_custom_command(TARGET ${target} POST_BUILD COMMAND ${discovery_command} VERBATIM)
-    # ...and when only the properties or the prefix changed, the executable is linked again (Makefile and Ninja generators) so
-    # that this command runs when the target alone is built; the target below does the same for a complete build, whatever
-    # the generator.
-    set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS "${properties_file}")
-    add_custom_command(OUTPUT "${output}" COMMAND ${discovery_command} DEPENDS ${target} "${properties_file}" VERBATIM)
-    add_custom_target(${target}_bdd_discovery ALL DEPENDS "${output}")
+    # ...and when only the properties, the prefix or the emulator changed, the executable is linked again (Makefile and Ninja
+    # generators) so that this command runs when the target alone is built. The target below does the same for a complete
+    # build with any generator, unless the executable is excluded from it: discovery must not bring it back (the property is
+    # read here, so set EXCLUDE_FROM_ALL before this call).
+    set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS "${properties_file}" "${emulator_file}")
+    add_custom_command(OUTPUT "${output}" COMMAND ${discovery_command} DEPENDS ${target} "${properties_file}" "${emulator_file}" VERBATIM)
+    get_property(excluded TARGET ${target} PROPERTY EXCLUDE_FROM_ALL)
+    set(with_all)
+    if(NOT excluded)
+        set(with_all ALL)
+    endif()
+    add_custom_target(${target}_bdd_discovery ${with_all} DEPENDS "${output}")
     file(WRITE "${base}_include.cmake" "${include_content}")
     set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES "${base}_include.cmake")
 endfunction()
