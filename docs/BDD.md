@@ -65,8 +65,8 @@ wait for an asynchronous state. The header documents each of them (Doxygen).
 | `TEST_PREFIX <text>` | Put before `Scenario: ` in the name of each case; refused with `SHARDS` |
 | `PROPERTIES <name> <value>...` | Properties of every case (`TIMEOUT`, `LABELS`, `ENVIRONMENT`...); a `SKIP_RETURN_CODE` of yours replaces the default 4 |
 | `SHARDS <n>` | Register `<n>` cases, each running a share of the scenarios in one process, instead of one case per scenario |
-| `SHARD_NAME <name>` | Name of the shards, `<name>-<i>` (default `<target>Shards`) |
-| `JUNIT_PREFIX <path>` | JUnit report of each shard, `<path>-<i>.xml` (default `<binary dir>/<target>-results-<i>.xml`) |
+| `SHARD_NAME <name>` | With `SHARDS` only (refused otherwise): name of the shards, `<name>-<i>` (default `<target>Shards`) |
+| `JUNIT_PREFIX <path>` | With `SHARDS` only (refused otherwise): JUnit report of each shard, `<path>-<i>.xml` (default `<binary dir>/<target>-results-<i>.xml`) |
 
 A value of `PROPERTIES` that holds a `;` is not supported: CMake splits it into several values before the function sees it (`ENVIRONMENT "A=1;B=2"` becomes two), so give such a variable to `ctest` through its own environment instead.
 

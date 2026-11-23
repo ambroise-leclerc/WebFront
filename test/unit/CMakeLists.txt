@@ -4,9 +4,9 @@
 find_package(Threads)
 include(CTest)
 
-# WEBFRONT_TEST_TIMEOUT_FACTOR (Bdd.hpp, a documented option) lengthens the waits of a slow job. It is read here, when CMake configures, and
-# handed to every unit test as its environment, so that the waits and the CTest limits agree whatever the environment of
-# ctest is (TimeoutFactor.cmake gives the rule, which the TimeoutFactor case checks).
+# WEBFRONT_TEST_TIMEOUT_FACTOR (Bdd.hpp, a documented option) lengthens the waits of a slow job. It is read here, when
+# CMake configures, and handed to every unit test as its environment, so that the waits and the CTest limits agree
+# whatever the environment of ctest is (TimeoutFactor.cmake gives the rule, which the TimeoutFactor case checks).
 include(TimeoutFactor.cmake)
 webfront_unit_timeouts("$ENV{WEBFRONT_TEST_TIMEOUT_FACTOR}" _unit_timeout _shard_timeout _unit_test_environment)
 add_test(NAME TimeoutFactor COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckTimeoutFactor.cmake)
