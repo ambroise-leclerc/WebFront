@@ -193,10 +193,18 @@ inline std::string withoutSnapPaths(std::string_view value, std::string_view sep
 /// The line printed on stderr when `names` were repaired, independent of the logger, which is silent until enabled.
 inline std::string snapRepairMessage(const std::vector<std::string>& names) {
     std::string list;
-    for (const auto& name : names)
+    bool        loader = false;
+    for (const auto& name : names) {
         list += (list.empty() ? "" : ", ") + name;
+        loader = loader || name == "LD_LIBRARY_PATH" || name == "LD_PRELOAD";
+    }
+    // The dynamic loader read these two at startup: changing them cannot unload or redirect what this process has.
     return "WebFront: inherited Snap environment would break WebKit's processes; repaired " + list
-         + " for this process (see docs/WEBKITGTK.md, \"Snap-hosted editor terminals\")\n";
+         + " for this process and the processes it starts"
+         + (loader ? " (LD_LIBRARY_PATH and LD_PRELOAD do not change the libraries this process already loaded or searches "
+                     "with dlopen; start it from a cleaned environment if it still fails)"
+                   : "")
+         + " (see docs/WEBKITGTK.md, \"Snap-hosted editor terminals\")\n";
 }
 
 /// Names `scrubInheritedSnapEnvironment()` would change, without changing anything.
@@ -208,13 +216,16 @@ inline std::vector<std::string> snapOverriddenNames() {
     return names;
 }
 
-/// Threads of this process, from /proc/self/task; 1 when it cannot be read.
-inline std::size_t processThreadCount() {
+/// Threads of this process, from /proc/self/task; empty when that cannot be read (no /proc, a restricted one, an
+/// iteration error): the count is then unknown, never assumed to be one.
+inline std::optional<std::size_t> processThreadCount() {
     std::error_code error;
     std::size_t     count = 0;
     for (std::filesystem::directory_iterator it("/proc/self/task", error), end; !error && it != end; it.increment(error))
         ++count;
-    return count == 0 ? 1 : count;
+    if (error || count == 0)
+        return std::nullopt;
+    return count;
 }
 
 inline bool keepSnapEnvironmentRequested() {
@@ -224,15 +235,16 @@ inline bool keepSnapEnvironmentRequested() {
 
 /// The stderr line when the repair is not applied because other threads already run: setenv is not safe against a
 /// concurrent getenv in them, so the process is left as it is and the cause stays visible.
-inline std::string snapRepairSkippedMessage(const std::vector<std::string>& names, std::size_t threads) {
+inline std::string snapRepairSkippedMessage(const std::vector<std::string>& names, std::optional<std::size_t> threads) {
     std::string list;
     for (const auto& name : names)
         list += (list.empty() ? "" : ", ") + name;
-    return "WebFront: inherited Snap environment would break WebKit's processes (" + list + "), but this process already runs "
-         + std::to_string(threads)
-         + " threads and changing the environment now is not safe, so nothing was repaired; construct the WebKitGTK frontend "
-           "before starting threads, or start the application with those variables cleaned (see docs/WEBKITGTK.md, "
-           "\"Snap-hosted editor terminals\")\n";
+    const auto why = threads ? "this process already runs " + std::to_string(*threads) + " threads"
+                             : std::string("this process cannot tell how many threads it runs (/proc/self/task is unreadable)");
+    return "WebFront: inherited Snap environment would break WebKit's processes (" + list + "), but " + why
+         + " and changing the environment is only safe with one, so nothing was repaired; construct the WebKitGTK "
+           "frontend before starting threads, or start the application with those variables cleaned (see "
+           "docs/WEBKITGTK.md, \"Snap-hosted editor terminals\")\n";
 }
 
 /// Repairs the variables that name Snap paths, for the application and the processes WebKit launches. A Snap-packaged

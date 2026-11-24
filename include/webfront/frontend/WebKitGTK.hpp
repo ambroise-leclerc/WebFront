@@ -193,8 +193,8 @@ inline void initialize(SandboxMode mode = SandboxMode::development) {
         // Printed on stderr, not through the logger: an application that has not enabled logging would otherwise
         // run with a changed environment, or a broken WebKit, and no trace of it.
         const auto threads = processThreadCount();
-        const auto message = threads > 1 ? snapRepairSkippedMessage(snapOverriddenNames(), threads)
-                                         : snapRepairMessage(scrubInheritedSnapEnvironment());
+        const auto message = threads == 1 ? snapRepairMessage(scrubInheritedSnapEnvironment())
+                                          : snapRepairSkippedMessage(snapOverriddenNames(), threads);
         std::fwrite(message.data(), 1, message.size(), stderr);
     }
     requireSandboxEnvironment(mode);

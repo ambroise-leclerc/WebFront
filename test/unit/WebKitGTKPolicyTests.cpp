@@ -188,6 +188,7 @@ const Scenario webKitGTKScrubsSnap{
                 check(current("GTK_EXE_PREFIX") == "/snap/codium/495/usr");
             });
             const auto before = processThreadCount();
+            require(before.has_value());
             std::atomic<bool> stop{false};
             std::thread       worker([&] {
                 while (!stop)
@@ -199,6 +200,14 @@ const Scenario webKitGTKScrubsSnap{
             const auto message = snapRepairSkippedMessage({"GIO_MODULE_DIR"}, 3);
             check(message.find("GIO_MODULE_DIR") != std::string::npos && message.find("3 threads") != std::string::npos);
             check(message.find('\n') == message.size() - 1);
+            const auto unknown = snapRepairSkippedMessage({"GIO_MODULE_DIR"}, std::nullopt);
+            check(unknown.find("cannot tell how many threads") != std::string::npos);
+            check(unknown.find("already runs") == std::string::npos);
+        });
+        then("says that the loader variables only reach processes started afterwards", [] {
+            check(snapRepairMessage({"GIO_MODULE_DIR"}).find("already loaded") == std::string::npos);
+            check(snapRepairMessage({"GIO_MODULE_DIR", "LD_LIBRARY_PATH"}).find("already loaded") != std::string::npos);
+            check(snapRepairMessage({"LD_PRELOAD"}).find("already loaded") != std::string::npos);
         });
         then("lets only the first initialization claim the repair", [] {
             std::atomic<bool> flag{false};

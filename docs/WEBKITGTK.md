@@ -104,11 +104,20 @@ the application's own environment, with `setenv`/`unsetenv`, which is not safe
 against a concurrent `getenv` in another thread. The change is therefore made only
 when it cannot race: in the frontend's first initialization of the process (the
 second one, when `show()` opens the page, never changes the environment), on the main
-thread, before the toolkit starts, and only if `/proc/self/task` shows a single
-thread. If the application already runs other threads, nothing is changed and
-`stderr` names the variables that would break WebKit and the two ways out: construct
+thread, before the toolkit starts, and only if `/proc/self/task` proves a single
+thread. If the application already runs other threads, or if `/proc/self/task` cannot
+be read so that the count is unknown, nothing is changed and `stderr` says which of the
+two applies and names the variables that would break WebKit and the two ways out: construct
 the frontend before starting threads, or start the application with those variables
 cleaned.
+
+`LD_LIBRARY_PATH` and `LD_PRELOAD` have a limit that no repair can lift: the dynamic
+loader read them when the process started, so changing them in the running process
+does not unload what `LD_PRELOAD` already loaded and does not change the search paths
+the process uses for its own later `dlopen`. They only reach the processes started
+afterwards, such as WebKit's. If the host process itself loads a Snap library through
+them, start it from a cleaned environment; the message printed on `stderr` says so
+when one of the two was repaired.
 
 The repair applies to the processes WebKit launches, which inherit the environment at
 that moment, so restoring a value after `show()` or `start()` is too late for them.
