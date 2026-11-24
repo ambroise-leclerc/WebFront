@@ -15,7 +15,7 @@ Build a modern interface for your C++ application, then ship it as a single exec
 
 Your application can open its own development environment with `app.bootstrap("developer")`. In that window, `wf` builds and previews the UI, checks types and runs Jasmine tests. You can work in the terminal or let a coding agent drive the same workflow over MCP. Node.js and npm are unnecessary.
 
-When the UI is ready, embed its assets in the executable. The result is a compact, self-contained application that can run offline, using the system browser or a supported native web view.
+When the UI is ready, embed its assets in the executable. This produces a compact, self-contained app that runs offline in a native window or via a web browser on embedded and headless systems.
 
 <a href="#game-of-life-from-console-to-native-application"><img src="docs/images/life-bootstrap.gif" width="100%" alt="Game of Life walkthrough: the C++ application beside the WebFront window, where wf create life, dependency installation and wf preview bring the React interface up below the terminal"></a>
 
