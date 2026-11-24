@@ -76,23 +76,38 @@ When `/snap/` or `/var/lib/snapd/snap/` paths appear outside a verified Snap
 confinement in `LD_LIBRARY_PATH`, `LD_PRELOAD`, `GIO_MODULE_DIR`, `GTK_PATH`,
 `GTK_EXE_PREFIX`, `GTK_IM_MODULE_FILE`, `GSETTINGS_SCHEMA_DIR`, `LOCPATH`,
 `XDG_DATA_DIRS` or `XDG_CONFIG_DIRS`, the frontend repairs them before the toolkit
-starts, in the application's own environment, which the processes WebKit launches
-inherit, and prints the names it changed on `stderr` (not through the WebFront logger, which is
-silent until the application enables a level and registers a sink):
+starts and prints the names it changed on `stderr`. It does not use the WebFront
+logger, which is silent until the application enables a level and registers a sink.
 
-- the value saved by VS Code and VSCodium in `<NAME>_VSCODE_SNAP_ORIG` is restored
-  (an empty one means the variable is unset);
-- otherwise the Snap entries are removed from a list, or a single Snap path is unset.
+- The value saved by VS Code and VSCodium in `<NAME>_VSCODE_SNAP_ORIG` is restored
+  (an empty one means the variable is unset).
+- Otherwise the Snap entries are removed from a list, or a single Snap path is unset.
 
 A variable is also repaired without any Snap path when its value differs from the
 `<NAME>_VSCODE_SNAP_ORIG` the editor saved, which catches per-user directories such
-as `~/snap/codium/common/.cache/gio-modules` (their files link into the Snap). A value
+as `~/snap/codium/common/.cache/gio-modules` (their files link into the Snap). The
+price is that a value you set yourself in that terminal, such as
+`export XDG_DATA_DIRS=$XDG_DATA_DIRS:/foo`, is replaced by the saved original. A value
 with no Snap path and no differing saved original, including `/home/<user>/snap/...`,
 is left alone. Removing Snap entries keeps the others unchanged, empty entries
-included (an empty element of `LD_LIBRARY_PATH` names the current directory). Nothing
-changes inside a verified Snap confinement. Other variables are not yet
-covered; report a failure with its variable. A launcher that needs a Snap value
-there must set it again after `show()` or `start()` returns.
+included (an empty element of `LD_LIBRARY_PATH` names the current directory). A
+legitimate `/var/lib/snapd/snap/...` entry in `XDG_DATA_DIRS` or `XDG_CONFIG_DIRS`
+outside a Snap editor is removed as well, which is not a failure fix: use the opt-out
+below. Nothing changes inside a verified Snap confinement.
+
+This revises an earlier position: WebFront used to leave these variables alone,
+because the host application and its other threads may depend on them. It now changes
+the application's own environment, with `setenv`/`unsetenv`, which is not safe
+against a concurrent `getenv` in another thread. The repair runs in the frontend's
+initialization, on the main thread before the toolkit starts, so construct the
+frontend before the application starts threads that read the environment.
+
+The repair applies to the processes WebKit launches, which inherit the environment at
+that moment, so restoring a value after `show()` or `start()` is too late for them.
+To keep the inherited environment, start the application with
+`WEBFRONT_KEEP_SNAP_ENVIRONMENT=1`: nothing is repaired or printed, and the failure
+above comes back unless the launcher fixed the variables itself. Other variables are
+not yet covered; report a failure with its variable.
 
 Persistent data lives in `$XDG_DATA_HOME/webfront/<executable>-<path-hash>` and caches
 in `$XDG_CACHE_HOME/webfront/<executable>-<path-hash>`. Absolute XDG paths are honored;

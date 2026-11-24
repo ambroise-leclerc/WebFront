@@ -90,7 +90,7 @@ std::string current(const char* name) {
 
 const Scenario webKitGTKScrubsSnap{
     "WebKitGTK repairs an environment inherited from a Snap-hosted terminal", [] {
-        then("unsets a single Snap path that breaks WebKit's GIO modules", [] {
+        then("unsets a Snap path, and leaves a per-user path with no saved original alone", [] {
             withSnapEnvironment([] {
                 setenv("GIO_MODULE_DIR", "/home/user/snap/codium/common/.cache/gio-modules", 1);
                 setenv("GTK_EXE_PREFIX", "/snap/codium/495/usr", 1);
@@ -121,6 +121,9 @@ const Scenario webKitGTKScrubsSnap{
                 setenv("LD_LIBRARY_PATH", ":/snap/core20/current/lib:/opt/host/lib:", 1);
                 scrubInheritedSnapEnvironment();
                 check(current("LD_LIBRARY_PATH") == ":/opt/host/lib:");
+                setenv("LD_LIBRARY_PATH", ":/snap/core20/current/lib", 1);
+                scrubInheritedSnapEnvironment();
+                check(current("LD_LIBRARY_PATH") == ".");
                 setenv("XDG_CONFIG_DIRS", "/snap/codium/495/etc", 1);
                 scrubInheritedSnapEnvironment();
                 check(current("XDG_CONFIG_DIRS") == "<unset>");
@@ -148,6 +151,22 @@ const Scenario webKitGTKScrubsSnap{
             check(message.find("GIO_MODULE_DIR, XDG_DATA_DIRS") != std::string::npos);
             check(message.ends_with("\n"));
             check(message.find('\n') == message.size() - 1);
+        });
+        then("honors the opt-out variable", [] {
+            withSnapEnvironment([] {
+                const auto* previous = std::getenv("WEBFRONT_KEEP_SNAP_ENVIRONMENT");
+                const auto  saved    = previous ? std::optional<std::string>(previous) : std::nullopt;
+                unsetenv("WEBFRONT_KEEP_SNAP_ENVIRONMENT");
+                check(!keepSnapEnvironmentRequested());
+                setenv("WEBFRONT_KEEP_SNAP_ENVIRONMENT", "0", 1);
+                check(!keepSnapEnvironmentRequested());
+                setenv("WEBFRONT_KEEP_SNAP_ENVIRONMENT", "1", 1);
+                check(keepSnapEnvironmentRequested());
+                if (saved)
+                    setenv("WEBFRONT_KEEP_SNAP_ENVIRONMENT", saved->c_str(), 1);
+                else
+                    unsetenv("WEBFRONT_KEEP_SNAP_ENVIRONMENT");
+            });
         });
         then("leaves a clean environment untouched", [] {
             withSnapEnvironment([] {

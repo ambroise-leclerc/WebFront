@@ -3,9 +3,9 @@
 // Created: 2026-10-19
 //
 // WebFront — frontend
-// Role: Navigation, new-window and response decisions of the WebKitGTK frontend, applying the bound content policy.
+// Role: Navigation, new-window and response decisions of the WebKitGTK frontend, applying the bound content policy, and the repair of an inherited Snap environment.
 // Thread: ui-loop | Alloc: heap-init
-// LLM: decision logic kept free of GTK calls so unit tests can reach it
+// LLM: decision logic kept free of GTK calls so unit tests can reach it; scrubInheritedSnapEnvironment() mutates the process environment, so it runs on the main thread before the toolkit starts and before other threads read the environment
 
 #pragma once
 
@@ -169,7 +169,7 @@ inline bool inheritedSnapToolkitPaths() {
 /// included: an empty element of LD_LIBRARY_PATH names the current directory.
 inline std::string withoutSnapPaths(std::string_view value, std::string_view separators) {
     std::string kept;
-    bool        first = true;
+    bool        first = true, keptEmpty = false;
     for (;;) {
         const auto end  = value.find_first_of(separators);
         const auto part = value.substr(0, end);
@@ -177,13 +177,15 @@ inline std::string withoutSnapPaths(std::string_view value, std::string_view sep
             if (!first)
                 kept += separators.front();
             kept += part;
-            first = false;
+            first     = false;
+            keptEmpty = keptEmpty || part.empty();
         }
         if (end == std::string_view::npos)
             break;
         value.remove_prefix(end + 1);
     }
-    return kept;
+    // A lone empty entry would read as "no path" once joined: spell the current directory it stands for.
+    return kept.empty() && keptEmpty ? "." : kept;
 }
 
 /// The line printed on stderr when `names` were repaired, independent of the logger, which is silent until enabled.
@@ -198,7 +200,13 @@ inline std::string snapRepairMessage(const std::vector<std::string>& names) {
 /// Repairs the variables that name Snap paths, for the application and the processes WebKit launches. A Snap-packaged
 /// VS Code or VSCodium terminal keeps the original value in `<NAME>_VSCODE_SNAP_ORIG`: restore it (an empty one means
 /// unset). Otherwise drop the Snap entries of a list, or unset a single path. Returns the names changed. It must run
-/// before the toolkit initializes, on the main thread, and never inside a verified Snap confinement.
+/// before the toolkit initializes, on the main thread before other threads read the environment (setenv is not safe
+/// against a concurrent getenv), and never inside a verified Snap confinement.
+inline bool keepSnapEnvironmentRequested() {
+    const auto* value = std::getenv("WEBFRONT_KEEP_SNAP_ENVIRONMENT");
+    return value && std::string_view(value) != "0";
+}
+
 inline std::vector<std::string> scrubInheritedSnapEnvironment() {
     std::vector<std::string> changed;
     for (const auto& [name, separators] : snapSensitiveVariables) {

@@ -11,7 +11,7 @@ these entries stays in the GitHub releases and the Git history.
 ## Unreleased
 
 ### Fixed
-- Applications started from the terminal of a Snap-packaged editor (VSCodium) now run on WebKitGTK without cleaning the environment by hand (#662, `docs/WEBKITGTK.md`).
+- Applications started from the terminal of a Snap-packaged editor (VSCodium) now run on WebKitGTK without cleaning the environment by hand; `WEBFRONT_KEEP_SNAP_ENVIRONMENT=1` opts out (#662, `docs/WEBKITGTK.md`).
 
 ## [1.2.0] - 2026-11-24
 

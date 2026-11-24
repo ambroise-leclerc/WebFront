@@ -187,7 +187,7 @@ inline void requireMainThread() {
 
 inline void initialize(SandboxMode mode = SandboxMode::development) {
     requireMainThread();
-    if (inheritedSnapToolkitPaths() && !snapConfinementVerified()) {
+    if (!keepSnapEnvironmentRequested() && inheritedSnapToolkitPaths() && !snapConfinementVerified()) {
         // Printed on stderr, not through the logger: an application that has not enabled logging would otherwise
         // run with a changed environment and no trace of it.
         const auto message = snapRepairMessage(scrubInheritedSnapEnvironment());
