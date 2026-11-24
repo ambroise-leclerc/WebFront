@@ -10,23 +10,24 @@
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C)](CMakeLists.txt)
 [![Header-only](https://img.shields.io/badge/library-header--only-2EA043)](include/)
 
-[English](README.md) · [Français](README.fr.md)
+[English](README.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
 
-WebFront est une **bibliothèque C++23 header-only pour créer des interfaces utilisateur riches et modernes.** Conservez la logique applicative en C++ et créez des interfaces réactives avec TypeScript, React et les paquets de l’écosystème JavaScript. WebFront intègre les outils de développement d’interfaces à votre application : aucun environnement de développement TypeScript séparé n’est à installer.
+WebFront est un framework d’interface utilisateur C++ qui produit des interfaces modernes et réactives. C’est une bibliothèque C++23 distribuée sous forme d’en-têtes : la logique de votre application reste en C++, l’interface se construit avec TypeScript, React et les paquets compatibles avec les navigateurs, et l’application terminée se distribue dans un seul exécutable.
 
-WebFront n’a aucune dépendance et peut être déployé sur tout appareil disposant d’une bibliothèque standard C++ récente.
+Avec `app.bootstrap("developer")`, l’application ouvre son propre environnement de développement. Dans cette fenêtre, `wf` compile l’interface, affiche un aperçu, vérifie les types et lance les tests Jasmine. Vous pouvez utiliser le terminal ou confier les mêmes opérations à un agent de programmation via MCP. Tout cela fonctionne sans Node.js ni npm.
+
+Une fois l’interface prête, embarquez ses ressources dans l’exécutable. Vous obtenez une application compacte et autonome qui fonctionne hors ligne, dans une fenêtre native ou, sur les systèmes embarqués et sans écran, via un navigateur web.
 
 <a href="#jeu-de-la-vie--du-calcul-c-à-lapplication-native"><img src="docs/images/life-bootstrap.gif" width="100%" alt="Parcours du jeu de la vie : application C++, terminal wf, installation des dépendances et aperçu React"></a>
 
 L'animation présente le programme C++ et l'interface ; les temps d'attente sont condensés et l'aperçu agrandi pour la lisibilité. Le [parcours ci-dessous](#jeu-de-la-vie--du-calcul-c-à-lapplication-native) utilise les sources compilées du dépôt.
 
-- **Intégrez WebFront à une application existante.** Conservez votre simulation, le contrôle de vos appareils, vos calculs SIMD, vos noyaux CUDA… et vos threads de travail en C++. Utilisez une fenêtre native ou même un navigateur web tout en gardant la maîtrise de votre boucle d’événements. [Intégration à l’application hôte →](docs/HOST_INTEGRATION.md)
-- **Équipez les développeurs et les agents de programmation.** Les outils `wf` intégrés compilent l’interface, vérifient les types, exécutent les tests et embarquent ses ressources. Un serveur MCP activable à la demande et une interface en ligne de commande JSON permettent aux agents de piloter la fenêtre de votre application et d’exécuter les vérifications et les fonctions de rappel autorisées. [Développer avec un agent →](#développer-avec-un-agent)
+- **Développez avec un agent.** Via MCP, il peut créer l’interface, installer les paquets, afficher un aperçu, lancer les tests et embarquer les ressources. Selon les droits que vous lui accordez, il peut aussi inspecter l’application en cours d’exécution, interagir avec son interface et appeler les fonctions C++ de votre choix. [Développer avec un agent →](#développer-avec-un-agent) · [Automatisation →](#laisser-un-agent-piloter-votre-application)
+- **Retrouvez les mêmes dépendances sur chaque poste.** La version de l’environnement de développement est épinglée. Son intégrité est vérifiée par SHA-512 et il est mis en cache au premier lancement. Le manifeste et le fichier de verrouillage fixent les dépendances pour toute l’équipe et ses agents. [Environnement de développement →](docs/DEVELOPER_ENVIRONMENT.md)
+- **Ajoutez une interface à un logiciel C++ existant.** Gardez la maîtrise de votre boucle d’événements, de vos threads de travail, de vos appareils et de vos calculs SIMD ou CUDA. Ouvrez une fenêtre native ou utilisez le navigateur du système, et faites tourner plusieurs applications ou fenêtres côte à côte. [Intégration à l’application hôte →](docs/HOST_INTEGRATION.md)
 - **Transférez directement les données numériques.** Les tableaux typés et les ensembles de bits compactés transitent par une passerelle WebSocket binaire, sans conversion en JSON ou en base64. Coroutines, futures et senders relient les appels asynchrones de l’interface aux traitements natifs. [Modèle d’exécution →](docs/ASYNC_EXECUTION.md)
-- **Préparez votre application pour la distribution.** Embarquez les ressources, verrouillez les versions des paquets et vérifiez les téléchargements ; l’application obtenue fonctionne hors ligne. Les cibles CMake destinées aux projets utilisateurs et les tests dans le navigateur facilitent les compilations reproductibles et l’intégration continue. [Intégration →](#intégrer-webfront-dans-votre-projet) · [Tests →](#tester-votre-application)
+- **Testez et préparez la distribution.** Le lanceur de tests dans le navigateur et le framework public `webfront::bdd` complètent votre projet CMake. Embarquez l’interface finale pour une utilisation hors ligne. [Intégration →](#intégrer-webfront-dans-votre-projet) · [Tests →](#tester-votre-application)
 - **Choisissez vos technologies d’interface.** Utilisez TypeScript, React et des paquets compatibles avec les navigateurs, ou créez des îlots DOM directement en C++. Des composants optionnels permettent de générer des formulaires et des inspecteurs à partir de descripteurs de types C++. [DOM →](docs/DOM.md) · [React →](docs/REACT.md) · [Formulaires →](docs/FORMS.md)
-
-
 
 **Site et livre : [webfront.fr](https://webfront.fr/fr/)** · [Le livre WebFront](https://webfront.fr/fr/book/) · [Documentation](docs/) · [Historique des versions](docs/CHANGELOG.md)
 
@@ -83,9 +84,9 @@ Scène de 960 × 720, quatre rayons par pixel ; fenêtre de 800 × 600 pixels CS
 
 ## Par où commencer ?
 
+- **Travailler avec un agent :** [parcours de développement](#développer-avec-un-agent) et [automation de l'application](#laisser-un-agent-piloter-votre-application).
 - **Évaluer la bibliothèque :** [Hello World](#hello-world), puis le [parcours du jeu de la vie](#jeu-de-la-vie--du-calcul-c-à-lapplication-native).
 - **Ajouter une interface à un logiciel existant :** [intégration CMake](#intégrer-webfront-dans-votre-projet) et [exemple de boucle hôte](examples/host-loop/HostLoop.cpp).
-- **Travailler avec un agent :** [parcours de développement](#développer-avec-un-agent) et [automation de l'application](#laisser-un-agent-piloter-votre-application).
 - **Préparer la production :** [tests](#tester-votre-application), [contrats et limites](#contrats-et-limites) et [état du support](docs/PROJECT_STATUS.md).
 
 ## Développer avec un agent
@@ -94,20 +95,17 @@ Une application WebFront est un programme C++ dont l'interface TypeScript/TSX se
 
 Avec l'environnement épinglé, l'ordre est : `wf create app` (nom du starter, pas du projet), `wf init`, `wf install <paquet>` pour les dépendances navigateur, puis `wf dev ui/main.ts`. Terminez par `wf check`, `wf test` et `wf embed` selon la configuration du projet. `wf create life` fournit le starter React du parcours ci-dessous ; `wf help agents` décrit la marche à suivre.
 
-**L'agent exécute les commandes lui-même**, sans demander à l'utilisateur de les saisir. Configurez avec `-DWEBFRONT_BUILD_AUTOMATION=ON` pour construire `webfront-agent`. L'application partage sa session explicitement avec `webfront::automation::enableAutomation(app, {.grants = {...}, .listen = directory})` ; les autorisations restent choisies par son propriétaire.
+**L'agent exécute les commandes lui-même**, par MCP, sans demander à l'utilisateur de les saisir. Dans une build de développement, l'application active l'automatisation avec `webfront::automation::enableAutomation(app, {.grants = {...}})` ; les autorisations restent choisies par son propriétaire. L'application devient alors le serveur MCP : aucun autre programme n'est construit ni lancé. Elle affiche son URL et le chemin d'une configuration cliente privée (`mcp.json`, avec l'URL et un jeton Bearer, hors du projet) :
 
-```sh
-webfront-agent --list
-webfront-agent --attach DIRECTORY --operation create --starter app
-webfront-agent --attach DIRECTORY --operation preview --entry ui/main.ts
-webfront-agent --print-mcp-config --attach DIRECTORY > .mcp.json
+```text
+WebFront MCP (grants: check, build, preview): http://127.0.0.1:PORT/mcp - client configuration: .../sessions/SESSION/mcp.json
 ```
-
-Après chaque modification, l'agent utilise `preview` à la place de la session interactive `wf dev`. La même interface est disponible en MCP :
 
 ```json
-{"mcpServers": {"webfront": {"command": "/path/to/webfront-agent", "args": ["--attach", "/path/to/directory", "--mcp"]}}}
+{"mcpServers": {"webfront": {"type": "http", "url": "http://127.0.0.1:PORT/mcp", "headers": {"Authorization": "Bearer TOKEN"}}}}
 ```
+
+Donnez ce fichier au client MCP (`claude --mcp-config PATH/mcp.json`) et ne copiez jamais le jeton dans le projet. L'agent appelle ensuite `webfront.start` avec `create`, `preview` (après chaque modification, à la place de `wf dev`), `check`, `test` ou `embed`, et suit chaque exécution avec `webfront.result`.
 
 Dans un projet consommateur, `webfront_write_agent_guide()` écrit un `AGENTS.md` à la racine ; `wf create` le place à côté des sources du starter. Le [guide des agents](docs/DEVELOPING_WITH_AGENTS.md) détaille ce contrat.
 
@@ -346,7 +344,7 @@ La recompilation est explicite. L'application fonctionne ensuite hors ligne, san
 
 Un agent peut vérifier les types, construire, prévisualiser, inspecter et cliquer l'interface de **votre application**, dans sa fenêtre et avec ses callbacks C++. Rien n'est activé par défaut.
 
-<img src="docs/images/automation-agent.svg" width="100%" alt="Transcription animée : découverte de session, vérification, compilation, aperçu, clic et appel d'un callback autorisé ; refus d'un callback privé">
+<img src="docs/images/automation-agent.svg" width="100%" alt="Transcription animée : connexion à l'URL MCP de l'application, vérification, compilation, aperçu, clic et appel d'un callback autorisé ; refus d'un callback privé">
 
 *Transcription abrégée du test de régression `AutomationConsumerWindow`, exécuté sur une application réelle.*
 
@@ -360,17 +358,16 @@ app.bootstrap("developer");
 app.cppFunction("bf.render", render);
 auto automation = webfront::automation::enableAutomation(
     app, {.grants    = {"check", "build", "preview", "inspect", "interact", "call"},
-          .callbacks = {"bf.render"},
-          .listen    = privateEndpointDirectory});
+          .callbacks = {"bf.render"}});
 app.show(automation->launchPage());
 automation->close();
 app.shutdown();
 ```
 
-- **Visible.** Le terminal annonce les autorisations et la manière de se connecter.
-- **Découvrable.** `webfront-agent --list` liste les sessions partagées sans exposer leur secret de connexion ; `--print-mcp-config --attach <dir>` génère la configuration du client MCP. `--schema` et `--agent-help` décrivent le contrat.
+- **Visible.** L'application affiche son URL MCP, et le terminal annonce les autorisations.
+- **Découvrable.** Chaque instance en cours publie son URL et le chemin de son `mcp.json` privé dans un enregistrement par utilisateur, jamais le jeton ; `claude --mcp-config PATH/mcp.json` ou tout client MCP s'y connecte.
 - **Borné.** Chaque opération demande son autorisation ; seuls les callbacks nommément déclarés sont appelables. Des délais natifs arrêtent un renderer bloqué. Le code du projet conserve les droits de l'utilisateur : ce n'est pas un sandbox.
-- **Optionnel.** Sans `enableAutomation`, aucun endpoint n'est enregistré. `webfront_add_agent()` construit et installe le lanceur pour les consommateurs CMake.
+- **Optionnel.** Sans `enableAutomation`, rien n'est enregistré et aucun port n'est ouvert ; une build de distribution (`WEBFRONT_DISTRIBUTION`) refuse de le compiler.
 
 Le [guide d'automation](docs/AUTOMATION.md#automating-your-own-application) décrit permissions, découverte, délais et profil MCP.
 

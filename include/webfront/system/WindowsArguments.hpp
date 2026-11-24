@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-19
+//
+// WebFront — system
+// Role: Windows command line quoting following CommandLineToArgvW and MSVCRT rules.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: exact quoting matters; the program must receive exactly its argument
+
 #pragma once
 
 #ifdef _WIN32

@@ -1,5 +1,14 @@
-/// @brief Deliberately limited MCP stdio profile: lifecycle, ping and bounded developer tools.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-28
+//
+// WebFront — automation
+// Role: Deliberately limited MCP profile shared by stdio and Streamable HTTP: lifecycle, ping and bounded developer tools.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: protocol layer; the transport counts only valid JSON-RPC messages as session activity
+
 #pragma once
+#include "Instructions.hpp"
 #include "Session.hpp"
 
 namespace webfront::automation {
@@ -13,6 +22,7 @@ public:
         std::string id           = "null";
         bool        notification = false;
         int         invalid      = -32700;  // JSON-RPC code of a failure at the current stage: parse, request shape, then parameters
+        envelopeAccepted         = false;
         try {
             Object request{line};
             invalid      = -32600;
@@ -24,6 +34,7 @@ public:
             if (request.string("jsonrpc") != "2.0" || !request.has("method"))
                 throw std::invalid_argument("Expected JSON-RPC 2.0 request");
             request.only({"jsonrpc", "id", "method", "params"});
+            envelopeAccepted    = true;
             invalid             = -32602;
             const auto   method = request.string("method");
             const Object params{request.raw("params", "{}")};
@@ -48,8 +59,10 @@ public:
                 initialized = true;
                 // Lifecycle version negotiation: offer our supported version when the requested one differs.
                 // A client that does not support it should disconnect, rather than use a mismatched profile.
-                return success(id,
-                               R"({"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"webfront-developer","version":"1.0.0"}})");
+                return success(
+                    id,
+                    R"({"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"webfront-developer","version":"1.0.0"},"instructions":)"
+                        + json::quote(mcpInstructions) + "}");
             }
             if (!ready)
                 return error(id, -32600, "Initialize the MCP connection first");
@@ -103,9 +116,19 @@ public:
         }
     }
 
+    /// Whether an `initialize` request succeeded; the transport creates its session on that, never on the size of the answer.
+    bool isInitialized() const noexcept {
+        return initialized;
+    }
+    /// Whether the last message passed the JSON-RPC 2.0 envelope checks (version, id, method, members), whatever the answer to
+    /// it; the transport counts only such messages as activity of the session.
+    bool lastEnvelopeAccepted() const noexcept {
+        return envelopeAccepted;
+    }
+
 private:
     Backend&    session;
-    bool        initialized = false, ready = false;
+    bool        initialized = false, ready = false, envelopeAccepted = false;
     static bool validId(std::string_view value) {
         if (value.starts_with('"')) {
             try {

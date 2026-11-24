@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-25
+//
+// WebFront — examples
+// Role: Selects the frontend of the Game of Life examples.
+// Thread: ui-loop | Alloc: zero-hot-path
+// LLM: alias only; the examples never select CEF
+
 #pragma once
 
 #include <webfront/DeveloperApp.hpp>

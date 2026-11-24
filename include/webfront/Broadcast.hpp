@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
-/// @brief A JavaScript function called on every connected browser (BasicWF::broadcast).
+// Author: Ambroise Leclerc
+// Created: 2026-10-30
+//
+// WebFront — core
+// Role: A JavaScript function called on every connected browser (BasicWF::broadcast), with an optional per-browser backlog limit.
+// Thread: thread-safe | Alloc: unrestricted
+// LLM: public API; read BroadcastOptions before the sender implementation
+
 #pragma once
 #include "http/WebSocket.hpp"
 #include "weblink/CallFrame.hpp"

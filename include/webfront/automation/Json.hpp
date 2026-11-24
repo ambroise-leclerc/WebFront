@@ -1,4 +1,12 @@
-/// @brief Bounded JSON input handling for the optional local automation endpoint.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-28
+//
+// WebFront — automation
+// Role: Bounded JSON input handling for the optional local automation endpoint.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: input validation with explicit limits; reject before parsing anything large
+
 #pragma once
 
 #include "../utils/Json.hpp"

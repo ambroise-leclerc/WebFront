@@ -1,6 +1,12 @@
-/// @date 16/01/2022 22:27:42
-/// @author Ambroise Leclerc
-/// @brief HexDump tool for debugging/development purposes
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-01-16
+//
+// WebFront — tooling
+// Role: HexDump of a container or buffer, for debugging and development.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: diagnostic only; not for hot paths
+
 #pragma once
 #include "../details/C++20Support.hpp"
 
@@ -15,44 +21,47 @@
 
 namespace webfront::utils {
 
-template<typename T>
+template <typename T>
 concept Buffer = std::movable<T> || requires(T t) {
     t.data();
     t.size();
 };
 
 /// Provides an hexadecimal dump of a container or a buffer
-template<Buffer BufferType>
+template <Buffer BufferType>
 struct HexDump {
-    HexDump(const BufferType& buf, size_t startAddr = 0) : buffer(buf), startAddress(startAddr) {}
+    HexDump(const BufferType& buf, size_t startAddr = 0) : buffer(buf), startAddress(startAddr) { }
 
     const BufferType& buffer;
-    size_t startAddress;
+    size_t            startAddress;
 };
 
-template<Buffer Container>
+template <Buffer Container>
 std::ostream& operator<<(std::ostream& os, const HexDump<Container>& h) {
     using namespace std;
-    size_t address = 0;
-    const auto buffer =
-      span(reinterpret_cast<const uint8_t*>(h.buffer.data()), h.buffer.size() * sizeof(typename pointer_traits<decltype(h.buffer.data())>::element_type));
-    auto iosFlags{os.flags()};
+    size_t     address = 0;
+    const auto buffer  = span(reinterpret_cast<const uint8_t*>(h.buffer.data()),
+                              h.buffer.size() * sizeof(typename pointer_traits<decltype(h.buffer.data())>::element_type));
+    auto       iosFlags{os.flags()};
     os << hex << setfill('0');
     while (address < buffer.size()) {
         os << setw(8) << address + h.startAddress;
         for (auto index = address; index < address + 16; ++index) {
-            if (index % 8 == 0) os << ' ';
+            if (index % 8 == 0)
+                os << ' ';
             if (index < buffer.size())
                 os << ' ' << setw(2) << +buffer[index];
-//                  os << ", 0x" << setw(2) << +buffer[index];
+            //                  os << ", 0x" << setw(2) << +buffer[index];
             else
                 os << "   ";
         }
         os << ' ';
         for (auto index = address; index < address + 16; ++index)
-            if (index < buffer.size()) os << (static_cast<char>(buffer[index]) < 32 ? '.' : index < buffer.size() ? static_cast<char>(buffer[index]) : '.');
+            if (index < buffer.size())
+                os << (static_cast<char>(buffer[index]) < 32 ? '.' : index < buffer.size() ? static_cast<char>(buffer[index]) : '.');
         address += 16;
-        if (address < buffer.size()) os << '\n';
+        if (address < buffer.size())
+            os << '\n';
     }
     os.flags(iosFlags);
 
@@ -90,4 +99,4 @@ std::ostream& operator<<(std::ostream& os, const HexDump<Container>& h) {
     return ss.str();
 }
 
-} // namespace webfront::utils
+}  // namespace webfront::utils

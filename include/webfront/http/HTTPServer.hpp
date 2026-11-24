@@ -1,12 +1,19 @@
-/// @date 16/01/2022 22:27:42
-/// @author Ambroise Leclerc
-/// @brief HTTPServer minimal implementation for WebSocket support - RFC1945
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-01-16
+//
+// WebFront — http
+// Role: Minimal HTTP server with WebSocket upgrade: connection coroutines awaiting the senders of a network provider.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: core transport; connections are coroutines on the io_context thread, owned by a counting_scope
+
 #pragma once
 #include "../ApplicationOrigin.hpp"
 #include "../ContentPolicy.hpp"
 #include "../networking/BasicNetworking.hpp"
 #include "../networking/Tasks.hpp"
 #include "../system/FileSystem.hpp"
+#include "../system/WindowsCompat.hpp"
 #include "../Task.hpp"
 #include "../tooling/HexDump.hpp"
 #include "AcceptEncoding.hpp"
@@ -39,15 +46,20 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
+
+namespace webfront::tls {
+class Credentials;
+}
 
 namespace webfront::http {
 
 class Headers {
     struct Header {
         Header() = default;
-        Header(std::string_view n, std::string_view v) : name(std::move(n)), value(std::move(v)) {}
+        Header(std::string_view n, std::string_view v) : name(std::move(n)), value(std::move(v)) { }
         std::string name;
         std::string value;
     };
@@ -56,7 +68,8 @@ public:
     /// @return the header value with headerName name (or at least the first one)
     [[nodiscard]] std::optional<std::string> getHeaderValue(std::string_view headerName) const {
         for (auto& header : headers)
-            if (caseInsensitiveEqual(header.name, headerName)) return header.value;
+            if (caseInsensitiveEqual(header.name, headerName))
+                return header.value;
         return {};
     }
 
@@ -64,16 +77,22 @@ public:
     [[nodiscard]] std::list<std::string> getHeadersValues(std::string_view headerName) const {
         std::list<std::string> values{};
         for (auto& header : headers)
-            if (caseInsensitiveEqual(header.name, headerName)) values.push_back(header.value);
+            if (caseInsensitiveEqual(header.name, headerName))
+                values.push_back(header.value);
         return values;
     }
 
     /// @return true if text is contained in the value field of headerName (case insensitive)
     [[nodiscard]] bool headersContain(std::string_view headerName, std::string_view text) const {
         for (auto header : getHeadersValues(headerName)) {
-            if (std::search(header.cbegin(), header.cend(), text.cbegin(), text.cend(), [](char c1, char c2) {
-                    return (c1 == c2 || std::toupper(c1) == std::toupper(c2));
-                }) != header.cend())
+            if (std::search(header.cbegin(),
+                            header.cend(),
+                            text.cbegin(),
+                            text.cend(),
+                            [](char c1, char c2) {
+                                return (c1 == c2 || std::toupper(c1) == std::toupper(c2));
+                            })
+                != header.cend())
                 return true;
         }
         return false;
@@ -98,15 +117,15 @@ private:
 };
 
 struct BadRequestException : public std::runtime_error {
-    BadRequestException() : std::runtime_error("Bad HTTP request") {}
+    BadRequestException() : std::runtime_error("Bad HTTP request") { }
 };
 
 struct Request : Headers {
     enum class Method { Connect, Delete, Get, Head, Options, Patch, Post, Put, Trace, Undefined };
-    Method method;
+    Method      method;
     std::string uri;
-    int httpVersionMajor;
-    int httpVersionMinor;
+    int         httpVersionMajor;
+    int         httpVersionMinor;
 
     void reset() {
         headers.clear();
@@ -115,34 +134,43 @@ struct Request : Headers {
 
     [[nodiscard]] static Method getMethodFromString(std::string_view text) {
         for (size_t index = 0; index < methodNames.size(); ++index)
-            if (methodNames[index] == text) return static_cast<Method>(index);
+            if (methodNames[index] == text)
+                return static_cast<Method>(index);
         return Method::Undefined;
     }
 
-    [[nodiscard]] std::string_view getMethodName() const { return method == Method::Undefined ? "Undefined" : methodNames[static_cast<size_t>(method)]; }
-        
-    void setMethod(std::string_view text) { method = getMethodFromString(text); }
+    [[nodiscard]] std::string_view getMethodName() const {
+        return method == Method::Undefined ? "Undefined" : methodNames[static_cast<size_t>(method)];
+    }
+
+    void setMethod(std::string_view text) {
+        method = getMethodFromString(text);
+    }
 
     [[nodiscard]] bool isUpgradeRequest(std::string_view protocol) const {
         return headersContain("Connection", "upgrade") && headersContain("Upgrade", protocol);
     }
 
-    template<typename InputIterator>
+    template <typename InputIterator>
     bool parseSomeData(InputIterator begin, InputIterator end) {
         while (begin != end)
-            if (completeRequest(*begin++)) return true;
+            if (completeRequest(*begin++))
+                return true;
 
         return false;
     }
 
     /// Parses up to the end of the headers and returns where it stopped: the bytes after it start the body.
-    template<typename InputIterator>
+    template <typename InputIterator>
     InputIterator consume(InputIterator begin, InputIterator end) {
-        while (begin != end && !completed()) completeRequest(*begin++);
+        while (begin != end && !completed())
+            completeRequest(*begin++);
         return begin;
     }
 
-    bool completed() const { return state == State::completed; }
+    bool completed() const {
+        return state == State::completed;
+    }
 
 private:
     std::string methodBuffer;
@@ -228,7 +256,7 @@ private:
         return false;
     }
     inline static std::array methodNames{"CONNECT", "DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT", "TRACE"};
-}; // clang-format on
+};  // clang-format on
 
 struct Response : Headers {
     enum StatusCode : uint16_t {
@@ -251,28 +279,28 @@ struct Response : Headers {
         serviceUnavailable    = 503,
         variantAlsoNegotiates = 506
     };
-    StatusCode statusCode;
+    StatusCode  statusCode;
     std::string content;
 
     static Response getStatusResponse(StatusCode code) {
         Response response;
         response.statusCode = code;
-        response.content = "<html><head><title>" + toString(code) + "</title></head>";
-        response.content += "<body><h1>" + std::to_string(code) + " " + toString(code) + "</h1></body></html>";
+        response.content    = "<html><head><title>" + toString(code) + "</title></head>";
+        response.content   += "<body><h1>" + std::to_string(code) + " " + toString(code) + "</h1></body></html>";
         response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
         response.headers.emplace_back("Content-Type", "text/html");
 
         return response;
     }
 
-    template<typename Net>
+    template <typename Net>
     [[nodiscard]] std::vector<typename Net::ConstBuffer> toBuffers() const {
         std::vector<typename Net::ConstBuffer> buffers;
         httpStatus = "HTTP/1.1 " + std::to_string(statusCode) + " " + toString(statusCode) + "\r\n";
         buffers.push_back(Net::Buffer(httpStatus));
 
         static const char separator[] = {':', ' '};
-        static const char crlf[] = {'\r', '\n'};
+        static const char crlf[]      = {'\r', '\n'};
         for (auto& header : headers) {
             buffers.push_back(Net::Buffer(header.name));
             buffers.push_back(Net::Buffer(separator));
@@ -284,7 +312,8 @@ struct Response : Headers {
         if (statusCode != switchingProtocols)
             buffers.push_back(Net::Buffer(std::string_view{"Connection: close\r\n"}));
         buffers.push_back(Net::Buffer(crlf));
-        if (!content.empty()) buffers.push_back(Net::Buffer(content));
+        if (!content.empty())
+            buffers.push_back(Net::Buffer(content));
 
         return buffers;
     }
@@ -324,9 +353,9 @@ private:
 /// The request a dynamic route answers: the parsed request, its decoded path and its raw query.
 struct RouteRequest {
     const Request&   request;
-    std::string_view path;   ///< Percent-decoded, without the query; always starts with the route's prefix.
-    std::string_view query;  ///< After the '?', undecoded; empty when there is none.
-    std::string_view body{}; ///< The body of a `POST` (see RouteOptions::postBodyLimit); empty for `GET` and `HEAD`.
+    std::string_view path;    ///< Percent-decoded, without the query; always starts with the route's prefix.
+    std::string_view query;   ///< After the '?', undecoded; empty when there is none.
+    std::string_view body{};  ///< The body of a `POST` (see RouteOptions::postBodyLimit); empty for `GET` and `HEAD`.
 };
 
 /// What a route handler produces. The server adds `Content-Length` (from `contentLength`) and `Connection`;
@@ -368,7 +397,7 @@ public:
         std::string  prefix;
         RouteHandler handler;
         /// The path after the prefix carries a secret (a read token): the server never writes it to its logs.
-        bool         secretPath = false;
+        bool secretPath = false;
         /// Applied to the answers the server generates for this route (4xx, 500), which never pass through the handler.
         std::function<void(RouteReply&)> harden;
         /// See RouteOptions::postBodyLimit: unset, the route refuses `POST` with 405.
@@ -386,10 +415,10 @@ public:
     /// running keeps the handler it started with; no later request reaches it.
     class Registration {
     public:
-        Registration() = default;
+        Registration()                               = default;
         Registration(const Registration&)            = delete;
         Registration& operator=(const Registration&) = delete;
-        Registration(Registration&& other) noexcept : state(std::move(other.state)), entry(std::move(other.entry)) {}
+        Registration(Registration&& other) noexcept : state(std::move(other.state)), entry(std::move(other.entry)) { }
         Registration& operator=(Registration&& other) noexcept {
             if (this != &other) {
                 reset();
@@ -398,7 +427,9 @@ public:
             }
             return *this;
         }
-        ~Registration() { reset(); }
+        ~Registration() {
+            reset();
+        }
 
         void reset() noexcept {
             if (auto owner = state.lock()) {
@@ -408,12 +439,14 @@ public:
             state.reset();
             entry.reset();
         }
-        [[nodiscard]] explicit operator bool() const noexcept { return !state.expired(); }
+        [[nodiscard]] explicit operator bool() const noexcept {
+            return !state.expired();
+        }
 
     private:
         friend class RouteTable;
-        Registration(std::weak_ptr<State> owner, std::shared_ptr<Entry> route) : state(std::move(owner)), entry(std::move(route)) {}
-        std::weak_ptr<State>  state;
+        Registration(std::weak_ptr<State> owner, std::shared_ptr<Entry> route) : state(std::move(owner)), entry(std::move(route)) { }
+        std::weak_ptr<State>   state;
         std::shared_ptr<Entry> entry;
     };
 
@@ -427,12 +460,15 @@ public:
 
     /// The same, with the options of RouteOptions (`POST` accepted with a bounded body...).
     [[nodiscard]] Registration add(std::string prefix, RouteHandler handler, RouteOptions options) {
-        if (!handler) throw std::invalid_argument("A route needs a handler");
-        if (!validPrefix(prefix)) throw std::invalid_argument("Invalid route prefix '" + prefix + "'");
+        if (!handler)
+            throw std::invalid_argument("A route needs a handler");
+        if (!validPrefix(prefix))
+            throw std::invalid_argument("Invalid route prefix '" + prefix + "'");
         // The log redaction recognizes the services space only: a secret route elsewhere could not be masked reliably.
         if (options.secretPath && !prefix.starts_with("/webfront/services/"))
             throw std::invalid_argument("A secret route must live under /webfront/services/, not '" + prefix + "'");
-        auto entry = std::make_shared<Entry>(Entry{std::move(prefix), std::move(handler), options.secretPath, std::move(options.harden), options.postBodyLimit});
+        auto entry = std::make_shared<Entry>(
+            Entry{std::move(prefix), std::move(handler), options.secretPath, std::move(options.harden), options.postBodyLimit});
         std::lock_guard lock(state->mutex);
         for (const auto& other : state->entries)
             if (other->prefix.starts_with(entry->prefix) || entry->prefix.starts_with(other->prefix))
@@ -445,7 +481,8 @@ public:
     [[nodiscard]] std::shared_ptr<const Entry> find(std::string_view path) const {
         std::lock_guard lock(state->mutex);
         for (const auto& entry : state->entries)
-            if (path.starts_with(entry->prefix)) return entry;
+            if (path.starts_with(entry->prefix))
+                return entry;
         return {};
     }
 
@@ -453,7 +490,8 @@ private:
     std::shared_ptr<State> state = std::make_shared<State>();
 
     static bool validPrefix(std::string_view prefix) {
-        if (prefix.size() < 2 || !prefix.starts_with('/') || !prefix.ends_with('/')) return false;
+        if (prefix.size() < 2 || !prefix.starts_with('/') || !prefix.ends_with('/'))
+            return false;
         if (prefix.find("..") != std::string_view::npos || prefix.find("//") != std::string_view::npos || prefix.find("/./") != std::string_view::npos)
             return false;
         return std::none_of(prefix.begin(), prefix.end(), [](char c) {
@@ -474,17 +512,21 @@ inline bool mentionsServices(std::string_view target) {
     for (int pass = 0; pass < 3; ++pass) {
         std::string lowered;
         lowered.reserve(text.size());
-        for (const char c : text) lowered += c == '\\' ? '/' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        for (const char c : text)
+            lowered += c == '\\' ? '/' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         std::string normalized;
         for (std::size_t from = 0; from <= lowered.size();) {
             const auto end     = std::min(lowered.find('/', from), lowered.size());
             const auto segment = std::string_view(lowered).substr(from, end - from);
-            if (!segment.empty() && segment != ".") normalized += (normalized.empty() ? "" : "/") + std::string(segment);
+            if (!segment.empty() && segment != ".")
+                normalized += (normalized.empty() ? "" : "/") + std::string(segment);
             from = end + 1;
         }
-        if (normalized.find(marker) != std::string::npos) return true;
+        if (normalized.find(marker) != std::string::npos)
+            return true;
         auto decoded = uri::decode(lowered, false);
-        if (decoded == lowered) return false;
+        if (decoded == lowered)
+            return false;
         text = std::move(decoded);
     }
     return true;  // still encoded after three layers: nothing is worth showing
@@ -496,14 +538,18 @@ inline constexpr std::uint64_t malformedLength = std::numeric_limits<std::uint64
 /// The fields called `name` (case-insensitive), in order, by reference: no list is built, no value is copied.
 inline auto fieldsNamed(const Request& request, std::string_view name) {
     return request.headers | std::views::filter([name](const auto& header) {
-               return std::ranges::equal(header.name, name, [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); });
+               return std::ranges::equal(header.name, name, [](char a, char b) {
+                   return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
+               });
            });
 }
 
 /// The text without the optional whitespace (spaces and tabs) around it (RFC 9110 §5.6.3).
 inline std::string_view trimmed(std::string_view text) {
-    while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) text.remove_prefix(1);
-    while (!text.empty() && (text.back() == ' ' || text.back() == '\t')) text.remove_suffix(1);
+    while (!text.empty() && (text.front() == ' ' || text.front() == '\t'))
+        text.remove_prefix(1);
+    while (!text.empty() && (text.back() == ' ' || text.back() == '\t'))
+        text.remove_suffix(1);
     return text;
 }
 
@@ -518,11 +564,14 @@ inline std::optional<std::uint64_t> contentLength(const Request& request) {
             const auto comma = rest.find(',');
             more             = comma != std::string_view::npos;
             const auto value = trimmed(rest.substr(0, comma));
-            if (more) rest.remove_prefix(comma + 1);
-            std::uint64_t parsed = 0;
+            if (more)
+                rest.remove_prefix(comma + 1);
+            std::uint64_t parsed    = 0;
             const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), parsed);
-            if (value.empty() || error != std::errc{} || end != value.data() + value.size() || parsed == malformedLength) return malformedLength;
-            if (length && *length != parsed) return malformedLength;
+            if (value.empty() || error != std::errc{} || end != value.data() + value.size() || parsed == malformedLength)
+                return malformedLength;
+            if (length && *length != parsed)
+                return malformedLength;
             length = parsed;
         }
     }
@@ -538,7 +587,8 @@ inline bool hasField(const Request& request, std::string_view name) {
 /// a comma-separated list, each element a token compared without case, not a substring), from an HTTP/1.1 or later
 /// client, as an interim answer is never sent to 1.0.
 inline bool expectsContinue(const Request& request) {
-    if (request.httpVersionMajor < 1 || (request.httpVersionMajor == 1 && request.httpVersionMinor < 1)) return false;
+    if (request.httpVersionMajor < 1 || (request.httpVersionMajor == 1 && request.httpVersionMinor < 1))
+        return false;
     constexpr std::string_view token = "100-continue";
     for (const auto& field : fieldsNamed(request, "Expect")) {
         std::string_view rest = field.value;
@@ -546,8 +596,12 @@ inline bool expectsContinue(const Request& request) {
             const auto comma = rest.find(',');
             more             = comma != std::string_view::npos;
             const auto text  = trimmed(rest.substr(0, comma));
-            if (more) rest.remove_prefix(comma + 1);
-            if (std::ranges::equal(text, token, [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == b; })) return true;
+            if (more)
+                rest.remove_prefix(comma + 1);
+            if (std::ranges::equal(text, token, [](char a, char b) {
+                    return std::tolower(static_cast<unsigned char>(a)) == b;
+                }))
+                return true;
         }
     }
     return false;
@@ -567,10 +621,12 @@ inline std::string collapseSegments(std::string path) {
             collapsed += '/';
             collapsed += segment;
         }
-        if (end == std::string::npos) break;
+        if (end == std::string::npos)
+            break;
         start = end + 1;
     }
-    if (collapsed.empty() || path.ends_with('/')) collapsed += '/';
+    if (collapsed.empty() || path.ends_with('/'))
+        collapsed += '/';
     return collapsed;
 }
 
@@ -579,8 +635,12 @@ inline std::string collapseSegments(std::string path) {
 inline std::optional<std::pair<std::string, std::string>> splitTarget(const std::string& uri) {
     const auto mark    = uri.find('?');
     const auto decoded = uri::decode(std::string_view(uri).substr(0, mark), false);
-    if (!decoded.starts_with('/') || decoded.find("..") != std::string::npos) return {};
-    if (std::any_of(decoded.begin(), decoded.end(), [](char c) { return static_cast<unsigned char>(c) < 32 || c == 127; })) return {};
+    if (!decoded.starts_with('/') || decoded.find("..") != std::string::npos)
+        return {};
+    if (std::any_of(decoded.begin(), decoded.end(), [](char c) {
+            return static_cast<unsigned char>(c) < 32 || c == 127;
+        }))
+        return {};
     return std::pair{collapseSegments(decoded), mark == std::string::npos ? std::string{} : uri.substr(mark + 1)};
 }
 
@@ -589,12 +649,16 @@ inline void validateReply(const RouteReply& reply) {
     const auto isToken = [](std::string_view name) {
         return !name.empty() && std::all_of(name.begin(), name.end(), [](char c) {
             // RFC 9110 tchar, spelled out: std::isalnum depends on the locale and may accept non-ASCII bytes.
-            return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || std::string_view("!#$%&'*+-.^_`|~").find(c) != std::string_view::npos;
+            return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+                   || std::string_view("!#$%&'*+-.^_`|~").find(c) != std::string_view::npos;
         });
     };
     for (const auto& [name, value] : reply.headers) {
-        if (!isToken(name)) throw std::runtime_error("Invalid response header name '" + name + "'");
-        if (std::any_of(value.begin(), value.end(), [](char c) { return c == '\r' || c == '\n' || c == '\0'; }))
+        if (!isToken(name))
+            throw std::runtime_error("Invalid response header name '" + name + "'");
+        if (std::any_of(value.begin(), value.end(), [](char c) {
+                return c == '\r' || c == '\n' || c == '\0';
+            }))
             throw std::runtime_error("Invalid value for response header '" + name + "'");
         for (const auto reserved : {std::string_view("Content-Length"), std::string_view("Connection"), std::string_view("Transfer-Encoding")})
             if (std::ranges::equal(name, reserved, [](char a, char b) {
@@ -604,7 +668,7 @@ inline void validateReply(const RouteReply& reply) {
     }
 }
 
-} // namespace routing
+}  // namespace routing
 
 /// The reply of a route that serves `file` as `contentType`, with the byte ranges of RFC 9110 §14: `Range` selects
 /// one part (206 with `Content-Range`, 416 when it starts past the end), `If-Range` conditions it on the file's
@@ -627,12 +691,15 @@ inline void validateReply(const RouteReply& reply) {
     }
     if (file.isEncoded() || !size) {
         reply.headers.emplace_back("Accept-Ranges", "none");
-        reply.body = [file = std::make_shared<fs::File>(std::move(file))](std::span<char> out) { return file->read(out); };
+        reply.body = [file = std::make_shared<fs::File>(std::move(file))](std::span<char> out) {
+            return file->read(out);
+        };
         reply.contentLength = size;
         return reply;
     }
     reply.headers.emplace_back("Accept-Ranges", "bytes");
-    if (file.entityTag()) reply.headers.emplace_back("ETag", *file.entityTag());
+    if (file.entityTag())
+        reply.headers.emplace_back("ETag", *file.entityTag());
     // Range is defined for GET only (RFC 9110 §14.2): HEAD describes the full response.
     const auto selection = request.method == Request::Method::Get ? range::select(request, *size, file.entityTag()) : range::Selection{};
     if (selection.outcome == range::Outcome::unsatisfiable) {
@@ -652,13 +719,15 @@ inline void validateReply(const RouteReply& reply) {
     reply.contentLength = length;
     reply.body = [file = std::make_shared<fs::File>(std::move(file)), first, remaining = length, positioned = first == 0](std::span<char> out) mutable {
         if (!positioned) {
-            if (!file->seek(first)) throw std::runtime_error("The file cannot seek");
+            if (!file->seek(first))
+                throw std::runtime_error("The file cannot seek");
             positioned = true;
         }
         const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(out.size(), remaining));
-        if (count == 0) return std::size_t{0};
+        if (count == 0)
+            return std::size_t{0};
         const auto read = file->read(out.first(count));
-        remaining -= read;
+        remaining      -= read;
         return read;
     };
     return reply;
@@ -669,36 +738,43 @@ class RequestHandler {
 public:
     explicit RequestHandler(std::filesystem::path root, detail::BoundContentPolicy policy = detail::BoundContentPolicy{})
         : fs(root), contentPolicy(std::move(policy)) { }
-    ~RequestHandler() = default;
-    RequestHandler(const RequestHandler&) = default;
-    RequestHandler(RequestHandler&&) = default;
+    ~RequestHandler()                                = default;
+    RequestHandler(const RequestHandler&)            = default;
+    RequestHandler(RequestHandler&&)                 = default;
     RequestHandler& operator=(const RequestHandler&) = default;
-    RequestHandler& operator=(RequestHandler&&) = default;
+    RequestHandler& operator=(RequestHandler&&)      = default;
 
     /** @brief Per-handler gzip cache counters and retained storage; read on the server context. */
-    [[nodiscard]] gzip::ValidatedCache::Statistics fallbackCacheStatistics() const { return fallbackCache.statistics(); }
+    [[nodiscard]] gzip::ValidatedCache::Statistics fallbackCacheStatistics() const {
+        return fallbackCache.statistics();
+    }
 
     struct Prepared {
         Response response;
-        bool needsDecode = false;
-        bool head = false;
-        bool identityFallback = false;
+        bool     needsDecode      = false;
+        bool     head             = false;
+        bool     identityFallback = false;
         /// An unencoded file of known size, left unread to be streamed (asynchronous requests only).
         std::unique_ptr<fs::File> file{};
         /// The part of `file` a `Range` request selected: its first byte, and how many bytes follow (206).
-        bool partial = false;
-        std::uint64_t offset = 0;
-        std::uint64_t length = 0;
-        std::size_t limit = maxDecodedAssetSize<Policy>();
+        bool          partial = false;
+        std::uint64_t offset  = 0;
+        std::uint64_t length  = 0;
+        std::size_t   limit   = maxDecodedAssetSize<Policy>();
     };
 
     // Explicit synchronous low-level API; Server always uses prepareRequest and the owned worker.
-    Response handleRequest(Request request) { return prepare(std::move(request), false).response; }
-    Prepared prepareRequest(Request request) { return prepare(std::move(request), true); }
+    Response handleRequest(Request request) {
+        return prepare(std::move(request), false).response;
+    }
+    Prepared prepareRequest(Request request) {
+        return prepare(std::move(request), true);
+    }
 
     template <typename Lease>
     Response finish(Prepared prepared, Lease& lease) {
-        if (!lease) return encodingError(Response::serviceUnavailable);
+        if (!lease)
+            return encodingError(Response::serviceUnavailable);
         if (!lease.valid() || lease.decoded().size() > maxDecodedAssetSize<Policy>())
             return encodingError(Response::internalServerError);
         fallbackCache.remember(lease.encoded(), lease.decoded());
@@ -710,10 +786,12 @@ public:
 private:
     Prepared prepare(Request request, bool asynchronous) {
         auto requestPath = filePath(request.uri);
-        if (!requestPath) return {Response::getStatusResponse(Response::badRequest)};
+        if (!requestPath)
+            return {Response::getStatusResponse(Response::badRequest)};
         switch (request.method) {
             case Request::Method::Get:
-                if (auto upgrade = webSocketUpgrade(request)) return {std::move(*upgrade)};
+                if (auto upgrade = webSocketUpgrade(request))
+                    return {std::move(*upgrade)};
                 [[fallthrough]];
             case Request::Method::Head:
                 break;
@@ -721,10 +799,10 @@ private:
                 return {Response::getStatusResponse(Response::notImplemented)};
         }
         Prepared result;
-        result.head = request.method == Request::Method::Head;
+        result.head    = request.method == Request::Method::Head;
         auto& response = result.response;
         if (auto error = readFile(request, *requestPath, result, asynchronous)) {
-            response = std::move(*error);
+            response           = std::move(*error);
             result.needsDecode = false;
             return result;
         }
@@ -733,10 +811,12 @@ private:
         if (!result.needsDecode) {
             if (!response.getHeaderValue("Content-Length"))
                 response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
-            if (result.head) response.content.clear();
+            if (result.head)
+                response.content.clear();
         }
         // Only an unencoded file of known size is served by ranges, and it announced them when it was opened.
-        if (!response.getHeaderValue("Accept-Ranges")) response.headers.emplace_back("Accept-Ranges", "none");
+        if (!response.getHeaderValue("Accept-Ranges"))
+            response.headers.emplace_back("Accept-Ranges", "none");
         return result;
     }
 
@@ -745,27 +825,34 @@ private:
         // The query is not part of the file name; it is cut before decoding, so "%3F" stays in the name.
         const auto rawPath    = std::string_view(uri).substr(0, uri.find('?'));
         auto       requestUri = uri::decode(rawPath);
-        const bool secret = routing::mentionsServices(uri) || routing::mentionsServices(requestUri);
-        if (!secret) log::debug("Request path - raw:'{}' decoded:'{}'", rawPath, requestUri);  // never the query
-        if (!isSafePath(requestUri)) return {};
+        const bool secret     = routing::mentionsServices(uri) || routing::mentionsServices(requestUri);
+        if (!secret)
+            log::debug("Request path - raw:'{}' decoded:'{}'", rawPath, requestUri);  // never the query
+        if (!isSafePath(requestUri))
+            return {};
         auto requestPath = std::filesystem::path(requestUri).relative_path();
-        if (!secret) log::debug("  -> requestPath : {}", requestPath.string());
-        if (!requestPath.has_filename()) requestPath /= "index.html";
+        if (!secret)
+            log::debug("  -> requestPath : {}", requestPath.string());
+        if (!requestPath.has_filename())
+            requestPath /= "index.html";
         return requestPath;
     }
 
     static bool isSafePath(std::string_view path) {
-        if (!path.starts_with('/')) return false;
+        if (!path.starts_with('/'))
+            return false;
         return path.find("..") == std::string_view::npos;
     }
 
     std::optional<Response> webSocketUpgrade(const Request& request) const {
-        if (!request.isUpgradeRequest("websocket")) return {};
+        if (!request.isUpgradeRequest("websocket"))
+            return {};
         const auto origins = request.getHeadersValues("Origin");
         if (origins.size() > 1 || !contentPolicy.allowsBridge(origins.empty() ? std::nullopt : std::optional<std::string_view>{origins.front()}))
             return rejectWebSocketOrigin();
         auto key = request.getHeaderValue("Sec-WebSocket-Key");
-        if (!key) return {};
+        if (!key)
+            return {};
         Response response;
         response.statusCode = Response::StatusCode::switchingProtocols;
         response.headers.emplace_back("Upgrade", "websocket");
@@ -790,15 +877,17 @@ private:
     // Reads the file into the response content, or returns the error response.
     std::optional<Response> readFile(const Request& request, const std::filesystem::path& requestPath, Prepared& prepared, bool asynchronous) {
         auto file = fs.open(requestPath);
-        if (!file) return Response::getStatusResponse(Response::notFound);
-        auto& response = prepared.response;
-        const bool fallback = file->isEncoded() && encoding::isGzip(file->getEncoding()) &&
-            !request.acceptsEncoding(file->getEncoding()) && request.acceptsEncoding("identity");
+        if (!file)
+            return Response::getStatusResponse(Response::notFound);
+        auto&      response       = prepared.response;
+        const bool fallback       = file->isEncoded() && encoding::isGzip(file->getEncoding()) && !request.acceptsEncoding(file->getEncoding())
+                                    && request.acceptsEncoding("identity");
         prepared.identityFallback = fallback;
         if (asynchronous && !file->isEncoded()) {
             if (const auto size = file->knownSize()) {
                 response.headers.emplace_back("Accept-Ranges", "bytes");
-                if (file->entityTag()) response.headers.emplace_back("ETag", *file->entityTag());
+                if (file->entityTag())
+                    response.headers.emplace_back("ETag", *file->entityTag());
                 // Range is defined for GET only (RFC 9110 §14.2): HEAD describes the full response.
                 const auto selection = request.method == Request::Method::Get ? range::select(request, *size, file->entityTag()) : range::Selection{};
                 if (selection.outcome == range::Outcome::unsatisfiable) {
@@ -818,18 +907,21 @@ private:
                     response.headers.emplace_back("Content-Range", range::contentRange(selection, *size));
                 }
                 response.headers.emplace_back("Content-Length", std::to_string(prepared.length));
-                if (prepared.head) return {};
+                if (prepared.head)
+                    return {};
                 prepared.file = std::make_unique<fs::File>(std::move(*file));
                 return {};
             }
         }
-        const auto inputLimit = asynchronous && fallback ? maxEncodedAssetSize : std::numeric_limits<std::size_t>::max();
+        const auto            inputLimit = asynchronous && fallback ? maxEncodedAssetSize : std::numeric_limits<std::size_t>::max();
         std::array<char, 512> buffer{};
         while (auto bytesRead = file->read(buffer)) {
-            if (bytesRead > inputLimit - response.content.size()) return encodingError(Response::internalServerError);
+            if (bytesRead > inputLimit - response.content.size())
+                return encodingError(Response::internalServerError);
             response.content.append(buffer.data(), bytesRead);
         }
-        if (!file->isEncoded()) return {};
+        if (!file->isEncoded())
+            return {};
         return negotiateEncoding(request, file->getEncoding(), prepared, asynchronous);
     }
 
@@ -850,7 +942,8 @@ private:
             return encodingError(Response::notAcceptable);
         if (asynchronous) {
             if (auto cached = fallbackCache.lookup(response.content, prepared.limit, prepared.head)) {
-                if (!cached->allowed) return encodingError(Response::internalServerError);
+                if (!cached->allowed)
+                    return encodingError(Response::internalServerError);
                 response.headers.emplace_back("Content-Length", std::to_string(cached->length));
             } else {
                 prepared.needsDecode = true;
@@ -864,37 +957,47 @@ private:
         return {};
     }
 
-    FS fs;
+    FS                         fs;
     detail::BoundContentPolicy contentPolicy;
-    gzip::ValidatedCache fallbackCache{maxDecodedAssetCacheSize<Policy>()};
-    std::size_t maxEncodedAssetSize{gzip::decodeLimits<Policy>().encoded};
+    gzip::ValidatedCache       fallbackCache{maxDecodedAssetCacheSize<Policy>()};
+    std::size_t                maxEncodedAssetSize{gzip::decodeLimits<Policy>().encoded};
 };
 
-template<networking::Features Net, fs::Provider FS, BuffersPolicyType Policy = DefaultBuffersPolicy, typename Decode = gzip::Decoder>
+template <networking::Features Net, fs::Provider FS, BuffersPolicyType Policy = DefaultBuffersPolicy, typename Decode = gzip::Decoder>
 class Server {
 public:
-    Server(std::string_view address, std::string_view port, std::filesystem::path docRoot = ".", ContentPolicy policy = {}, Decode decode = {})
+    Server(std::string_view                  address,
+           std::string_view                  port,
+           std::filesystem::path             docRoot     = ".",
+           ContentPolicy                     policy      = {},
+           Decode                            decode      = {},
+           std::shared_ptr<tls::Credentials> credentials = {})
         : acceptor(ioContext),
-          listeningPort(bind(address, port)),
-          requestHandler(docRoot, detail::BoundContentPolicy{detail::applicationOrigin(address, listeningPort), std::move(policy)}),
+          listeningPort((configureTransport(std::move(credentials)), bind(address, port))),
+          requestHandler(docRoot,
+                         detail::BoundContentPolicy{detail::applicationOrigin(address, listeningPort, networking::secureTransport<Net>), std::move(policy)}),
           decodeExecutor(gzip::decodeLimits<Policy>(), std::move(decode)) {
         spawn(acceptConnections());
     }
     ~Server() noexcept {
         drainUntilJoined();
     }
-    Server(const Server&) = delete;
-    Server(Server&&) = delete;
+    Server(const Server&)            = delete;
+    Server(Server&&)                 = delete;
     Server& operator=(const Server&) = delete;
-    Server& operator=(Server&&) = delete;
+    Server& operator=(Server&&)      = delete;
 
     /// The bound port, including the OS-assigned port when constructed with "0".
     const std::string& port() const noexcept {
         return listeningPort;
     }
 
-    void run() { ioContext.run(); }
-    void runOne() { ioContext.run_one(); }
+    void run() {
+        ioContext.run();
+    }
+    void runOne() {
+        ioContext.run_one();
+    }
 
     /// Thread-safe. Cancels the acceptor and the connections, and makes run() return.
     void stop() {
@@ -923,7 +1026,8 @@ public:
                 tasks.drain(ioContext);
                 break;
             } catch (const std::logic_error&) {
-                if (!route.busy && !file.busy && route == routeWorker.activity() && file == fileWorker.activity()) throw;
+                if (!route.busy && !file.busy && route == routeWorker.activity() && file == fileWorker.activity())
+                    throw;
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
         }
@@ -966,7 +1070,8 @@ public:
     /// Answers the `GET` and `HEAD` requests under `prefix` with `handler` (see RouteTable::add for the
     /// prefix rules). The route lasts as long as the returned registration; it never masks the embedded
     /// `WebFront.js`, and takes precedence over the file providers. Thread-safe.
-    [[nodiscard]] RouteTable::Registration addRoute(std::string prefix, RouteHandler handler, bool secretPath = false, std::function<void(RouteReply&)> harden = {}) {
+    [[nodiscard]] RouteTable::Registration
+    addRoute(std::string prefix, RouteHandler handler, bool secretPath = false, std::function<void(RouteReply&)> harden = {}) {
         return routes.add(std::move(prefix), std::move(handler), secretPath, std::move(harden));
     }
 
@@ -980,40 +1085,91 @@ public:
         upgradeHandler = std::move(handler);
     }
 
-    [[nodiscard]] auto fallbackDecodeStatistics() const { return decodeExecutor.statistics(); }
+    [[nodiscard]] auto fallbackDecodeStatistics() const {
+        return decodeExecutor.statistics();
+    }
     [[nodiscard]] auto fallbackCacheStatistics() const {
-        auto result = requestHandler.fallbackCacheStatistics();
+        auto result    = requestHandler.fallbackCacheStatistics();
         result.decodes = decodeExecutor.statistics().decodes;
         return result;
     }
 
 private:
-    typename Net::IoContext                     ioContext;
-    typename Net::Acceptor                      acceptor;
-    std::string                                 listeningPort;
-    networking::TaskScope                       tasks;
-    RequestHandler<Net, FS, Policy>             requestHandler;
-    gzip::DecodeExecutor<Decode>                decodeExecutor;
-    RouteTable                                  routes;
+    typename Net::IoContext         ioContext;
+    typename Net::Acceptor          acceptor;
+    std::string                     listeningPort;
+    networking::TaskScope           tasks;
+    RequestHandler<Net, FS, Policy> requestHandler;
+    gzip::DecodeExecutor<Decode>    decodeExecutor;
+    RouteTable                      routes;
     // Route handlers may block for as long as they like: they get their own threads, so that the files of the
     // providers (WebFront.js, pages) keep flowing for the other browsers.
     BlockingWorker                              routeWorker{4};
     BlockingWorker                              fileWorker{2};
     std::function<void(typename Net::Socket&&)> upgradeHandler;
 
+    void configureTransport(std::shared_ptr<tls::Credentials> credentials) {
+        if constexpr (networking::secureTransport<Net>) {
+            if (!credentials)
+                throw std::invalid_argument("WebFront: missing TLS credentials");
+            acceptor.credentials = std::move(credentials);
+        } else if (credentials) {
+            throw std::invalid_argument("WebFront: TLS credentials require the HTTPS provider");
+        }
+    }
+
+    // Cancels a handshake that outlives Net::handshakeTimeout, unless `settled` ends the wait first.
+    networking::Task handshakeDeadline(std::shared_ptr<networking::ex::inplace_stop_source> expired,
+                                       std::shared_ptr<networking::ex::inplace_stop_source> settled) {
+        if constexpr (networking::secureTransport<Net>)
+            co_await networking::ex::write_env(Net::ResumeAfter(acceptor, Net::handshakeTimeout),
+                                               networking::ex::prop{networking::ex::get_stop_token, settled->get_token()});
+        expired->request_stop();
+    }
+
+    networking::Task closeResponse(typename Net::Socket& socket) {
+        if constexpr (networking::secureTransport<Net>)
+            co_await Net::Close(socket);
+        else
+            socket.shutdown(Net::Socket::shutdown_both);
+        co_return;
+    }
+
     std::string bind(std::string_view address, std::string_view requestedPort) {
-        const auto endpoint = Net::Resolve(address, requestedPort);
-        acceptor.open(endpoint.protocol());
-        acceptor.set_option(typename Net::Acceptor::reuse_address(true));
-        acceptor.bind(endpoint);
-        acceptor.listen();
-        // Only the literal "0" asks for an OS-assigned port; any other value is already the port.
-        if (requestedPort != "0")
-            return std::string(requestedPort);
+        try {
+            const auto endpoint = Net::Resolve(address, requestedPort);
+            acceptor.open(endpoint.protocol());
+#ifdef _WIN32
+            // SO_REUSEADDR lets Winsock bind a second socket to a port in use and then deals the connections out unpredictably, so
+            // two applications would answer each other's requests. SO_EXCLUSIVEADDRUSE makes the second bind fail instead.
+            if constexpr (requires { acceptor.native_handle(); }) {
+                const BOOL exclusive = TRUE;
+                if (::setsockopt(static_cast<SOCKET>(acceptor.native_handle()),
+                                 SOL_SOCKET,
+                                 SO_EXCLUSIVEADDRUSE,
+                                 reinterpret_cast<const char*>(&exclusive),
+                                 sizeof exclusive)
+                    != 0)
+                    throw std::system_error(::WSAGetLastError(), std::system_category(), "SO_EXCLUSIVEADDRUSE");
+            }
+#else
+            acceptor.set_option(typename Net::Acceptor::reuse_address(true));  // rebinding after a restart; POSIX still refuses a port in use
+#endif
+            acceptor.bind(endpoint);
+            acceptor.listen();
+        } catch (const std::system_error& error) {
+            // Name the address and port: the bare "bind: Address already in use" does not say which server failed.
+            throw std::system_error(error.code(),
+                                    "WebFront cannot listen on " + std::string(address) + ":" + std::string(requestedPort) + ": " + error.code().message()
+                                        + (error.code() == std::errc::address_in_use
+                                               ? " (another instance may use this port; set WEBFRONT_PORT=0 or WebFrontConfig::port to \"0\" for a free port)"
+                                               : ""));
+        }
+        // The port really bound, whatever the request said: the resolver also accepts "00", "65536" or a service name.
         if constexpr (requires { acceptor.local_endpoint().port(); })
             return std::to_string(acceptor.local_endpoint().port());
         else
-            return std::string(requestedPort); // Preserve legacy providers/mocks which have no endpoint query.
+            return std::string(requestedPort);  // Preserve legacy providers/mocks which have no endpoint query.
     }
 
     void spawn(networking::Task task) {
@@ -1025,9 +1181,9 @@ private:
         while (!tasks.stopRequested()) {
             try {
                 spawn(serve(co_await Net::Accept(acceptor)));
-            }
-            catch (const std::system_error& error) {
-                if (error.code() == std::errc::operation_canceled) co_return;
+            } catch (const std::system_error& error) {
+                if (error.code() == std::errc::operation_canceled)
+                    co_return;
                 log::error("Accept failed: {}", error.what());
             }
         }
@@ -1041,39 +1197,52 @@ private:
     // A request, other than a WebSocket upgrade, under a registered prefix. Every method under a prefix
     // belongs to the route (405 for those it does not serve): its URLs never fall through to the providers.
     std::optional<RouteMatch> matchRoute(const Request& request) const {
-        if (request.isUpgradeRequest("websocket")) return {};
+        if (request.isUpgradeRequest("websocket"))
+            return {};
         auto split = routing::splitTarget(request.uri);
-        if (!split) return {};
+        if (!split)
+            return {};
         auto route = routes.find(split->first);
-        if (!route) return {};
+        if (!route)
+            return {};
         return RouteMatch{std::move(route), std::move(split->first), std::move(split->second)};
     }
 
     // Sends a body read on the worker in chunks of at most emissionBufferSize bytes, each read after the
     // previous one was sent (back-pressure). A failure cannot change the status line already sent: it is
     // logged, and the caller closes the connection, which the client sees as a truncated body.
-    networking::Task streamBody(BlockingWorker& worker, typename Net::Socket& socket, std::function<std::size_t(std::span<char>)> body,
-                                std::optional<std::uint64_t> length, std::string label, bool secret = false) {
+    networking::Task streamBody(BlockingWorker&                             worker,
+                                typename Net::Socket&                       socket,
+                                std::function<std::size_t(std::span<char>)> body,
+                                std::optional<std::uint64_t>                length,
+                                std::string                                 label,
+                                bool                                        secret = false) {
         try {
             std::vector<char> chunk(Policy::emissionBufferSize);
             std::uint64_t     sent = 0;
             for (;;) {
                 std::size_t count = 0;
-                co_await networking::ex::continues_on(worker.run([&] { count = body(chunk); }), Net::Scheduler(socket));
-                if (count == 0) break;
-                if (count > chunk.size() || (length && count > *length - sent)) throw std::length_error("The body is longer than announced");
+                co_await networking::ex::continues_on(worker.run([&] {
+                    count = body(chunk);
+                }),
+                                                      Net::Scheduler(socket));
+                if (count == 0)
+                    break;
+                if (count > chunk.size() || (length && count > *length - sent))
+                    throw std::length_error("The body is longer than announced");
                 sent += count;
                 std::vector<typename Net::ConstBuffer> buffers{Net::Buffer(static_cast<const char*>(chunk.data()), count)};
                 co_await Net::Send(socket, buffers);
             }
-            if (length && sent != *length) throw std::length_error("The body is shorter than announced");
-        }
-        catch (const std::exception& error) {
+            if (length && sent != *length)
+                throw std::length_error("The body is shorter than announced");
+        } catch (const std::exception& error) {
             // The message of a handler can quote the request path, which holds a token on a secret route.
-            if (secret) log::warn("{} ended its response early (the error is not logged)", label);
-            else log::warn("{} ended its response early: {}", label, error.what());
-        }
-        catch (...) {
+            if (secret)
+                log::warn("{} ended its response early (the error is not logged)", label);
+            else
+                log::warn("{} ended its response early: {}", label, error.what());
+        } catch (...) {
             log::warn("{} ended its response early: unknown exception", label);
         }
     }
@@ -1090,14 +1259,18 @@ private:
         Response   response;
         // The route's policy for the answers the server writes itself; the type and disposition stay those of the error page.
         const auto sameHeader = [](std::string_view a, std::string_view b) {
-            return std::ranges::equal(a, b, [](char x, char y) { return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y)); });
+            return std::ranges::equal(a, b, [](char x, char y) {
+                return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
+            });
         };
         const auto hardenError = [&] {
-            if (!match.route->harden) return;
+            if (!match.route->harden)
+                return;
             RouteReply policy;
             match.route->harden(policy);
             for (auto& [name, value] : policy.headers)
-                if (!sameHeader(name, "Content-Type") && !sameHeader(name, "Content-Disposition")) response.headers.emplace_back(name, value);
+                if (!sameHeader(name, "Content-Type") && !sameHeader(name, "Content-Disposition"))
+                    response.headers.emplace_back(name, value);
         };
         // The body of a POST outlives the handler: its answer may stream from the view it was given. `body` holds it only
         // when it did not come with the headers (then `view` is in the reception buffer of serve()); both live as long as this call.
@@ -1107,10 +1280,14 @@ private:
             std::optional<Response::StatusCode> refusal;
             if (post) {
                 const auto length = routing::contentLength(request);
-                if (routing::hasField(request, "Transfer-Encoding")) refusal = Response::notImplemented;  // no chunked bodies
-                else if (!length) refusal = Response::lengthRequired;
-                else if (*length == routing::malformedLength) refusal = Response::badRequest;
-                else if (*length > *match.route->postBodyLimit) refusal = Response::payloadTooLarge;
+                if (routing::hasField(request, "Transfer-Encoding"))
+                    refusal = Response::notImplemented;  // no chunked bodies
+                else if (!length)
+                    refusal = Response::lengthRequired;
+                else if (*length == routing::malformedLength)
+                    refusal = Response::badRequest;
+                else if (*length > *match.route->postBodyLimit)
+                    refusal = Response::payloadTooLarge;
                 else {
                     if (received.size() < *length && routing::expectsContinue(request)) {
                         // The client waits for this interim answer before it sends the body (curl does beyond 1 KiB).
@@ -1127,7 +1304,7 @@ private:
                             const auto wanted = std::min<std::size_t>(*length - body.size(), buffer.size());
                             const auto count  = co_await Net::Receive(socket, Net::Buffer(buffer.data(), wanted));
                             if (count == 0) {  // the client ended the connection before the announced length
-                                socket.shutdown(Net::Socket::shutdown_both);
+                                co_await closeResponse(socket);
                                 co_return;
                             }
                             body.append(buffer.data(), count);
@@ -1147,50 +1324,90 @@ private:
                 co_await networking::ex::continues_on(routeWorker.run([&] {
                     reply = match.route->handler(RouteRequest{request, match.path, match.query, view});
                     routing::validateReply(reply);
-                }), Net::Scheduler(socket));
+                }),
+                                                      Net::Scheduler(socket));
                 response.statusCode = reply.status;
-                for (auto& [name, value] : reply.headers) response.headers.emplace_back(name, value);
-                if (reply.contentLength) response.headers.emplace_back("Content-Length", std::to_string(*reply.contentLength));
-                else if (!reply.body) response.headers.emplace_back("Content-Length", "0");
+                for (auto& [name, value] : reply.headers)
+                    response.headers.emplace_back(name, value);
+                if (reply.contentLength)
+                    response.headers.emplace_back("Content-Length", std::to_string(*reply.contentLength));
+                else if (!reply.body)
+                    response.headers.emplace_back("Content-Length", "0");
             }
-        }
-        catch (const std::exception& error) {
-            if (match.route->secretPath) log::warn("Route {} failed (the error is not logged: it may quote a secret)", match.route->prefix);
-            else log::warn("Route {} failed: {}", match.route->prefix, error.what());
+        } catch (const std::exception& error) {
+            if (match.route->secretPath)
+                log::warn("Route {} failed (the error is not logged: it may quote a secret)", match.route->prefix);
+            else
+                log::warn("Route {} failed: {}", match.route->prefix, error.what());
             response = Response::getStatusResponse(Response::internalServerError);
             hardenError();
             reply.body = nullptr;
-        }
-        catch (...) {
+        } catch (...) {
             log::warn("Route {} failed with an exception which is not a std::exception", match.route->prefix);
             response = Response::getStatusResponse(Response::internalServerError);
             hardenError();
             reply.body = nullptr;
         }
         const bool streaming = !head && reply.body;  // the built-in 405 has no reply.body
-        if (head) response.content.clear();  // an error page keeps its Content-Length; HEAD never has a body
+        if (head)
+            response.content.clear();                // an error page keeps its Content-Length; HEAD never has a body
         co_await Net::Send(socket, response.toBuffers<Net>());
-        if (streaming) co_await streamBody(routeWorker, socket, std::move(reply.body), reply.contentLength, match.route->prefix, match.route->secretPath);
-        socket.shutdown(Net::Socket::shutdown_both);
+        if (streaming)
+            co_await streamBody(routeWorker, socket, std::move(reply.body), reply.contentLength, match.route->prefix, match.route->secretPath);
+        co_await closeResponse(socket);
     }
 
     networking::Task serve(typename Net::Socket socket) {
-        Request request;
+        if constexpr (networking::secureTransport<Net>) {
+            // The deadline and the server's shutdown cancel the handshake through this source.
+            struct Forward {
+                networking::ex::inplace_stop_source& source;
+                void                                 operator()() noexcept {
+                    source.request_stop();
+                }
+            };
+            const auto                                                                       expired = std::make_shared<networking::ex::inplace_stop_source>();
+            const auto                                                                       settled = std::make_shared<networking::ex::inplace_stop_source>();
+            networking::ex::stop_callback_for_t<networking::ex::inplace_stop_token, Forward> shutdown(tasks.stopToken(), Forward{*expired});
+            spawn(handshakeDeadline(expired, settled));
+            struct Settle {
+                networking::ex::inplace_stop_source& source;
+                ~Settle() {
+                    source.request_stop();
+                }
+            } settle{*settled};
+            try {
+                co_await networking::ex::stopped_as_error(
+                    networking::ex::write_env(Net::Handshake(socket, acceptor), networking::ex::prop{networking::ex::get_stop_token, expired->get_token()}),
+                    std::make_error_code(std::errc::timed_out));
+            } catch (const std::system_error& error) {
+                if (tasks.stopRequested())
+                    co_return;  // interrupted by the server's shutdown, not a failed or expired handshake
+                log::debug("TLS handshake failed ({}:{}): {}", error.code().category().name(), error.code().value(), error.what());
+                co_return;
+            } catch (const std::exception& error) {
+                log::warn("TLS handshake failed: {}", error.what());
+                co_return;
+            }
+        }
+        Request                                                     request;
         std::optional<typename gzip::DecodeExecutor<Decode>::Lease> lease;
-        std::unique_ptr<fs::File> streamed;
-        std::uint64_t streamOffset = 0, streamLength = 0;
-        bool head = false;
-        bool servicesTarget = false;
-        Response response;
+        std::unique_ptr<fs::File>                                   streamed;
+        std::uint64_t                                               streamOffset = 0, streamLength = 0;
+        bool                                                        head           = false;
+        bool                                                        servicesTarget = false;
+        Response                                                    response;
         try {
             std::array<char, Policy::receptionBufferSize> buffer;
-            std::string_view rest;  // received after the headers, still in `buffer`: the start of a body
+            std::string_view                              rest;  // received after the headers, still in `buffer`: the start of a body
             while (!request.completed()) {
                 const auto received = co_await Net::Receive(socket, Net::Buffer(buffer));
-                if (received == 0) co_return;  // the client closed the connection
-                const char* end = buffer.data() + received;
+                if (received == 0)
+                    co_return;  // the client closed the connection
+                const char* end  = buffer.data() + received;
                 const char* stop = request.consume(static_cast<const char*>(buffer.data()), end);
-                if (request.completed()) rest = std::string_view(stop, end);
+                if (request.completed())
+                    rest = std::string_view(stop, end);
             }
             auto match = matchRoute(request);
             if (match && match->route->secretPath)
@@ -1198,17 +1415,19 @@ private:
             else if (routing::mentionsServices(request.uri))
                 log::info("Received request {} on a services path (not logged)", request.getMethodName());
             else
-                log::info("Received request {} on {}", request.getMethodName(), std::string_view(request.uri).substr(0, request.uri.find('?')));  // the query may quote a URL
+                log::info("Received request {} on {}",
+                          request.getMethodName(),
+                          std::string_view(request.uri).substr(0, request.uri.find('?')));  // the query may quote a URL
             if (match) {
                 co_await serveRoute(socket, std::move(request), std::move(*match), rest, buffer);
                 co_return;
             }
-            head = request.method == Request::Method::Head;
+            head           = request.method == Request::Method::Head;
             servicesTarget = routing::mentionsServices(request.uri);  // before the request is moved away
-            auto prepared = requestHandler.prepareRequest(std::move(request));
+            auto prepared  = requestHandler.prepareRequest(std::move(request));
             if (prepared.needsDecode) {
-                lease.emplace(co_await networking::ex::continues_on(
-                    decodeExecutor.submit(std::move(prepared.response.content), prepared.limit, prepared.head), Net::Scheduler(socket)));
+                lease.emplace(co_await networking::ex::continues_on(decodeExecutor.submit(std::move(prepared.response.content), prepared.limit, prepared.head),
+                                                                    Net::Scheduler(socket)));
                 response = requestHandler.finish(std::move(prepared), *lease);
             } else {
                 if (prepared.identityFallback && prepared.response.statusCode == Response::ok) {
@@ -1226,43 +1445,48 @@ private:
                 response = std::move(prepared.response);
             }
             log::info("  responding http {}", static_cast<int>(response.statusCode));
-        }
-        catch (const BadRequestException&) {
+        } catch (const BadRequestException&) {
             response = Response::getStatusResponse(Response::badRequest);
-        }
-        catch (const std::bad_alloc&) {
+        } catch (const std::bad_alloc&) {
             response = Response::getStatusResponse(Response::serviceUnavailable);
             response.headers.emplace_back("Vary", "Accept-Encoding");
-        }
-        catch (const std::exception& error) {
-            if (servicesTarget) log::warn("HTTP asset request on a services path failed (the error is not logged)");
-            else log::warn("HTTP asset request failed: {}", error.what());
+        } catch (const std::exception& error) {
+            if (servicesTarget)
+                log::warn("HTTP asset request on a services path failed (the error is not logged)");
+            else
+                log::warn("HTTP asset request failed: {}", error.what());
             response = Response::getStatusResponse(Response::internalServerError);
-        }
-        catch (...) {
+        } catch (...) {
             log::warn("HTTP asset request failed with an exception which is not a std::exception");
             response = Response::getStatusResponse(Response::internalServerError);
         }
-        if (head) response.content.clear();  // an error page keeps its Content-Length; HEAD never has a body
+        if (head)
+            response.content.clear();  // an error page keeps its Content-Length; HEAD never has a body
         co_await Net::Send(socket, response.toBuffers<Net>());
         if (streamed)
-            co_await streamBody(fileWorker, socket, [&file = *streamed, offset = streamOffset, remaining = streamLength,
-                                                     positioned = streamOffset == 0](std::span<char> out) mutable {
-                if (!positioned) {
-                    if (!file.seek(offset)) throw std::runtime_error("The file cannot seek");
-                    positioned = true;
-                }
-                const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(out.size(), remaining));
-                if (count == 0) return std::size_t{0};
-                const auto read = file.read(out.first(count));
-                remaining -= read;
-                return read;
-            }, streamLength, "File response");
+            co_await streamBody(
+                fileWorker,
+                socket,
+                [&file = *streamed, offset = streamOffset, remaining = streamLength, positioned = streamOffset == 0](std::span<char> out) mutable {
+                    if (!positioned) {
+                        if (!file.seek(offset))
+                            throw std::runtime_error("The file cannot seek");
+                        positioned = true;
+                    }
+                    const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(out.size(), remaining));
+                    if (count == 0)
+                        return std::size_t{0};
+                    const auto read = file.read(out.first(count));
+                    remaining      -= read;
+                    return read;
+                },
+                streamLength,
+                "File response");
         if (response.statusCode != Response::switchingProtocols || tasks.stopRequested())
-            socket.shutdown(Net::Socket::shutdown_both);  // a stopped server hands nothing over: its drain would never end
+            co_await closeResponse(socket);  // a stopped server hands nothing over: its drain would never end
         else if (upgradeHandler)
             upgradeHandler(std::move(socket));
     }
 };
 
-} // namespace webfront::http
+}  // namespace webfront::http

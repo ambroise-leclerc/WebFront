@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
-/// @brief The frame of a C++ call to a JavaScript function, shared by every way of making one.
+// Author: Ambroise Leclerc
+// Created: 2026-10-30
+//
+// WebFront — weblink
+// Role: The frame of a C++ call to a JavaScript function, shared by every way of making one.
+// Thread: bridge-io | Alloc: zero-hot-path
+// LLM: the frame borrows its arguments; send it while they live or own it first
+
 #pragma once
 #include "../http/WebSocket.hpp"
 #include "Messages.hpp"

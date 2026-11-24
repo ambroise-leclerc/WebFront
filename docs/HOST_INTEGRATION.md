@@ -157,6 +157,33 @@ host.request_stop();                          // the user closed the window firs
 - Stop the host thread before `shutdown()` or the destruction of the application: no call into WebFront may still
   be running then.
 
+## Several instances at once
+
+**The port.** A configuration that leaves `WebFrontConfig::port` empty uses the port in the environment variable
+`WEBFRONT_PORT`, or `9002`, and, when `9002` is taken, a free port: several applications, of one program or of several,
+start side by side with no setting. `9002` stays the default so that a newcomer's first application keeps one address (the
+browser's `localStorage` and the other origin-bound storage follow the port). A port that is chosen, in the configuration or
+by `WEBFRONT_PORT`, is never replaced: when it is taken the constructor throws a `std::system_error` that names the address, the
+port and the cause. `WEBFRONT_PORT` is a number from 0 to 65535 (anything else throws `std::invalid_argument`) and `0` asks for
+a free port at once, which is the setting for tens of instances, as on a server: nothing probes ports one after the other, the
+system assigns each, and the frontend and `port()` receive the port really bound. `WebFrontLifeDeveloper`, `WebFrontLifeReact`,
+`WebFrontLifeEmbedded` and `WebFrontHostLoop` also take `--port <n>` or `--port=<n>`; `HelloWorld` (whose listing is the README's)
+and the PTY example read `WEBFRONT_PORT` only. On Windows a port in use is refused (`SO_EXCLUSIVEADDRUSE`), as on POSIX.
+
+**Cookies.** Cookies are not isolated by port: a cookie is shared by every port of a host, so state or authentication kept in a
+cookie must not assume a port of its own, as the read binding's cookie names already do.
+
+**Browser profiles.** CEF and WebKitGTK keep one profile directory per executable. The first live instance keeps it, held by a
+lock file (`.webfront-lock`), so a fixed port finds its storage again; every other live instance of the same executable gets
+a directory of its own beside it (`<directory>.instances/<pid>-<n>`), removed when it ends, and the directories of instances that
+died are removed by the next one (`frontend/ProfileLease.hpp`). Without that, Chromium hands the second process over to the first.
+The CEF profile is `cef_cache/<executable>` beside the executable, one per executable; data written under the former shared `cef_cache` is not migrated (move it there to keep it). WebView2 shares one user data folder between processes by design, and a WKWebView data store is not persistent. The system
+browser is the user's own. `WEBFRONT_STARTUP_TRACE` only writes to the standard error of its process.
+
+**Other alternatives.** A loopback address of its own (`WebFrontConfig::address = "127.0.0.2"`, any `127.x.y.z` on Linux; macOS
+needs the alias) lets instances share a port, and it works today, the origin then differing by its address. A Unix socket is not
+offered: a browser cannot connect to one, so it would need a proxy in front, which is the deployment's business.
+
 ## Concurrency and lifetime, in short
 
 - Callbacks, handlers and task bodies run on the server thread, one at a time. They must not wait for that thread:

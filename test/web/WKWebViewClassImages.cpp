@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — tests/web
+// Role: Checks the Objective-C classes that WKWebView.hpp resolves at run time against the system images.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: macOS only; fails when a class or selector is missing
+
 #include <webfront/frontend/WKWebView.hpp>
 
 #include <iostream>

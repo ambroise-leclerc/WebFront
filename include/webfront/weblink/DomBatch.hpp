@@ -1,4 +1,14 @@
-/// @brief Bounded DOM mutation wire command (ADR-003); the document API is a separate layer.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-27
+//
+// WebFront — weblink
+// Role: Bounded DOM mutation wire command: operations, LEB128 operands and the batch identifier.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: bridge wire format (ADR-003); keep layout stable and in step with the DOM interpreter
+
+// Bounded DOM mutation wire command (ADR-003); the document API is a separate layer.
+
 #pragma once
 
 #include "Messages.hpp"

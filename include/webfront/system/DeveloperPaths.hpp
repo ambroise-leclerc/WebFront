@@ -1,4 +1,12 @@
-/// @brief Path containment helpers of the developer store.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-21
+//
+// WebFront — system
+// Role: Path containment helpers of the developer store, with the Windows extended-length forms.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: security sensitive; a path outside the project must never resolve
+
 #pragma once
 
 #include "SafePath.hpp"
@@ -15,9 +23,18 @@ inline constexpr std::size_t extendedPathThreshold = 200;
 
 #ifdef _WIN32
 // Spelled with \x5c (a backslash): the prefixes are \?\ and \?\UNC\ for a network share, which is \ in its ordinary form.
-inline constexpr std::wstring_view networkPrefix  = L"\x5c" L"\x5c";
-inline constexpr std::wstring_view extendedPrefix = L"\x5c" L"\x5c" L"?" L"\x5c";
-inline constexpr std::wstring_view uncPrefix      = L"\x5c" L"\x5c" L"?" L"\x5c" L"UNC" L"\x5c";
+inline constexpr std::wstring_view networkPrefix  = L"\x5c"
+                                                    L"\x5c";
+inline constexpr std::wstring_view extendedPrefix = L"\x5c"
+                                                    L"\x5c"
+                                                    L"?"
+                                                    L"\x5c";
+inline constexpr std::wstring_view uncPrefix      = L"\x5c"
+                                                    L"\x5c"
+                                                    L"?"
+                                                    L"\x5c"
+                                                    L"UNC"
+                                                    L"\x5c";
 #endif
 
 /// The form of an absolute path that the Windows file APIs accept beyond MAX_PATH; other platforms keep the path as is.

@@ -1,4 +1,12 @@
-/// @brief The JavaScript calls a C++ callback has not answered yet, per browser connection.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-05
+//
+// WebFront — core
+// Role: The JavaScript calls a C++ callback has not answered yet, per browser connection.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: internal; completion may come from any thread, keep the per-connection ownership rules intact
+
 #pragma once
 
 #include "Task.hpp"
@@ -7,8 +15,8 @@
 #include <cstdint>
 #include <map>
 #include <memory>
-#include <optional>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <tuple>
 #include <type_traits>
@@ -104,11 +112,11 @@ public:
     }
 
 private:
-    mutable std::mutex                 mutex;
-    std::set<msg::CallId>              inFlightIds;
+    mutable std::mutex                                 mutex;
+    std::set<msg::CallId>                              inFlightIds;
     std::map<std::uint64_t, std::optional<TaskHandle>> tasks;
-    std::uint64_t                      lastKey = 0;
-    bool                               closed  = false;
+    std::uint64_t                                      lastKey = 0;
+    bool                                               closed  = false;
 };
 
 }  // namespace webfront::detail

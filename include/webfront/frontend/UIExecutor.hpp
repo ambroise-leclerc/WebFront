@@ -1,30 +1,43 @@
-/// @brief Execution on the interface thread of a frontend (ADR-020, prerequisite of the native dialogs).
-///
-/// A frontend that owns an interface thread publishes a `UIExecutorHost`: while its loop runs, it calls `attach()` on the
-/// interface thread with a thread-safe `wake` function, then `drain()` each time `wake` was called, and `close()` when the
-/// loop ends. Everything else uses the `UIExecutor` handle, whose `schedule()` is a sender that completes on the interface
-/// thread (ADR-006):
-///  - `set_value()` on the interface thread, once the host drains it;
-///  - `set_stopped()` when the receiver's stop token fires before the operation started to run, or when the loop closes
-///    with the operation still pending: it never runs after closure;
-///  - `set_error(UIExecutorUnavailable)` when no loop is attached (system browser without the loop mode, loop not started
-///    yet, or already closed).
-/// An operation that started to run is never interrupted: stop requests arrive too late for it.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-09
+//
+// WebFront — frontend
+// Role: Execution on the interface thread of a frontend (ADR-020): a sender that completes on that thread.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: public contract; schedule() is callable from any thread, completion is on the interface thread (ADR-006)
+
+// Execution on the interface thread of a frontend (ADR-020, prerequisite of the native dialogs).
+//
+// A frontend that owns an interface thread publishes a `UIExecutorHost`: while its loop runs, it calls `attach()` on the
+// interface thread with a thread-safe `wake` function, then `drain()` each time `wake` was called, and `close()` when the
+// loop ends. Everything else uses the `UIExecutor` handle, whose `schedule()` is a sender that completes on the interface
+// thread (ADR-006):
+//  - `set_value()` on the interface thread, once the host drains it;
+//  - `set_stopped()` when the receiver's stop token fires before the operation started to run, or when the loop closes
+//    with the operation still pending: it never runs after closure;
+//  - `set_error(UIExecutorUnavailable)` when no loop is attached (system browser without the loop mode, loop not started
+//    yet, or already closed).
+// An operation that started to run is never interrupted: stop requests arrive too late for it.
+
 #pragma once
 
 #include "../networking/Tasks.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <exception>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -50,9 +63,9 @@ namespace detail {
 
 /// One pending operation. The first of run / stop / close / failure to claim it completes the receiver, once.
 struct UIJob {
-    virtual ~UIJob()                         = default;
-    virtual void run() noexcept              = 0;  // on the interface thread
-    virtual void abandon() noexcept          = 0;  // loop closed or stop requested: completes stopped
+    virtual ~UIJob()                               = default;
+    virtual void run() noexcept                    = 0;  // on the interface thread
+    virtual void abandon() noexcept                = 0;  // loop closed or stop requested: completes stopped
     virtual void fail(std::exception_ptr) noexcept = 0;
 };
 
@@ -157,7 +170,7 @@ public:
             {
                 std::lock_guard lock(mutex);
                 if (queue.empty() || phase != Phase::running || wakePending)
-                    return;  // nothing left, or a job queued meanwhile already asked for the next pass
+                    return;                  // nothing left, or a job queued meanwhile already asked for the next pass
                 wake        = wakeFunction;  // may throw: nothing has changed yet
                 wakePending = true;
                 ++wakesInFlight;
@@ -177,7 +190,9 @@ public:
             phase = Phase::closed;
             pending.swap(queue);
             // No new wake starts (phase is closed): wait for those in flight on other threads, which only signal the loop.
-            wakesDone.wait(lock, [&] { return wakesInFlight == 0; });
+            wakesDone.wait(lock, [&] {
+                return wakesInFlight == 0;
+            });
             wakeFunction = nullptr;  // may hold the session that is ending
         }
         for (auto& job : pending)
@@ -397,6 +412,85 @@ template <typename Tag>
 [[nodiscard]] UIExecutorHost& uiExecutorHostOf() {
     static UIExecutorHost host;
     return host;
+}
+
+/// @brief Thrown on the interface thread by a frontend's `openSecondaryWindow` while its first window cannot host another
+/// yet (WebView2 creates its environment after open() started). invokeOnUIThreadWhenReady() tries again from another
+/// thread; on the interface thread it reaches the caller, as the std::logic_error it is.
+class WindowNotReady : public std::logic_error {
+public:
+    explicit WindowNotReady(const std::string& message) : std::logic_error(message) { }
+};
+
+namespace detail {
+
+/// One blocking invocation (invokeOnUIThread): deletes itself when its operation completes, whatever the outcome.
+template <typename Function>
+struct UIInvocation {
+    struct Receiver {
+        using receiver_concept = ex::receiver_tag;
+        UIInvocation* self;
+        void          finish(std::exception_ptr error) noexcept {
+            auto completion = std::move(self->done);
+            delete self;
+            completion.set_value(std::move(error));
+        }
+        void set_value() noexcept {
+            std::exception_ptr error;
+            try {
+                self->function();
+            } catch (...) {
+                error = std::current_exception();
+            }
+            finish(std::move(error));
+        }
+        void set_error(std::exception_ptr) noexcept {
+            finish(std::make_exception_ptr(UIExecutorUnavailable{}));
+        }
+        void set_stopped() noexcept {
+            finish(std::make_exception_ptr(UIExecutorUnavailable{}));
+        }
+    };
+    Function                                                                               function;
+    std::promise<std::exception_ptr>                                                       done;
+    ex::connect_result_t<decltype(std::declval<const UIExecutor&>().schedule()), Receiver> operation;
+    UIInvocation(const UIExecutor& loop, Function work) : function(std::move(work)), operation(ex::connect(loop.schedule(), Receiver{this})) { }
+};
+
+}  // namespace detail
+
+/// @brief Runs `function` on the interface thread and waits for it, from any other thread (#616). Called on the interface
+/// thread itself it runs the function at once (waiting there would never end). An exception of the function is rethrown to
+/// the caller; `UIExecutorUnavailable` is thrown when no loop runs, or when it closes before the function started.
+/// Never call it from a thread the interface thread waits for.
+template <typename Function>
+void invokeOnUIThread(const UIExecutor& executor, Function function) {
+    if (executor.onUIThread()) {
+        function();
+        return;
+    }
+    auto* invocation = new detail::UIInvocation<Function>(executor, std::move(function));
+    auto  answer     = invocation->done.get_future();
+    ex::start(invocation->operation);
+    if (auto error = answer.get())
+        std::rethrow_exception(error);
+}
+
+/// @brief invokeOnUIThread(), run again every 10 ms while `function` throws WindowNotReady (#646). The interface thread
+/// cannot wait for itself: there, WindowNotReady reaches the caller. The frontend bounds the wait: a first window that
+/// never becomes ready closes, and the call then fails as invokeOnUIThread() does.
+template <typename Function>
+void invokeOnUIThreadWhenReady(const UIExecutor& executor, Function function) {
+    for (;;) {
+        try {
+            invokeOnUIThread(executor, function);
+            return;
+        } catch (const WindowNotReady&) {
+            if (executor.onUIThread())
+                throw;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
 }
 
 }  // namespace webfront::frontend

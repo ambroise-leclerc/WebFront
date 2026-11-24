@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
-/// @date 18/01/2022 19:34:27
-/// @author Ambroise Leclerc
-/// @brief WebFront UI main objet
+// Author: Ambroise Leclerc
+// Created: 2022-01-18
+//
+// WebFront — core
+// Role: Main orchestration API: BasicWF owns the HTTP server, the connected browsers, the registered callbacks and the server thread.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: public API; read AGENTS.md invariants and the class contracts before the implementation
+
 #pragma once
 
 #include "BridgeError.hpp"
@@ -13,12 +18,12 @@
 #include "JsFunction.hpp"
 #include "JsFunctionSender.hpp"
 #include "networking/TCPNetworkingStdnet.hpp"
+#include "ReadBinding.hpp"
 #include "system/DefaultFS.hpp"
 #include "system/IndexFS.hpp"
 #include "system/WindowsCompat.hpp"
 #include "Task.hpp"
 #include "UISubscribers.hpp"
-#include "ReadBinding.hpp"
 #include "ViewAssociation.hpp"
 #include "weblink/DomBatch.hpp"
 #include "weblink/Messages.hpp"
@@ -34,6 +39,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -50,7 +56,7 @@ namespace pty::detail {
 struct PageRegistration;
 }  // namespace pty::detail
 
-inline constexpr std::string_view version = "1.1.1";
+inline constexpr std::string_view version = "1.2.0";
 
 namespace testing {
 /// Test-only access to the connection identifiers of an application; not part of the API.
@@ -66,12 +72,12 @@ using ConnectionError = std::runtime_error;
 
 template <typename WebFront>
 class BasicUI {
-    WebFront* webFront; ///< Never null: the only constructor takes a reference, and there is no default constructor.
-    WebLinkId webLinkId;
+    WebFront*         webFront;  ///< Never null: the only constructor takes a reference, and there is no default constructor.
+    WebLinkId         webLinkId;
     WebLinkGeneration generation;
 
 public:
-    BasicUI(WebFront& wf, WebLinkId id, WebLinkGeneration connectionGeneration) : webFront(&wf), webLinkId(id), generation(connectionGeneration) {}
+    BasicUI(WebFront& wf, WebLinkId id, WebLinkGeneration connectionGeneration) : webFront(&wf), webLinkId(id), generation(connectionGeneration) { }
 
     /// Identifies this browser's connection among those connected. The 16-bit identifier of a released connection
     /// is reused after 65,536 later connections; the value also carries the connection's generation, which is never
@@ -106,7 +112,8 @@ public:
     /// Queues one DOM command on the bridge context. Rejections arrive at wfDom.rejected(batchId, reason).
     void sendDomBatch(const msg::DomBatch& batch) const {
         const auto link = webFront->findLink(webLinkId, generation);
-        if (!link) throw ConnectionError("Connection with client lost");
+        if (!link)
+            throw ConnectionError("Connection with client lost");
         link->sendCommand(batch);
     }
 
@@ -217,7 +224,11 @@ template <typename Address>
 [[nodiscard]] bool isLoopbackAddress(const Address& address) {
     if (address.is_loopback())
         return true;
-    if constexpr (requires { address.is_v6(); address.to_v6().is_v4_mapped(); address.to_v6().to_bytes(); }) {
+    if constexpr (requires {
+                      address.is_v6();
+                      address.to_v6().is_v4_mapped();
+                      address.to_v6().to_bytes();
+                  }) {
         if (address.is_v6()) {
             const auto v6 = address.to_v6();
             return v6.is_v4_mapped() && v6.to_bytes()[12] == 127;
@@ -240,11 +251,11 @@ inline int ensureFrontendInitialized() {
 template <http::BuffersPolicyType Policy, typename R, typename... Args, typename Function>
 auto makeCppFunctionHandler(Function&& function) {
     using StoredFunction = std::decay_t<Function>;
-    auto callable = std::make_shared<StoredFunction>(std::forward<Function>(function));
+    auto callable        = std::make_shared<StoredFunction>(std::forward<Function>(function));
 
     return [callable = std::move(callable)](std::span<const std::byte> data, auto&&... caller) -> R {
         std::tuple<Args...> parameters;
-        auto deserializeAndCall = [&]<std::size_t... Is>(std::tuple<Args...>& tuple, std::index_sequence<Is...>) -> R {
+        auto                deserializeAndCall = [&]<std::size_t... Is>(std::tuple<Args...>& tuple, std::index_sequence<Is...>) -> R {
             // Arguments that cannot be decoded as the callback declared them reject with the `webfront.malformed` code.
             try {
                 (msg::FunctionCall<Policy>::decodeParameter(std::get<Is>(tuple), data), ...);
@@ -270,14 +281,18 @@ auto makeCppFunctionHandler(Function&& function) {
 template <http::BuffersPolicyType Policy, typename... Args, typename Function>
 auto makeDeferredHandler(Function&& function) {
     using StoredFunction = std::decay_t<Function>;
-    auto callable = std::make_shared<StoredFunction>(std::forward<Function>(function));
+    auto callable        = std::make_shared<StoredFunction>(std::forward<Function>(function));
 
     return [callable = std::move(callable)](std::span<const std::byte> data, auto&&... caller) {
         // The caller (the calling UI) is kept with the arguments, as a copy: a callback taking it by reference lives as long as them.
         using State = std::pair<std::tuple<std::decay_t<decltype(caller)>...>, std::tuple<Args...>>;
         auto state  = std::make_shared<State>(std::tuple<std::decay_t<decltype(caller)>...>{caller...}, std::tuple<Args...>{});
         try {
-            std::apply([&](auto&... decoded) { (msg::FunctionCall<Policy>::decodeParameter(decoded, data), ...); }, state->second);
+            std::apply(
+                [&](auto&... decoded) {
+                    (msg::FunctionCall<Policy>::decodeParameter(decoded, data), ...);
+                },
+                state->second);
             if (!data.empty())
                 throw std::runtime_error("Function call contains trailing parameter data");
         } catch (const std::exception& error) {
@@ -285,10 +300,16 @@ auto makeDeferredHandler(Function&& function) {
         }
         auto sender = std::apply(
             [&](auto&... kept) {
-                return std::apply([&](auto&... decoded) { return std::invoke(*callable, kept..., decoded...); }, state->second);
+                return std::apply(
+                    [&](auto&... decoded) {
+                        return std::invoke(*callable, kept..., decoded...);
+                    },
+                    state->second);
             },
             state->first);
-        return networking::ex::let_value(networking::ex::just(std::move(state)), [sender = std::move(sender)](auto&) mutable { return std::move(sender); });
+        return networking::ex::let_value(networking::ex::just(std::move(state)), [sender = std::move(sender)](auto&) mutable {
+            return std::move(sender);
+        });
     };
 }
 
@@ -298,7 +319,7 @@ auto makeDeferredHandler(Function&& function) {
 // treats their absence as "inference unsupported", so unmatched T (generic lambdas, functors with
 // an overloaded or templated operator(), non-callables) fail detection instead of a specialization.
 template <typename T>
-struct callable_traits_impl {};
+struct callable_traits_impl { };
 
 template <typename R, typename... Args>
 struct callable_traits_impl<R (*)(Args...)> {
@@ -307,7 +328,7 @@ struct callable_traits_impl<R (*)(Args...)> {
     using RawArgs     = std::tuple<Args...>;
 };
 template <typename R, typename... Args>
-struct callable_traits_impl<R (*)(Args...) noexcept> : callable_traits_impl<R (*)(Args...)> {};
+struct callable_traits_impl<R (*)(Args...) noexcept> : callable_traits_impl<R (*)(Args...)> { };
 
 template <typename R, typename... Args>
 struct callable_traits_impl<std::function<R(Args...)>> {
@@ -323,32 +344,31 @@ struct callable_traits_impl<R (C::*)(Args...)> {
     using RawArgs     = std::tuple<Args...>;
 };
 template <typename C, typename R, typename... Args>
-struct callable_traits_impl<R (C::*)(Args...) const> : callable_traits_impl<R (C::*)(Args...)> {};
+struct callable_traits_impl<R (C::*)(Args...) const> : callable_traits_impl<R (C::*)(Args...)> { };
 template <typename C, typename R, typename... Args>
-struct callable_traits_impl<R (C::*)(Args...) noexcept> : callable_traits_impl<R (C::*)(Args...)> {};
+struct callable_traits_impl<R (C::*)(Args...) noexcept> : callable_traits_impl<R (C::*)(Args...)> { };
 template <typename C, typename R, typename... Args>
-struct callable_traits_impl<R (C::*)(Args...) const noexcept> : callable_traits_impl<R (C::*)(Args...)> {};
+struct callable_traits_impl<R (C::*)(Args...) const noexcept> : callable_traits_impl<R (C::*)(Args...)> { };
 
 // A generic lambda or a functor with an overloaded operator() has no single &T::operator() (taking
 // its address, or picking an overload, is ill-formed without explicit template arguments), so this
 // correctly evaluates to false for exactly the callables that need explicit cppFunction<R, Args...>.
 template <typename T, typename = void>
-struct has_call_operator : std::false_type {};
+struct has_call_operator : std::false_type { };
 template <typename T>
-struct has_call_operator<T, std::void_t<decltype(&T::operator())>> : std::true_type {};
+struct has_call_operator<T, std::void_t<decltype(&T::operator())>> : std::true_type { };
 
 // Function pointers and std::function have no operator() member, so their traits apply directly;
 // lambdas/functors route through their (single, non-overloaded, non-template) operator() member.
 template <typename T, bool = has_call_operator<T>::value>
-struct callable_traits : callable_traits_impl<T> {};
+struct callable_traits : callable_traits_impl<T> { };
 template <typename T>
-struct callable_traits<T, true> : callable_traits_impl<decltype(&T::operator())> {};
+struct callable_traits<T, true> : callable_traits_impl<decltype(&T::operator())> { };
 
 template <typename T, typename = void>
-struct has_callable_traits_impl : std::false_type {};
+struct has_callable_traits_impl : std::false_type { };
 template <typename T>
-struct has_callable_traits_impl<T, std::void_t<typename callable_traits<T>::Return, typename callable_traits<T>::DecayedArgs>>
-    : std::true_type {};
+struct has_callable_traits_impl<T, std::void_t<typename callable_traits<T>::Return, typename callable_traits<T>::DecayedArgs>> : std::true_type { };
 
 template <typename T>
 concept has_callable_traits = has_callable_traits_impl<T>::value;
@@ -365,9 +385,9 @@ auto adaptCaller(Function&& function) {
 /// True when a callable's first parameter is the application's UI: the calling browser is then
 /// passed to it instead of being read from the call data.
 template <typename UI, typename... Args>
-struct takes_caller : std::false_type {};
+struct takes_caller : std::false_type { };
 template <typename UI, typename First, typename... Rest>
-struct takes_caller<UI, First, Rest...> : std::is_same<std::remove_cvref_t<First>, UI> {};
+struct takes_caller<UI, First, Rest...> : std::is_same<std::remove_cvref_t<First>, UI> { };
 
 /// The deduced parameters to register: the decayed ones, except a caller UI, which keeps its declared
 /// type so that adaptCaller can pass it as a mutable or rvalue reference.
@@ -437,7 +457,7 @@ websocket::Frame<Net> makeVoidFrame(msg::CallId callId) {
     return frame;
 }
 
-template<typename Net, http::BuffersPolicyType Policy, typename R, typename Callable>
+template <typename Net, http::BuffersPolicyType Policy, typename R, typename Callable>
 auto makeCppFunctionResponder(Callable&& callable) {
     return [callable = std::forward<Callable>(callable)](std::span<const std::byte> data, auto& link, msg::CallId callId, auto&&... caller) mutable {
         msg::FunctionReturn<Policy> result;
@@ -468,9 +488,9 @@ namespace detail {
 /// What an application that serves a document root is told once: a document root holds development files, and the
 /// development path of an interface is not hand-written pages there but TypeScript/TSX in ui/ built by wf.
 inline constexpr std::string_view developmentPathNote =
-  "WebFront: serving local files from documentRoot (development only). The intended development path is a TypeScript/TSX "
-  "interface in ui/, built with `wf dev` in the terminal of app.bootstrap(\"developer\"); an agent can run wf in JSON or MCP "
-  "(docs/DEVELOPING_WITH_AGENTS.md).";
+    "WebFront: serving local files from documentRoot (development only). The intended development path is a TypeScript/TSX "
+    "interface in ui/, built with `wf dev` in the terminal of app.bootstrap(\"developer\"); an agent can run wf through MCP "
+    "(docs/DEVELOPING_WITH_AGENTS.md).";
 
 /// Set once the process has written developmentPathNote.
 inline std::atomic_flag developmentPathNoted;
@@ -487,6 +507,49 @@ inline bool noteDevelopmentPath() {
 }
 }  // namespace detail
 
+/// Returns `text` when it is a port number: decimal digits, from 0 to 65535, without a sign or a leading zero ("0" asks for a
+/// free port). Anything else (a service name such as "http", "00", "65536") throws std::invalid_argument naming `origin`,
+/// because the resolver would accept some of those and bind a port other than the one announced.
+[[nodiscard]] inline std::string validatedPort(std::string_view text, std::string_view origin) {
+    unsigned value = 0;
+    bool     valid = !text.empty() && text.size() <= 5 && (text.size() == 1 || text.front() != '0');
+    for (const char c : text) {
+        valid = valid && c >= '0' && c <= '9';
+        if (valid)
+            value = value * 10 + static_cast<unsigned>(c - '0');
+    }
+    if (!valid || value > 65535)
+        throw std::invalid_argument(std::string(origin) + " must be a port number from 0 to 65535 (0 asks for a free port), not '" + std::string(text) + "'");
+    return std::string(text);
+}
+
+/// The port that the environment variable WEBFRONT_PORT asks for, when it is set and not empty ("0" asks for a free port). A
+/// value that is not a port number throws std::invalid_argument.
+[[nodiscard]] inline std::optional<std::string> environmentPort() {
+    std::string value;
+#ifdef _WIN32
+    // std::getenv is deprecated for MSVC (C4996, an error with /WX); _dupenv_s copies the value.
+    char*  buffer = nullptr;
+    size_t length = 0;
+    if (_dupenv_s(&buffer, &length, "WEBFRONT_PORT") == 0 && buffer != nullptr) {
+        value = buffer;
+        std::free(buffer);
+    }
+#else
+    if (const char* found = std::getenv("WEBFRONT_PORT"))
+        value = found;
+#endif
+    if (value.empty())
+        return std::nullopt;
+    return validatedPort(value, "WEBFRONT_PORT");
+}
+
+/// The port of a configuration that does not choose one: WEBFRONT_PORT when it is set, "9002" otherwise. A server created
+/// from such a configuration (an empty `WebFrontConfig::port`) also falls back to a free port when "9002" is taken.
+[[nodiscard]] inline std::string defaultPort() {
+    return environmentPort().value_or("9002");
+}
+
 /**
  * @brief Configuration for the newcomer-friendly default construction of BasicWF.
  *
@@ -497,25 +560,49 @@ inline bool noteDevelopmentPath() {
  * root, and the embedded fallback page.
  */
 struct WebFrontConfig {
-    std::string           address{"127.0.0.1"};
-    /// "0" requests an ephemeral port with TCPStdnet. The frontend receives the bound port.
-    std::string           port{"9002"};
+    std::string address{"127.0.0.1"};
+    /// "0" requests an ephemeral port with TCPStdnet. The frontend receives the bound port. Empty (the default) takes
+    /// defaultPort(): WEBFRONT_PORT, else 9002, and then, 9002 being taken, a free port, so that several applications start side
+    /// by side. A port that is chosen, here or by WEBFRONT_PORT, is never replaced: when it is taken the start fails.
+    std::string           port{};
     std::filesystem::path documentRoot{};
     ContentPolicy         contentPolicy{};
     /// Initial window of the embedded frontends; the title defaults to the executable's name.
-    WindowOptions         window{};
+    WindowOptions window{};
     /// Treats a connection whose peer address is the loopback as a local client (UI::isLocalClient) although it is
     /// not the view of an embedded frontend. This reintroduces a decision by address: it is unsafe on a shared machine
     /// and behind a local proxy or an SSH tunnel, which also arrive from the loopback. Off by default (ADR-020).
-    bool                  trustLoopbackClients = false;
+    bool trustLoopbackClients = false;
     /// How the application declares that a connection other than the view of an embedded frontend (the system browser
     /// among them) reaches it, which decides whether such a connection may read files (ADR-020 rule 3). Never deduced
     /// from an address or a `Forwarded` header. `loopbackAttested` is refused at construction unless `address` is a
     /// loopback address; the other declarations are the integrator's word, which WebFront does not verify.
-    RemoteFileTransport   remoteFileTransport = RemoteFileTransport::refused;
+    RemoteFileTransport remoteFileTransport = RemoteFileTransport::refused;
     /// Allows the optional PtyPage component. Requires a literal loopback bind and a bridge policy limited to the application's Origin.
-    bool                  allowPtyPages = false;
+    bool allowPtyPages = false;
+    /// PEM identity for the optional HTTPS provider (webfront/tls/WebFront.hpp).
+    std::shared_ptr<tls::Credentials> tlsCredentials{};
 };
+
+namespace detail {
+/// Binds the server of a configuration: its port, or, when the configuration leaves the port empty and WEBFRONT_PORT is not
+/// set, 9002 and then a free port if 9002 is taken. Any other failure, and any chosen port in use, propagates.
+template <typename ServerType>
+ServerType makeHttpServer(const WebFrontConfig& config, std::string_view preferred = "9002") {
+    if (!config.port.empty())
+        return ServerType(config.address, config.port, config.documentRoot, config.contentPolicy, {}, config.tlsCredentials);
+    const auto chosen = environmentPort();
+    if (chosen)
+        return ServerType(config.address, *chosen, config.documentRoot, config.contentPolicy, {}, config.tlsCredentials);
+    try {
+        return ServerType(config.address, std::string(preferred), config.documentRoot, config.contentPolicy, {}, config.tlsCredentials);
+    } catch (const std::system_error& error) {
+        if (error.code() != std::errc::address_in_use)
+            throw;
+    }
+    return ServerType(config.address, "0", config.documentRoot, config.contentPolicy, {}, config.tlsCredentials);
+}
+}  // namespace detail
 
 namespace detail {
 /// True when `address` parses as the IPv6 address ::1 in any spelling (::1, 0:0:0:0:0:0:0:1, 0::0001...).
@@ -533,9 +620,10 @@ namespace detail {
                 return false;
             unsigned value = 0;
             for (const char c : group) {
-                const unsigned digit = c >= '0' && c <= '9' ? static_cast<unsigned>(c - '0')
+                const unsigned digit = c >= '0' && c <= '9'   ? static_cast<unsigned>(c - '0')
                                        : c >= 'a' && c <= 'f' ? static_cast<unsigned>(c - 'a' + 10)
-                                       : c >= 'A' && c <= 'F' ? static_cast<unsigned>(c - 'A' + 10) : 16u;
+                                       : c >= 'A' && c <= 'F' ? static_cast<unsigned>(c - 'A' + 10)
+                                                              : 16u;
                 if (digit > 15)
                     return false;
                 value = value * 16 + digit;
@@ -560,7 +648,13 @@ namespace detail {
     std::vector<unsigned> all = head;
     all.insert(all.end(), 8 - head.size() - tail.size(), 0u);
     all.insert(all.end(), tail.begin(), tail.end());
-    return all.size() == 8 && std::all_of(all.begin(), all.end() - 1, [](unsigned g) { return g == 0; }) && all.back() == 1;
+    return all.size() == 8
+           && std::all_of(all.begin(),
+                          all.end() - 1,
+                          [](unsigned g) {
+                              return g == 0;
+                          })
+           && all.back() == 1;
 }
 
 /// True for the literal loopback addresses a server can be configured with: 127.x.y.z and ::1 in any spelling, bracketed or not.
@@ -574,17 +668,17 @@ namespace detail {
         return false;
     // Four decimal octets of 0 to 255 without leading zeros: the string must read the same to every resolver (127.256.0.1 or
     // 127.0.0.010 are not literal addresses, and a resolver could take them for names).
-    int      octets = 0;
-    unsigned value  = 0;
-    int      digits = 0;
+    int      octets      = 0;
+    unsigned value       = 0;
+    int      digits      = 0;
     bool     leadingZero = false;
     for (const char c : address) {
         if (c == '.') {
             if (digits == 0)
                 return false;
             ++octets;
-            value = 0;
-            digits = 0;
+            value       = 0;
+            digits      = 0;
             leadingZero = false;
         } else if (c >= '0' && c <= '9') {
             if (digits == 1 && leadingZero)
@@ -618,14 +712,19 @@ inline WebFrontConfig checkedPtyPageConfig(WebFrontConfig config) {
 }
 
 /// The read binding of a configuration, which is refused here, before anything is bound, if its declaration is false.
-inline std::shared_ptr<ReadBinding> makeReadBinding(const WebFrontConfig& config) {
+inline std::shared_ptr<ReadBinding> makeReadBinding(const WebFrontConfig& config, bool secure = false) {
     checkedAddress(config);
-    return std::make_shared<ReadBinding>(config.remoteFileTransport);
+    if (secure && !isLoopbackName(config.address))
+        std::cerr << "WebFront: TLS listener outside loopback. Handshake cryptography runs on the I/O thread, "
+                     "and bursts can delay established connections or cause denial of service. See docs/TLS.md.\n";
+    return std::make_shared<ReadBinding>(ReadBinding::Options{.remote = config.remoteFileTransport, .secure = secure});
 }
 }  // namespace detail
 
-template <typename NetProvider, typename Filesystem, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy,
-          frontend::FrontendType Frontend = frontend::DefaultFrontend>
+template <typename NetProvider,
+          typename Filesystem,
+          http::BuffersPolicyType Policy   = http::DefaultBuffersPolicy,
+          frontend::FrontendType  Frontend = frontend::DefaultFrontend>
 class BasicWF {
 public:
     using Net              = NetProvider;
@@ -633,16 +732,16 @@ public:
     using FrontendProvider = Frontend;
     using UI               = BasicUI<BasicWF<Net, Filesystem, Policy, Frontend>>;
 
-    // Newcomer-friendly defaults: loopback address, port 9002, no local document root.
-    BasicWF() : BasicWF(WebFrontConfig{}) {}
+    // Newcomer-friendly defaults: loopback address, port 9002 (a free one when it is taken), no local document root.
+    BasicWF() : BasicWF(WebFrontConfig{}) { }
 
-    explicit BasicWF(WebFrontConfig config) : BasicWF(detail::checkedPtyPageConfig(std::move(config)), CheckedConfig{}) {}
+    explicit BasicWF(WebFrontConfig config) : BasicWF(detail::checkedPtyPageConfig(std::move(config)), CheckedConfig{}) { }
 
 private:
-    struct CheckedConfig {};
+    struct CheckedConfig { };
     BasicWF(WebFrontConfig config, CheckedConfig)
-        : readBinding(detail::makeReadBinding(config)),
-          httpServer((detail::ensureFrontendInitialized<Frontend>(), config.address), config.port, config.documentRoot, config.contentPolicy),
+        : readBinding(detail::makeReadBinding(config, networking::secureTransport<Net>)),
+          httpServer((detail::ensureFrontendInitialized<Frontend>(), detail::makeHttpServer<http::Server<Net, Filesystem, Policy>>(config))),
           httpAddress(config.address),
           httpPort(httpServer.port()),
           httpDocRoot(config.documentRoot),
@@ -670,12 +769,25 @@ private:
                     loopbackPeer         = !error && detail::isLoopbackAddress(peer.address());
                 }
             }
-            auto link = std::make_shared<WebLink<Net, Policy>>(std::move(socket), id, [this](WebLinkEvent event) {
-                onEvent(event);
-            }, httpServer.taskScope(), false);
+            auto link = std::make_shared<WebLink<Net, Policy>>(
+                std::move(socket),
+                id,
+                [this](WebLinkEvent event) {
+                    onEvent(event);
+                },
+                httpServer.taskScope(),
+                false);
             {
                 std::scoped_lock lock{linksMutex};
-                webLinks.emplace(id, Connection{.link = link, .generation = generation, .thread = std::this_thread::get_id(), .closed = false, .stage = Connection::Stage::handshaking, .deferred = {}, .viewAssociated = false, .loopbackPeer = loopbackPeer});
+                webLinks.emplace(id,
+                                 Connection{.link           = link,
+                                            .generation     = generation,
+                                            .thread         = std::this_thread::get_id(),
+                                            .closed         = false,
+                                            .stage          = Connection::Stage::handshaking,
+                                            .deferred       = {},
+                                            .viewAssociated = false,
+                                            .loopbackPeer   = loopbackPeer});
             }
             link->start();  // registered first: every event it dispatches finds it
         });
@@ -685,19 +797,23 @@ private:
     }
 
 public:
-    [[nodiscard]] bool allowsPtyPages() const noexcept { return ptyPagesAllowed; }
+    [[nodiscard]] bool allowsPtyPages() const noexcept {
+        return ptyPagesAllowed;
+    }
 
     // Preserved for source compatibility; binds all interfaces like it always has, unlike the
     // loopback-by-default WebFrontConfig constructor above.
     explicit BasicWF(std::string_view port, std::filesystem::path docRoot = ".")
-        : BasicWF(WebFrontConfig{.address = "0.0.0.0", .port = std::string(port), .documentRoot = std::move(docRoot)}) {}
+        : BasicWF(WebFrontConfig{.address = "0.0.0.0", .port = std::string(port), .documentRoot = std::move(docRoot)}) { }
 
     // Each UI and the server callbacks hold the application's address: it never moves.
     BasicWF(const BasicWF&)            = delete;
     BasicWF& operator=(const BasicWF&) = delete;
 
     /** @brief The listening port, including the OS-assigned TCPStdnet port when configured with "0". */
-    std::string_view port() const noexcept { return httpPort; }
+    std::string_view port() const noexcept {
+        return httpPort;
+    }
 
     ~BasicWF() noexcept {
         stopAndJoinServer();
@@ -754,10 +870,12 @@ public:
         if (!handler)
             throw std::invalid_argument("A read route needs a handler");
         if (!prefix.starts_with(ReadBinding::servicesPath) || prefix.size() == ReadBinding::servicesPath.size() || prefix.starts_with(ReadBinding::bindPath))
-            throw std::invalid_argument("A read route lives under " + std::string(ReadBinding::servicesPath) + ", not under " + std::string(ReadBinding::bindPath));
-        auto id = automation::channel::nonce();  // this registration's identity: its grants work nowhere else
-        auto registration = httpServer.addRoute(prefix, readBinding->readHandler(id, prefix, std::move(handler)), true,
-                                                  [](http::RouteReply& reply) { detail::hardenRead(reply, {}); });
+            throw std::invalid_argument("A read route lives under " + std::string(ReadBinding::servicesPath) + ", not under "
+                                        + std::string(ReadBinding::bindPath));
+        auto id           = automation::channel::nonce();  // this registration's identity: its grants work nowhere else
+        auto registration = httpServer.addRoute(prefix, readBinding->readHandler(id, prefix, std::move(handler)), true, [](http::RouteReply& reply) {
+            detail::hardenRead(reply, {});
+        });
         return ReadRoute{std::move(id), prefix, readBinding, std::move(registration)};
     }
 
@@ -793,7 +911,9 @@ public:
     /// The interface thread of the frontend: available while an embedded frontend's loop runs (or the system browser's
     /// optional loop mode), never for a frontend without one. See frontend/UIExecutor.hpp for the completion rules.
     [[nodiscard]] frontend::UIExecutor uiExecutor() const {
-        if constexpr (requires { { Frontend::uiExecutor() } -> std::same_as<frontend::UIExecutor>; })
+        if constexpr (requires {
+                          { Frontend::uiExecutor() } -> std::same_as<frontend::UIExecutor>;
+                      })
             return Frontend::uiExecutor();
         else
             return {};
@@ -803,7 +923,9 @@ public:
     /// frontend without one. It names the window, not a connection: UI::nativeWindow() also checks that the caller's view
     /// is that window.
     [[nodiscard]] frontend::NativeWindow nativeWindow() const {
-        if constexpr (requires { { Frontend::nativeWindow() } -> std::same_as<frontend::NativeWindow>; })
+        if constexpr (requires {
+                          { Frontend::nativeWindow() } -> std::same_as<frontend::NativeWindow>;
+                      })
             return Frontend::nativeWindow();
         else
             return {};
@@ -839,7 +961,7 @@ private:
     template <typename>
     friend struct testing::ConnectionIds;  // lets a test start the identifiers near their wrap
     template <typename>
-    friend struct testing::LaunchSecret;  // lets a test present the secret an embedded view would
+    friend struct testing::LaunchSecret;   // lets a test present the secret an embedded view would
 
     /// Sends `call` to each browser not reported closed whose onUIStarted handlers have returned: at once, on the
     /// calling thread and outside every lock. For a browser whose handlers are running, `call` is kept, within its
@@ -1062,19 +1184,29 @@ public:
             ~Showing() {
                 if (owns) {
                     ++self.showEpoch;  // even: a reader that saw the odd value and sees this one reads nothing
-                    self.showThread = std::thread::id{};
+                    self.showThread                               = std::thread::id{};
                     detail::FrontendSessionOwner<Frontend>::owner = nullptr;
                 }
             }
         } showing{*this};
-        // A frontend that can be asked to close shows one window at a time: a show() that did not take the ownership must
+        // A frontend that can be asked to close has one primary session at a time: a show() that did not take the ownership must
         // not open one that nobody could close (the first may end before this one attaches, and the frontend would accept it).
         if constexpr (frontend::endsOnRequest<Frontend>) {
             if (!showing.owns)
                 throw std::logic_error("webfront::BasicWF::show(): another application is already showing a window through this frontend");
         }
-        if constexpr (requires(const ViewLaunch& launch) { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, launch); })
-            Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, ViewLaunch{viewSecret, detail::browserOrigin(httpAddress, httpPort)});
+        constexpr bool acceptsViewLaunch = requires(const ViewLaunch& launch) {
+            Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, launch);
+        };
+        if constexpr (networking::secureTransport<Net>)
+            static_assert(acceptsViewLaunch, "An HTTPS frontend must accept ViewLaunch in open()");
+        if constexpr (acceptsViewLaunch)
+            Frontend::open(httpAddress,
+                           httpPort,
+                           htmlFilename,
+                           contentPolicy,
+                           windowOptions,
+                           ViewLaunch{viewSecret, detail::browserOrigin(httpAddress, httpPort, networking::secureTransport<Net>)});
         else if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions); })
             Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions);
         else if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy); })
@@ -1152,19 +1284,27 @@ public:
      * which show() does not give them either (ADR-020).
      */
     void start(std::string_view page = "index.html") {
-        static_assert(requires { Frontend::launch(std::string_view{}, std::string_view{}, std::string_view{}); },
-                      "webfront::BasicWF::start(): this frontend opens its window inside the loop of show(), which keeps the "
-                      "calling thread. Call show() on the interface thread and end it with requestClose(), or run the "
-                      "application in a webfront::UIThread when the frontend allows a secondary thread "
-                      "(docs/HOST_INTEGRATION.md).");
-        if constexpr (requires { Frontend::launch(std::string_view{}, std::string_view{}, std::string_view{}); }) {
+        constexpr bool secure    = networking::secureTransport<Net>;
+        constexpr bool canLaunch = secure ? requires { Frontend::launchHttps(std::string_view{}, std::string_view{}, std::string_view{}); }
+                                          : requires { Frontend::launch(std::string_view{}, std::string_view{}, std::string_view{}); };
+        if constexpr (secure)
+            static_assert(canLaunch, "webfront::BasicWF::start(): an HTTPS frontend must provide launchHttps(address, port, page)");
+        else
+            static_assert(canLaunch,
+                          "webfront::BasicWF::start(): this frontend opens its window inside the loop of show(), which keeps the "
+                          "calling thread. Call show() on the interface thread and end it with requestClose(), or run the "
+                          "application in a webfront::UIThread when the frontend allows a secondary thread "
+                          "(docs/HOST_INTEGRATION.md).");
+        if constexpr (canLaunch) {
             if (shown || serverThread.joinable() || launched.exchange(true))
                 throw std::logic_error("webfront::BasicWF::start(): the application is already started; call start() once, instead of show()");
             if (!httpDocRoot.empty() && !developerEnvironment)
                 detail::noteDevelopmentPath();
             startServerThread();
             try {
-                if constexpr (requires { Frontend::launch(httpAddress, httpPort, page, contentPolicy); })
+                if constexpr (secure)
+                    Frontend::launchHttps(httpAddress, httpPort, page);
+                else if constexpr (requires { Frontend::launch(httpAddress, httpPort, page, contentPolicy); })
                     Frontend::launch(httpAddress, httpPort, page, contentPolicy);
                 else
                     Frontend::launch(httpAddress, httpPort, page);
@@ -1191,9 +1331,13 @@ public:
             const auto epoch = showEpoch.load();
             if (epoch % 2 == 0)
                 return false;
-            if constexpr (requires { { Frontend::uiExecutor() } -> std::same_as<frontend::UIExecutor>; }) {
+            if constexpr (requires {
+                              { Frontend::uiExecutor() } -> std::same_as<frontend::UIExecutor>;
+                          }) {
                 bool publishesSessions = true;  // false: the frontend in use has no executor (an empty handle), so no session to name
-                if constexpr (requires { { Frontend::publishesUIExecutor() } -> std::same_as<bool>; })
+                if constexpr (requires {
+                                  { Frontend::publishesUIExecutor() } -> std::same_as<bool>;
+                              })
                     publishesSessions = Frontend::publishesUIExecutor();
                 if (publishesSessions) {
                     const auto shows   = showThread.load();
@@ -1204,16 +1348,131 @@ public:
                         return false;
                     // Another application may open a window between this check and the toolkit call: a frontend that
                     // takes the session checks it again where the request runs, so that it never closes a later one.
-                    if constexpr (requires { { Frontend::requestClose(session) } -> std::same_as<bool>; })
+                    if constexpr (requires {
+                                      { Frontend::requestClose(session) } -> std::same_as<bool>;
+                                  })
                         return Frontend::requestClose(session);
                 }
             }
             if (showEpoch.load() != epoch)
                 return false;
-            if constexpr (requires { { Frontend::requestClose() } -> std::same_as<bool>; })
+            if constexpr (requires {
+                              { Frontend::requestClose() } -> std::same_as<bool>;
+                          })
                 return Frontend::requestClose();
             else
                 return Frontend::requestClose(std::nullopt);  // only the form that takes a session, and none is published
+        } else {
+            return false;
+        }
+    }
+
+    /// Whether the frontend type can show a second window of the application (see openSecondaryWindow()). A frontend that
+    /// chooses at run time, as NativeOrBrowserFrontend does, may still refuse it: canShowSecondaryWindow() tells.
+    static constexpr bool supportsSecondaryWindow =
+        requires(std::string_view text, const ContentPolicy& policy, const WindowOptions& window, const ViewLaunch& launch) {
+            Frontend::openSecondaryWindow(text, text, text, policy, window, launch);
+            { Frontend::uiExecutor() } -> std::same_as<frontend::UIExecutor>;
+        };
+
+    /** @brief Whether openSecondaryWindow() can open a window with the frontend chosen at run time, once show() runs: false
+     * when the frontend type cannot (supportsSecondaryWindow), and for NativeOrBrowserFrontend once it fell back to the system
+     * browser (the frontend is initialized when the first application is constructed). Use it to offer the action or not.
+     */
+    [[nodiscard]] static bool canShowSecondaryWindow() {
+        if constexpr (!supportsSecondaryWindow)
+            return false;
+        else if constexpr (requires {
+                               { Frontend::secondaryWindowsAvailable() } -> std::convertible_to<bool>;
+                           })
+            return Frontend::secondaryWindowsAvailable();
+        else
+            return true;
+    }
+
+    /** @brief Opens `page` in a second native window beside the one show() runs, served by the same server (#616).
+     *
+     * The page reaches the same `cppFunction`s and the same `jsFunction` subscribers as the first one (each window is
+     * one more connected browser: `onUIStarted` and `subscribeUIStarted` see it), and receives the same view-association
+     * proof, so it is an embedded view of this application and not an external browser. The title, the size and the
+     * background come from `options` (an empty background takes the application's). Opening a page that a secondary
+     * window already shows brings that window to the front instead of opening another. A window is identified by the page
+     * string exactly as given, query included: "a.html?x=1" and "a.html?x=2" are two windows, and requestClose(page) takes
+     * the string that opened it. Closing the window of show() closes the others with it; closing a secondary window leaves
+     * the rest running. A window that cannot start (its view refuses the navigation) throws the failure to the caller; a page
+     * that fails to load later closes its window and the failure is written to stderr: this call has returned by then, so
+     * nothing can throw it. The window follows the first one's visibility: a hidden application shows none.
+     *
+     * Callable from any thread while show() runs, and it waits for the interface thread: it returns once the window exists
+     * (on the interface thread itself it runs at once). Called from a `cppFunction` callback, it holds the server's thread
+     * until then, and with it every exchange of the application, also while a modal dialog keeps the interface thread busy;
+     * there, run it on the interface thread instead (an operation scheduled with `app.uiExecutor()`), where it does not wait.
+     * Under WebView2, a call made just after show() started waits until the first window's browser is created; on the
+     * interface thread that call throws std::logic_error instead. Throws std::logic_error when this application is not
+     * showing a window (also once the first window has closed), and when the frontend cannot show a second window (today the
+     * WebKitGTK, WKWebView and WebView2 frontends can; the system browser and CEF refuse; canShowSecondaryWindow() tells it
+     * beforehand). Window placement is left to the toolkit.
+     */
+    void openSecondaryWindow(std::string_view page, WindowOptions options = {}) {
+        if constexpr (supportsSecondaryWindow) {
+            // One read: its parity and the session this call is bound to are those of the same instant. A second read could
+            // land in a show() that started after the first one ended, and bind the call to a session it was not made for.
+            const auto epoch = showEpoch.load();
+            if (epoch % 2 == 0)
+                throw std::logic_error("webfront::BasicWF::openSecondaryWindow(): this application is not showing a window; call show() first");
+            const auto executor = Frontend::uiExecutor();
+            const auto session  = executor.session();
+            if (!session || session->thread != showThread.load() || showEpoch.load() != epoch)
+                throw std::logic_error("webfront::BasicWF::openSecondaryWindow(): this application has no active interface session");
+            if (options.background.empty())
+                options.background = windowOptions.background;
+            try {
+                // Called on the interface thread, the frontend cannot wait for its first window to become ready: a caller on
+                // another thread tries again while it is not (WebView2 just after show() started).
+                frontend::invokeOnUIThreadWhenReady(executor, [&] {
+                    if (showEpoch.load() != epoch || executor.session() != session)
+                        throw std::logic_error("webfront::BasicWF::openSecondaryWindow(): the interface session has ended");
+                    Frontend::openSecondaryWindow(httpAddress,
+                                                  httpPort,
+                                                  page,
+                                                  contentPolicy,
+                                                  options,
+                                                  ViewLaunch{viewSecret, detail::browserOrigin(httpAddress, httpPort, networking::secureTransport<Net>)});
+                });
+            } catch (const frontend::UIExecutorUnavailable&) {
+                throw std::logic_error("webfront::BasicWF::openSecondaryWindow(): the interface session has ended");
+            }
+        } else {
+            throw std::logic_error("webfront::BasicWF::openSecondaryWindow(): this frontend cannot show a second window of the application");
+        }
+    }
+
+    /** @brief Asks the secondary window showing `page` to close, as if the user had closed it; callable from any thread.
+     * Returns false when no such window is open (or the frontend has none). The window of show() ends with
+     * requestClose(). Unlike requestClose(), it waits for the interface thread, as openSecondaryWindow() does: from a
+     * `cppFunction` callback, run it on the interface thread instead.
+     */
+    bool requestClose(std::string_view page) {
+        if constexpr (supportsSecondaryWindow && requires {
+                          { Frontend::closeSecondaryWindow(page) } -> std::same_as<bool>;
+                      }) {
+            const auto epoch = showEpoch.load();
+            if (epoch % 2 == 0)
+                return false;
+            const auto executor = Frontend::uiExecutor();
+            const auto session  = executor.session();
+            if (!session || session->thread != showThread.load() || showEpoch.load() != epoch)
+                return false;
+            bool closed = false;
+            try {
+                frontend::invokeOnUIThread(executor, [&] {
+                    if (showEpoch.load() == epoch && executor.session() == session)
+                        closed = Frontend::closeSecondaryWindow(page);
+                });
+            } catch (const frontend::UIExecutorUnavailable&) {
+                return false;
+            }
+            return closed;
         } else {
             return false;
         }
@@ -1273,8 +1532,8 @@ private:
         for (auto& [id, document] : domDocuments)
             document->close();
         domDocuments.clear();
-        std::map<WebLinkId, Connection>                           released;
-        std::scoped_lock                                          lock{linksMutex};
+        std::map<WebLinkId, Connection> released;
+        std::scoped_lock                lock{linksMutex};
         released.swap(webLinks);
     }
 
@@ -1285,7 +1544,7 @@ private:
     bool registerDeferred(std::string functionName, auto&& function) {
         // Naming the value type checks the contract at registration: one value at most, one kind of value completion.
         using DeferredValue [[maybe_unused]] = detail::deferred_value_t<R>;
-        const auto start = [this](auto invoke, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) {
+        const auto start                     = [this](auto invoke, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) {
             this->startDeferred(std::move(invoke), link, callId, caller);
         };
         if constexpr (detail::takes_caller<UI, Args...>::value) {
@@ -1293,7 +1552,13 @@ private:
             return cppFunctions
                 .try_emplace(std::move(functionName),
                              [start, handler](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) mutable {
-                                 start([&] { return handler(data, caller); }, link, callId, caller);
+                                 start(
+                                     [&] {
+                                         return handler(data, caller);
+                                     },
+                                     link,
+                                     callId,
+                                     caller);
                              })
                 .second;
         } else {
@@ -1301,7 +1566,13 @@ private:
             return cppFunctions
                 .try_emplace(std::move(functionName),
                              [start, handler](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) mutable {
-                                 start([&] { return handler(data); }, link, callId, caller);
+                                 start(
+                                     [&] {
+                                         return handler(data);
+                                     },
+                                     link,
+                                     callId,
+                                     caller);
                              })
                 .second;
         }
@@ -1317,7 +1588,7 @@ private:
     template <typename Invoke>
     void startDeferred(Invoke invoke, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) {
         const auto [calls, generation] = deferredCallsOf(caller);
-        const auto key                  = calls ? calls->reserve(callId) : 0;
+        const auto key                 = calls ? calls->reserve(callId) : 0;
         if (key == 0) {
             // The connection closed (nobody is left to answer), or a call with this identifier is still running: the common
             // reception drops such a call before it gets here, and this claim is the last guard.
@@ -1370,18 +1641,22 @@ private:
     /// completed stopped by something other than this call's own stop request. When that request was made (the
     /// connection closed, the application is stopping) nothing is sent: nobody is left to read it.
     template <typename Sender>
-    Task respondLater(UI caller, WebLinkGeneration generation, std::shared_ptr<detail::DeferredCalls> calls, msg::CallId callId, std::uint64_t key, Sender sender) {
+    Task
+    respondLater(UI caller, WebLinkGeneration generation, std::shared_ptr<detail::DeferredCalls> calls, msg::CallId callId, std::uint64_t key, Sender sender) {
         struct Finish {
             detail::DeferredCalls& calls;
             msg::CallId            callId;
             std::uint64_t          key;
-            ~Finish() { calls.finish(callId, key); }
+            ~Finish() {
+                calls.finish(callId, key);
+            }
         } finish{*calls, callId, key};
-        const auto token = co_await networking::ex::read_env(networking::ex::get_stop_token);
+        const auto                           token = co_await networking::ex::read_env(networking::ex::get_stop_token);
         std::optional<websocket::Frame<Net>> answer;
         try {
             auto stoppable = networking::ex::stopped_as_error(
-                std::move(sender), std::make_exception_ptr(detail::makeBridgeError(bridge_code::cancelled, "The C++ callback was cancelled")));
+                std::move(sender),
+                std::make_exception_ptr(detail::makeBridgeError(bridge_code::cancelled, "The C++ callback was cancelled")));
             // One answer frame whether the sender completes with a value or without: the message is built where it completes.
             auto framed = networking::ex::then(std::move(stoppable), [callId](auto&&... values) -> websocket::Frame<Net> {
                 if constexpr (sizeof...(values) == 0)
@@ -1415,47 +1690,47 @@ private:
     }
 
     // Before the server: the routes' handlers use it, and the server drains them before it is destroyed.
-    std::shared_ptr<ReadBinding>                                             readBinding;
-    http::Server<Net, Filesystem, Policy>                                    httpServer;
-    http::RouteTable::Registration                                           bindRoute;
-    std::string                                                              httpAddress;
-    std::string                                                              httpPort;
-    std::filesystem::path                                                    httpDocRoot;
-    ContentPolicy                                                            contentPolicy;
-    WindowOptions                                                            windowOptions;
-    const std::string                                                        viewSecret = detail::newViewSecret();  // this launch's proof of an embedded view
-    const bool                                                               trustLoopbackClients;
-    const bool                                                               ptyPagesAllowed;
-    bool                                                                     developerEnvironment = false;
-    std::atomic<bool>                                                        launched{false};  // start() was called
-    std::atomic<std::thread::id>                                             showThread{};  // the thread inside this application's Frontend::open(), if any
-    std::atomic<std::uint64_t>                                               showEpoch{0};  // odd while show() runs its frontend, changes at each entry and exit
-    std::atomic<bool>                                                        showRunning{false};  // a show() of this application is in progress
-    std::atomic<bool>                                                        shown{false};     // show() was called, whether or not its server still runs
-    mutable std::mutex                                                       linksMutex;  // guards webLinks, read from any thread
+    std::shared_ptr<ReadBinding>          readBinding;
+    http::Server<Net, Filesystem, Policy> httpServer;
+    http::RouteTable::Registration        bindRoute;
+    std::string                           httpAddress;
+    std::string                           httpPort;
+    std::filesystem::path                 httpDocRoot;
+    ContentPolicy                         contentPolicy;
+    WindowOptions                         windowOptions;
+    const std::string                     viewSecret = detail::newViewSecret();  // this launch's proof of an embedded view
+    const bool                            trustLoopbackClients;
+    const bool                            ptyPagesAllowed;
+    bool                                  developerEnvironment = false;
+    std::atomic<bool>                     launched{false};     // start() was called
+    std::atomic<std::thread::id>          showThread{};        // the thread inside this application's Frontend::open(), if any
+    std::atomic<std::uint64_t>            showEpoch{0};        // odd while show() runs its frontend, changes at each entry and exit
+    std::atomic<bool>                     showRunning{false};  // a show() of this application is in progress
+    std::atomic<bool>                     shown{false};        // show() was called, whether or not its server still runs
+    mutable std::mutex                    linksMutex;          // guards webLinks, read from any thread
     struct Connection {
         std::shared_ptr<WebLink<Net, Policy>> link;
         WebLinkGeneration                     generation;
         std::thread::id                       thread;
         bool                                  closed;
         enum class Stage { handshaking, starting, started };
-        Stage                                  stage = Stage::handshaking;  // starting while its onUIStarted handlers run
+        Stage                                   stage = Stage::handshaking;  // starting while its onUIStarted handlers run
         std::vector<detail::BroadcastCall<Net>> deferred;                    // sendToStartedLinks() calls while starting
-        bool                                    viewAssociated = false;              // presented the launch secret of an embedded view
-        bool                                    loopbackPeer   = false;              // peer address was the loopback (read only with trustLoopbackClients)
-        std::shared_ptr<detail::DeferredCalls>  deferredCalls = std::make_shared<detail::DeferredCalls>();  // calls a callback answers later
+        bool                                    viewAssociated = false;      // presented the launch secret of an embedded view
+        bool                                    loopbackPeer   = false;      // peer address was the loopback (read only with trustLoopbackClients)
+        std::shared_ptr<detail::DeferredCalls>  deferredCalls  = std::make_shared<detail::DeferredCalls>();  // calls a callback answers later
     };
-    std::map<WebLinkId, Connection>                                          webLinks;
-    WebLinkId                                                              idsCounter{0};
-    WebLinkGeneration                                                      generationCounter{0};  // guarded by linksMutex; the first connection is 1
-    std::function<void(UI)>                                                uiStartedHandler;
-    std::shared_ptr<detail::UISubscribers<UI>>                               uiSubscribers = std::make_shared<detail::UISubscribers<UI>>();
-    std::shared_ptr<detail::UISubscribers<UI>>                               uiClosedSubscribers = std::make_shared<detail::UISubscribers<UI>>();
+    std::map<WebLinkId, Connection>            webLinks;
+    WebLinkId                                  idsCounter{0};
+    WebLinkGeneration                          generationCounter{0};  // guarded by linksMutex; the first connection is 1
+    std::function<void(UI)>                    uiStartedHandler;
+    std::shared_ptr<detail::UISubscribers<UI>> uiSubscribers       = std::make_shared<detail::UISubscribers<UI>>();
+    std::shared_ptr<detail::UISubscribers<UI>> uiClosedSubscribers = std::make_shared<detail::UISubscribers<UI>>();
     std::map<std::string, std::function<void(std::span<const std::byte>, WebLink<Net, Policy>&, msg::CallId, UI)>, std::less<>> cppFunctions;
     // Keyed by identifier alone: a document is closed and erased on its connection's closed event, before the link is
     // released and its identifier can be reused, so two connections never share an entry.
-    std::map<WebLinkId, std::shared_ptr<dom::detail::State>>                                                                    domDocuments;
-    std::thread                                                            serverThread;  // Background thread running the HTTP server
+    std::map<WebLinkId, std::shared_ptr<dom::detail::State>> domDocuments;
+    std::thread                                              serverThread;  // Background thread running the HTTP server
 
 private:
     static Task flushDomAfter(UI ui, std::shared_ptr<dom::detail::State> state) {
@@ -1559,7 +1834,7 @@ private:
                 {
                     std::scoped_lock lock{linksMutex};
                     if (auto found = webLinks.find(event.webLinkId); found != webLinks.end()) {
-                        found->second.stage          = Connection::Stage::starting;
+                        found->second.stage = Connection::Stage::starting;
                         // Raised once, never lowered: the secret is judged at the single handshake WebLink dispatches.
                         found->second.viewAssociated = found->second.viewAssociated || detail::viewSecretMatches(viewSecret, event.text);
                         bindKey                      = found->second.generation;
@@ -1592,7 +1867,7 @@ private:
                 // Shutdown cancels the connections' writes, which then fail and report a closure: not a disconnection.
                 if (httpServer.taskScope().stopRequested())
                     break;
-                std::optional<WebLinkGeneration> closedGeneration;
+                std::optional<WebLinkGeneration>       closedGeneration;
                 std::shared_ptr<detail::DeferredCalls> stoppedCalls;
                 {
                     std::scoped_lock lock{linksMutex};
@@ -1655,7 +1930,7 @@ using BasicWFWithFrontend = BasicWF<NetProvider, Filesystem, Policy, Frontend>;
 using WebFront = BasicWF<NetProvider, fs::DefaultFS>;
 template <frontend::FrontendType Frontend, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
 using WebFrontWithFrontend = BasicWF<NetProvider, fs::DefaultFS, Policy, Frontend>;
-using UI       = WebFront::UI;
+using UI                   = WebFront::UI;
 
 #ifdef WEBFRONT_EMBED_CEF
 inline constexpr bool cefAvailable = true;

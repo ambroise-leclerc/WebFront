@@ -1,5 +1,15 @@
-/// @brief A simulated storage held in memory: the backend of the unit tests of the services, and the model of a storage
-/// without links (FatFs, LittleFS), where the syntax of SafePath is the whole confinement.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-05
+//
+// WebFront — system
+// Role: A simulated storage held in memory: the backend of the services' unit tests and the model of storages without links.
+// Thread: thread-safe | Alloc: unrestricted
+// LLM: test and embedded backend; SafePath syntax is its whole confinement
+
+// A simulated storage held in memory: the backend of the unit tests of the services, and the model of a storage
+// without links (FatFs, LittleFS), where the syntax of SafePath is the whole confinement.
+
 #pragma once
 
 #include "Storage.hpp"

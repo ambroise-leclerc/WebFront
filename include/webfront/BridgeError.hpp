@@ -1,4 +1,12 @@
-/// @brief The failure of a bridge call, with a code that lets the caller tell failures apart.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-05
+//
+// WebFront — core
+// Role: The failure of a bridge call, with a code that lets the caller tell failures apart.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: public API; reserved `webfront.` codes are part of the wire contract with WebFront.js
+
 #pragma once
 
 #include <cstddef>
@@ -39,7 +47,7 @@ inline constexpr std::string_view cancelled = "webfront.cancelled";
  */
 class BridgeError : public std::runtime_error {
 public:
-    static constexpr std::size_t maxCodeSize = 64;
+    static constexpr std::size_t      maxCodeSize    = 64;
     static constexpr std::string_view reservedPrefix = "webfront.";
 
     /// @throws std::invalid_argument for an ill-formed or reserved code
@@ -73,8 +81,8 @@ public:
 
 private:
     friend BridgeError detail::makeBridgeError(std::string_view, const std::string&);
-    struct Bridge {};
-    BridgeError(Bridge, std::string errorCode, const std::string& message) : std::runtime_error(message), codeText(std::move(errorCode)) {}
+    struct Bridge { };
+    BridgeError(Bridge, std::string errorCode, const std::string& message) : std::runtime_error(message), codeText(std::move(errorCode)) { }
 
     std::string codeText;
 };

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — frontend
+// Role: The NativeWebView alias selecting the opt-in native web view of the current platform.
+// Thread: ui-loop | Alloc: zero-hot-path
+// LLM: aliases only; availability follows the WEBFRONT_EMBED_* options
+
 #pragma once
 
 #if defined(_WIN32)
@@ -18,7 +27,7 @@ namespace webfront::frontend {
  * It says nothing about the session: a native window can still fail at run time, for instance without a display.
  * NativeOrBrowserFrontend handles that case.
  */
-#if (defined(_WIN32) && defined(WEBFRONT_EMBED_WEBVIEW2)) || (defined(__APPLE__) && defined(WEBFRONT_EMBED_WKWEBVIEW)) \
+#if (defined(_WIN32) && defined(WEBFRONT_EMBED_WEBVIEW2)) || (defined(__APPLE__) && defined(WEBFRONT_EMBED_WKWEBVIEW))                                         \
     || (defined(__linux__) && defined(WEBFRONT_EMBED_WEBKITGTK))
 inline constexpr bool nativeWebViewAvailable = true;
 #else

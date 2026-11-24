@@ -1,0 +1,28 @@
+name: Source Format
+
+# Rare on purpose (#653): the advanced tier only, like the other weekly and release-branch checks. A pull request into develop is not checked.
+on:
+  pull_request:
+    branches: [ master ]
+  schedule:
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clang-format:
+    name: clang-format
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # The version is pinned: clang-format changes its output from one release to the next.
+      - name: Install clang-format
+        run: python3 -m pip install --user clang-format==23.1.5
+
+      - name: Check the tracked sources
+        run: .github/scripts/check-clang-format.sh "$HOME/.local/bin/clang-format"

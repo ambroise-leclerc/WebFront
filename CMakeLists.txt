@@ -16,7 +16,6 @@ else()
 endif()
 
 option(BUILD_SHARED_LIBS "Enable compilation of shared libraries" OFF)
-option(WEBFRONT_BUILD_AUTOMATION "Build the optional local developer CLI/MCP launcher" OFF)
 option(WEBFRONT_BUILD_EXAMPLES "Build the example applications" ${WEBFRONT_IS_TOP_LEVEL})
 option(WEBFRONT_DISTRIBUTION "Require WebKitGTK sandboxing for distribution (development disables it by default)" OFF)
 option(WEBFRONT_GZIP_DIFFERENTIAL "Build test-only gzip/zlib differential checks" OFF)
@@ -55,6 +54,8 @@ find_package(Threads REQUIRED)
 
 add_library(WebFront INTERFACE)
 add_library(WebFront::WebFront ALIAS WebFront)
+# The public test framework (WebFront::Bdd, webfront_bdd_discover_tests), which WebFront's own tests use.
+include(cmake/WebFrontBddTarget.cmake)
 if(WEBFRONT_DISTRIBUTION)
     target_compile_definitions(WebFront INTERFACE WEBFRONT_DISTRIBUTION=1)
 endif()
@@ -148,24 +149,11 @@ webfront_add_embedded_assets()
 # Opt-in consumer test registration; inclusion alone downloads nothing and registers no tests.
 include(WebFrontJasmine)
 
-if(WEBFRONT_BUILD_AUTOMATION OR (WEBFRONT_ENABLE_TESTING AND
-    (WEBFRONT_EMBED_CEF OR WEBFRONT_EMBED_WKWEBVIEW OR WEBFRONT_EMBED_WEBVIEW2 OR WEBFRONT_EMBED_WEBKITGTK)))
-    webfront_default_embedded_frontend(_automation_default FALLBACK CEF)
-    webfront_select_frontend(WEBFRONT_AUTOMATION_FRONTEND "${_automation_default}"
-        "Developer automation frontend" EMBEDDED_ONLY REQUIRE_AVAILABLE)
-    if(NOT ${WEBFRONT_FRONTEND_${WEBFRONT_AUTOMATION_FRONTEND}_OPTION})
-        message(FATAL_ERROR "Automation needs an explicitly enabled embedded frontend")
-    endif()
-    add_executable(webfront-agent js/developer/tools/WebFrontAgent.cpp)
-    target_link_libraries(webfront-agent PRIVATE WebFront WebFront_options WebFront_warnings)
-    if(WIN32)
-        target_link_libraries(webfront-agent PRIVATE ws2_32 bcrypt advapi32)
-    endif()
-    target_compile_definitions(webfront-agent PRIVATE WEBFRONT_AUTOMATION_FRONTEND_TYPE=${WEBFRONT_AUTOMATION_FRONTEND_TYPE})
-    webfront_setup_frontends_for_target(webfront-agent)
+# The webfront-agent launcher is gone (ADR-025): an application that enables automation serves MCP itself.
+if(DEFINED WEBFRONT_BUILD_AUTOMATION OR DEFINED WEBFRONT_AUTOMATION_FRONTEND)
+    message(WARNING "WEBFRONT_BUILD_AUTOMATION and WEBFRONT_AUTOMATION_FRONTEND no longer build anything: webfront-agent was removed. "
+        "An application that calls webfront::automation::enableAutomation serves MCP itself (docs/AUTOMATION.md).")
 endif()
-# Public helper for a parent project: checks the launcher target and optionally installs it.
-include(WebFrontAgent)
 # What an agent configuring a project must learn at once: the development model, and how it runs wf itself.
 include(WebFrontAgentGuide)
 webfront_announce_agent_support()

@@ -1,4 +1,12 @@
-/// @brief Explicitly bind an automation controller to one developer window. No callbacks in normal applications.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-28
+//
+// WebFront — automation
+// Role: Explicitly binds an automation controller to one developer window; no callbacks exist in ordinary applications.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: opt-in security surface; only a browser proving the launch URL's secret is selected
+
 #pragma once
 #include "../WebFront.hpp"
 #include "PageAuthentication.hpp"
@@ -75,7 +83,8 @@ void (async () => {
 })();
 )JS";
 
-inline std::string connectionScript(std::string_view capability, const std::vector<std::pair<std::string, std::string>>& versioned = {}, std::string_view notice = {}) {
+inline std::string
+connectionScript(std::string_view capability, const std::vector<std::pair<std::string, std::string>>& versioned = {}, std::string_view notice = {}) {
     std::string script{connectionScriptTemplate};
     std::string list = "[";
     for (const auto& [operation, since] : versioned)
@@ -98,7 +107,7 @@ class Binding {
         authentication::PageAuthentication pageAuthentication;
         std::string                        launchToken = channel::nonce();
         std::string                        notice;  // what the human sees in the terminal: grants and how to attach
-        bool                               closing     = false;
+        bool                               closing = false;
         void
         authorize(const AppUI& ui, std::string_view sequence, std::string_view mac, std::string_view method, std::initializer_list<std::string_view> args) {
             if (!browser || *browser != ui)
@@ -125,7 +134,8 @@ public:
                 throw std::runtime_error("Automation window claim rejected");
             owned->browser = ui;
             owned->launchToken.clear();  // one successful claim; later connections cannot replace the selected browser
-            ui.addScript(owned->closing ? std::string{"window.close()"} : connectionScript(owned->pageAuthentication.secret(), owned->session->versionedOperations(), owned->notice));
+            ui.addScript(owned->closing ? std::string{"window.close()"}
+                                        : connectionScript(owned->pageAuthentication.secret(), owned->session->versionedOperations(), owned->notice));
             return std::string{"null"};
         });
         app.cppFunction("webfront.automation.poll", [owned](AppUI ui, std::string sequence, std::string mac, std::string output) {
@@ -187,7 +197,7 @@ public:
         if (state->browser) {
             try {
                 state->browser->addScript("window.close()");
-            } catch (const std::exception&) {}  // a native watchdog still supervises renderer termination
+            } catch (const std::exception&) { }  // a native watchdog still supervises renderer termination
         }
     }
 

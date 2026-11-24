@@ -1,5 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-30
+//
+// WebFront — tests/unit
+// Role: Fake browser and recorder for the forms tests.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: test helper
+
 // A DOM document without a browser for the forms tests (#383): it records the operations of each flushed batch and
 // delivers events to C++ listeners as the interpreter would.
+
 #pragma once
 #include <webfront/dom/Document.hpp>
 

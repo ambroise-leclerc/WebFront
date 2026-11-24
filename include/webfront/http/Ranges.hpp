@@ -1,4 +1,12 @@
-/// @brief Byte range requests (RFC 9110 §14): which part of a representation a `Range` header selects.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-04
+//
+// WebFront — http
+// Role: Byte range requests (RFC 9110 section 14): which part of a representation a Range header selects.
+// Thread: bridge-io | Alloc: zero-hot-path
+// LLM: pure parser; oversized numbers saturate instead of overflowing
+
 #pragma once
 
 #include <algorithm>
@@ -11,9 +19,9 @@
 namespace webfront::http::range {
 
 enum class Outcome {
-    whole,          ///< No usable range: answer 200 with the entire representation.
-    partial,        ///< Answer 206 with `[first, first + length)`.
-    unsatisfiable   ///< Answer 416.
+    whole,         ///< No usable range: answer 200 with the entire representation.
+    partial,       ///< Answer 206 with `[first, first + length)`.
+    unsatisfiable  ///< Answer 416.
 };
 
 struct Selection {
@@ -25,17 +33,21 @@ struct Selection {
 namespace detail {
 
 inline std::string_view trim(std::string_view text) {
-    while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) text.remove_prefix(1);
-    while (!text.empty() && (text.back() == ' ' || text.back() == '\t')) text.remove_suffix(1);
+    while (!text.empty() && (text.front() == ' ' || text.front() == '\t'))
+        text.remove_prefix(1);
+    while (!text.empty() && (text.back() == ' ' || text.back() == '\t'))
+        text.remove_suffix(1);
     return text;
 }
 
 /// Digits only; a number too large for 64 bits saturates, which every comparison below treats as "past the end".
 inline std::optional<std::uint64_t> number(std::string_view digits) {
-    if (digits.empty()) return {};
+    if (digits.empty())
+        return {};
     std::uint64_t value = 0;
     for (const char c : digits) {
-        if (c < '0' || c > '9') return {};
+        if (c < '0' || c > '9')
+            return {};
         const auto digit = static_cast<std::uint64_t>(c - '0');
         value            = value > (std::numeric_limits<std::uint64_t>::max() - digit) / 10 ? std::numeric_limits<std::uint64_t>::max() : value * 10 + digit;
     }
@@ -49,7 +61,7 @@ inline bool startsWithBytes(std::string_view spec) {
            });
 }
 
-} // namespace detail
+}  // namespace detail
 
 /// The part of a representation of `size` bytes that the request asks for.
 ///
@@ -62,40 +74,51 @@ inline bool startsWithBytes(std::string_view spec) {
 template <typename Fields>
 [[nodiscard]] Selection select(const Fields& request, std::uint64_t size, const std::optional<std::string>& entityTag) {
     const auto ranges = request.getHeadersValues("Range");
-    if (ranges.size() != 1) return {};
+    if (ranges.size() != 1)
+        return {};
 
     const auto conditions = request.getHeadersValues("If-Range");
-    if (conditions.size() > 1) return {};
+    if (conditions.size() > 1)
+        return {};
     if (!conditions.empty()) {
         // A date cannot match: the representation has no Last-Modified. A weak tag never matches (strong comparison).
         const auto condition = detail::trim(conditions.front());
-        if (!entityTag || condition != *entityTag) return {};
+        if (!entityTag || condition != *entityTag)
+            return {};
     }
 
     auto spec = detail::trim(ranges.front());
-    if (!detail::startsWithBytes(spec)) return {};
+    if (!detail::startsWithBytes(spec))
+        return {};
     spec.remove_prefix(6);
-    if (spec.find(',') != std::string_view::npos) return {};
+    if (spec.find(',') != std::string_view::npos)
+        return {};
     const auto dash = spec.find('-');
-    if (dash == std::string_view::npos) return {};
+    if (dash == std::string_view::npos)
+        return {};
     const auto firstText = spec.substr(0, dash);
     const auto lastText  = spec.substr(dash + 1);
 
     if (firstText.empty()) {  // "-n": the last n bytes
         const auto suffix = detail::number(lastText);
-        if (!suffix) return {};
-        if (*suffix == 0 || size == 0) return {Outcome::unsatisfiable};
+        if (!suffix)
+            return {};
+        if (*suffix == 0 || size == 0)
+            return {Outcome::unsatisfiable};
         const auto length = std::min(*suffix, size);
         return {Outcome::partial, size - length, length};
     }
     const auto first = detail::number(firstText);
-    if (!first) return {};
+    if (!first)
+        return {};
     std::optional<std::uint64_t> last;
     if (!lastText.empty()) {
         last = detail::number(lastText);
-        if (!last || *last < *first) return {};
+        if (!last || *last < *first)
+            return {};
     }
-    if (*first >= size) return {Outcome::unsatisfiable};
+    if (*first >= size)
+        return {Outcome::unsatisfiable};
     const auto end = last ? std::min(*last, size - 1) : size - 1;
     return {Outcome::partial, *first, end - *first + 1};
 }
@@ -110,4 +133,4 @@ template <typename Fields>
     return "bytes */" + std::to_string(size);
 }
 
-} // namespace webfront::http::range
+}  // namespace webfront::http::range

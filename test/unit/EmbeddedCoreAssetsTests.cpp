@@ -1,11 +1,20 @@
-#include "Bdd.hpp"
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-24
+//
+// WebFront — tests/unit
+// Role: The embedded core assets: closed list, decoded budget and byte-exact content.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: guards ADR-016; amend the ADR together with this test
+
 #include <webfront/system/DeveloperBootstrapData.hpp>
 #include <webfront/system/DeveloperIndexHtmlData.hpp>
+#include <webfront/system/DomInterpreterData.hpp>
 #include <webfront/system/FallbackIndexHtmlData.hpp>
 #include <webfront/system/FallbackModuleData.hpp>
 #include <webfront/system/FaviconData.hpp>
 #include <webfront/system/WebFrontJsData.hpp>
-#include <webfront/system/DomInterpreterData.hpp>
+#include <webfront/testing/Bdd.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -47,21 +56,23 @@ void requireHeaderMatchesSource(std::string_view source) {
     require(embedded.size() >= expected.size());
     require(embedded.size() - expected.size() < 8);
     require(std::string_view(embedded).substr(0, expected.size()) == expected);
-    require(std::ranges::all_of(std::string_view(embedded).substr(expected.size()), [](char c) { return c == '\0'; }));
+    require(std::ranges::all_of(std::string_view(embedded).substr(expected.size()), [](char c) {
+        return c == '\0';
+    }));
 }
 
 }  // namespace
 
 const Scenario embeddedAssets{"The embedded assets of the core are the readable sources they are generated from", [] {
-    given("The generated headers of include/webfront/system and the sources of js/core", [&] {
-        then("Each header embeds exactly the bytes of its source, without compression and with zero padding only", [&] {
-            requireHeaderMatchesSource<fs::generated::DomInterpreterData>("js/core/dom-interpreter.mjs");
-            requireHeaderMatchesSource<fs::generated::WebFrontJsData>("js/core/WebFront.js");
-            requireHeaderMatchesSource<fs::generated::FallbackIndexHtmlData>("js/core/fallback/index.html");
-            requireHeaderMatchesSource<fs::generated::FallbackModuleData>("js/core/fallback/webfront-fallback.mjs");
-            requireHeaderMatchesSource<fs::generated::FaviconData>("js/core/favicon.ico");
-            requireHeaderMatchesSource<fs::generated::DeveloperIndexHtmlData>("js/core/bootstrap/index.html");
-            requireHeaderMatchesSource<fs::generated::DeveloperBootstrapData>("js/core/bootstrap/bootstrap.bundle.mjs");
-        });
-    });
-}};
+                                  given("The generated headers of include/webfront/system and the sources of js/core", [&] {
+                                      then("Each header embeds exactly the bytes of its source, without compression and with zero padding only", [&] {
+                                          requireHeaderMatchesSource<fs::generated::DomInterpreterData>("js/core/dom-interpreter.mjs");
+                                          requireHeaderMatchesSource<fs::generated::WebFrontJsData>("js/core/WebFront.js");
+                                          requireHeaderMatchesSource<fs::generated::FallbackIndexHtmlData>("js/core/fallback/index.html");
+                                          requireHeaderMatchesSource<fs::generated::FallbackModuleData>("js/core/fallback/webfront-fallback.mjs");
+                                          requireHeaderMatchesSource<fs::generated::FaviconData>("js/core/favicon.ico");
+                                          requireHeaderMatchesSource<fs::generated::DeveloperIndexHtmlData>("js/core/bootstrap/index.html");
+                                          requireHeaderMatchesSource<fs::generated::DeveloperBootstrapData>("js/core/bootstrap/bootstrap.bundle.mjs");
+                                      });
+                                  });
+                              }};

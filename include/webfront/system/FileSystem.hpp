@@ -1,6 +1,12 @@
-/// @date 01/03/2023 22:39:42
-/// @author Ambroise Leclerc
-/// @brief Provides access to local or virtual file system.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2023-03-01
+//
+// WebFront — system
+// Role: The fs concepts and Multi provider: access to local or virtual file systems, first provider wins.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: public contract; read the concepts (IsData, EncodedData) before writing a provider
+
 #pragma once
 
 #include "../details/C++23Support.hpp"
@@ -9,8 +15,8 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
-#include <fstream>
 #include <filesystem>
+#include <fstream>
 #include <ios>
 #include <memory>
 #include <optional>
@@ -21,19 +27,19 @@
 
 namespace webfront::fs {
 
-template<typename T>
+template <typename T>
 concept HasEncoding = requires(T t) { T::encoding; };
 
-template<typename T>
+template <typename T>
 concept IsData = requires(T t) {
     T::data;
     T::dataSize;
 };
 
-template<typename T>
+template <typename T>
 concept EncodedData = IsData<T> && HasEncoding<T>;
 
-template<typename T>
+template <typename T>
 concept RawData = IsData<T>;
 
 /// @brief The bytes of a file a provider or a storage reads through its own handle: a descriptor opened relative to a
@@ -52,25 +58,36 @@ public:
 
 class File {
     enum class FileType { nativeFStream, staticData, byteSource };
+
 public:
-    File(EncodedData auto t) : File(decltype(t)::data, decltype(t)::dataSize, decltype(t)::encoding) {}
-    File(RawData auto t) : File(decltype(t)::data, decltype(t)::dataSize) {}
+    File(EncodedData auto t) : File(decltype(t)::data, decltype(t)::dataSize, decltype(t)::encoding) { }
+    File(RawData auto t) : File(decltype(t)::data, decltype(t)::dataSize) { }
     File(std::span<const uint64_t> input, size_t fileSize, std::string_view contentEncoding = "")
-        : fileType{FileType::staticData}, data(input), size(fileSize), eofBit(fileSize==0), encoding(contentEncoding) {}
-    File(std::ifstream ifstream) : fileType{FileType::nativeFStream}, fstream{std::move(ifstream)} { measureStream(); }
+        : fileType{FileType::staticData}, data(input), size(fileSize), eofBit(fileSize == 0), encoding(contentEncoding) { }
+    File(std::ifstream ifstream) : fileType{FileType::nativeFStream}, fstream{std::move(ifstream)} {
+        measureStream();
+    }
     /// A file read through a provider's own handle (see ByteSource).
     explicit File(std::unique_ptr<ByteSource> byteSource) : fileType{FileType::byteSource}, source{std::move(byteSource)} {
-        if (!source) throw std::invalid_argument("A File needs a byte source");
+        if (!source)
+            throw std::invalid_argument("A File needs a byte source");
     }
 
-    [[nodiscard]] bool isEncoded() const { return !encoding.empty(); }
-    [[nodiscard]] std::string_view getEncoding() const { return encoding; }
-    [[nodiscard]] bool eof() const { return eofBit; }
+    [[nodiscard]] bool isEncoded() const {
+        return !encoding.empty();
+    }
+    [[nodiscard]] std::string_view getEncoding() const {
+        return encoding;
+    }
+    [[nodiscard]] bool eof() const {
+        return eofBit;
+    }
 
     /// The number of bytes this file yields, when known before reading it (always for embedded data, and for a
     /// native file whose stream can seek). A server uses it to announce a length and stream the file in chunks.
     [[nodiscard]] std::optional<std::uint64_t> knownSize() const {
-        if (fileType == FileType::byteSource) return source->size();
+        if (fileType == FileType::byteSource)
+            return source->size();
         return fileType == FileType::staticData ? std::optional<std::uint64_t>{size} : streamSize;
     }
 
@@ -79,10 +96,14 @@ public:
     /// the opened stream (replacement between the open and the lookup, rewrite that keeps the time). A provider
     /// whose storage is versioned (a content hash, a revision number) sets it with setEntityTag(); without one, a
     /// range request conditioned by `If-Range` is answered in full.
-    [[nodiscard]] const std::optional<std::string>& entityTag() const { return entityTagValue; }
+    [[nodiscard]] const std::optional<std::string>& entityTag() const {
+        return entityTagValue;
+    }
 
     /// @param tag a quoted tag that changes whenever the bytes this file yields change, such as `"rev-42"`.
-    void setEntityTag(std::string tag) { entityTagValue = std::move(tag); }
+    void setEntityTag(std::string tag) {
+        entityTagValue = std::move(tag);
+    }
 
     /// Positions the next read at `offset` bytes from the start of the content (the position the file had when it
     /// was built), when knownSize() is set. An offset past the end positions at the end.
@@ -97,7 +118,8 @@ public:
             eofBit = false;
             return source->seek(offset);
         }
-        if (!streamSize || !fstream.is_open()) return false;
+        if (!streamSize || !fstream.is_open())
+            return false;
         const auto target = std::min(offset, *streamSize);
         fstream.clear();
         fstream.seekg(streamOrigin + static_cast<std::streamoff>(target));
@@ -109,26 +131,29 @@ public:
     // @param buffer buffer which will receive extracted data
     // @return bytes read
     size_t read(std::span<char> buffer) {
-        if (fileType == FileType::staticData) return readData(buffer);
-        if (fileType == FileType::byteSource) return readSource(buffer);
+        if (fileType == FileType::staticData)
+            return readData(buffer);
+        if (fileType == FileType::byteSource)
+            return readSource(buffer);
         return readFStream(buffer);
     }
 
 private:
-    FileType fileType;
-    std::span<const uint64_t> data;
-    size_t readIndex{}, size{};
+    FileType                     fileType;
+    std::span<const uint64_t>    data;
+    size_t                       readIndex{}, size{};
     std::optional<std::uint64_t> streamSize;
-    std::streamoff streamOrigin{};
-    std::optional<std::string> entityTagValue;
-    bool eofBit{false};
-    const std::string encoding{};
-    std::ifstream fstream;
-    std::unique_ptr<ByteSource> source;
+    std::streamoff               streamOrigin{};
+    std::optional<std::string>   entityTagValue;
+    bool                         eofBit{false};
+    const std::string            encoding{};
+    std::ifstream                fstream;
+    std::unique_ptr<ByteSource>  source;
 
     size_t readSource(std::span<char> buffer) {
         const auto count = source->read(buffer);
-        if (count < buffer.size()) eofBit = true;
+        if (count < buffer.size())
+            eofBit = true;
         return count;
     }
 
@@ -148,7 +173,8 @@ private:
 
     // The bytes left from the stream's current position, which the caller may have moved past a prefix.
     void measureStream() {
-        if (!fstream.is_open()) return;
+        if (!fstream.is_open())
+            return;
         const auto start = fstream.tellg();
         fstream.seekg(0, std::ios::end);
         const auto end = fstream.tellg();
@@ -156,42 +182,45 @@ private:
         if (start >= 0 && end >= start && fstream) {
             streamSize   = static_cast<std::uint64_t>(end - start);
             streamOrigin = static_cast<std::streamoff>(start);
-        }
-        else fstream.clear();
+        } else
+            fstream.clear();
     }
 
     size_t readFStream(std::span<char> buffer) {
         fstream.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
         // The stream stays open at the end of the file, so that seek() can position it again.
-        if (fstream.eof()) eofBit = true;
+        if (fstream.eof())
+            eofBit = true;
         return static_cast<size_t>(fstream.gcount());
     }
 };
 
-template<typename T>
+template <typename T>
 concept Provider = requires(T t, std::filesystem::path filename) {
     { t.open(filename) } -> std::same_as<std::optional<File>>;
     requires std::constructible_from<T, std::filesystem::path>;
 };
 
-template<Provider ... FSs>
+template <Provider... FSs>
 class Multi : FSs... {
 public:
-    Multi(std::filesystem::path docRoot) : FSs(docRoot)... {}
+    Multi(std::filesystem::path docRoot) : FSs(docRoot)... { }
     std::optional<File> open(std::filesystem::path filename) {
         return openFile<FSs...>(filename);
     }
 
 private:
-    template<typename First, typename ... Rest>
+    template <typename First, typename... Rest>
     std::optional<File> openFile(std::filesystem::path filename) {
         auto file = this->First::open(filename);
-        if constexpr (sizeof...(Rest) == 0) return file;
+        if constexpr (sizeof...(Rest) == 0)
+            return file;
         else {
-            if (file.has_value()) return file;
+            if (file.has_value())
+                return file;
             return openFile<Rest...>(filename);
         }
     }
 };
 
-} // namespace webfront::fs
+}  // namespace webfront::fs

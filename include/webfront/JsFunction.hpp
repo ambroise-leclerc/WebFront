@@ -1,6 +1,12 @@
-/// @date 04/02/2022 13:15:27
-/// @author Ambroise Leclerc
-/// @brief A functor which invokes a corresponding javascript function
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-02-04
+//
+// WebFront — core
+// Role: A functor that invokes a corresponding JavaScript function, fire-and-forget or returning a std::future.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: public API; the untyped form is fire-and-forget, the typed form returns a future
+
 #pragma once
 #include "http/WebSocket.hpp"
 #include "tooling/HexDump.hpp"
@@ -12,24 +18,23 @@
 #include <cstdint>
 #include <exception>
 #include <future>
+#include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string_view>
 #include <type_traits>
 
-#include <iostream>
-
 namespace webfront {
 
 namespace detail {
-struct IgnoreJsResult {};
-}
+struct IgnoreJsResult { };
+}  // namespace detail
 
-template<typename WebFront, typename Result = detail::IgnoreJsResult>
+template <typename WebFront, typename Result = detail::IgnoreJsResult>
 class JsFunction {
 public:
     JsFunction(std::string_view functionName, WebFront& wf, WebLinkId linkId, WebLinkGeneration connectionGeneration)
-        : name(functionName), webFront(wf), webLinkId(linkId), generation(connectionGeneration) {}
+        : name(functionName), webFront(wf), webLinkId(linkId), generation(connectionGeneration) { }
 
     auto operator()(auto&&... ts) {
         msg::FunctionCall<typename WebFront::BufferPolicy> command;
@@ -58,10 +63,10 @@ public:
     }
 
 private:
-    std::string name;
-    WebFront& webFront;
-    WebLinkId webLinkId;
+    std::string       name;
+    WebFront&         webFront;
+    WebLinkId         webLinkId;
     WebLinkGeneration generation;
 };
 
-} // namespace webfront
+}  // namespace webfront

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-20
+//
+// WebFront — tests/web
+// Role: Integration test of the developer environment journey: bootstrap, project creation and wf commands in a real browser.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: real-browser test; fixtures are served locally, no public network
+
 #include "../../examples/life/Life.hpp"
 #include "../driver/RequestLog.hpp"
 #include "../unit/TemporaryDirectory.hpp"
@@ -34,7 +43,7 @@ std::string readFixtureText(const std::filesystem::path& path) {
 
 class FixturesFS {
 public:
-    explicit FixturesFS(std::filesystem::path projectRoot) : root(std::filesystem::canonical(projectRoot)) {}
+    explicit FixturesFS(std::filesystem::path projectRoot) : root(std::filesystem::canonical(projectRoot)) { }
     std::optional<webfront::fs::File> open(std::filesystem::path path) const {
         const auto relative = path.relative_path().generic_string();
         if (!relative.starts_with("fixtures/"))
@@ -230,8 +239,8 @@ Mode parseMode(std::string_view argument) {
         mode.part               = "app";
     } else if (argument.starts_with("--part=")) {
         mode.part = std::string(argument.substr(7));
-        if (mode.part != "app" && mode.part != "scripts" && mode.part != "typescript" && mode.part != "jasmine" && mode.part != "terminal" &&
-            mode.part != "workspace")
+        if (mode.part != "app" && mode.part != "scripts" && mode.part != "typescript" && mode.part != "jasmine" && mode.part != "terminal"
+            && mode.part != "workspace")
             throw std::invalid_argument("Unknown part of the developer test: " + mode.part);
     } else {
         throw std::invalid_argument("Unknown smoke-test mode");

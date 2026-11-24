@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-19
+//
+// WebFront — examples
+// Role: Standalone PTY example: a native pseudoterminal shown in an xterm.js page.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: has its own CMake entry point; see docs/PTY.md
+
 #include <webfront/PtyPage.hpp>
 #include <webfront/WebFront.hpp>
 #ifdef _WIN32

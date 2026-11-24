@@ -1,4 +1,12 @@
-/** @brief Application-owned, bounded LRU of fully validated gzip identity representations. */
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-25
+//
+// WebFront — http
+// Role: Application-owned, bounded LRU of fully validated gzip identity representations.
+// Thread: thread-safe | Alloc: unrestricted
+// LLM: cache with a byte budget; entries are validated before they are cached
+
 #pragma once
 
 #include "Gzip.hpp"
@@ -28,8 +36,8 @@ public:
         std::size_t retainedBytes{};
     };
 
-    explicit ValidatedCache(std::size_t cacheBudget) : budget(cacheBudget) {}
-    ValidatedCache(const ValidatedCache& other) : budget(other.budget) {}
+    explicit ValidatedCache(std::size_t cacheBudget) : budget(cacheBudget) { }
+    ValidatedCache(const ValidatedCache& other) : budget(other.budget) { }
     ValidatedCache& operator=(const ValidatedCache& other) {
         if (this != &other) {
             entries.clear();
@@ -38,7 +46,7 @@ public:
         }
         return *this;
     }
-    ValidatedCache(ValidatedCache&& other) noexcept : budget(other.budget), entries(std::move(other.entries)), stats(std::exchange(other.stats, {})) {}
+    ValidatedCache(ValidatedCache&& other) noexcept : budget(other.budget), entries(std::move(other.entries)), stats(std::exchange(other.stats, {})) { }
     ValidatedCache& operator=(ValidatedCache&& other) noexcept {
         if (this != &other) {
             entries = std::move(other.entries);

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-18
+//
+// WebFront — tests/web
+// Role: Lifecycle test shared by the real frontends: start, show, close, restart and failure stages with a watchdog.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: real-browser test; a stage is selected through the bridge by the specs
+
 #include "../driver/TestFrontend.hpp"
 #include <webfront/system/NativeFS.hpp>
 #include <webfront/UIThread.hpp>
@@ -6,18 +15,18 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
-#include <cstdlib>
-#include <future>
-#include <list>
-#include <thread>
-#include <filesystem>
-#include <iostream>
 #include <cstdint>
+#include <cstdlib>
+#include <filesystem>
+#include <future>
+#include <iostream>
+#include <list>
 #include <map>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #ifndef WEBFRONT_TEST_FRONTEND
@@ -32,32 +41,43 @@ static_assert(Frontend::action == webfront::frontend::Action::closeServerAfterOp
 
 // Values reported by the lifecycle pages; keep their named constants in sync with this enum.
 enum class LifecycleStage : std::int32_t {
-    uninstrumented = 0,
-    bridgeConnected = 1,
-    associationOrigins = 2,
+    uninstrumented          = 0,
+    bridgeConnected         = 1,
+    associationOrigins      = 2,
     associationSecondSocket = 3,
     associationRegistration = 4,
-    policyPopup = 5,
-    policyNavigation = 6,
-    policyDestination = 7,
-    pageCompleted = 8,
-    windowClosed = 9,
-    startingInstrumented = 10,
+    policyPopup             = 5,
+    policyNavigation        = 6,
+    policyDestination       = 7,
+    pageCompleted           = 8,
+    windowClosed            = 9,
+    startingInstrumented    = 10,
 };
 std::atomic<LifecycleStage> lifecycleStage = LifecycleStage::uninstrumented;
-constexpr const char* stageName(LifecycleStage stage) {
+constexpr const char*       stageName(LifecycleStage stage) {
     switch (stage) {
-        case LifecycleStage::uninstrumented: return "uninstrumented mode or frontend initialization";
-        case LifecycleStage::bridgeConnected: return "bridge connected";
-        case LifecycleStage::associationOrigins: return "association: checking origins";
-        case LifecycleStage::associationSecondSocket: return "association: waiting for second WebSocket";
-        case LifecycleStage::associationRegistration: return "association: waiting for second connection registration";
-        case LifecycleStage::policyPopup: return "policy: bridge ready, opening popup";
-        case LifecycleStage::policyNavigation: return "policy: waiting for navigation or cancellation";
-        case LifecycleStage::policyDestination: return "policy: destination bridge ready";
-        case LifecycleStage::pageCompleted: return "page reported completion, waiting for window close";
-        case LifecycleStage::windowClosed: return "window closed, checking results or shutting down";
-        case LifecycleStage::startingInstrumented: return "starting frontend or waiting for first bridge connection";
+        case LifecycleStage::uninstrumented:
+            return "uninstrumented mode or frontend initialization";
+        case LifecycleStage::bridgeConnected:
+            return "bridge connected";
+        case LifecycleStage::associationOrigins:
+            return "association: checking origins";
+        case LifecycleStage::associationSecondSocket:
+            return "association: waiting for second WebSocket";
+        case LifecycleStage::associationRegistration:
+            return "association: waiting for second connection registration";
+        case LifecycleStage::policyPopup:
+            return "policy: bridge ready, opening popup";
+        case LifecycleStage::policyNavigation:
+            return "policy: waiting for navigation or cancellation";
+        case LifecycleStage::policyDestination:
+            return "policy: destination bridge ready";
+        case LifecycleStage::pageCompleted:
+            return "page reported completion, waiting for window close";
+        case LifecycleStage::windowClosed:
+            return "window closed, checking results or shutting down";
+        case LifecycleStage::startingInstrumented:
+            return "starting frontend or waiting for first bridge connection";
     }
     return "unknown stage";
 }
@@ -65,18 +85,22 @@ constexpr const char* stageName(LifecycleStage stage) {
 // A stuck UI loop or a page which never settles must fail before CTest's outer timeout. The watchdog
 // terminates the process because the owning thread cannot safely be unwound; EXIT_FAILURE makes CTest fail.
 class LifecycleWatchdog {
-    std::mutex mutex;
+    std::mutex              mutex;
     std::condition_variable changed;
-    bool finished = false;
-    std::thread worker;
+    bool                    finished = false;
+    std::thread             worker;
+
 public:
-    explicit LifecycleWatchdog(std::chrono::seconds timeout) : worker([this, timeout] {
-        std::unique_lock lock{mutex};
-        if (!changed.wait_for(lock, timeout, [this] { return finished; })) {
-            std::cerr << "Lifecycle timeout at stage: " << stageName(lifecycleStage.load()) << std::endl;
-            std::_Exit(EXIT_FAILURE);
-        }
-    }) { }
+    explicit LifecycleWatchdog(std::chrono::seconds timeout)
+        : worker([this, timeout] {
+              std::unique_lock lock{mutex};
+              if (!changed.wait_for(lock, timeout, [this] {
+                      return finished;
+                  })) {
+                  std::cerr << "Lifecycle timeout at stage: " << stageName(lifecycleStage.load()) << std::endl;
+                  std::_Exit(EXIT_FAILURE);
+              }
+          }) { }
     ~LifecycleWatchdog() {
         {
             std::lock_guard lock{mutex};
@@ -90,8 +114,7 @@ public:
 template <class Application>
 void registerLifecycleStage(Application& app) {
     app.cppFunction("lifecycleStage", [](std::int32_t stage) {
-        if (stage >= static_cast<std::int32_t>(LifecycleStage::associationOrigins)
-            && stage <= static_cast<std::int32_t>(LifecycleStage::pageCompleted))
+        if (stage >= static_cast<std::int32_t>(LifecycleStage::associationOrigins) && stage <= static_cast<std::int32_t>(LifecycleStage::pageCompleted))
             lifecycleStage = static_cast<LifecycleStage>(stage);
     });
 }
@@ -111,12 +134,12 @@ int show(std::string_view page) {
 // The page of the view is associated with the view of the frontend; a second connection from the same page, without the
 // secret, is not (ADR-020, rule 3).
 int checkViewAssociation() {
-    App                 app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
-    std::mutex          mutex;
-    std::vector<bool>   embedded;
-    std::vector<bool>   local;
-    std::atomic<bool>   originsChecked = false;
-    lifecycleStage = LifecycleStage::startingInstrumented;
+    App               app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    std::mutex        mutex;
+    std::vector<bool> embedded;
+    std::vector<bool> local;
+    std::atomic<bool> originsChecked = false;
+    lifecycleStage                   = LifecycleStage::startingInstrumented;
     registerLifecycleStage(app);
     app.onUIStarted([&](App::UI ui) {
         std::scoped_lock lock{mutex};
@@ -132,7 +155,9 @@ int checkViewAssociation() {
     app.cppFunction("associationScript", [](std::string address) {
         return webfront::detail::viewSecretScript(std::string(64, 'a'), webfront::detail::browserOrigin(address, "9002"));
     });
-    app.cppFunction("originsChecked", [&] { originsChecked = true; });
+    app.cppFunction("originsChecked", [&] {
+        originsChecked = true;
+    });
     app.show("view-association.html");
     lifecycleStage = LifecycleStage::windowClosed;
     if (!originsChecked)
@@ -189,10 +214,9 @@ struct OutcomeReceiver {
 };
 
 struct ScheduledOperation {
-    std::promise<std::pair<Outcome, bool>> result;
+    std::promise<std::pair<Outcome, bool>>                                       result;
     decltype(webfront::networking::ex::connect(std::declval<decltype(std::declval<webfront::frontend::UIExecutor>().schedule())>(),
-                                              std::declval<OutcomeReceiver>()))
-        operation;
+                                               std::declval<OutcomeReceiver>())) operation;
     explicit ScheduledOperation(const webfront::frontend::UIExecutor& executor)
         : operation(webfront::networking::ex::connect(executor.schedule(), OutcomeReceiver{&result, executor})) { }
     std::future<std::pair<Outcome, bool>> start() {
@@ -205,12 +229,12 @@ struct ScheduledOperation {
 // The window's interface thread runs the operations, and closing the window completes the pending ones stopped: every
 // operation completes exactly once, none runs on another thread or after closure, and the executor is unavailable afterwards.
 int checkUIExecutor() {
-    App         app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
-    const auto  executor = app.uiExecutor();
-    const auto  mainThread = std::this_thread::get_id();
+    App        app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    const auto executor   = app.uiExecutor();
+    const auto mainThread = std::this_thread::get_id();
     if (executor.available())
         throw std::runtime_error("The executor is available before the window opens");
-    std::atomic<int>  ran = 0;
+    std::atomic<int>  ran   = 0;
     std::atomic<bool> error = false;
     std::string       message;
     std::jthread      client([&] {
@@ -221,7 +245,7 @@ int checkUIExecutor() {
                     throw std::runtime_error("The executor never became available");
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
-            std::list<ScheduledOperation>                       operations;
+            std::list<ScheduledOperation>                      operations;
             std::vector<std::future<std::pair<Outcome, bool>>> results;
             while (executor.available() && results.size() < 5000) {
                 operations.emplace_back(executor);
@@ -339,11 +363,11 @@ struct SecondOpenOutcome {
 
 struct SecondOpener {
     using receiver_concept = webfront::networking::ex::receiver_tag;
-    std::promise<SecondOpenOutcome>*  result;
-    webfront::frontend::NativeWindow  window;
-    webfront::frontend::UIExecutor    executor;
-    void*                             firstWindow;
-    auto                              get_env() const noexcept {
+    std::promise<SecondOpenOutcome>* result;
+    webfront::frontend::NativeWindow window;
+    webfront::frontend::UIExecutor   executor;
+    void*                            firstWindow;
+    auto                             get_env() const noexcept {
         return webfront::networking::ex::prop{webfront::networking::ex::get_stop_token, webfront::networking::ex::never_stop_token{}};
     }
     void set_value() && noexcept {
@@ -372,10 +396,10 @@ struct SecondOpener {
 // A second open() on the interface thread, while the first runs, is refused before it creates a view: the window published for
 // the first application, and its executor, stay the ones its connections and dialogs rely on.
 int checkSecondOpen() {
-    App        app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
-    const auto window   = app.nativeWindow();
-    const auto executor = app.uiExecutor();
-    std::atomic<bool> error = false;
+    App               app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    const auto        window   = app.nativeWindow();
+    const auto        executor = app.uiExecutor();
+    std::atomic<bool> error    = false;
     std::string       message;
     std::jthread      client([&] {
         try {
@@ -503,7 +527,7 @@ struct PolicyLifecycleFrontend {
         } else
 #endif
 #if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
-        if constexpr (std::same_as<Frontend, webfront::frontend::WKWebViewFrontend>) {
+            if constexpr (std::same_as<Frontend, webfront::frontend::WKWebViewFrontend>) {
             using namespace webfront::frontend::detail::wkwebview;
             initialize();
             Object  pool(send(type("NSAutoreleasePool"), "new"));
@@ -530,7 +554,7 @@ int checkContentPolicy(bool allowNavigation) {
     if (allowNavigation)
         policy.navigationAllowedOrigins = {"http://localhost:9002"};
     using PolicyApp = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, PolicyLifecycleFrontend>;
-    PolicyApp         app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path(), .contentPolicy = policy});
+    PolicyApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path(), .contentPolicy = policy});
     lifecycleStage = LifecycleStage::startingInstrumented;
     registerLifecycleStage(app);
     app.onUIStarted([](PolicyApp::UI) {
@@ -542,15 +566,15 @@ int checkContentPolicy(bool allowNavigation) {
     std::atomic<bool> navigated = false;
     app.cppFunction("policyCompleted", [&] {
         lifecycleStage = LifecycleStage::pageCompleted;
-        completed = true;
+        completed      = true;
     });
     app.cppFunction("policyEscaped", [&] {
         lifecycleStage = LifecycleStage::pageCompleted;
-        escaped = true;
+        escaped        = true;
     });
     app.cppFunction("policyNavigated", [&] {
         lifecycleStage = LifecycleStage::pageCompleted;
-        navigated = true;
+        navigated      = true;
     });
     app.show("content-policy.html");
     lifecycleStage = LifecycleStage::windowClosed;
@@ -566,8 +590,8 @@ int checkContentPolicy(bool allowNavigation) {
 // A host thread that keeps working while show() runs: it talks to the page, then ends the session (#567).
 template <typename Application>
 class HostSession {
-    std::mutex              mutex;
-    std::condition_variable changed;
+    std::mutex                              mutex;
+    std::condition_variable                 changed;
     std::optional<typename Application::UI> page;
     bool                                    abandoned = false;
 
@@ -593,7 +617,9 @@ public:
     /// On the host's thread: waits for the page, then exchanges with it. The watchdog bounds the wait.
     std::string exchange() {
         std::unique_lock lock{mutex};
-        changed.wait(lock, [this] { return page.has_value() || abandoned; });
+        changed.wait(lock, [this] {
+            return page.has_value() || abandoned;
+        });
         if (!page)
             return {};
         auto ui = *page;
@@ -643,6 +669,294 @@ int checkHostClose() {
     return 0;
 }
 
+// A second window of the application (#616): both pages share the C++ functions and the pushed calls of one application;
+// closing the second leaves the first usable, closing the first closes the second. A frontend that cannot show a second
+// window must refuse the call with an exception instead of opening a browser.
+constexpr const char* secondPage = "second-window.html?name=editor";
+constexpr const char* earlyPage  = "second-window.html?name=early";
+
+class SecondWindows {
+    std::mutex                          mutex;
+    std::condition_variable             changed;
+    std::map<std::string, App::UI>      windows;
+    std::map<std::string, bool>         embedded;
+    std::map<std::string, std::int64_t> seen;
+    std::int64_t                        counter     = 0;
+    unsigned                            connections = 0;
+    bool                                abandoned   = false;
+
+    template <typename Predicate>
+    bool waitFor(Predicate predicate) {
+        std::unique_lock lock{mutex};
+        return changed.wait_for(lock,
+                                std::chrono::seconds(20),
+                                [&] {
+                                    return predicate() || abandoned;
+                                })
+               && !abandoned && predicate();
+    }
+
+public:
+    void abandon() {
+        {
+            std::lock_guard lock{mutex};
+            abandoned = true;
+        }
+        changed.notify_all();
+    }
+    void setup(App& app) {
+        app.onUIStarted([this](App::UI) {
+            std::lock_guard lock{mutex};
+            ++connections;
+        });
+        app.cppFunction("windowReady", [this](App::UI ui, std::string name) {
+            lifecycleStage = LifecycleStage::bridgeConnected;
+            {
+                std::lock_guard lock{mutex};
+                windows.insert_or_assign(name, ui);
+                embedded[name] = ui.isEmbeddedView();
+            }
+            changed.notify_all();
+        });
+        app.cppFunction("bump", [this] {
+            std::vector<App::UI> all;
+            std::int64_t         value;
+            {
+                std::lock_guard lock{mutex};
+                value = ++counter;
+                for (auto& [name, ui] : windows)
+                    all.push_back(ui);
+            }
+            for (auto& ui : all) {
+                try {
+                    ui.jsFunction("windowTests.changed")(value);
+                } catch (...) {  // a window that closed meanwhile
+                }
+            }
+        });
+        app.cppFunction("seen", [this](std::string name, std::int64_t value) {
+            {
+                std::lock_guard lock{mutex};
+                seen[name] = value;
+            }
+            changed.notify_all();
+        });
+    }
+    bool ready(const std::string& name) {
+        return waitFor([&] {
+            return windows.contains(name);
+        });
+    }
+    bool isEmbedded(const std::string& name) {
+        std::lock_guard lock{mutex};
+        return embedded[name];
+    }
+    unsigned connectionCount() {
+        std::lock_guard lock{mutex};
+        return connections;
+    }
+    App::UI window(const std::string& name) {
+        std::lock_guard lock{mutex};
+        return windows.at(name);
+    }
+    void forget(const std::string& name) {
+        std::lock_guard lock{mutex};
+        windows.erase(name);
+    }
+    bool saw(const std::string& name, std::int64_t value) {
+        return waitFor([&] {
+            return seen.contains(name) && seen[name] == value;
+        });
+    }
+};
+
+// Runs `function` on the interface thread once started; the future gives the executor's outcome (ran, stopped, unavailable).
+template <typename Function>
+class OnInterfaceThread {
+    struct Receiver {
+        using receiver_concept = webfront::networking::ex::receiver_tag;
+        OnInterfaceThread* self;
+        auto               get_env() const noexcept {
+            return webfront::networking::ex::prop{webfront::networking::ex::get_stop_token, webfront::networking::ex::never_stop_token{}};
+        }
+        void set_value() && noexcept {
+            self->function();
+            self->done.set_value(Outcome::ran);
+        }
+        void set_stopped() && noexcept {
+            self->done.set_value(Outcome::stopped);
+        }
+        void set_error(std::exception_ptr) && noexcept {
+            self->done.set_value(Outcome::unavailable);
+        }
+    };
+    Function                                                              function;
+    std::promise<Outcome>                                                 done;
+    decltype(webfront::networking::ex::connect(std::declval<decltype(std::declval<webfront::frontend::UIExecutor>().schedule())>(),
+                                               std::declval<Receiver>())) operation;
+
+public:
+    OnInterfaceThread(const webfront::frontend::UIExecutor& executor, Function work)
+        : function(std::move(work)), operation(webfront::networking::ex::connect(executor.schedule(), Receiver{this})) { }
+    std::future<Outcome> outcome() {
+        return done.get_future();
+    }
+    void start() noexcept {
+        webfront::networking::ex::start(operation);
+    }
+};
+
+int checkSecondWindow() {
+    App app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    lifecycleStage         = LifecycleStage::startingInstrumented;
+    bool refusedBeforeShow = false;
+    try {
+        app.openSecondaryWindow(secondPage);
+    } catch (const std::logic_error&) {
+        refusedBeforeShow = true;
+    }
+    if (!refusedBeforeShow)
+        throw std::runtime_error("A second window was accepted before show()");
+    if (app.requestClose(secondPage))
+        throw std::runtime_error("A close request of a window was accepted before show()");
+    SecondWindows windows;
+    windows.setup(app);
+    std::string failure;
+    std::thread host([&] {
+        try {
+            const auto check = [&](bool condition, const char* message) {
+                if (!condition)
+                    throw std::runtime_error(message);
+            };
+            if constexpr (App::supportsSecondaryWindow) {
+                // As soon as the interface loop runs, before the first page connected (WebView2 is still creating its
+                // environment then), a second window opens: the call waits for the first one instead of refusing (#646).
+                const auto executor = app.uiExecutor();
+                for (int attempt = 0; attempt < 2000 && !executor.available(); ++attempt)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                app.openSecondaryWindow(earlyPage);
+            }
+            check(windows.ready("main"), "The first window did not connect");
+            if constexpr (!App::supportsSecondaryWindow) {
+                bool refused = false;
+                try {
+                    app.openSecondaryWindow(secondPage);
+                } catch (const std::logic_error&) {
+                    refused = true;
+                }
+                check(refused, "A frontend without a second window did not refuse the call");
+            } else {
+                check(windows.ready("early"), "The window opened as the first one started did not connect");
+                check(app.requestClose(earlyPage), "The close request of the early window was refused");
+                for (int attempt = 0; attempt < 200 && app.requestClose(earlyPage); ++attempt)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+                check(!app.requestClose(earlyPage), "The early window did not close");
+                windows.forget("early");
+                windows.window("main").jsFunction("windowTests.setStorage")(std::string("from-main"));
+                // The round trip orders the fire-and-forget write before creating the second view.
+                check(windows.window("main").template jsFunction<std::string>("windowTests.getStorage")().get() == "from-main",
+                      "The first window could not write storage");
+                webfront::WindowOptions options;
+                options.title  = "Second window";
+                options.width  = 640;
+                options.height = 480;
+                app.openSecondaryWindow(secondPage, options);
+                check(windows.ready("editor"), "The second window did not connect");
+                check(windows.isEmbedded("main") && windows.isEmbedded("editor"), "A window of the application lacks the proof of an embedded view");
+                check(windows.window("editor").template jsFunction<std::string>("windowTests.getStorage")().get() == "from-main",
+                      "The second window does not share storage");
+                // The same page again brings the window to the front: no third connection.
+                app.openSecondaryWindow(secondPage, options);
+                check(windows.window("editor").template jsFunction<std::string>("windowTests.name")().get() == "editor", "The second window did not answer");
+                check(windows.connectionCount() == 3, "Opening the same page again opened another window");  // main, early, editor
+                // A change made from one window is seen by both (shared cppFunction, pushed jsFunction).
+                windows.window("editor").jsFunction("windowTests.bump")();
+                check(windows.saw("main", 1) && windows.saw("editor", 1), "A change made in one window did not reach both");
+                // Closing the second window leaves the first usable.
+                check(app.requestClose(secondPage), "The close request of the second window was refused");
+                for (int attempt = 0; attempt < 200 && app.requestClose(secondPage); ++attempt)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+                check(!app.requestClose(secondPage), "The second window did not close");
+                check(windows.window("main").template jsFunction<std::string>("windowTests.name")().get() == "main",
+                      "The first window is not usable after the second closed");
+                // Opened again, it shares the state again.
+                windows.forget("editor");
+                app.openSecondaryWindow(secondPage, options);
+                check(windows.ready("editor"), "The second window did not reopen");
+                windows.window("main").jsFunction("windowTests.bump")();
+                check(windows.saw("editor", 2) && windows.saw("main", 2), "The reopened window does not share the state");
+                // A request that the loop runs after the first window closed, in the same pass, is refused: the window it
+                // would build would be destroyed with the first one at once, and its caller told it exists (#646). Both
+                // operations are queued from one operation of the interface thread, so the next pass runs them in order.
+                enum class Late { pending, opened, refused, failed };
+                std::atomic<Late> late{Late::pending};
+                std::atomic<bool> closeAccepted{false};
+                const auto        executor = app.uiExecutor();
+                OnInterfaceThread lateOpen(executor, [&]() noexcept {
+                    try {
+                        app.openSecondaryWindow("second-window.html?name=late");
+                        late = Late::opened;
+                    } catch (const std::logic_error&) {
+                        late = Late::refused;
+                    } catch (...) {
+                        late = Late::failed;
+                    }
+                });
+                OnInterfaceThread closeThenOpen(executor, [&]() noexcept {
+                    closeAccepted = app.requestClose();
+                    lateOpen.start();
+                });
+                auto              lateOutcome  = lateOpen.outcome();
+                auto              closeOutcome = closeThenOpen.outcome();
+                closeThenOpen.start();
+                check(closeOutcome.wait_for(std::chrono::seconds(20)) == std::future_status::ready && closeOutcome.get() == Outcome::ran,
+                      "The operation that closes the first window did not run");
+                check(closeAccepted, "The close request of the first window was refused");
+                check(lateOutcome.wait_for(std::chrono::seconds(20)) == std::future_status::ready, "The late request did not complete");
+                const auto lateRan = lateOutcome.get() == Outcome::ran;
+                check(late != Late::failed, "A request made as the first window closed failed with an unexpected exception");
+                // These frontends close the first window when the request runs, so the late request sees it closed; WebView2
+                // posts WM_CLOSE and may legitimately open the window before the first one closes it.
+                if constexpr (std::same_as<Frontend, webfront::frontend::WebKitGTKFrontend> || std::same_as<Frontend, webfront::frontend::WKWebViewFrontend>)
+                    check(lateRan && late == Late::refused, "A second window was opened after the first one had closed");
+                return;
+            }
+            check(app.requestClose(), "The close request of the first window was refused");
+        } catch (const std::exception& error) {
+            failure = error.what();
+            app.requestClose();
+        }
+    });
+    struct Join {
+        SecondWindows& windows;
+        std::thread&   thread;
+        ~Join() {
+            windows.abandon();
+            thread.join();
+        }
+    };
+    {
+        Join join{windows, host};
+        app.show("second-window.html");
+        lifecycleStage = LifecycleStage::windowClosed;
+    }
+    if (!failure.empty())
+        throw std::runtime_error(failure);
+    if constexpr (App::supportsSecondaryWindow) {
+        if (app.requestClose(secondPage))
+            throw std::runtime_error("The second window survived the first");
+        bool refused = false;
+        try {
+            app.openSecondaryWindow(secondPage);
+        } catch (const std::logic_error&) {
+            refused = true;
+        }
+        if (!refused)
+            throw std::runtime_error("A second window was accepted after show() returned");
+    }
+    return 0;
+}
+
 // The application on a thread of its own, for a frontend that allows it; the others must refuse with a diagnostic
 // instead of opening a window off the main thread.
 template <typename Application>
@@ -667,8 +981,13 @@ int checkHostThread() {
             throw std::runtime_error("Opening off the main thread was not refused with a diagnostic: '" + diagnostic + "'");
         return 0;
     } else {
-        HostSession<Application>      session;
-        webfront::UIThread<Application> ui(config, [&](Application& app) { session.setup(app); }, "host-close.html");
+        HostSession<Application>        session;
+        webfront::UIThread<Application> ui(
+            config,
+            [&](Application& app) {
+                session.setup(app);
+            },
+            "host-close.html");
         const auto answer = session.exchange();  // this thread stays the host's
         if (!ui.running())
             throw std::runtime_error("The session ended before the host stopped it");
@@ -684,7 +1003,8 @@ int checkHostThread() {
 const auto programStart = std::chrono::steady_clock::now();
 
 // How long the window takes to reach a working bridge: the page asks the host, which prints the time since the start of the
-// program, including the frontend's initialization (#611). The CTest case StartupTime-* runs it with fresh profile directories (cold) or after a first run (warm).
+// program, including the frontend's initialization (#611). The CTest case StartupTime-* runs it with fresh profile directories (cold) or after a first run
+// (warm).
 int checkStartupTime() {
     const auto begin = programStart;
     App        app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
@@ -695,7 +1015,7 @@ int checkStartupTime() {
     long long   readyMilliseconds = -1;
     std::thread host([&] {
         try {
-            answer = session.exchange();
+            answer            = session.exchange();
             readyMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin).count();
             // The answer can come before the first frame: the window is shown at the first frame or, at the latest, one second
             // after the load, so the close waits for that milestone to be traced (RunStartupTime.cmake requires it).
@@ -762,8 +1082,13 @@ int run(std::string_view mode) {
     cases.emplace("native-window", checkNativeWindow);
     cases.emplace("second-open", checkSecondOpen);
     cases.emplace("host-close", checkHostClose);
+    cases.emplace("second-window", checkSecondWindow);
     cases.emplace("startup-time", checkStartupTime);
-    cases.emplace("host-thread", +[] { return checkHostThread<App>(); });
+    cases.emplace(
+        "host-thread",
+        +[] {
+            return checkHostThread<App>();
+        });
     cases.emplace("view-association", checkViewAssociation);
     cases.emplace("stage-report", checkStageReport);
     const auto selected = cases.find(mode);

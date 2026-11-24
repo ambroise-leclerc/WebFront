@@ -1,20 +1,30 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — tests/web
+// Role: Lifecycle cases of the WebKitGTK frontend: display, sandbox, repeated show and failure diagnostics.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: Linux only; each case expects a precise diagnostic
+
 #include <webfront/system/NativeFS.hpp>
 #include <webfront/WebFront.hpp>
 
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cstdlib>
-#include <dlfcn.h>
-#include <cctype>
-#include <sstream>
-#include <iterator>
-#include <memory>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <iterator>
 #include <map>
+#include <memory>
+#include <sstream>
 #include <thread>
+
+#include <dlfcn.h>
 
 #if defined(GTK_MAJOR_VERSION) || defined(G_TYPE_OBJECT) || defined(Bool) || defined(None) || defined(signals)
     #error WebFront.hpp must not expose GTK, GLib or X11 macros
@@ -164,8 +174,9 @@ struct NativeClosingFrontend : Frontend {
     static void open(std::string_view address, std::string_view port, std::string_view page, const webfront::ContentPolicy& policy) {
         open(address, port, page, policy, webfront::WindowOptions{});
     }
-    static void open(std::string_view address, std::string_view port, std::string_view page, const webfront::ContentPolicy& policy, const webfront::WindowOptions& window) {
-                gtk::Session session(webfront::detail::BoundContentPolicy{webfront::frontend::detail::applicationUrl(address, port, ""), policy}, window);
+    static void
+    open(std::string_view address, std::string_view port, std::string_view page, const webfront::ContentPolicy& policy, const webfront::WindowOptions& window) {
+        gtk::Session session(webfront::detail::BoundContentPolicy{webfront::frontend::detail::applicationUrl(address, port, ""), policy}, window);
         session.create();
         CloseDuringLoop probe(session);
         session.run(webfront::frontend::detail::applicationUrl(address, port, page));
@@ -183,21 +194,22 @@ void nativeClose() {
 struct ScenarioFrontend : Frontend {
     static inline std::function<void(gtk::Session&)> configure;
     static inline std::function<bool(gtk::Session&)> finished;  // Polled; true closes the window.
-    static void open(std::string_view port, std::string_view page) {
+    static void                                      open(std::string_view port, std::string_view page) {
         open("127.0.0.1", port, page, {});
     }
     static void open(std::string_view address, std::string_view port, std::string_view page, const webfront::ContentPolicy& policy) {
         open(address, port, page, policy, webfront::WindowOptions{});
     }
-    static void open(std::string_view address, std::string_view port, std::string_view page, const webfront::ContentPolicy& policy, const webfront::WindowOptions& window) {
+    static void
+    open(std::string_view address, std::string_view port, std::string_view page, const webfront::ContentPolicy& policy, const webfront::WindowOptions& window) {
         gtk::Session session(webfront::detail::BoundContentPolicy{webfront::frontend::detail::applicationUrl(address, port, ""), policy}, window);
         session.create();
         configure(session);
         struct Poll {
-            gtk::Session& session;
+            gtk::Session&                         session;
             std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::seconds(45);
-            unsigned timer = 0;
-            std::exception_ptr failure{};
+            unsigned                              timer    = 0;
+            std::exception_ptr                    failure{};
         } poll{session};
         poll.timer = session.a.timeoutAdd(
             100,
@@ -212,7 +224,7 @@ struct ScenarioFrontend : Frontend {
                     done = finished(probe.session);
                 } catch (...) {
                     probe.failure = std::current_exception();
-                    done = true;
+                    done          = true;
                 }
                 if (done || std::chrono::steady_clock::now() >= probe.deadline) {
                     probe.timer = 0;
@@ -233,19 +245,23 @@ struct ScenarioFrontend : Frontend {
 using ScenarioApp = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, ScenarioFrontend>;
 
 void pollFailure() {
-    ScenarioFrontend::configure = [](gtk::Session&) {};
-    ScenarioFrontend::finished = [](gtk::Session&) -> bool {
+    ScenarioFrontend::configure = [](gtk::Session&) { };
+    ScenarioFrontend::finished  = [](gtk::Session&) -> bool {
         throw std::runtime_error("poll failure");
     };
     ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
-    expectFailure([&] { app.show("no-bridge.html"); }, "poll failure");
+    expectFailure(
+        [&] {
+            app.show("no-bridge.html");
+        },
+        "poll failure");
 }
 
 std::string readFile(const std::filesystem::path& path) {
     std::ifstream stream(path, std::ios::binary);
     if (!stream)
         throw std::runtime_error("Cannot open downloaded file: " + path.string());
-    std::string result;
+    std::string            result;
     std::array<char, 4096> buffer;
     while (stream.read(buffer.data(), buffer.size()) || stream.gcount() != 0)
         result.append(buffer.data(), static_cast<std::size_t>(stream.gcount()));
@@ -259,7 +275,7 @@ void download() {
     const auto folder = parent / "not" / "yet";  // The frontend creates the folder: WebKitGTK writes into an existing one only.
     std::filesystem::remove_all(parent);
     std::string destination;
-    bool        done = false;
+    bool        done            = false;
     ScenarioFrontend::configure = [&](gtk::Session& session) {
         session.downloadDirectory = folder;
         session.downloadFinished  = [&](const std::string& path) {
@@ -298,7 +314,7 @@ void downloadUserDirectory() {
     setenv("XDG_CONFIG_HOME", config.c_str(), 1);
     setenv("XDG_DOWNLOAD_DIR", decoy.c_str(), 1);
     std::string destination;
-    bool        done        = false;
+    bool        done            = false;
     ScenarioFrontend::configure = [&](gtk::Session& session) {
         session.downloadFinished = [&](const std::string& path) {
             destination = path;
@@ -389,7 +405,7 @@ void chooseFile(bool cancel) {
     const FakeClick pointer;
     if (!pointer.available())
         throw std::runtime_error("XTest is unavailable: run the scenario under Xvfb with libXtst");
-    int ticks = 0;
+    int ticks                  = 0;
     ScenarioFrontend::finished = [&](gtk::Session& session) {
         const char* current = session.a.viewTitle(session.view);
         title               = current ? current : "";
@@ -401,8 +417,8 @@ void chooseFile(bool cancel) {
     app.show("file-services.html?choose");
     std::filesystem::remove(fixture);
     if (!asked)
-        throw std::runtime_error("The file chooser was not requested (page title \"" + title + "\", " +
-                                 std::to_string(ticks / 5 + (ticks % 5 == 4)) + " clicks, " + std::to_string(ticks) + " pointer steps)");
+        throw std::runtime_error("The file chooser was not requested (page title \"" + title + "\", " + std::to_string(ticks / 5 + (ticks % 5 == 4))
+                                 + " clicks, " + std::to_string(ticks) + " pointer steps)");
     const std::string expected = cancel ? "cancelled" : "picked:chosen by the test";
     if (title != expected)
         throw std::runtime_error("Unexpected page state after the chooser: " + title);
@@ -416,8 +432,8 @@ void chooseCancel() {
 
 /// Closing the window while the system file dialog is open must end cleanly, without waiting for an answer.
 void closeWithDialog() {
-    bool opened = false;
-    int  open   = 0;  // Poll ticks since the dialog opened.
+    bool opened                 = false;
+    int  open                   = 0;  // Poll ticks since the dialog opened.
     ScenarioFrontend::configure = [&](gtk::Session& session) {
         session.chooserOpened = [&] {
             opened = true;
@@ -427,7 +443,7 @@ void closeWithDialog() {
     const FakeClick pointer;
     if (!pointer.available())
         throw std::runtime_error("XTest is unavailable: run the scenario under Xvfb with libXtst");
-    int ticks = 0;
+    int ticks                  = 0;
     ScenarioFrontend::finished = [&](gtk::Session& session) {
         const char* current = session.a.viewTitle(session.view);
         title               = current ? current : "";
@@ -438,8 +454,8 @@ void closeWithDialog() {
     ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
     app.show("file-services.html?choose");
     if (!opened)
-        throw std::runtime_error("The file dialog was not opened (page title \"" + title + "\", " +
-                                 std::to_string(ticks / 5 + (ticks % 5 == 4)) + " clicks, " + std::to_string(ticks) + " pointer steps)");
+        throw std::runtime_error("The file dialog was not opened (page title \"" + title + "\", " + std::to_string(ticks / 5 + (ticks % 5 == 4)) + " clicks, "
+                                 + std::to_string(ticks) + " pointer steps)");
 }
 
 /// alert, confirm and prompt reach the injection point and their answers reach the page (issue #452).
@@ -471,7 +487,7 @@ void scriptDialogs() {
 
 /// Closing the window while WebKitGTK's own script dialog is open must end cleanly, without waiting for an answer.
 void closeWithScriptDialog() {
-    using Clock = std::chrono::steady_clock;
+    using Clock              = std::chrono::steady_clock;
     bool              opened = false;
     Clock::time_point openedAt;
     ScenarioFrontend::configure = [&](gtk::Session& session) {
@@ -524,7 +540,7 @@ int childNamed(std::string_view name) {
         const auto open = line.find('('), close = line.rfind(')');
         if (open == std::string::npos || close == std::string::npos)
             continue;
-        int parent = 0;
+        int                parent = 0;
         std::istringstream rest(line.substr(close + 4));
         rest >> parent;
         if (parent == getpid() && line.substr(open + 1, close - open - 1).starts_with(name.substr(0, 15)))
@@ -537,14 +553,14 @@ int childNamed(std::string_view name) {
 /// process it starts during the session, keeps its own values.
 void mediaOptOutIsScoped() {
     setenv("GST_PLUGIN_SYSTEM_PATH_1_0", "/webfront-sentinel", 1);
-    bool shown = false, checked = false;
+    bool        shown = false, checked = false;
     std::string failure;
-    bool exposedAtStart = false;
+    bool        exposedAtStart  = false;
     ScenarioFrontend::configure = [&](gtk::Session& session) {
         // The documented window: process-wide until the load starts, so the opt-out is visible to the application here.
-        const auto during = std::getenv("GST_PLUGIN_SYSTEM_PATH_1_0");
-        exposedAtStart    = during && std::string_view(during) == session.mediaPlugins.string();
-        session.windowShown = [&] {
+        const auto during                = std::getenv("GST_PLUGIN_SYSTEM_PATH_1_0");
+        exposedAtStart                   = during && std::string_view(during) == session.mediaPlugins.string();
+        session.presentation.windowShown = [&] {
             shown = true;
         };
     };
@@ -557,7 +573,7 @@ void mediaOptOutIsScoped() {
         // An unrelated child, started now, inherits the application's value.
         std::unique_ptr<FILE, int (*)(FILE*)> pipe(popen("printenv GST_PLUGIN_SYSTEM_PATH_1_0", "r"), pclose);
         char                                  buffer[128]{};
-        if (pipe && fgets(buffer, sizeof buffer, pipe.get()); std::string_view(buffer).find("/webfront-sentinel") == std::string_view::npos)
+        if (pipe&& fgets(buffer, sizeof buffer, pipe.get()); std::string_view(buffer).find("/webfront-sentinel") == std::string_view::npos)
             failure = "An unrelated child did not inherit the application's environment: " + std::string(buffer);
         // WebKit's web process got the restriction.
         if (const auto web = childNamed("WebKitWebProces"); web == 0)
@@ -567,7 +583,7 @@ void mediaOptOutIsScoped() {
                 std::string found;
                 const auto  env = environmentOf(web);
                 for (std::size_t at = 0; at < env.size();) {
-                    const auto end = env.find('\0', at);
+                    const auto end  = env.find('\0', at);
                     const auto item = env.substr(at, end == std::string::npos ? std::string::npos : end - at);
                     if (item.starts_with("GST_"))
                         found += item + " ";
@@ -582,7 +598,7 @@ void mediaOptOutIsScoped() {
     };
     ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path(), .window = {.media = false}});
     app.show("first-frame.html");
-    const auto after = std::getenv("GST_PLUGIN_SYSTEM_PATH_1_0");
+    const auto after    = std::getenv("GST_PLUGIN_SYSTEM_PATH_1_0");
     const bool restored = after && std::string_view(after) == "/webfront-sentinel";
     unsetenv("GST_PLUGIN_SYSTEM_PATH_1_0");
     if (!restored)
@@ -599,15 +615,18 @@ void mediaOptOutIsScoped() {
 void firstFramePresentation(bool noFrame) {
     bool shown = false, byFrame = false;
     ScenarioFrontend::configure = [&](gtk::Session& session) {
-        session.windowShown = [&] {
+        session.presentation.windowShown = [&] {
             shown   = true;
-            byFrame = session.shownByFrame;
+            byFrame = session.presentation.byFrame;
         };
     };
     ScenarioFrontend::finished = [&](gtk::Session&) {
         return shown;
     };
-    ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path(), .window = {.background = "#123456", .media = false}});  // no media: the web process runs without GStreamer plugins
+    ScenarioApp app(webfront::WebFrontConfig{
+        .documentRoot = std::filesystem::current_path(),
+        .window       = {.background = "#123456", .media = false}
+    });  // no media: the web process runs without GStreamer plugins
     app.show(noFrame ? "first-frame.html?no-frame" : "first-frame.html");
     if (!shown)
         throw std::runtime_error("The window was never shown");
@@ -633,35 +652,44 @@ void profilePermissions() {
         if (std::filesystem::status(directory).permissions() != owner_all)
             throw std::runtime_error("New profile directory is not private");
         std::filesystem::permissions(directory, all, std::filesystem::perm_options::replace);
-        gtk::profileDirectory(variable, ".unused");
+        // A second call in the same process leases another directory (one live process per profile): the restriction of an
+        // existing directory is the one of privateProfileDirectory.
+        gtk::privateProfileDirectory(directory);
         if (std::filesystem::status(directory).permissions() != owner_all)
             throw std::runtime_error("Existing profile directory was not restricted to 0700");
+        if (std::filesystem::status(gtk::profileDirectory(variable, ".unused")).permissions() != owner_all)
+            throw std::runtime_error("An instance profile directory is not private");
     }
 }
 
 void run(std::string_view mode) {
     const std::map<std::string_view, void (*)()> cases{
-        {"sandbox-recheck", sandboxRecheck},
-        {"sandbox-environment", sandboxEnvironment},
-        {         "no-display",          noDisplay},
-        {      "worker-thread",       workerThread},
-        {      "repeated-show",       repeatedShow},
-        {         "http-error",          httpError},
-        {       "native-close",        nativeClose},
-        {    "pre-run-failure",      preRunFailure},
-        {       "poll-failure",         pollFailure},
-        {"profile-permissions", profilePermissions},
-        {       "window-title",        windowTitle},
-        {          "download",           download},
-        {"download-user-dir", downloadUserDirectory},
-        { "close-with-dialog",      closeWithDialog},
-        {       "choose-file",          chooseOne},
-        {     "cancel-choose",       chooseCancel},
-        {    "script-dialogs",       scriptDialogs},
+        {         "sandbox-recheck",sandboxRecheck                                    },
+        {     "sandbox-environment",    sandboxEnvironment},
+        {              "no-display",             noDisplay},
+        {           "worker-thread",          workerThread},
+        {           "repeated-show",          repeatedShow},
+        {              "http-error",             httpError},
+        {            "native-close",           nativeClose},
+        {         "pre-run-failure",         preRunFailure},
+        {            "poll-failure",           pollFailure},
+        {     "profile-permissions",    profilePermissions},
+        {            "window-title",           windowTitle},
+        {                "download",              download},
+        {       "download-user-dir", downloadUserDirectory},
+        {       "close-with-dialog",       closeWithDialog},
+        {             "choose-file",             chooseOne},
+        {           "cancel-choose",          chooseCancel},
+        {          "script-dialogs",         scriptDialogs},
         {"close-with-script-dialog", closeWithScriptDialog},
-        {    "media-scoped",         mediaOptOutIsScoped},
-        {        "first-frame",        [] { firstFramePresentation(false); }},
-        {      "present-timeout",      [] { firstFramePresentation(true); }}
+        {            "media-scoped",   mediaOptOutIsScoped},
+        {             "first-frame",
+         [] {
+         firstFramePresentation(false);
+         }                                                },
+        {         "present-timeout",             [] {
+             firstFramePresentation(true);
+             }        }
     };
     const auto selected = cases.find(mode);
     if (selected == cases.end())

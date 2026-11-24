@@ -1,4 +1,12 @@
-/** @brief Lazy, server-owned gzip worker with bounded jobs, waiters and owned payload storage. */
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-25
+//
+// WebFront — http
+// Role: Lazy, server-owned gzip worker with bounded jobs, waiters and owned payload storage.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: decoding runs off the I/O context; limits live in DecodeLimits
+
 #pragma once
 #include "../networking/Tasks.hpp"
 #include "Gzip.hpp"
@@ -52,7 +60,7 @@ class DecodeExecutor {
         virtual ~Waiter()                     = default;
     };
     struct State {
-        explicit State(DecodeLimits value) : limits(value) {}
+        explicit State(DecodeLimits value) : limits(value) { }
         DecodeLimits                       limits;
         std::mutex                         mutex;
         std::condition_variable            changed;
@@ -62,7 +70,7 @@ class DecodeExecutor {
         std::atomic_size_t                 jobs{0}, waiters{0}, bytes{0}, decodes{0};
     };
     struct Work {
-        explicit Work(std::shared_ptr<State> owner) : state(std::move(owner)) {}
+        explicit Work(std::shared_ptr<State> owner) : state(std::move(owner)) { }
         std::shared_ptr<State> state;
         std::string            encoded;
         std::string            output;
@@ -92,15 +100,15 @@ public:
         std::size_t            charge{};
         bool                   head{};
         Lease(std::shared_ptr<Work> value, std::string buffer, bool isHead)
-            : state(value->state), work(std::move(value)), body(std::move(buffer)), charge(body.capacity() + 1), head(isHead) {}
-        Lease(std::shared_ptr<State> owner, std::size_t bytes) : state(std::move(owner)), charge(bytes) {}
+            : state(value->state), work(std::move(value)), body(std::move(buffer)), charge(body.capacity() + 1), head(isHead) { }
+        Lease(std::shared_ptr<State> owner, std::size_t bytes) : state(std::move(owner)), charge(bytes) { }
 
     public:
         Lease()                        = default;
         Lease(const Lease&)            = delete;
         Lease& operator=(const Lease&) = delete;
         Lease(Lease&& other) noexcept
-            : state(std::move(other.state)), work(std::move(other.work)), body(std::move(other.body)), charge(other.charge), head(other.head) {}
+            : state(std::move(other.state)), work(std::move(other.work)), body(std::move(other.body)), charge(other.charge), head(other.head) { }
         ~Lease() {
             if (state) {
                 std::string{}.swap(body);
@@ -131,7 +139,7 @@ public:
         std::size_t jobs, waiters, bytes, decodes;
         bool        workerStarted;
     };
-    explicit DecodeExecutor(DecodeLimits limits = {}, Decode value = {}) : state(std::make_shared<State>(limits)), decode(std::move(value)) {}
+    explicit DecodeExecutor(DecodeLimits limits = {}, Decode value = {}) : state(std::make_shared<State>(limits)), decode(std::move(value)) { }
     DecodeExecutor(const DecodeExecutor&)            = delete;
     DecodeExecutor& operator=(const DecodeExecutor&) = delete;
     ~DecodeExecutor() {
@@ -183,7 +191,7 @@ public:
             bool                 head;
             std::optional<Lease> lease;
             Operation(DecodeExecutor* owner, Receiver value, std::string bytes, std::size_t bound, bool isHead)
-                : executor(owner), receiver(std::move(value)), encoded(std::move(bytes)), limit(bound), head(isHead) {}
+                : executor(owner), receiver(std::move(value)), encoded(std::move(bytes)), limit(bound), head(isHead) { }
             Operation(const Operation&) = delete;
             Operation(Operation&&)      = delete;
             bool stopped() const noexcept override {

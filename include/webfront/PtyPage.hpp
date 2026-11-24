@@ -1,4 +1,12 @@
-/// @brief Registers an application-chosen PTY for the optional xterm.js adapter.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-19
+//
+// WebFront — core
+// Role: Registers an application-chosen PTY for the optional xterm.js adapter.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: optional component; one session per name, retained across page reloads
+
 #pragma once
 
 #include "http/Encodings.hpp"
@@ -67,7 +75,7 @@ void registerPtyPage(App& app, PtyOptions options, std::string name = "webfront.
             launch->generation = state->generation + 1;
             launch->terminal   = std::async(std::launch::async, [options = state->options]() mutable {
                                    return std::make_shared<Pty>(std::move(options));
-                               }).share();
+                                 }).share();
             state->launching   = std::move(launch);
         }
         auto launch = state->launching;

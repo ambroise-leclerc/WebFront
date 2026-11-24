@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — tests/web
+// Role: Translation unit that compiles WKWebView.hpp in a module-style build.
+// Thread: ui-loop | Alloc: zero-hot-path
+// LLM: macOS only; compile check
+
 #include <webfront/frontend/WKWebView.hpp>
 
 using namespace webfront::frontend::detail::wkwebview;

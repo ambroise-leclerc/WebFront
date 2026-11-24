@@ -1,5 +1,15 @@
-/// @brief Minimal JSON support for the small files WebFront writes itself (such as the wf tool
-/// manager's lock file): a strict reader of objects and strings, and string quoting.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-14
+//
+// WebFront — utils
+// Role: Minimal JSON support for the small files WebFront writes itself: a strict reader of objects and strings, and quoting.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: not a general JSON library; rejects anything outside the supported subset
+
+// Minimal JSON support for the small files WebFront writes itself (such as the wf tool
+// manager's lock file): a strict reader of objects and strings, and string quoting.
+
 #pragma once
 
 #include <algorithm>
@@ -112,7 +122,7 @@ inline std::string quote(std::string_view text) {
 /// skipped. Errors throw std::runtime_error with the offset of the problem.
 class Reader {
 public:
-    explicit Reader(std::string_view json) : text(json) {}
+    explicit Reader(std::string_view json) : text(json) { }
 
     /// Reads an object, calling onMember(key) for each member; onMember must consume the value.
     void object(const std::function<void(const std::string&)>& onMember) {

@@ -1,4 +1,12 @@
-/// @brief Bootstrap assets and the explicit developer project's published browser resources.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-20
+//
+// WebFront — system
+// Role: Bootstrap assets and the explicit developer project's published browser resources.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: development only; reads mapped views defensively on Windows
+
 #pragma once
 
 #include "DeveloperBootstrapData.hpp"

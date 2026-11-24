@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-14
+//
+// WebFront — tests/driver
+// Role: Deadline of the non-interactive wf driver, so a stalled test run ends with a diagnostic.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: test driver; one deadline per run
+
 #pragma once
 
 #include <algorithm>
@@ -12,7 +21,7 @@ namespace webfront::testdriver {
 // blocks JavaScript so that no JS timer can report an expired command.
 class DriverDeadline {
 public:
-    explicit DriverDeadline(std::chrono::steady_clock::duration total) : overall(std::chrono::steady_clock::now() + total), current(overall) {}
+    explicit DriverDeadline(std::chrono::steady_clock::duration total) : overall(std::chrono::steady_clock::now() + total), current(overall) { }
     void beginCase(std::chrono::steady_clock::duration timeout) {
         std::scoped_lock lock{mutex};
         current = std::min(overall, std::chrono::steady_clock::now() + timeout);

@@ -6,7 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 
-DECODERS = ('messages', 'http', 'websocket', 'gzip', 'gzip_differential')
+DECODERS = ('messages', 'http', 'websocket', 'gzip', 'tls', 'gzip_differential')
 
 
 def run_all(root, jobs, seconds, run=subprocess.call):

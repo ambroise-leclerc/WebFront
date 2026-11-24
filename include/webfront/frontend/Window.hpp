@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-29
+//
+// WebFront — frontend
+// Role: WindowOptions: title, size and media settings that an application gives to an embedded window.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: public API; fields a toolkit cannot honour are ignored
+
 #pragma once
 
 #include <array>
@@ -9,6 +18,7 @@
 
 #if defined(_WIN32)
     #include "../system/WindowsCompat.hpp"
+
     #include <windows.h>
 #elif defined(__APPLE__)
     #include <mach-o/dyld.h>
@@ -20,9 +30,10 @@ namespace webfront {
  * @brief Initial native window of the embedded frontends (the system browser ignores it).
  *
  * An empty title selects the executable's name. Sizes are in the toolkit's logical pixels; a
- * non-positive size selects the default. `background` is a CSS hexadecimal colour ("#rgb", "#rrggbb" or "#rrggbbaa") that WebKitGTK applies as the colour of the
- * view under the page; WebView2 applies it to its window and WKWebView to its view, CEF to its browser and window (CEF accepts only an opaque or a fully transparent alpha: any non-zero alpha is opaque), and nothing guarantees the window's look before the first
- * frame. Empty keeps the toolkit's default and an invalid value is ignored. `media` is described below.
+ * non-positive size selects the default. `background` is a CSS hexadecimal colour ("#rgb", "#rrggbb" or "#rrggbbaa") that WebKitGTK applies as the colour of
+ * the view under the page; WebView2 applies it to its window and WKWebView to its view, CEF to its browser and window (CEF accepts only an opaque or a fully
+ * transparent alpha: any non-zero alpha is opaque), and nothing guarantees the window's look before the first frame. Empty keeps the toolkit's default and an
+ * invalid value is ignored. `media` is described below.
  */
 struct WindowOptions {
     std::string title{};
@@ -42,18 +53,18 @@ namespace frontend::detail {
 inline std::string executableName() {
     std::filesystem::path path;
     try {
-    #if defined(_WIN32)
+#if defined(_WIN32)
         std::wstring buffer(32768, L'\0');
         buffer.resize(GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size())));
         path = buffer;
-    #elif defined(__APPLE__)
+#elif defined(__APPLE__)
         std::string   buffer(4096, '\0');
         std::uint32_t size = static_cast<std::uint32_t>(buffer.size());
         if (_NSGetExecutablePath(buffer.data(), &size) == 0)
             path = buffer.c_str();
-    #elif defined(__linux__)
+#elif defined(__linux__)
         path = std::filesystem::read_symlink("/proc/self/exe");
-    #endif
+#endif
         const auto name = path.stem().u8string();
         return {name.begin(), name.end()};
     } catch (...) {
@@ -93,7 +104,9 @@ inline std::optional<std::array<float, 4>> parseBackground(std::string_view text
 /// a browser: any non-zero alpha is therefore opaque, as in WebView2, and only "#rrggbb00" stays transparent (CEF then uses
 /// its default background).
 inline std::uint32_t cefBackground(const std::array<float, 4>& rgba) {
-    const auto byte = [](float v) { return static_cast<std::uint32_t>(v * 255.0f + 0.5f); };
+    const auto byte = [](float v) {
+        return static_cast<std::uint32_t>(v * 255.0f + 0.5f);
+    };
     return (byte(rgba[3]) > 0 ? 0xFF000000u : 0u) | (byte(rgba[0]) << 16) | (byte(rgba[1]) << 8) | byte(rgba[2]);
 }
 

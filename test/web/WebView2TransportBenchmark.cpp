@@ -1,9 +1,19 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-24
+//
+// WebFront — tests/web
+// Role: Transport benchmark of the WebView2 frontend through a direct channel.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: Windows only; benchmark
+
 // ADR-017 (#363): measures the HTML bridge (WebSocket to the embedded server) against WebView2's own message channel, in
 // the same window and with the same echo calls (transport-benchmark.html, TransportBenchmark.hpp). The direct channel is
 // registered here on the browser the adapter created, before navigation: WebMessageReceived and PostWebMessageAsString
 // carry the calls of JS to C++ (a call carries an identifier, WebView2 has no reply), ExecuteScript those of C++ to JS.
 // It fails on a wrong echo, never on a timing.
 //   webview2_transport_benchmark [<report.json>]    (working directory: test/web, needs the Evergreen runtime)
+
 #include "TransportBenchmark.hpp"
 
 #include <algorithm>
@@ -59,7 +69,7 @@ class DirectChannel : public std::enable_shared_from_this<DirectChannel> {
             const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> owned(raw, CoTaskMemFree);
             // "id\nname\ntext"
             const std::wstring_view message(raw);
-            const auto              idEnd = message.find(L'\n');
+            const auto              idEnd   = message.find(L'\n');
             const auto              nameEnd = idEnd == message.npos ? idEnd : message.find(L'\n', idEnd + 1);
             if (nameEnd == message.npos)
                 return;

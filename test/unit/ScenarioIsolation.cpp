@@ -1,7 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
-/// @brief Gives every scenario the process-wide state a process of its own would have, so that the scenarios pass in any
-/// order within one process (WEBFRONT_TEST_UNIT_SHARDS, #543).
-#include "Bdd.hpp"
+// Author: Ambroise Leclerc
+// Created: 2026-11-11
+//
+// WebFront — tests/unit
+// Role: Gives every scenario the process-wide state a process of its own would have, so scenario order does not matter.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: keeps WEBFRONT_TEST_UNIT_SHARDS safe
+
+// Gives every scenario the process-wide state a process of its own would have, so that the scenarios pass in any
+// order within one process (WEBFRONT_TEST_UNIT_SHARDS, #543).
+
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/tooling/Logger.hpp>
 
 #include <array>

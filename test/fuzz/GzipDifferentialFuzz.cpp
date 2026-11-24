@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-25
+//
+// WebFront — tests/fuzz
+// Role: libFuzzer entry point of the differential gzip comparison.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: fuzz entry point; the logic is in GzipDifferential.cpp
+
 #include "GzipZlib.hpp"
 
 #include <cstdlib>

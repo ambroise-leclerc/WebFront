@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-16
+//
+// WebFront — examples
+// Role: The page of the host-loop example and the callbacks that connect it to the host.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: example UI; the host must outlive the application that registers its callbacks
+
 #pragma once
 
 // The interface WebFront adds to the host: four callbacks and one page. The callbacks run on WebFront's server thread

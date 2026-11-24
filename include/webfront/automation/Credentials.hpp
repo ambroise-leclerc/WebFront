@@ -1,4 +1,12 @@
-/// @brief OS entropy and shared credential comparison, independent of session/transport ownership.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-29
+//
+// WebFront — automation
+// Role: OS entropy and shared credential comparison, independent of session and transport ownership.
+// Thread: worker-safe | Alloc: zero-hot-path
+// LLM: security sensitive; sameToken is constant-time for equal lengths
+
 #pragma once
 #include "Platform.hpp"
 
@@ -12,10 +20,10 @@ inline std::string nonce() {
     std::array<unsigned char, 32> bytes{};
 #ifdef _WIN32
     if (BCryptGenRandom(nullptr, bytes.data(), static_cast<ULONG>(bytes.size()), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0)
-        throw std::runtime_error("Cannot generate attachment capability");
+        throw std::runtime_error("Cannot generate automation token");
 #else
     if (getentropy(bytes.data(), bytes.size()))
-        throw std::runtime_error("Cannot generate attachment capability");
+        throw std::runtime_error("Cannot generate automation token");
 #endif
     constexpr std::string_view digits = "0123456789abcdef";
     std::string                result;
@@ -25,6 +33,7 @@ inline std::string nonce() {
     }
     return result;
 }
+/// Content comparison is constant-time for equal lengths; a length mismatch is rejected immediately.
 inline bool sameToken(std::string_view left, std::string_view right) {
     if (left.size() != right.size())
         return false;

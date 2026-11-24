@@ -1,9 +1,19 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-23
+//
+// WebFront — tests/driver
+// Role: Non-interactive wf driver: options, engine selection (CEF, WebView2, native) and the run of one wf command.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: test driver; usage errors are reported before an engine that needs a display starts
+
 // The driver of the browser tests: runs one wf command of the developer environment without interaction, in an
 // application that may add its own pages and C++ callbacks. webfront-wf (WebFrontWf.cpp) is the plain driver; the
 // browser integration test (JasmineTest.cpp) adds the callbacks its specs call and checks what C++ observed.
 //
 // Exit status: the command's own status; 64 usage; 70 bootstrap failure (archive missing, wrong integrity, incompatible
 // protocol or API); 71 time limit of the driver; 72 the browser closed without a result.
+
 #pragma once
 
 #include "../unit/TemporaryDirectory.hpp"
@@ -69,16 +79,22 @@ struct DriverCEFFrontend : frontend::CEFFrontend {
         open("127.0.0.1", port, page, {});
     }
     static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy = {}) {
+        open(address, port, page, policy, {}, {});
+    }
+    static void open(std::string_view     address,
+                     std::string_view     port,
+                     std::string_view     page,
+                     const ContentPolicy& policy,
+                     const WindowOptions& window,
+                     const ViewLaunch&    launch) {
 #if defined(WEBFRONT_EMBED_CEF) && defined(__linux__)
         const auto* profile = std::getenv("WEBFRONT_TEST_CEF_PROFILE");
         if (!profile || !*profile)
             throw std::runtime_error("CEF test driver requires an isolated WEBFRONT_TEST_CEF_PROFILE");
-        cef::detail::openWindow(frontend::detail::applicationUrl(address, port, page),
-                                webfront::detail::BoundContentPolicy{webfront::detail::applicationOrigin(address, port), policy},
-                                nullptr,
-                                std::filesystem::path(profile));
+        const auto url = frontend::detail::applicationUrl(address, port, page, launch.origin);
+        cef::detail::openWindow(url, webfront::detail::BoundContentPolicy{url, policy}, nullptr, std::filesystem::path(profile), window, false, launch);
 #else
-        frontend::CEFFrontend::open(address, port, page, policy);
+        frontend::CEFFrontend::open(address, port, page, policy, window, launch);
 #endif
     }
 };
@@ -200,7 +216,7 @@ inline Sources& sources() {
 /// Serves the environment archive and the optional local registry under /driver/, from outside the project.
 class DriverFS {
 public:
-    explicit DriverFS(const std::filesystem::path&) {}
+    explicit DriverFS(const std::filesystem::path&) { }
 
     std::optional<webfront::fs::File> open(std::filesystem::path path) const {
         const auto relative = path.relative_path().generic_string();
@@ -217,7 +233,7 @@ public:
         if (sources().registry && relative.starts_with(prefix)) {
             try {
                 return read(webfront::developer::projectPath(*sources().registry, std::string_view(relative).substr(prefix.size())));
-            } catch (const std::exception&) {}
+            } catch (const std::exception&) { }
         }
         return {};
     }
@@ -384,13 +400,13 @@ inline void printOutput(const std::string& json) {
 /// An application that adds nothing to the driver: no page, no callback, the status of the command.
 struct PlainSetup {
     struct Pages {
-        explicit Pages(const std::filesystem::path&) {}
+        explicit Pages(const std::filesystem::path&) { }
         std::optional<webfront::fs::File> open(std::filesystem::path) const {
             return {};
         }
     };
     template <typename App>
-    void configure(App&) {}
+    void configure(App&) { }
     int  finish(int status) {
         return status;
     }
@@ -402,7 +418,13 @@ struct PlainSetup {
 /// what C++ observed).
 template <typename Frontend, typename Setup = PlainSetup>
 int run(const Options& options, Setup&& setup = {}) {
-    using App = webfront::BasicDeveloperApp<DriverFrontend<Frontend>, DriverFS, typename std::remove_reference_t<Setup>::Pages>;
+    using Configuration = std::remove_reference_t<Setup>;
+    using App           = typename decltype([] {
+        if constexpr (requires { typename Configuration::Application; })
+            return std::type_identity<typename Configuration::Application>{};
+        else
+            return std::type_identity<webfront::BasicDeveloperApp<DriverFrontend<Frontend>, DriverFS, typename Configuration::Pages>>{};
+    }())::type;
     static_assert(frontend::CanRequestClose<DriverFrontend<Frontend>>, "The driver closes its window with requestClose()");
     if (!std::filesystem::is_regular_file(*options.environment)) {
         std::cerr << "Bootstrap environment archive not found: " << *options.environment << '\n';
@@ -417,16 +439,16 @@ int run(const Options& options, Setup&& setup = {}) {
         sources().registry = std::filesystem::canonical(*sources().registry);
 
     const auto started = std::chrono::steady_clock::now();
-    const auto  phase      = [&](std::string_view name) {
+    const auto phase   = [&](std::string_view name) {
         std::cout << "driver " << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count() << "ms " << name << std::endl;
     };
-    DriverDeadline deadlines{options.timeout};
-    Outcome        outcome;
+    DriverDeadline           deadlines{options.timeout};
+    Outcome                  outcome;
     webfront::WebFrontConfig config{.port = "0", .remoteFileTransport = webfront::RemoteFileTransport::loopbackAttested};
     if constexpr (requires { setup.configureApplication(config); })
         setup.configureApplication(config);
-    App app{options.project, std::move(config)};
-    bool           commandStarted = false;
+    App  app{options.project, std::move(config)};
+    bool commandStarted = false;
     app.cppFunction("wf.commandStarted", [&] {
         if (std::exchange(commandStarted, true))
             throw std::runtime_error("Unexpected single-command start");

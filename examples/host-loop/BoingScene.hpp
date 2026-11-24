@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-16
+//
+// WebFront — examples
+// Role: The animated Boing Ball scene and its CPU ray tracer, a pure function of time.
+// Thread: worker-safe | Alloc: zero-hot-path
+// LLM: deterministic computation; the CUDA unit must produce the same image
+
 #pragma once
 
 // The Boing Ball scene: the colour of one pixel as a function of the scene of a frame. The CPU renderer and the CUDA
@@ -236,11 +245,11 @@ BOING_FN std::uint32_t pixel(const Scene& scene, int x, int y) {
                 const float toBall = hitBall(scene, camera, direction), toFloor = hitFloor(camera, direction);
                 const auto  ray = static_cast<unsigned>(x) * 1973U + static_cast<unsigned>(y) * 9277U + static_cast<unsigned>(sy * 2 + sx) * 26699U;
                 sum             = sum
-                      + beamsAlong(scene,
-                                   camera,
-                                   direction,
-                                   toBall > 0.F && (toFloor <= 0.F || toBall < toFloor) ? toBall : toFloor,
-                                   static_cast<float>(ray & 255U) / 256.F);
+                                  + beamsAlong(scene,
+                                               camera,
+                                               direction,
+                                               toBall > 0.F && (toFloor <= 0.F || toBall < toFloor) ? toBall : toFloor,
+                                               static_cast<float>(ray & 255U) / 256.F);
             }
         }
     const float scale = 1.F / static_cast<float>(scene.samples * scene.samples);

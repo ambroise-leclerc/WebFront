@@ -1,5 +1,15 @@
-/// @brief Terminal commands of an application: coroutines that the developer environment's terminal discovers and
-/// runs, one browser session at a time, streaming their output and cancelled by Ctrl+C, a disconnection or shutdown.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-22
+//
+// WebFront — core
+// Role: Terminal commands of an application: coroutines the developer environment's terminal discovers and runs, one browser session at a time.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: public API; read the command contract and reserved names before the registration code
+
+// Terminal commands of an application: coroutines that the developer environment's terminal discovers and
+// runs, one browser session at a time, streaming their output and cancelled by Ctrl+C, a disconnection or shutdown.
+
 #pragma once
 
 #include "networking/Tasks.hpp"
@@ -81,8 +91,8 @@ inline std::vector<std::string> parseArguments(std::string_view json) {
 
 inline void validateName(std::string_view name) {
     const auto invalid = name.empty() || std::ranges::any_of(name, [](char c) {
-        return static_cast<unsigned char>(c) <= ' ' || c == '\x7f' || c == '\'' || c == '"' || c == '\\';
-    });
+                             return static_cast<unsigned char>(c) <= ' ' || c == '\x7f' || c == '\'' || c == '"' || c == '\\';
+                         });
     if (invalid)
         throw std::invalid_argument("Invalid command name '" + std::string(name) + "'");
     if (std::ranges::find(reservedNames, name) != reservedNames.end())
@@ -98,8 +108,8 @@ struct Run {
     int                      exitCode = 0;
     // The command's own stop source, requested with its task's: a copy of the Context that outlives the task still
     // reads a valid source.
-    ex::inplace_stop_source  stop;
-    std::atomic<bool>        disconnected{false};
+    ex::inplace_stop_source stop;
+    std::atomic<bool>       disconnected{false};
 
     Run(UI caller, std::uint32_t commandId, std::vector<std::string> args) : ui(std::move(caller)), id(commandId), arguments(std::move(args)) { }
 
@@ -314,19 +324,20 @@ private:
     // command it stopped waiting for. A stopped command still reports: its coroutine was unwound, not this one.
     struct ForwardStop {
         Run<UI>* run;
-        void     operator()() noexcept { run->stop.request_stop(); }
+        void     operator()() noexcept {
+            run->stop.request_stop();
+        }
     };
 
     static Task execute(std::weak_ptr<Registry> registry, std::shared_ptr<Handler> handler, std::shared_ptr<Run<UI>> run) {
         const auto taskStop = co_await ex::read_env(ex::get_stop_token);
         // Forwards the task's stop request (Ctrl+C, disconnection, shutdown) to the command's source while it runs.
         const ex::stop_callback_for_t<std::remove_cvref_t<decltype(taskStop)>, ForwardStop> forward{taskStop, ForwardStop{run.get()}};
-        bool stopped = false;
-        std::string error;
+        bool                                                                                stopped = false;
+        std::string                                                                         error;
         try {
             // The command observes its own source: requested before the senders it awaits are stopped.
-            co_await ex::let_stopped(ex::write_env((*handler)(Context<UI>{run}), ex::prop{ex::get_stop_token, run->stop.get_token()}),
-                                     [&stopped]() noexcept {
+            co_await ex::let_stopped(ex::write_env((*handler)(Context<UI>{run}), ex::prop{ex::get_stop_token, run->stop.get_token()}), [&stopped]() noexcept {
                 stopped = true;
                 return ex::just();
             });
@@ -382,7 +393,8 @@ public:
             return owner->list();
         }));
         registered(app.template cppFunction<void, UI, std::uint32_t, std::string, std::string>(
-            "webfront.commands.start", [owner = registry](UI ui, std::uint32_t id, const std::string& name, const std::string& arguments) {
+            "webfront.commands.start",
+            [owner = registry](UI ui, std::uint32_t id, const std::string& name, const std::string& arguments) {
                 owner->start(std::move(ui), id, name, arguments);
             }));
         registered(app.template cppFunction<void, UI, std::uint32_t>("webfront.commands.cancel", [owner = registry](UI ui, std::uint32_t id) {

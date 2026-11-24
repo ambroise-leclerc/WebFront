@@ -1,4 +1,12 @@
-/// @brief Path and file helpers of the developer store: project containment, staging and replacement.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-21
+//
+// WebFront — system
+// Role: Path and file helpers of the developer store: project containment, staging and replacement.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: developer store internals; abandoned transactions and old staging are cleaned automatically
+
 #pragma once
 
 #include "DeveloperPaths.hpp"
@@ -109,7 +117,7 @@ inline void removeStaleStaging(const std::filesystem::path& root) {
     } catch (const std::exception&) {
         return;
     }
-    const auto      now         = std::filesystem::file_time_type::clock::now();
+    const auto now = std::filesystem::file_time_type::clock::now();
     for (const auto& entry : std::filesystem::directory_iterator(stagingRoot, error))
         if (const auto written = entry.last_write_time(error); !error && now - written >= staleStagingAfter)
             std::filesystem::remove_all(entry.path(), error);

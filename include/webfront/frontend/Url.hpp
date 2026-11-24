@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-17
+//
+// WebFront — frontend
+// Role: Builds the application URL opened by a frontend, percent-encoding the page reference.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: pure string helpers; keep consistent with ApplicationOrigin.hpp
+
 #pragma once
 
 #include "../ApplicationOrigin.hpp"
@@ -43,6 +52,10 @@ inline std::string encodePageReference(std::string_view page) {
 // A page is a UTF-8 URI reference: query/fragment delimiters and valid %XX escapes retain their meaning.
 inline std::string applicationUrl(std::string_view address, std::string_view port, std::string_view page) {
     return webfront::detail::applicationOrigin(address, port) + "/" + encodePageReference(page);
+}
+
+inline std::string applicationUrl(std::string_view address, std::string_view port, std::string_view page, std::string_view origin) {
+    return origin.starts_with("https://") ? std::string(origin) + "/" + encodePageReference(page) : applicationUrl(address, port, page);
 }
 
 inline std::string applicationUrl(std::string_view port, std::string_view page) {

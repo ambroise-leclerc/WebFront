@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-14
+//
+// WebFront — tests/unit
+// Role: A new empty directory under the system temporary directory, removed with its content on destruction.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: test helper
+
 #pragma once
 
 #include <atomic>

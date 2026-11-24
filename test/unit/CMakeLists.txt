@@ -1,12 +1,12 @@
-# The scenarios use Bdd.hpp, a test framework in a single header; BddDiscoverTests registers them in CTest.
-include(BddDiscoverTests.cmake)
+# The scenarios use WebFront::Bdd (include/webfront/testing/Bdd.hpp, docs/BDD.md), a test framework in a single header;
+# webfront_bdd_discover_tests registers them in CTest.
 
 find_package(Threads)
 include(CTest)
 
-# WEBFRONT_TEST_TIMEOUT_FACTOR (Bdd.hpp) lengthens the waits of a slow job. It is read here, when CMake configures, and
-# handed to every unit test as its environment, so that the waits and the CTest limits agree whatever the environment of
-# ctest is (TimeoutFactor.cmake gives the rule, which the TimeoutFactor case checks).
+# WEBFRONT_TEST_TIMEOUT_FACTOR (Bdd.hpp, a documented option) lengthens the waits of a slow job. It is read here, when
+# CMake configures, and handed to every unit test as its environment, so that the waits and the CTest limits agree
+# whatever the environment of ctest is (TimeoutFactor.cmake gives the rule, which the TimeoutFactor case checks).
 include(TimeoutFactor.cmake)
 webfront_unit_timeouts("$ENV{WEBFRONT_TEST_TIMEOUT_FACTOR}" _unit_timeout _shard_timeout _unit_test_environment)
 add_test(NAME TimeoutFactor COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckTimeoutFactor.cmake)
@@ -24,29 +24,44 @@ if(WEBFRONT_TEST_DOXYGEN)
   set_tests_properties(DoxygenDocumentation PROPERTIES TIMEOUT 60)
 endif()
 
+# Optional Memcheck regression for compiler-introduced secret-dependent curve operations.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  find_program(WEBFRONT_TEST_VALGRIND valgrind)
+  find_path(WEBFRONT_TEST_VALGRIND_INCLUDE valgrind/memcheck.h)
+  if(WEBFRONT_TEST_VALGRIND AND WEBFRONT_TEST_VALGRIND_INCLUDE)
+    add_executable(tls_constant_time TlsConstantTime.cpp)
+    target_link_libraries(tls_constant_time PRIVATE WebFront WebFront_warnings)
+    target_include_directories(tls_constant_time SYSTEM PRIVATE "${WEBFRONT_TEST_VALGRIND_INCLUDE}")
+    target_compile_options(tls_constant_time PRIVATE -Os)
+    add_test(NAME TLSConstantTime COMMAND "${WEBFRONT_TEST_VALGRIND}" --tool=memcheck --error-exitcode=1 $<TARGET_FILE:tls_constant_time>)
+    set_tests_properties(TLSConstantTime PROPERTIES TIMEOUT 30)
+  endif()
+endif()
+
 # The framework's own test: the order of the sections, the failures, the filters and the exit codes.
 add_executable(bdd_self_test BddSelfTest.cpp)
-target_link_libraries(bdd_self_test PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options)
+target_link_libraries(bdd_self_test PRIVATE WebFront::Bdd WebFront_test_hardening WebFront_warnings WebFront_options)
 target_compile_features(bdd_self_test PRIVATE cxx_std_23)
 add_test(NAME BddSelfTest COMMAND bdd_self_test)
 # CTest registers one case per scenario whatever brackets or semicolons its title holds.
 add_executable(bdd_discovery_probe Main.cpp BddDiscoveryProbe.cpp)
-target_link_libraries(bdd_discovery_probe PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options)
+target_link_libraries(bdd_discovery_probe PRIVATE WebFront::Bdd WebFront_test_hardening WebFront_warnings WebFront_options)
 target_compile_features(bdd_discovery_probe PRIVATE cxx_std_23)
 add_test(NAME BddDiscovery COMMAND ${CMAKE_COMMAND} -DPROBE=$<TARGET_FILE:bdd_discovery_probe>
-    -DSCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/BddDiscoverTests.cmake -DWORK=${CMAKE_CURRENT_BINARY_DIR}/bdd-discovery
+    -DSCRIPT=${PROJECT_SOURCE_DIR}/cmake/WebFrontBdd.cmake -DWORK=${CMAKE_CURRENT_BINARY_DIR}/bdd-discovery
     "-DGENERATOR=${CMAKE_GENERATOR}" "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}"
     -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckBddDiscovery.cmake)
-set_tests_properties(BddSelfTest BddDiscovery PROPERTIES TIMEOUT 30 LABELS fast)
+set_tests_properties(BddSelfTest BddDiscovery PROPERTIES TIMEOUT 120 LABELS fast)
 
 set(TESTS_LIST)
+list(APPEND TESTS_LIST TlsTests.cpp)
 list(APPEND TESTS_LIST WebKitGTKPolicyTests.cpp ContentPolicyTests.cpp HTTPServerTests.cpp HTTPEncodingTests.cpp GzipExecutorTests.cpp AcceptEncodingTests.cpp GzipTests.cpp ModuleHTTPServerTests.cpp HTTPRoutesTests.cpp HTTPRangeTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp MimeTypeTests.cpp)
 list(APPEND TESTS_LIST FormsTests.cpp ReactStoreTests.cpp DomDocumentTests.cpp DomBatchTests.cpp JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)
 list(APPEND TESTS_LIST FileSystemTests.cpp NativeFSTests.cpp DownloadsTests.cpp StorageTests.cpp NativeStorageTests.cpp PtyTests.cpp)
-list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp SafePathTests.cpp UISubscribersTests.cpp)
+list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp ProfileLeaseTests.cpp SafePathTests.cpp UISubscribersTests.cpp)
 list(APPEND TESTS_LIST ReadBindingTests.cpp ViewAssociationTests.cpp BroadcastTests.cpp WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp)
-list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp AutomationTests.cpp AutomationChannelTests.cpp AutomationStdioTests.cpp AutomationDiscoveryTests.cpp JasmineConsumerTests.cpp HostTests.cpp LifeTests.cpp HostLoopTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp DeferredCallTests.cpp)
-list(APPEND TESTS_LIST Main.cpp ScenarioIsolation.cpp FrontendUrlTests.cpp ApplicationUrlTests.cpp FrontendContractTests.cpp UIExecutorTests.cpp NativeWindowTests.cpp CommandsTests.cpp EmbeddedCoreAssetsTests.cpp)
+list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp AutomationTests.cpp AutomationChannelTests.cpp AutomationDiscoveryTests.cpp AutomationMcpHttpTests.cpp JasmineConsumerTests.cpp HostTests.cpp LifeTests.cpp HostLoopTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp DeferredCallTests.cpp)
+list(APPEND TESTS_LIST Main.cpp ScenarioIsolation.cpp FrontendUrlTests.cpp ApplicationUrlTests.cpp FrontendContractTests.cpp UIExecutorTests.cpp NativeWindowTests.cpp WindowRegistryTests.cpp CommandsTests.cpp EmbeddedCoreAssetsTests.cpp)
 if(WEBFRONT_USE_MDDLOG)
   list(APPEND TESTS_LIST MddlogLoggerTests.cpp MddlogTransportTests.cpp)
 endif()
@@ -54,7 +69,7 @@ if(WEBFRONT_EMBED_WEBVIEW2)
   list(APPEND TESTS_LIST WebView2Tests.cpp)
 endif()
 add_executable(tests ${TESTS_LIST})
-target_link_libraries(tests PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
+target_link_libraries(tests PRIVATE WebFront::Bdd WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
 # The scene of the host-loop example: the CPU renderer everywhere, compared with the CUDA one where a toolkit was found.
 target_link_libraries(tests PRIVATE WebFront_boing)
 if(WIN32)
@@ -114,17 +129,12 @@ if(NOT WEBFRONT_TEST_UNIT_SHARDS MATCHES "^[0-9]+$")
   message(FATAL_ERROR "WEBFRONT_TEST_UNIT_SHARDS must be a non-negative integer, not '${WEBFRONT_TEST_UNIT_SHARDS}'")
 endif()
 if(WEBFRONT_TEST_UNIT_SHARDS GREATER 0)
-  math(EXPR _last_shard "${WEBFRONT_TEST_UNIT_SHARDS} - 1")
-  foreach(_shard RANGE ${_last_shard})
-    # The shards split the scenarios in their declaration order, which every process sees alike.
-    add_test(NAME UnitTests-${_shard} COMMAND tests --order decl --shard-count ${WEBFRONT_TEST_UNIT_SHARDS} --shard-index ${_shard}
-        --junit "${CMAKE_BINARY_DIR}/unit-results-${_shard}.xml")
-    # The scenarios of a shard share its time limit; the slowest of them takes a few seconds.
-    # A shard whose every scenario is skipped exits with 4, as a single scenario does (BddDiscoverTests.cmake).
-    set_tests_properties(UnitTests-${_shard} PROPERTIES TIMEOUT ${_shard_timeout} LABELS fast SKIP_RETURN_CODE 4 ${_unit_test_environment})
-  endforeach()
+  # The shards split the scenarios in their declaration order, which every process sees alike. The scenarios of a shard
+  # share its time limit; the slowest of them takes a few seconds.
+  webfront_bdd_discover_tests(tests SHARDS ${WEBFRONT_TEST_UNIT_SHARDS} SHARD_NAME UnitTests
+      JUNIT_PREFIX "${CMAKE_BINARY_DIR}/unit-results" PROPERTIES TIMEOUT ${_shard_timeout} LABELS fast ${_unit_test_environment})
 else()
-  bdd_discover_tests(tests PROPERTIES TIMEOUT ${_unit_timeout} LABELS fast ${_unit_test_environment})
+  webfront_bdd_discover_tests(tests PROPERTIES TIMEOUT ${_unit_timeout} LABELS fast ${_unit_test_environment})
 endif()
 
 # The developer journey type-checks the declaration this tool writes from the hand-described settings (#383).
@@ -160,10 +170,10 @@ endif()
 if(_reflection_supported)
   # Bdd.hpp is a header: the whole executable, its framework included, is compiled as C++26.
   add_executable(forms_reflection_tests Main.cpp FormsReflectionTests.cpp)
-  target_link_libraries(forms_reflection_tests PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
+  target_link_libraries(forms_reflection_tests PRIVATE WebFront::Bdd WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
   set_target_properties(forms_reflection_tests PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
   target_compile_options(forms_reflection_tests PRIVATE -freflection)
-  bdd_discover_tests(forms_reflection_tests TEST_PREFIX "C++26." PROPERTIES TIMEOUT 60 LABELS fast)
+  webfront_bdd_discover_tests(forms_reflection_tests TEST_PREFIX "C++26." PROPERTIES TIMEOUT 60 LABELS fast)
   # Misplaced annotations do not compile: each case must fail with the message of describe<T>().
   foreach(_case IN ITEMS "RANGE_ON_BOOL|Range applies to numeric members only" "RANGE_ON_STRING|Range applies to numeric members only"
                          "RANGE_ON_ENUM|Range applies to numeric members only" "REPEATED_LABEL|Label is repeated on a member"
@@ -274,6 +284,15 @@ add_test(NAME RepositoryLayoutRejectsVendoredSources
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
         -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/layout-negative
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckRepositoryLayoutNegative.cmake)
+# Every tracked C++ source starts with the normalized file header (#653).
+add_test(NAME SourceHeaders
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckSourceHeaders.cmake)
+set_tests_properties(SourceHeaders PROPERTIES TIMEOUT 60)
+add_test(NAME SourceHeadersRejectsDrift
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/source-headers-negative
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckSourceHeadersNegative.cmake)
+set_tests_properties(SourceHeadersRejectsDrift PROPERTIES TIMEOUT 60)
 add_test(NAME NewcomerDocsMatchExamples
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckNewcomerDocs.cmake)
 # What an agent reads first states the development model and how it runs wf itself (#561).
@@ -445,4 +464,23 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME TestFlakeReport COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/tools/TestFlakeReport.py")
     add_test(NAME HardwareWorkflows COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/tools/TestHardwareWorkflows.py")
     set_tests_properties(FuzzerConcurrency TestFlakeReport HardwareWorkflows PROPERTIES TIMEOUT 60 LABELS fast)
+endif()
+
+# Automation does not exist in a distribution build (ADR-025): Enable.hpp, which opens the MCP listener, refuses to compile
+# with WEBFRONT_DISTRIBUTION. The test builds that translation unit and expects the compiler to name the reason.
+add_library(automation_distribution_guard OBJECT EXCLUDE_FROM_ALL AutomationDistributionGuard.cpp)
+target_link_libraries(automation_distribution_guard PRIVATE WebFront WebFront_options)
+target_compile_definitions(automation_distribution_guard PRIVATE WEBFRONT_DISTRIBUTION=1)
+add_test(NAME AutomationAbsentFromDistribution
+         COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --target automation_distribution_guard --config $<CONFIG>)
+set_tests_properties(AutomationAbsentFromDistribution PROPERTIES PASS_REGULAR_EXPRESSION "does not exist in a distribution build")
+
+# A project outside WebFront finds the installed WebFrontBdd package, writes scenarios and has CTest discover them (#647).
+# Only the top-level project installs the package, so only it can run this check.
+if(WEBFRONT_IS_TOP_LEVEL)
+    add_test(NAME BddConsumer COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DBUILD_DIR=${CMAKE_BINARY_DIR}
+        -DWORK=${CMAKE_CURRENT_BINARY_DIR}/bdd-consumer "-DGENERATOR=${CMAKE_GENERATOR}" "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        "-DINSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}" "-DINSTALL_INCLUDEDIR=${CMAKE_INSTALL_INCLUDEDIR}"
+        -DCONFIG=$<CONFIG> -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckBddConsumer.cmake)
+    set_tests_properties(BddConsumer PROPERTIES TIMEOUT 300 LABELS portability)
 endif()

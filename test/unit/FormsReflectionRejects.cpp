@@ -1,5 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-30
+//
+// WebFront — tests/unit
+// Role: Annotations that describe<T>() rejects at compile time; compiled once per REJECT_ macro.
+// Thread: worker-safe | Alloc: zero-hot-path
+// LLM: expects the static_assert message of the matching macro
+
 // Annotations that describe<T>() rejects at compile time (#383). CMake compiles this file once per REJECT_ macro and
 // expects the message of the matching static_assert; without any macro it must compile.
+
 #include <webfront/components/forms/Reflection.hpp>
 
 #include <string>

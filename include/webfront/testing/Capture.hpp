@@ -1,4 +1,12 @@
-/// @brief Screenshots and image sequences of the web view, written to a directory owned by a test run.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-01
+//
+// WebFront — testing
+// Role: Screenshots and image sequences of the web view, written to a directory owned by a test run.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: test support; a worker blocked on a dead window is detached after a grace period
+
 #pragma once
 
 #include "../frontend/Capture.hpp"
@@ -42,7 +50,7 @@ public:
                 return frontend::capturePng(timeout);
             },
         std::size_t maxImages = maxFrames)
-        : shared(std::make_shared<Shared>(std::move(root), std::move(source), maxImages)) {}
+        : shared(std::make_shared<Shared>(std::move(root), std::move(source), maxImages)) { }
     CaptureStore(const CaptureStore&)            = delete;
     CaptureStore& operator=(const CaptureStore&) = delete;
 
@@ -181,7 +189,7 @@ public:
 
 private:
     struct Shared {
-        Shared(std::filesystem::path root, Source source, std::size_t maxImages) : directory(std::move(root)), capture(std::move(source)), limit(maxImages) {}
+        Shared(std::filesystem::path root, Source source, std::size_t maxImages) : directory(std::move(root)), capture(std::move(source)), limit(maxImages) { }
         std::filesystem::path directory;
         Source                capture;
         std::size_t           limit;

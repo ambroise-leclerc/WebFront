@@ -1,7 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — tests/unit
+// Role: Reads an embedded asset through the file system, decoding gzip, for the asset tests.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: test helper
+
 #pragma once
 
-#include "Bdd.hpp"
 #include <webfront/system/FileSystem.hpp>
+#include <webfront/testing/Bdd.hpp>
 
 #include <array>
 #include <string>

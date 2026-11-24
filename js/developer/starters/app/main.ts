@@ -6,7 +6,7 @@ declare const webFront: {ready: Promise<void>; cppFunction(name: string): (...va
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, id: string, text = '') {
     const node = document.createElement(tag);
-    node.id = id;  // explicit ids let `inspect`, `click` and `fill` (webfront-agent) and your specs name the elements
+    node.id = id;  // explicit ids let `inspect`, `click` and `fill` (automation through MCP) and your specs name the elements
     node.textContent = text;
     return node;
 }

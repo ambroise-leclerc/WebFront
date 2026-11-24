@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-25
+//
+// WebFront — tests/fuzz
+// Role: Differential fuzz harness comparing the gzip decoder with zlib.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: fuzz support; a mismatch aborts
+
 #include "../unit/GzipFixtures.hpp"
 #include "GzipZlib.hpp"
 

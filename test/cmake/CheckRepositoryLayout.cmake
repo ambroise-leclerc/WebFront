@@ -12,8 +12,8 @@ if(NOT ROOT)
 endif()
 
 set(expected
-    .gitattributes .github .gitignore
-    AGENTS.md CMakeLists.txt LICENSE README.md README.fr.md
+    .gitattributes .git-blame-ignore-revs .github .gitignore
+    AGENTS.md CMakeLists.txt LICENSE README.md README.fr.md README.zh-CN.md
     cmake docs examples include js test)
 
 set(actual "")
@@ -53,13 +53,13 @@ if(NOT from_git)
     endforeach()
 endif()
 # Include public documents during local validation before they have been added to Git.
-foreach(document LICENSE README.fr.md)
+foreach(document LICENSE README.fr.md README.zh-CN.md)
     if(EXISTS "${ROOT}/${document}")
         list(APPEND actual "${document}")
     endif()
 endforeach()
-# .gitattributes and .gitignore are export-ignored, so archives legitimately lack them.
-set(archive_optional .gitattributes .gitignore)
+# .gitattributes, .git-blame-ignore-revs and .gitignore are export-ignored, so archives legitimately lack them.
+set(archive_optional .gitattributes .git-blame-ignore-revs .gitignore)
 list(REMOVE_ITEM actual "" ${archive_optional})
 list(REMOVE_ITEM expected ${archive_optional})
 list(REMOVE_DUPLICATES actual)

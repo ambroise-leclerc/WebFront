@@ -1,5 +1,15 @@
-/// @brief Optional forms and inspectors built in a DOM document (ADR-018, #383) from the descriptors of Description.hpp.
-/// They only read descriptors, whether written by hand in C++23 or produced by the C++26 reflection layer.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-30
+//
+// WebFront — components/forms
+// Role: Optional forms and inspectors built in a DOM document from the descriptors of Description.hpp.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: optional component; reads descriptors only, state lives in per-document FormState
+
+// Optional forms and inspectors built in a DOM document (ADR-018, #383) from the descriptors of Description.hpp.
+// They only read descriptors, whether written by hand in C++23 or produced by the C++26 reflection layer.
+
 #pragma once
 #include "../../dom/Document.hpp"
 #include "Description.hpp"

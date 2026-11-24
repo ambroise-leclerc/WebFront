@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2025-08-16
+//
+// WebFront — frontend
+// Role: Opens a URL in the system browser: per-platform command line, WSL included.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: default frontend plumbing; quoting of the command line is security sensitive
+
 #pragma once
 #include "../system/WindowsCompat.hpp"
 #include "Url.hpp"
@@ -14,14 +23,14 @@
 #ifdef _WIN32
     #include <shellapi.h>
 #else
-    #include <spawn.h>
-    #include <sys/wait.h>
-    #include <unistd.h>
-
     #include <cerrno>
     #include <cstdio>
     #include <functional>
     #include <thread>
+
+    #include <spawn.h>
+    #include <sys/wait.h>
+    #include <unistd.h>
 extern char** environ;
 #endif
 
@@ -170,10 +179,14 @@ struct LaunchContext {
 };
 
 /// Launch the page, then wait for Enter before returning control to the caller.
-inline void open(std::string_view address, std::string_view port, std::string_view file, const LaunchContext& context = {}) {
-    context.launcher(frontend::detail::applicationUrl(address, port, file));
+inline void openUrl(const std::string& url, const LaunchContext& context = {}) {
+    context.launcher(url);
     context.output << "Browser opened. Press Enter to close and stop the server..." << std::endl;
     context.input.get();
+}
+
+inline void open(std::string_view address, std::string_view port, std::string_view file, const LaunchContext& context = {}) {
+    openUrl(frontend::detail::applicationUrl(address, port, file), context);
 }
 
 inline void open(std::string_view port, std::string_view file, const LaunchContext& context = {}) {

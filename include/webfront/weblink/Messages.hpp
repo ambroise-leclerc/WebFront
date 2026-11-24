@@ -1,6 +1,12 @@
-/// @date 13/02/2022 21:24:42
-/// @author Ambroise Leclerc
-/// @brief Messages exchanged between webfront clients and server
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-02-13
+//
+// WebFront — weblink
+// Role: Messages exchanged between WebFront clients and the server: binary encoding and decoding of values and commands.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: bridge wire format; evolve together with WebFront.js and add unit and browser tests
+
 #pragma once
 
 #include "../BridgeError.hpp"
@@ -112,28 +118,28 @@ inline std::string_view toString(CodedType t) {
 }
 
 template <typename _Tp, typename dummy = void>
-struct is_printable : std::false_type {};
+struct is_printable : std::false_type { };
 
 template <typename T>
-struct is_printable<T, std::void_t<decltype(std::cout << std::declval<T>())>> : std::true_type {};
+struct is_printable<T, std::void_t<decltype(std::cout << std::declval<T>())>> : std::true_type { };
 
 template <typename T, typename U>
 inline constexpr bool is_printable_v = is_printable<T, U>::value;
 
 template <typename>
-struct is_tuple : std::false_type {};
+struct is_tuple : std::false_type { };
 
 template <typename... T>
-struct is_tuple<std::tuple<T...>> : std::true_type {};
+struct is_tuple<std::tuple<T...>> : std::true_type { };
 
 template <typename T>
 inline constexpr bool is_tuple_v = is_tuple<T>::value;
 
 template <typename T>
-struct is_bitset : std::false_type {};
+struct is_bitset : std::false_type { };
 
 template <std::size_t N>
-struct is_bitset<std::bitset<N>> : std::true_type {};
+struct is_bitset<std::bitset<N>> : std::true_type { };
 
 template <typename T>
 inline constexpr bool is_bitset_v = is_bitset<std::remove_cvref_t<T>>::value;
@@ -178,19 +184,19 @@ template <typename T>
 using numeric_array_element_t = typename numeric_array_traits<std::remove_cvref_t<T>>::element_type;
 
 template <typename T>
-struct is_vector : std::false_type {};
+struct is_vector : std::false_type { };
 
 template <typename T, typename Allocator>
-struct is_vector<std::vector<T, Allocator>> : std::true_type {};
+struct is_vector<std::vector<T, Allocator>> : std::true_type { };
 
 template <typename T>
 inline constexpr bool is_vector_v = is_vector<std::remove_cvref_t<T>>::value;
 
 template <typename T>
-struct is_std_array : std::false_type {};
+struct is_std_array : std::false_type { };
 
 template <typename T, std::size_t Size>
-struct is_std_array<std::array<T, Size>> : std::true_type {};
+struct is_std_array<std::array<T, Size>> : std::true_type { };
 
 template <typename T>
 inline constexpr bool is_std_array_v = is_std_array<std::remove_cvref_t<T>>::value;
@@ -199,7 +205,7 @@ template <typename T>
 inline constexpr bool is_string_like_v = std::is_same_v<std::remove_cvref_t<T>, std::string> || std::is_same_v<std::remove_cvref_t<T>, std::string_view>;
 
 template <typename T>
-struct is_list : std::false_type {};
+struct is_list : std::false_type { };
 
 /// A list is a std::vector whose elements are not scalars (a vector of numbers is a typed array): strings, tuples, typed
 /// arrays and bitsets. Lists do not nest, neither directly nor inside a tuple that is an element.
@@ -207,9 +213,9 @@ template <typename T>
 inline constexpr bool is_list_v = is_list<std::remove_cvref_t<T>>::value;
 
 template <typename T>
-struct contains_list : std::bool_constant<is_list_v<T>> {};
+struct contains_list : std::bool_constant<is_list_v<T>> { };
 template <typename... T>
-struct contains_list<std::tuple<T...>> : std::bool_constant<(contains_list<std::remove_cvref_t<T>>::value || ...)> {};
+struct contains_list<std::tuple<T...>> : std::bool_constant<(contains_list<std::remove_cvref_t<T>>::value || ...)> { };
 template <typename T>
 inline constexpr bool contains_list_v = contains_list<std::remove_cvref_t<T>>::value;
 
@@ -218,20 +224,19 @@ inline constexpr bool contains_list_v = contains_list<std::remove_cvref_t<T>>::v
 inline constexpr std::size_t maxListTupleDepth = 32;
 
 template <typename T>
-struct tuple_depth : std::integral_constant<std::size_t, 0> {};
+struct tuple_depth : std::integral_constant<std::size_t, 0> { };
 template <typename... T>
-struct tuple_depth<std::tuple<T...>>
-    : std::integral_constant<std::size_t, 1 + std::max({std::size_t{0}, tuple_depth<std::remove_cvref_t<T>>::value...})> {};
+struct tuple_depth<std::tuple<T...>> : std::integral_constant<std::size_t, 1 + std::max({std::size_t{0}, tuple_depth<std::remove_cvref_t<T>>::value...})> { };
 template <typename T>
 inline constexpr std::size_t tuple_depth_v = tuple_depth<std::remove_cvref_t<T>>::value;
 
 template <typename T>
-struct is_list_element : std::bool_constant<is_string_like_v<T> || is_tuple_v<T> || is_bitset_v<T> || is_numeric_array_v<T>> {};
+struct is_list_element : std::bool_constant<is_string_like_v<T> || is_tuple_v<T> || is_bitset_v<T> || is_numeric_array_v<T>> { };
 template <typename T>
 inline constexpr bool is_list_element_v = is_list_element<std::remove_cvref_t<T>>::value;
 
 template <typename E, typename Allocator>
-struct is_list<std::vector<E, Allocator>> : std::bool_constant<is_list_element_v<E> && !std::is_same_v<E, bool>> {};
+struct is_list<std::vector<E, Allocator>> : std::bool_constant<is_list_element_v<E> && !std::is_same_v<E, bool>> { };
 
 /// The numeric array opcodes form one contiguous run, so membership is a range test rather than a
 /// case per element type. The asserts below pin the two ends against an accidental reordering.
@@ -334,7 +339,7 @@ class TextCommand : public MessageBase<TextCommand> {
 public:
     TextCommand(TxtOpcode opcode, std::string_view text)
         : head{.opcode = opcode, .lengthHi = static_cast<uint8_t>(text.size() >> 8), .lengthLo = static_cast<uint8_t>(text.size())},
-          payloadSpan{reinterpret_cast<const std::byte*>(text.data()), text.size()} {}
+          payloadSpan{reinterpret_cast<const std::byte*>(text.data()), text.size()} { }
 
     [[nodiscard]] std::span<const std::byte> payload() const {
         return payloadSpan;
@@ -347,10 +352,10 @@ public:
 /// Shared header layout for function call/return messages
 template <Command Cmd>
 struct FunctionCallHeader {
-    Command                command         = Cmd;
-    uint8_t                parametersCount = 0;  // parameter 0 is the function name so parametersCount is always at least 1
-    CallId                 callId{};
-    uint32_t               parametersDataSize = 0;
+    Command  command         = Cmd;
+    uint8_t  parametersCount = 0;  // parameter 0 is the function name so parametersCount is always at least 1
+    CallId   callId{};
+    uint32_t parametersDataSize = 0;
 };
 static_assert(sizeof(FunctionCallHeader<Command::callFunction>) == 8, "FunctionCall header has to be 8 bytes long");
 
@@ -625,15 +630,24 @@ public:
         if (data.empty())
             throw std::runtime_error("Not enough data for msg::FunctionCall::decodeParameter");
         const auto type = static_cast<CodedType>(data[0]);
-        if (type == CodedType::booleanTrue || type == CodedType::booleanFalse) return decodeBoolean(param, data);
-        if (type == CodedType::smallString) return decodeSmallString(param, data);
-        if (type == CodedType::string) return decodeLongString(param, data);
-        if (type == CodedType::exception) return decodeExceptionMessage(param, data);
-        if (type == CodedType::longString) return decodeHugeString(param, data);
-        if (type == CodedType::number) return decodeNumber(param, data);
-        if (isNumericArrayCode(type)) return decodeArray(param, data);
-        if (type == CodedType::tuple) return decodeTuple(param, data);
-        if (type == CodedType::list) return decodeList(param, data);
+        if (type == CodedType::booleanTrue || type == CodedType::booleanFalse)
+            return decodeBoolean(param, data);
+        if (type == CodedType::smallString)
+            return decodeSmallString(param, data);
+        if (type == CodedType::string)
+            return decodeLongString(param, data);
+        if (type == CodedType::exception)
+            return decodeExceptionMessage(param, data);
+        if (type == CodedType::longString)
+            return decodeHugeString(param, data);
+        if (type == CodedType::number)
+            return decodeNumber(param, data);
+        if (isNumericArrayCode(type))
+            return decodeArray(param, data);
+        if (type == CodedType::tuple)
+            return decodeTuple(param, data);
+        if (type == CodedType::list)
+            return decodeList(param, data);
         throw std::runtime_error("Unsupported coded parameter type");
     }
 
@@ -767,13 +781,17 @@ private:
         switch (type) {
             case CodedType::smallArrayU8:
             case CodedType::arrayU8:
-            case CodedType::array8: return 1;
+            case CodedType::array8:
+                return 1;
             case CodedType::arrayU16:
-            case CodedType::array16: return 2;
+            case CodedType::array16:
+                return 2;
             case CodedType::arrayU32:
             case CodedType::array32:
-            case CodedType::arrayFloat: return 4;
-            default: return 8;
+            case CodedType::arrayFloat:
+                return 4;
+            default:
+                return 8;
         }
     }
 
@@ -823,7 +841,7 @@ private:
             return header + size;
         }
         if (isNumericArrayCode(type)) {
-            const bool small = type == CodedType::smallArrayU8;
+            const bool        small  = type == CodedType::smallArrayU8;
             const std::size_t header = small ? 2 : 5;
             need(header);
             if (small)
@@ -842,7 +860,7 @@ private:
                 throw std::runtime_error("List element tuples are nested too deeply");
             need(2);
             std::size_t used = 2;
-            shape += '(';
+            shape           += '(';
             for (std::size_t field = 0; field < static_cast<std::size_t>(data[1]); ++field) {
                 if (field != 0)
                     shape += ',';
@@ -903,16 +921,20 @@ private:
                 throw std::runtime_error("Truncated tuple header");
             const auto tupleSize = static_cast<size_t>(data[1]);
             if (std::tuple_size_v<T> != tupleSize)
-                throw std::runtime_error("Parameter is a " + std::to_string(std::tuple_size_v<T>)
-                                         + " elements tuple but decoded tuple only has " + std::to_string(tupleSize) + " elements.");
+                throw std::runtime_error("Parameter is a " + std::to_string(std::tuple_size_v<T>) + " elements tuple but decoded tuple only has "
+                                         + std::to_string(tupleSize) + " elements.");
             data = data.subspan(2);
-            std::apply([&](auto&... tupleArgs) { ((decodeParameter(tupleArgs, data)), ...); }, param);
+            std::apply(
+                [&](auto&... tupleArgs) {
+                    ((decodeParameter(tupleArgs, data)), ...);
+                },
+                param);
         } else if constexpr (is_list_v<T>) {
             // A JavaScript array that is not marked as a list arrives as a tuple of at most 255 elements.
             if (data.size() < 2u)
                 throw std::runtime_error("Truncated tuple header");
             const auto count = static_cast<size_t>(data[1]);
-            data = data.subspan(2);
+            data             = data.subspan(2);
             decodeListElements(param, count, data);
         } else
             throw std::runtime_error("Wrong parameter type : std::tuple expected");
@@ -965,7 +987,7 @@ private:
 
     template <typename Array>
     static void decodeNumericArray(Array& param, std::span<const std::byte>& data) {
-        using Element = std::remove_cv_t<numeric_array_element_t<Array>>;
+        using Element                         = std::remove_cv_t<numeric_array_element_t<Array>>;
         const auto [headerSize, elementCount] = readNumericArrayHeader<Array>(data);
 
         if (elementCount > std::numeric_limits<std::size_t>::max() / sizeof(Element))

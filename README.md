@@ -9,23 +9,24 @@
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C)](CMakeLists.txt)
 [![Header-only](https://img.shields.io/badge/library-header--only-2EA043)](include/)
 
-[English](README.md) · [Français](README.fr.md)
+[English](README.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
 
-WebFront is a **header-only C++23 library for building rich, modern user interfaces.** Keep application logic in C++ and create reactive interfaces with TypeScript, React and the existing JavaScript package ecosystem. WebFront brings UI development tools into your application: there is no separate TypeScript development environment to install.
+WebFront is a C++ UI framework that produces modern, reactive interfaces. It is a header-only C++23 library: your application logic stays in C++, the UI is built with TypeScript, React and browser-compatible packages, and the finished application ships as a single executable.
 
-WebFront has no dependencies and can be deployed on any device with a recent C++ standard library.
+Your application can open its own development environment with `app.bootstrap("developer")`. In that window, `wf` builds and previews the UI, checks types and runs Jasmine tests. You can work in the terminal or let a coding agent drive the same workflow over MCP. Node.js and npm are unnecessary.
+
+When the UI is ready, embed its assets in the executable. This produces a compact, self-contained app that runs offline in a native window or via a web browser on embedded and headless systems.
 
 <a href="#game-of-life-from-console-to-native-application"><img src="docs/images/life-bootstrap.gif" width="100%" alt="Game of Life walkthrough: the C++ application beside the WebFront window, where wf create life, dependency installation and wf preview bring the React interface up below the terminal"></a>
 
 The animation shows the C++ application and the Game of Life example, with terminal output and timing condensed and the preview expanded for readability. [Follow the walkthrough below ↓](#game-of-life-from-console-to-native-application)
 
-- **Integrate into an existing application.** Keep your simulation, device control, SIMD computations, CUDA kernels... and worker threads in C++. Use a native window or even a web browser without surrendering your event loop. [Host integration →](docs/HOST_INTEGRATION.md)
-- **Support human developers and coding agents.** The integrated `wf` tools compile, type-check, test and embed the UI. An opt-in MCP server and JSON CLI let coding agents operate your application's own window and run permitted checks and callbacks. [Agent workflow →](#developing-with-an-agent)
+- **Develop with a coding agent.** Let it create the UI, install packages, preview, test and embed through MCP. With the permissions you grant, it can inspect the running application, interact with its interface and call selected C++ functions. [Agent workflow →](#developing-with-an-agent) · [Automation →](#let-an-agent-drive-your-application)
+- **Build with locked dependencies.** The pinned developer environment is verified with SHA-512 and cached on first use. The project manifest and lockfile record the dependencies for your team and your agents. [Developer environment →](docs/DEVELOPER_ENVIRONMENT.md)
+- **Give existing C++ software a UI.** Keep your event loop, worker threads, device control and SIMD or CUDA workloads. Open a native window or use the system browser, and run multiple applications or windows side by side. [Host integration →](docs/HOST_INTEGRATION.md)
 - **Move numerical data directly.** Typed arrays and packed bitsets cross a binary WebSocket bridge without JSON or base64 conversion. Coroutines, futures and senders connect asynchronous UI calls to native work. [Execution model →](docs/ASYNC_EXECUTION.md)
-- **Build for distribution.** Embed assets, pin package versions and verify downloads; run the resulting application offline. CMake consumer targets and browser tests support repeatable builds and CI. [Integrate →](#use-webfront-in-your-project) · [Test →](#test-your-application)
+- **Test and package your application.** Use the browser test runner and the public `webfront::bdd` framework alongside your CMake build. Embed the finished UI for offline distribution. [Integrate →](#use-webfront-in-your-project) · [Test →](#test-your-application)
 - **Choose your UI stack.** Use TypeScript, React and browser-compatible packages, or build DOM islands directly from C++. Optional forms and inspectors derive from C++ type descriptors. [DOM →](docs/DOM.md) · [React →](docs/REACT.md) · [Forms →](docs/FORMS.md)
-
-
 
 **Website and book: [webfront.fr](https://webfront.fr/en/)** · [The WebFront Book](https://webfront.fr/en/book/) · [Documentation](docs/) · [Changelog](docs/CHANGELOG.md)
 
@@ -82,9 +83,9 @@ Scene: 960 × 720, four rays per pixel; window: 800 × 600 CSS pixels. Release b
 
 ## Find your starting point
 
+- **Work with a coding agent:** [developer workflow](#developing-with-an-agent) and [application automation](#let-an-agent-drive-your-application).
 - **Evaluate the library:** [Hello World](#hello-world), then the [Game of Life walkthrough](#game-of-life-from-console-to-native-application).
 - **Add a UI to existing software:** [CMake integration](#use-webfront-in-your-project) and the [host loop example](examples/host-loop/HostLoop.cpp).
-- **Work with a coding agent:** [developer workflow](#developing-with-an-agent) and [application automation](#let-an-agent-drive-your-application).
 - **Plan production:** [testing](#test-your-application), [contracts and limitations](#contracts-and-limitations) and [support status](docs/PROJECT_STATUS.md).
 
 ## Developing with an agent
@@ -93,18 +94,17 @@ If you are a coding agent, or work with one, read this before anything else. The
 
 - **The model.** A WebFront application is a C++ program whose interface is TypeScript/TSX. The interface lives in **`ui/`** of the project directory (`ui/main.ts` or `ui/main.tsx`) and is developed with **`wf dev`**, in the terminal that `app.bootstrap("developer")` opens in the application's window. Pages of hand-written HTML and classic JavaScript served through `documentRoot` are not the development path: none of the tools apply to them.
 - **The sequence.** With the pinned developer environment: `wf create app` (the starter name, not your project's name), `wf init`, `wf install <package>` for browser dependencies, then `wf dev ui/main.ts`. Finish with `wf check`, `wf test` and `wf embed` using the project's configuration. Use `wf create life` for the React walkthrough. `wf help agents` prints the workflow.
-- **An agent runs `wf` itself, in JSON or MCP.** Do not ask a person to type the commands. Configure with `-DWEBFRONT_BUILD_AUTOMATION=ON` to build `webfront-agent`; the application opts in with `webfront::automation::enableAutomation(app, {.grants = {...}, .listen = directory})`, whose grants stay the owner's; then:
+- **An agent runs `wf` itself, through MCP.** Do not ask a person to type the commands. In a development build, the application opts in with `webfront::automation::enableAutomation(app, {.grants = {...}})`, whose grants stay the owner's, and becomes the MCP server: no other program is built or launched. It prints its URL and the path of a private client configuration (`mcp.json`, URL and Bearer token, outside the project):
 
-```sh
-webfront-agent --list                                              # the sessions shared with agents
-webfront-agent --attach DIRECTORY --operation create --starter app
-webfront-agent --attach DIRECTORY --operation preview --entry ui/main.ts   # after each edit, in place of wf dev
-webfront-agent --print-mcp-config --attach DIRECTORY > .mcp.json   # the same operations as an MCP server
+```text
+WebFront MCP (grants: check, build, preview): http://127.0.0.1:PORT/mcp - client configuration: .../sessions/SESSION/mcp.json
 ```
 
 ```json
-{"mcpServers": {"webfront": {"command": "/path/to/webfront-agent", "args": ["--attach", "/path/to/directory", "--mcp"]}}}
+{"mcpServers": {"webfront": {"type": "http", "url": "http://127.0.0.1:PORT/mcp", "headers": {"Authorization": "Bearer TOKEN"}}}}
 ```
+
+Pass that file to the MCP client (`claude --mcp-config PATH/mcp.json`) and never copy the token into the project. The agent then calls `webfront.start` with `create`, `preview` (after each edit, in place of `wf dev`), `check`, `test` or `embed`, and reads each run with `webfront.result`.
 
 In a project that embeds WebFront, `webfront_write_agent_guide()` writes these rules as `AGENTS.md` at its root, and `wf create` writes them beside the starter's sources.
 
@@ -386,7 +386,7 @@ Your own application can select `webfront::NativeApp` or `webfront::NativeAppWit
 Your coding agent can type-check, build, preview, inspect and click the interface of **your own application**, in its own
 window and with its own C++ callbacks, while you keep the window and decide what the agent may do. Nothing is on by default.
 
-<img src="docs/images/automation-agent.svg" width="100%" alt="Animated transcript. On the left, an agent lists the shared session, checks, builds and previews the interface, clicks a button, calls the allow-listed C++ callback bf.render and is refused bf.secret. On the right, the application window shows the interface updating, and the C++ process logs only the callbacks that ran.">
+<img src="docs/images/automation-agent.svg" width="100%" alt="Animated transcript. On the left, an agent connects to the application's MCP URL, checks, builds and previews the interface, clicks a button, calls the allow-listed C++ callback bf.render and is refused bf.secret. On the right, the application window shows the interface updating, and the C++ process logs only the callbacks that ran.">
 
 *Abridged transcript of the `AutomationConsumerWindow` regression test, which runs these steps against a real application.*
 
@@ -400,17 +400,16 @@ app.bootstrap("developer");
 app.cppFunction("bf.render", render);                  // your callbacks stay yours
 auto automation = webfront::automation::enableAutomation(
     app, {.grants    = {"check", "build", "preview", "inspect", "interact", "call"},
-          .callbacks = {"bf.render"},                  // the only callback an agent may call
-          .listen    = privateEndpointDirectory});
+          .callbacks = {"bf.render"}});                // the only callback an agent may call
 app.show(automation->launchPage());
 automation->close();
 app.shutdown();
 ```
 
-- **Visible to you.** The window's terminal prints the grants and how to attach, `wf help` says so, and the window title can carry a marker.
-- **Found without being told.** `webfront-agent --list` shows the sessions their owners shared (never the capability), and `webfront-agent --print-mcp-config --attach <dir>` writes the `.mcp.json` for Claude Code or any MCP client. `wf create` adds an `AGENTS.md` that tells the agent how to attach.
+- **Visible to you.** The application prints its MCP URL, the window's terminal prints the grants, `wf help` says so, and the window title can carry a marker.
+- **Found without being told.** Each running instance writes its URL and the path of its private `mcp.json` (URL and token) to a per-user record, never the token itself; `claude --mcp-config PATH/mcp.json` or any MCP client connects to it. `wf create` adds an `AGENTS.md` that tells the agent how to connect.
 - **Bounded.** Each operation is a separate grant; a callback is reachable only by an exact name you listed; a stuck renderer is stopped by native deadlines; project code still runs with your rights (this is not a sandbox).
-- **Optional.** It lives in a separate launcher and one header; applications that do not call `enableAutomation` register nothing. `webfront_add_agent()` builds and installs the launcher for `add_subdirectory` and `FetchContent` consumers.
+- **Optional.** It lives in one header; applications that do not call `enableAutomation` register nothing and open no listener, and a distribution build (`WEBFRONT_DISTRIBUTION`) refuses to compile it.
 
 The [automation guide](docs/AUTOMATION.md#automating-your-own-application) covers grants, callbacks, discovery, deadlines and the MCP profile.
 
@@ -498,6 +497,8 @@ For explicit engine selection, `webfront_native_frontend_option(out)` and `webfr
 
 The optional [Jasmine and CTest integration](docs/CONSUMER_TESTING.md) runs browser specs against your application's page. Specs can capture PNG screenshots and image sequences, and can run native programs explicitly authorized by the test owner with `PROGRAMS`, using private temporary spaces for test files. The native-program browser integration is validated on Linux with CEF; see the guide for platform coverage and limitations. Authorized programs run with the user's permissions, so use trusted test code.
 
+Your own C++ tests can use the framework of WebFront's tests: the public [`webfront::bdd`](docs/BDD.md) header, the `WebFront::Bdd` CMake target and `webfront_bdd_discover_tests()`, which registers one CTest case per scenario.
+
 To select an embedded engine explicitly, `webfront::embeddedFrontendAvailable` reports whether one is compiled in and `webfront::EmbeddedWebFront` selects it. See [frontend selection](docs/FRONTENDS.md).
 
 ## Build and test
@@ -526,7 +527,7 @@ CI exercises C++ and native-browser paths on Windows, macOS and Linux. Extended 
 - Development project access is explicit and intended for trusted local code. Downloaded tools run with the application's bridge authority, and script permissions frame only the `context` API: neither is a sandbox. Only packages that run in a browser are supported; installation scripts and native add-ons are not executed. Builds transform TypeScript without type checking; `wf check` type-checks with the compiler the project locks.
 - An opt-in [native pseudoterminal](docs/PTY.md) connects an application-selected program to xterm.js on Linux, macOS and Windows.
 - The optional [`@webfront/react` adapter](docs/REACT.md) supplies coalesced C++ stores and empty React islands. `WebFrontLifeReact` demonstrates a C++ panel within the Game of Life React UI; its package archive is prepared locally for registry publication.
-- Embedded Linux has ARM64 CI coverage and specific Orin Nano board evidence; other boards, bare-metal targets and microcontrollers are not generally qualified. Check C++23, memory, networking and browser requirements for your target. The default local transport supplies neither TLS nor client authentication; remote deployment needs an application-specific security design.
+- Embedded Linux has ARM64 CI coverage and specific Orin Nano board evidence; other boards, bare-metal targets and microcontrollers are not generally qualified. Check C++23, memory, networking and browser requirements for your target. For HTTPS and WSS, see the [optional TLS listener and remote deployment recipe](docs/TLS.md). Client authentication is an application responsibility.
 - Packaging, accessibility and native-engine deployment still need application-specific work. The optional [`ui.document()` API](docs/DOM.md) provides DOM islands, automatically batched writes, event callbacks and grouped sender reads. See [project status](docs/PROJECT_STATUS.md) for known limitations.
 
 ## License

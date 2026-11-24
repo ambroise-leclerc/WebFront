@@ -1,4 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-25
+//
+// WebFront — tests/unit
+// Role: Benchmark of the gzip decoder with and without reserved output.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: measures only; never fails on timing
+
 // Manual Release benchmark; global allocation counters are isolated from the test runtime.
+
 #include "GzipFixtures.hpp"
 #include <webfront/http/Gzip.hpp>
 

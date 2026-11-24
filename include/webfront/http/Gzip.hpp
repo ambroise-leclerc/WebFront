@@ -1,4 +1,12 @@
-/** @brief Bounded, header-only gzip decoding for embedded HTTP assets (RFC 1951/1952). */
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — http
+// Role: Bounded, header-only gzip decoding of embedded HTTP assets (RFC 1951/1952).
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: decoder with hard output limits; fuzzed, never trust compressed sizes
+
 #pragma once
 
 #include "BuffersPolicy.hpp"
@@ -15,11 +23,11 @@
 
 namespace webfront::http::gzip {
 
-struct InvalidGzip : std::exception {};
+struct InvalidGzip : std::exception { };
 
 class GzipReader {
 public:
-    explicit GzipReader(std::string_view bytes) : input(bytes) {}
+    explicit GzipReader(std::string_view bytes) : input(bytes) { }
 
     // The reservoir contains at most 39 bits (a 32-bit read plus seven unused bits).
     // Refill is byte-bounded even when a lookup probes the final short code.
@@ -276,7 +284,7 @@ inline void skipBytes(GzipReader& input, unsigned count) {
 }
 
 inline void skipTerminatedString(GzipReader& input) {
-    while (input.bits(8) != 0) {}
+    while (input.bits(8) != 0) { }
 }
 
 inline unsigned readHeaderPrefix(GzipReader& input) {

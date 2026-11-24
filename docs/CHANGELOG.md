@@ -10,6 +10,35 @@ these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
+## [1.2.0] - 2026-11-24
+
+WebFront 1.2 ships with developer environment 1.2.0. The application itself becomes the MCP server that a coding agent drives
+(`enableAutomation`), and it can open a second native window, serve HTTPS and run beside other applications on a free port.
+It has breaking changes: `WebView2Options` becomes `ViewOptions`, `webfront-agent` is removed and the CEF profile moves; each
+entry below gives its migration.
+
+### Breaking
+- `WebView2Options` is now `ViewOptions`, shared with WKWebView: `userDataFolder` moves after `launch`, so a positional initialization of `WebView2Options` stops compiling, and so does a designated one that writes `.userDataFolder` before `.contentPolicy`, `.window`, `.visible` or `.launch` (write it last) (#652, `docs/FRONTENDS.md`).
+- `webfront/automation/Enable.hpp` no longer compiles with `WEBFRONT_DISTRIBUTION`: gate `enableAutomation` out of the distribution build, as the guide already advised (#632, ADR-025).
+- `webfront-agent` is removed with its JSON CLI, MCP on stdio, `--serve`, `--attach`, `--list` and `--print-mcp-config`, as are `WEBFRONT_BUILD_AUTOMATION`, `WEBFRONT_AUTOMATION_FRONTEND` and `webfront_add_agent()`: connect the MCP client to the URL the application prints (#632, ADR-025, `docs/AUTOMATION.md`).
+- `AutomationOptions::listen` becomes `directory` and may stay empty (a private directory named after the session is created), `Automation::endpoint()` becomes `directory()`, and the JSON-lines attachment channel (`ChannelServer`, `ChannelClient`) is gone (#632).
+- The CEF profile is now `cef_cache/<executable>`, not `cef_cache`: an application starts with an empty profile (localStorage, cookies); to keep the data, move the old contents of `cef_cache` into `cef_cache/<executable>` once (#617, `docs/HOST_INTEGRATION.md`).
+
+### Added
+- Open a second native window with `app.openSecondaryWindow(page, WindowOptions)` (WebKitGTK, WKWebView, WebView2; elsewhere `std::logic_error`, which `app.canShowSecondaryWindow()` predicts): it shares the server, the `cppFunction`s, the `jsFunction` subscribers and the view proof of the first window; `app.requestClose(page)` closes it, and closing the first closes the others (#616, `docs/FRONTENDS.md`).
+- Write your own scenarios with the public `webfront::bdd` framework: `<webfront/testing/Bdd.hpp>`, the `WebFront::Bdd` target, the installable `WebFrontBdd` package and `webfront_bdd_discover_tests()` (prefix, properties, shards) replace the internal `test/unit/Bdd.hpp` and `bdd_discover_tests`, and follow WebFront's versions (#647, `docs/BDD.md`).
+- Configure a stable MCP port and application-supplied Bearer token, or explicitly disable authentication for trusted development (#637, ADR-026, `docs/AUTOMATION.md`).
+- Connect an MCP client to the application itself: `enableAutomation(app, {.grants = {...}})` serves MCP over Streamable HTTP on a loopback port of its own, prints its URL and writes a private `mcp.json` with the URL and a session Bearer token, so several applications run side by side with no other program (#632, ADR-025, `docs/AUTOMATION.md`).
+- Use a custom network provider with `DeveloperAppWithNetwork`. The `BasicDeveloperApp` alias selects the existing TCP provider (#631).
+- Pass the MSVC code analysis on the automation host probe and the discovery directory of `Enable.hpp` (C6031, C6244), which stopped the Windows desktop job of a dispatch or pull request at its build (#638).
+- Serve HTTPS and WSS with the optional header-only TLS 1.3 listener and reload its PEM identity after renewal (#631, `docs/TLS.md`).
+- Start an application with no port setting when `9002` is taken: an empty `WebFrontConfig::port` falls back to a free port, a chosen port is never replaced, and CEF and WebKitGTK give each live instance its own profile directory (#617, `docs/HOST_INTEGRATION.md`).
+- Start several applications side by side: the default port follows `WEBFRONT_PORT` (a number from 0 to 65535, `0` asks for a free port, `9002` remains the default), the examples take `--port`, the server announces the port really bound, and a failed bind names the address, the port and the cause (#617, `docs/HOST_INTEGRATION.md`).
+
+### Fixed
+- Check the leftover STA of a WebView2 window only after a page that ran to its end, not after one that closes the window on a load failure: the runtime can keep a COM initialization of its own then, in about one `show()` in 500 under load, and the limit is documented with its measurements (#638, `docs/PROJECT_STATUS.md`).
+- Refuse every `Sec-Fetch-*` request header on the MCP listener, including `Sec-Fetch-Dest`, in both authenticated and unauthenticated modes (#637).
+
 ## [1.1.1] - 2026-11-20
 
 WebFront 1.1.1 ships with developer environment 1.0.1. It repairs the desktop CI jobs that the 1.1.0 release exposed (a Windows
@@ -38,6 +67,10 @@ in a native pseudoterminal, and a faster, less flashy start of the native window
 - Choose the colour of the WebKitGTK view under the page with `WindowOptions::background` (WebKitGTK; the other embedded frontends are listed here), and read the start-up milestones of a WebKitGTK view with `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WEBKITGTK.md`).
 
 ### Changed
+- The whole C++ code base is reformatted with `clang-format` and every source starts with a normalized header (SPDX, author, creation date, role, thread and allocation model, reading hint); CI checks both (`SourceHeaders` case, `.github/workflows/SourceFormat.yml`), and `.git-blame-ignore-revs` skips the reformatting in `git blame` (#653, `.github/CONTRIBUTING.md`).
+- WebKitGTK takes a `startupTimeout` (30 s by default), and WebView2 refuses a secondary window once the first one closed, even for a page already open (#652).
+- Open every native window from one `ViewOptions` (`WKWebViewOptions` and `WebView2Options` are aliases), whose test injections reach the secondary windows too (#652, `docs/FRONTENDS.md`).
+- Write a native frontend from shared headers: `EmbeddedFrontend` (facade and every `open()` overload), `WindowRegistry`/`InterfaceSession`, `StartupTrace` and `Presentation`, tested on Linux with fake windows (#652, `docs/FRONTENDS.md`).
 - Reveal the WKWebView window when the document has loaded or after one second (#611, `docs/WKWEBVIEW.md`).
 - Reveal the WebView2 window after the first frame or one second (#611, `docs/WEBVIEW2.md`).
 - Show the WebKitGTK window when the page reports its first frame, or when a one-second timer fires, even if the page has not painted, instead of at once; the embedded pages, the starter and the examples use the cheap `sans-serif` and `monospace` font stacks (#611, `docs/WEBKITGTK.md`).
@@ -270,7 +303,8 @@ Coroutines and the opt-in developer environment. One **breaking** change to the 
 
 - Fail decoding when a bridge integer is out of the requested C++ range, instead of invoking undefined behavior.
 
-[Unreleased]: https://github.com/ambroise-leclerc/WebFront/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/ambroise-leclerc/WebFront/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/ambroise-leclerc/WebFront/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/ambroise-leclerc/WebFront/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/ambroise-leclerc/WebFront/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ambroise-leclerc/WebFront/compare/v0.9.0...v1.0.0

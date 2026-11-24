@@ -76,8 +76,9 @@ WebView2 still reports failures to read popup event data or mark it handled as s
 
 This is a top-level navigation policy, not a subresource/iframe/network sandbox. Frames, fetches,
 third-party scripts, downloads, OS protocol handlers and browser extensions need separate host
-controls. A same-origin script already has the application's bridge authority. The server exposes
-no TLS or user authentication. Keep the default loopback bind unless remote access is deliberate.
+controls. A same-origin script already has the application's bridge authority. The optional [TLS listener](TLS.md)
+protects the transport and authenticates the server. The application owns client authentication.
+Keep the default loopback bind unless remote access is deliberate.
 DevTools settings control the adapter's engine UI, not inspection by native host code or an external debugger.
 
 Custom frontends can opt into `open(address, port, page, const ContentPolicy&)`; `BasicWF` prefers

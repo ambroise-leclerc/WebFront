@@ -1,4 +1,12 @@
-/// @brief Opt-in developer environment (terminal and wf commands) running in the application window. Downloaded code has project/bridge authority.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-20
+//
+// WebFront — core
+// Role: Opt-in developer environment (terminal and wf commands) running in the application window.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: public API; downloaded code has project and bridge authority, read DeveloperBootstrapOptions first
+
 #pragma once
 
 #include "system/DeveloperFS.hpp"
@@ -66,21 +74,20 @@ inline constexpr std::string_view defaultRegistry{"https://registry.npmjs.org/"}
 /// The configuration the environment reads. "registry" always names a usable registry, for environments
 /// that predate "registryExplicit"; the latter tells whether the application chose it.
 inline std::string bootstrapConfig(const DeveloperBootstrapOptions& options) {
-    return "{\"environment\":" + json::quote(options.environment) + ",\"integrity\":" + json::quote(options.integrity)
-         + ",\"registry\":" + json::quote(options.registry.value_or(std::string(defaultRegistry)))
-         + ",\"registryExplicit\":" + (options.registry ? "true" : "false")
-         + (options.manifestDirectory.empty() ? std::string{} : ",\"manifestDirectory\":" + json::quote(options.manifestDirectory))
-         + ",\"supported\":{\"protocol\":[" + std::to_string(protocolVersion) + "],\"api\":[" + std::to_string(apiVersion) + "]}}";
+    return "{\"environment\":" + json::quote(options.environment) + ",\"integrity\":" + json::quote(options.integrity) + ",\"registry\":"
+           + json::quote(options.registry.value_or(std::string(defaultRegistry))) + ",\"registryExplicit\":" + (options.registry ? "true" : "false")
+           + (options.manifestDirectory.empty() ? std::string{} : ",\"manifestDirectory\":" + json::quote(options.manifestDirectory))
+           + ",\"supported\":{\"protocol\":[" + std::to_string(protocolVersion) + "],\"api\":[" + std::to_string(apiVersion) + "]}}";
 }
 }  // namespace developer
 
-template <frontend::FrontendType Frontend = frontend::DefaultFrontend, fs::Provider... Extra>
-class BasicDeveloperApp : public BasicWF<NetProvider, fs::Multi<fs::DeveloperFS, Extra...>, http::DefaultBuffersPolicy, Frontend> {
-    using Base = BasicWF<NetProvider, fs::Multi<fs::DeveloperFS, Extra...>, http::DefaultBuffersPolicy, Frontend>;
+template <typename Network, frontend::FrontendType Frontend, fs::Provider... Extra>
+class DeveloperAppWithNetwork : public BasicWF<Network, fs::Multi<fs::DeveloperFS, Extra...>, http::DefaultBuffersPolicy, Frontend> {
+    using Base = BasicWF<Network, fs::Multi<fs::DeveloperFS, Extra...>, http::DefaultBuffersPolicy, Frontend>;
 
 public:
     /// An explicit project is required before enabling development file operations.
-    explicit BasicDeveloperApp(std::filesystem::path projectDirectory = {}, WebFrontConfig config = {})
+    explicit DeveloperAppWithNetwork(std::filesystem::path projectDirectory = {}, WebFrontConfig config = {})
         : Base(developer::projectConfig(std::move(config), projectDirectory)),
           project(projectDirectory.empty() ? std::filesystem::path{} : developer::canonicalDirectory(projectDirectory)) { }
 
@@ -137,6 +144,9 @@ private:
     std::filesystem::path             project;
     std::shared_ptr<developer::Store> store;
 };
+
+template <frontend::FrontendType Frontend = frontend::DefaultFrontend, fs::Provider... Extra>
+using BasicDeveloperApp = DeveloperAppWithNetwork<NetProvider, Frontend, Extra...>;
 
 #if defined(_WIN32) || defined(__APPLE__) || defined(__linux__)
 using NativeApp = BasicDeveloperApp<frontend::NativeWebViewFrontend>;

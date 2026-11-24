@@ -27,6 +27,9 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   system browser, `app.requestClose()` from another thread, or `webfront::UIThread` where the frontend
   accepts a secondary thread (WebView2); a host loop cannot share the main thread with an embedded
   window. See [host integration](HOST_INTEGRATION.md).
+  A second native window of the same application (`app.openSecondaryWindow()`, #616) exists on WebKitGTK, WKWebView and WebView2; CEF
+  and the system browser refuse it with `std::logic_error` (`app.canShowSecondaryWindow()` tells it beforehand, also after `NativeOrBrowserFrontend` fell back to the browser), and the position of the window is left to the toolkit. The call waits
+  for the interface thread: a `cppFunction` callback runs it on `app.uiExecutor()` rather than hold the server's thread.
 - **Native pseudoterminals (opt-in).** `webfront::Pty` uses a Unix PTY on Linux and macOS or ConPTY on Windows 10 version 1809 and later. The page adapter requires a loopback bind and the application’s own browser origin. See the [PTY guide and standalone example](PTY.md).
 - **Developer environment.** `NativeApp::bootstrap("developer")` loads the verified, pinned
   environment selected by `DeveloperReleaseData.hpp`. Its terminal provides `wf init`, `create`,
@@ -42,15 +45,21 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   covers the console, developer and embedded Game of Life stages; Hello World and the host loop
   (`examples/host-loop/`, a Boing Ball ray-traced by the host on the CPU or with optional CUDA; see
   [the host-loop example](HOST_LOOP_EXAMPLE.md) for its measurements and limits) are also in the default build.
-- **Developer automation (opt-in).** `webfront-agent` provides local stdio MCP and a JSON CLI
-  for an explicitly launched developer window. Native grants select check/build/test/preview,
-  bounded inspection and semantic actions. [Automation](AUTOMATION.md) documents provisioning,
-  lifecycle, limits and the supported MCP profile. It requires a compatible environment
-  (0.6.3 or later), supplied as a rebuilt archive or verified published distribution. Explicitly shared human windows support authenticated
-  native attachment. This does not discover arbitrary processes or isolate untrusted project code.
-  An application opts in to being driven with `automation::enableAutomation` (its own window and callbacks), shared sessions are
-  listed by `webfront-agent --list`, and `--print-mcp-config` generates the client configuration. The owner may allow-list application callbacks that an agent reaches through the `call` operation, and the terminal, `wf help` and
-  the starter's `AGENTS.md` announce automation (environment 0.6.6). Environment 0.6.6 is published; the release pin selects 0.9.2. First-contact guidance for agents (README section, `docs/DEVELOPING_WITH_AGENTS.md`, `webfront_write_agent_guide()`, configuration and startup notices) comes with the library; the `app` starter, `wf help agents` and the errors that give the next steps come with environment 0.9.2 (#561).
+- **Developer automation (opt-in).** An application that calls `automation::enableAutomation` serves MCP itself over
+  Streamable HTTP, on a loopback listener of its own with a session Bearer token, prints its URL and writes a private
+  `mcp.json` client configuration; no other program is built or launched ([ADR-025](adr/ADR-025-mcp-http-dans-l-application.md),
+  #632). Native grants select check/build/test/preview, bounded inspection, semantic actions, the setup operations and the
+  owner's allow-listed callbacks (`call`). Several instances run side by side, each with its own URL and discovery record.
+  A fixed MCP port and application-supplied token can keep a client configuration stable; authentication can also be
+  explicitly disabled for development, with the local-process risks described in [Automation](AUTOMATION.md) (#637).
+  Remote access is out of scope and automation does not compile with `WEBFRONT_DISTRIBUTION`. This does not isolate
+  untrusted project code. [Automation](AUTOMATION.md) documents the listener, lifecycle, limits and the supported MCP profile.
+  The `webfront-agent` launcher, its JSON CLI and MCP on stdio were removed. The environment 1.0.2 pinned in
+  [`DeveloperReleaseData.hpp`](../include/webfront/system/DeveloperReleaseData.hpp) describes MCP;
+  the starter guidance for stable client configuration is in the 1.0.3 sources and will reach `wf create` in the next
+  environment release. Until then agents can follow `docs/DEVELOPING_WITH_AGENTS.md`. First-contact
+  guidance for agents (README section, `docs/DEVELOPING_WITH_AGENTS.md`, `webfront_write_agent_guide()`, configuration and
+  startup notices) comes with the library.
 - **Maintaining WebFront.** The repository is itself a `wf` project, selected with
   `--manifest-dir js/developer`. Build and publish its environment using
   [PUBLISHING](../js/developer/tools/PUBLISHING.md). Regenerate the core's versioned headers
@@ -159,7 +168,9 @@ are retained for investigation; diagnostics alone do not establish a correction.
 - The developer environment and `NativeDebugFS` are trusted development facilities, not sandboxes.
   Manifest permissions bound only the scripts' `context` API. Only browser packages install;
   installation scripts and native add-ons do not run. The [content policy](CONTENT_POLICY.md)
-  restricts browser origins and navigation but provides neither TLS nor client authentication.
+  restricts browser origins and navigation. The optional [TLS listener](TLS.md) adds HTTPS and WSS
+  with TLS 1.3 and ChaCha20-Poly1305. Each listener admits 16 concurrent handshakes on the I/O thread.
+  Client authentication remains an application responsibility.
 - `fs::NativeStorage` confines writable storage to a declared root while resolving each path, but
   on POSIX it cannot prevent the effective user or the superuser from moving a directory out of the
   root during an operation: it detects such a move before a commit and after each operation, at
@@ -175,9 +186,18 @@ are retained for investigation; diagnostics alone do not establish a correction.
   Windows/macOS CEF deployment is not qualified. WebView2 needs its installed Evergreen runtime;
   fixed-version runtime packaging, application installers and accessibility remain application work.
 - `WebView2Frontend::open()` releases the STA it initialized. When a window is closed while the runtime is still
-  starting and the same thread then opens another one, the WebView2 runtime (observed with 157.0.4341.46) can keep one
-  COM initialization of its own: the thread then remains in its STA after `open()` returns (#564). A window that ran to
-  its end leaves none.
+  starting, or by a page that closes it on a load failure, the WebView2 runtime (observed with 157.0.4341.46) can keep a
+  COM initialization of its own: the thread is then still in an STA (apartment type 3, qualifier 0) when `open()` returns
+  (#564, #638). Measured on the Windows CI runner under load, over repeated `show()` calls of the
+  `WebView2Lifecycle-repeated-show` case (the repetition and its apartment log were temporary): a page whose bridge
+  connection is rejected and that closes the window (`rejected-ready.html`) left an STA in 2 of 600 calls, then in 1 of 1031
+  with `open()` dispatching the messages queued on the thread before it released its apartment, so that drain does not
+  remove it and was not kept; a page that closes its window (the encoded-path page) and a page that ran to its end and
+  closed it (`no-bridge.html`) left none in more than 1600 calls each. That is 3 cases in about 1600 calls after a load
+  failure, of the order of one in 500; the cause is not established. In the one case where another `show()` followed on the
+  same thread, the remainder was gone after that `show()`, so it can be a delayed release rather than a permanent one; one
+  case does not prove it. Do not rely on the thread being out of its STA immediately after `open()` returns. The test
+  checks the apartment only after a page that ran to its end.
 - The low-level DOM batch command and optional embedded interpreter are implemented; see
   [the wire contract](adr/ADR-003-protocole-binaire-et-bornes.md#commande-dom-dombatch-code-5-version-1).
   The per-connection document/node API, events (callbacks or `co_await node.next(name)`) and grouped

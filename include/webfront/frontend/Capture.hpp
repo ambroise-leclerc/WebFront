@@ -1,4 +1,12 @@
-/// @brief Frontend-neutral capture of the web view's content as a PNG image, for tests and CI.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-01
+//
+// WebFront — frontend
+// Role: Frontend-neutral capture of the web view's content as a PNG image, for tests and CI.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: test support; capture may be requested from any thread and blocks for a bounded time
+
 #pragma once
 
 #include <algorithm>

@@ -335,13 +335,14 @@ New interface, in order:
   wf install <package>          only for the npm packages the interface imports
   wf dev ui/main.ts             rebuilds on every save; wf preview builds once
   wf check, wf test, wf embed <entry> --output generated/AppUI.hpp
-An agent runs these itself and reads JSON results, with webfront-agent (WebFront configured with
--DWEBFRONT_BUILD_AUTOMATION=ON) once the application has called webfront::automation::enableAutomation:
-  webfront-agent --list                                                      the shared sessions
-  webfront-agent --attach DIRECTORY --operation create --starter app
-  webfront-agent --attach DIRECTORY --operation preview --entry ui/main.ts   after each edit, in place of wf dev
-  webfront-agent --attach DIRECTORY --mcp                                    the same operations as MCP on stdio
-  webfront-agent --agent-help                                                rules and contract
+An agent runs these itself, through MCP, once the application has called webfront::automation::enableAutomation:
+the application prints its MCP URL (http://127.0.0.1:PORT/mcp) and the path of its private mcp.json, which holds the URL
+and the Bearer token for the MCP client; never copy that file or its token into the project.
+  webfront.session {}                                                        gives the session ID: S below
+  webfront.start {session: S, operation: "create", arguments: {starter: "app"}}           returns a runId
+  webfront.result {session: S, runId}                                        until the run ends; one run at a time
+  webfront.start {session: S, operation: "preview", arguments: {entry: "ui/main.ts"}}    after each edit, in place of wf dev
+  webfront.result {session: S, runId}                                        until the preview run ends
 Guide: docs/DEVELOPING_WITH_AGENTS.md`;
 function help([topic, ...extra] = [], {config} = {}) {
     if (extra.length) throw new Error(`Usage: ${usage.help}`);
@@ -351,7 +352,7 @@ function help([topic, ...extra] = [], {config} = {}) {
         const purpose = purposes[topic];
         return `${usage[topic]}\n${typeof purpose === 'function' ? purpose(config) : purpose}`;
     }
-    return Object.values(usage).join('\n') + '\nAgents: wf help agents (the sequence, and how to run wf in JSON or MCP).' +
+    return Object.values(usage).join('\n') + '\nAgents: wf help agents (the sequence, and how to run wf through MCP).' +
         '\nCtrl+C interrupts a command. No system shell is exposed.' + automationHelp();
 }
 const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, check, test, build, dev, preview, embed, list, why, info, help};

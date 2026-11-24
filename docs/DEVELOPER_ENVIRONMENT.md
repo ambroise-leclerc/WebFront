@@ -79,8 +79,8 @@ Each published version is immutable: 0.3.0 introduced the packed-bitset Life sta
 manifest, `wf restore`, `wf run`, `wf exec`, `wf check` and the complete terminal, and 0.6.0 `wf build`, `wf dev` and `wf test`.
 
 The default configuration is generated in `include/webfront/system/DeveloperReleaseData.hpp`; it contains
-an exact versioned environment URL and the trusted digest. The 1.0.1 release pin selects
-`https://dist.webfront.fr/developer/1.0.1/environment.tgz` (ADR-021). The deployed archive, CORS headers and public
+an exact versioned environment URL and the trusted digest. The 1.2.0 release pin selects
+`https://dist.webfront.fr/developer/1.2.0/environment.tgz` (ADR-021). The deployed archive, CORS headers and public
 smoke test were verified before the pin was merged. Earlier publication gates are recorded for
 [0.6.6](validation/developer-0.6.6-release.md), [0.6.4](validation/developer-0.6.4-release.md) and [0.6.3](validation/developer-0.6.3-release.md).
 Published 0.6.2 introduced installation of the archives of `@types` packages and the manifest directory;
@@ -489,8 +489,8 @@ scheduler@0.28.0
 ```
 
 `wf help` lists the `wf` commands; `wf help <command>` gives the usage and purpose of one, and `wf help agents` (or
-`wf help --agents`) the model, the sequence for a new interface and the `webfront-agent` commands that run it in JSON or
-MCP (environment 0.9.2). The errors a newcomer meets first carry the next steps: a missing manifest names `wf init`, then
+`wf help --agents`) the model, the sequence for a new interface and how an agent runs it through the MCP URL of the application
+(environment 0.9.2; the MCP URL replaces `webfront-agent` from the environment that follows 1.0.1). The errors a newcomer meets first carry the next steps: a missing manifest names `wf init`, then
 `wf dev <entry.tsx>` and `wf create app`; a missing entry gives `ui/main.tsx` as an example; `wf create` without or with an
 unknown starter lists the starters. The line under the terminal that reports the bootstrap ends with `Agents: docs/DEVELOPING_WITH_AGENTS.md`;
 it comes from the library's embedded loader, not from the environment.
@@ -727,7 +727,8 @@ above). Rows before 0.9 were reconstructed from the header of each tag; 0.4.0 pr
 <!-- compatibility-table:begin -->
 | Library | Environment | Minimum api |
 | --- | --- | --- |
-| unreleased | 1.0.1 | 1 |
+| unreleased | 1.2.0 | 1 |
+| 1.2.0 | 1.2.0 | 1 |
 | 1.1.1 | 1.0.1 | 1 |
 | 1.1.0 | 1.0.1 | 1 |
 | 1.0.0 | 1.0.0 | 1 |
@@ -792,6 +793,12 @@ that flag, it writes only to the output directory. `site.mjs` stages a build int
 checks the pinned header against the published archive. The headers of the core's embedded assets are rendered by `js/core/EmbedAsset.cmake`, in pure CMake (see below). The archives have the package identifiers
 `@webfront/developer-environment`, `@webfront/app-starter` and `@webfront/life-starter`. They are distributed as static
 GitHub Pages downloads; no npm publication or scope ownership is required.
+
+The version in `distribution.json` is the version built from the current sources (currently 1.0.3, not yet published).
+It can be ahead of `DeveloperReleaseData.hpp`, which pins the published 1.0.2 environment used by applications. The
+compatibility table above records that published pin, not the next source build. The default branch receives a new
+pin only after the new distribution is published and its files are verified. Before the tag, the release branch carries
+the regenerated header, and `wf run build <directory> --refresh-bootstrap` rewrites it locally.
 
 The `SelfBuild*` CTest cases run the scripts on a copy of the sources, with the dependencies installed from the local
 registry: the build, a repeat build (same bytes), the checked-in bootstrap bundles and checksums rebuilt by wf alone (and the

@@ -1,19 +1,29 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-05-31
+//
+// WebFront — frontend
+// Role: The FrontendType concept, the default system-browser frontend and the contract every frontend satisfies.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: public contract; a frontend decides whether the server stops when open() returns
+
 #pragma once
 
 #include "../ContentPolicy.hpp"
 #include "../ViewAssociation.hpp"
 #include "Action.hpp"
-#include "Window.hpp"
 #include "CEF.hpp"
 #include "CloseRequest.hpp"
 #include "DefaultBrowser.hpp"
+#include "EmbeddedFrontend.hpp"
 #include "NativeWebView.hpp"
 #include "NativeWindow.hpp"
 #include "UIExecutor.hpp"
 #include "UILoop.hpp"
-#include "WebView2.hpp"
-#include "WKWebView.hpp"
 #include "WebKitGTK.hpp"
+#include "WebView2.hpp"
+#include "Window.hpp"
+#include "WKWebView.hpp"
 
 #include <atomic>
 #include <concepts>
@@ -60,6 +70,9 @@ namespace webfront::frontend {
  * closed the window; it returns false when nothing is open to receive the request. BasicWF::requestClose() forwards it.
  * A frontend that publishes its interface thread (uiExecutor()) declares `requestClose(std::optional<UISession>)` instead:
  * BasicWF passes the session it owns, and the request is dropped on the interface thread if another loop runs by then.
+ * Optional static openSecondaryWindow() and closeSecondaryWindow() show a second window of the application (#616). An
+ * optional static bool secondaryWindowsAvailable() tells at run time whether that frontend, as initialized, can show one
+ * (NativeOrBrowserFrontend cannot once it fell back to the system browser); undeclared means it always can.
  * An optional static constexpr bool requiresMainThread tells that open() belongs to the process main thread
  * (frontend::requiresMainThread<Frontend>); webfront::UIThread refuses such a frontend at compile time.
  * An optional open(address, port, file) overload receives the configured address; build URLs with
@@ -84,6 +97,15 @@ struct DefaultBrowserFrontend {
     /// for the opener command to end (BasicWF::start()).
     static void launch(std::string_view address, std::string_view port, std::string_view file) {
         browser::launchWithoutWaiting(detail::applicationUrl(address, port, file));
+    }
+
+    static void launchHttps(std::string_view address, std::string_view port, std::string_view file) {
+        browser::launchWithoutWaiting(detail::applicationUrl(address, port, file, webfront::detail::applicationOrigin(address, port, true)));
+    }
+
+    static void
+    open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy&, const WindowOptions&, const ViewLaunch& launch) {
+        browser::openUrl(detail::applicationUrl(address, port, file, launch.origin));
     }
 
     static void open(std::string_view port, std::string_view file) {
@@ -159,13 +181,17 @@ struct BrowserWithUILoopFrontend {
     static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy&, const WindowOptions&) {
         open(address, port, file);
     }
+    static void
+    open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy&, const WindowOptions&, const ViewLaunch& launch) {
+        loop(address, port, file, browser::launchWithoutWaiting, launch.origin);
+    }
     /// The loop with another launcher: the unit tests start no browser.
-    static void loop(std::string_view address, std::string_view port, std::string_view file, browser::Launcher launcher) {
+    static void loop(std::string_view address, std::string_view port, std::string_view file, browser::Launcher launcher, std::string_view origin = {}) {
         // The page opens from inside the loop, once it can run (the platform's loop acquired, nothing left to fail): a loop
         // that refuses to run never opens a page that nobody serves. A launcher that fails throws before the executor is
         // attached, so none is left attached.
         detail::uiloop::run(uiExecutorHostOf<BrowserWithUILoopFrontend>(), loopStop(), [&] {
-            launcher(detail::applicationUrl(address, port, file));
+            launcher(detail::applicationUrl(address, port, file, origin));
         });
     }
 
@@ -176,31 +202,14 @@ private:
     }
 };
 
-struct CEFFrontend {
-    static constexpr Action action{Action::closeServerAfterOpen};
+struct CEFFrontend : EmbeddedFrontend<CEFFrontend> {
     // CEF is initialized and run on the process main thread; another thread is not a qualified configuration.
-    static constexpr bool requiresMainThread = true;
-
-    /// Asks the window to close, from any thread; false when no window is open (see CloseRequest.hpp).
-    static bool requestClose([[maybe_unused]] std::optional<UISession> session = std::nullopt) noexcept {
-#ifdef WEBFRONT_EMBED_CEF
-        return detail::requestWindowClose(uiExecutor(), nativeWindow(), [](const NativeWindowHandle& window) {
-            cef::closeBrowser(window.pointer);
-        }, session);
-#else
-        return false;
-#endif
-    }
-
-    /// CEF's UI thread while open() runs its message loop (see UIExecutor.hpp).
-    [[nodiscard]] static UIExecutor uiExecutor() {
-        return uiExecutorHostOf<CEFFrontend>().executor();
-    }
-
-    /// The application's CefBrowser, readable on CEF's UI thread while open() runs (see NativeWindow.hpp).
-    [[nodiscard]] static NativeWindow nativeWindow() {
-        return nativeWindowHostOf<CEFFrontend>().window();
-    }
+    static constexpr bool             requiresMainThread = true;
+    static constexpr bool             secondaryWindows   = false;  // (#616)
+    static constexpr bool             compiled           = true;   // without CEF the functions of cef:: throw their own diagnostic
+    static constexpr std::string_view name               = "CEFFrontend";
+    using Host                                           = CEFFrontend;
+    using Options                                        = ViewOptions;
 
     static void initialize() {
         try {
@@ -209,22 +218,13 @@ struct CEFFrontend {
             std::exit(e.exit_code());
         }
     }
-
-    static void open(std::string_view port, std::string_view file) {
-        cef::open(port, file);
+    static void openNative(std::string_view address, std::string_view port, std::string_view file, const Options& options) {
+        cef::open(address, port, file, options.contentPolicy, options.window, options.launch);
     }
-    static void open(std::string_view address, std::string_view port, std::string_view file) {
-        cef::open(address, port, file);
-    }
-    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy) {
-        cef::open(address, port, file, policy);
-    }
-    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window) {
-        cef::open(address, port, file, policy, window);
-    }
-    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window,
-                     const ViewLaunch& launch) {
-        cef::open(address, port, file, policy, window, launch);
+    static void closeNative([[maybe_unused]] const NativeWindowHandle& window) {
+#ifdef WEBFRONT_EMBED_CEF
+        cef::closeBrowser(window.pointer);
+#endif
     }
 };
 
@@ -248,8 +248,12 @@ struct PlatformNativeFrontend {
 
 // Calls the richest open() the frontend offers, as BasicWF does.
 template <typename Frontend>
-void openWith(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window,
-              const ViewLaunch& launch = {}) {
+void openWith(std::string_view     address,
+              std::string_view     port,
+              std::string_view     file,
+              const ContentPolicy& policy,
+              const WindowOptions& window,
+              const ViewLaunch&    launch = {}) {
     if constexpr (requires { Frontend::open(address, port, file, policy, window, launch); })
         Frontend::open(address, port, file, policy, window, launch);
     else if constexpr (requires { Frontend::open(address, port, file, policy, window); })
@@ -282,7 +286,7 @@ struct NativeOrBrowserFrontendFor {
     static constexpr Action action{Native::action};
     static constexpr bool   requiresMainThread = frontend::requiresMainThread<Native> || frontend::requiresMainThread<Browser>;
     /// Whichever is used at run time must be closable on request: the plain system browser, which waits for Enter, is not.
-    static constexpr bool   endsOnRequest = frontend::endsOnRequest<Native> && frontend::endsOnRequest<Browser>;
+    static constexpr bool endsOnRequest = frontend::endsOnRequest<Native> && frontend::endsOnRequest<Browser>;
 
     /// Asks the one in use to end its session; false when it has nothing to close (the plain system browser never has).
     /// Callable from any thread: the decision of initialize() is read atomically.
@@ -311,19 +315,27 @@ struct NativeOrBrowserFrontendFor {
     /// owner of a session is told apart by it only then.
     [[nodiscard]] static bool publishesUIExecutor() {
         if (usesNativeWindow())
-            return requires { { Native::uiExecutor() } -> std::same_as<UIExecutor>; };
-        return requires { { Browser::uiExecutor() } -> std::same_as<UIExecutor>; };
+            return requires {
+                { Native::uiExecutor() } -> std::same_as<UIExecutor>;
+            };
+        return requires {
+            { Browser::uiExecutor() } -> std::same_as<UIExecutor>;
+        };
     }
 
     /// The interface thread of the window in use; the browser path has one only with its loop mode.
     [[nodiscard]] static UIExecutor uiExecutor() {
         if (usesNativeWindow()) {
-            if constexpr (requires { { Native::uiExecutor() } -> std::same_as<UIExecutor>; })
+            if constexpr (requires {
+                              { Native::uiExecutor() } -> std::same_as<UIExecutor>;
+                          })
                 return Native::uiExecutor();
             else
                 return {};
         } else {
-            if constexpr (requires { { Browser::uiExecutor() } -> std::same_as<UIExecutor>; })
+            if constexpr (requires {
+                              { Browser::uiExecutor() } -> std::same_as<UIExecutor>;
+                          })
                 return Browser::uiExecutor();
             else
                 return {};
@@ -333,7 +345,9 @@ struct NativeOrBrowserFrontendFor {
     /// The window of the one in use; the system browser has none.
     [[nodiscard]] static NativeWindow nativeWindow() {
         if (usesNativeWindow()) {
-            if constexpr (requires { { Native::nativeWindow() } -> std::same_as<NativeWindow>; })
+            if constexpr (requires {
+                              { Native::nativeWindow() } -> std::same_as<NativeWindow>;
+                          })
                 return Native::nativeWindow();
         }
         return {};
@@ -356,36 +370,66 @@ struct NativeOrBrowserFrontendFor {
         }
     }
 
+    /// A second window beside the first (#616): the native window's, or a refusal when the system browser was chosen. The
+    /// system browser is never asked to open one: it would be an external browser, without the proof of an embedded view.
+    /// Offered only when the native frontend offers it; secondaryWindowsAvailable() tells which way initialize() decided.
+    static void openSecondaryWindow(std::string_view     address,
+                                    std::string_view     port,
+                                    std::string_view     file,
+                                    const ContentPolicy& policy,
+                                    const WindowOptions& window,
+                                    const ViewLaunch&    launch)
+        requires requires { Native::openSecondaryWindow(address, port, file, policy, window, launch); }
+    {
+        if (!usesNativeWindow())
+            throw std::logic_error("the system browser cannot show a second window of the application");
+        Native::openSecondaryWindow(address, port, file, policy, window, launch);
+    }
+    [[nodiscard]] static bool closeSecondaryWindow(std::string_view file)
+        requires requires {
+            { Native::closeSecondaryWindow(file) } -> std::same_as<bool>;
+        }
+    {
+        return usesNativeWindow() && Native::closeSecondaryWindow(file);
+    }
+    /// Whether openSecondaryWindow() can open a window: false once initialize() chose the system browser.
+    [[nodiscard]] static bool secondaryWindowsAvailable()
+        requires requires(std::string_view text, const ContentPolicy& policy, const WindowOptions& window, const ViewLaunch& launch) {
+            Native::openSecondaryWindow(text, text, text, policy, window, launch);
+        }
+    {
+        return usesNativeWindow();
+    }
+
     static void open(std::string_view port, std::string_view file) {
         if (usesNativeWindow())
             Native::open(port, file);
         else
             Browser::open(port, file);
     }
-    static void open(std::string_view address, std::string_view port, std::string_view file) {
-        open(address, port, file, ContentPolicy{}, WindowOptions{});
-    }
-    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy) {
-        open(address, port, file, policy, WindowOptions{});
-    }
-    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window) {
-        open(address, port, file, policy, window, ViewLaunch{});
-    }
     /// The launch proof goes to the native window only: the system browser is never given a secret (ADR-020).
-    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window,
-                     const ViewLaunch& launch) {
+    static void open(std::string_view     address,
+                     std::string_view     port,
+                     std::string_view     file,
+                     const ContentPolicy& policy = {},
+                     const WindowOptions& window = {},
+                     const ViewLaunch&    launch = {}) {
         if (usesNativeWindow())
             detail::openWith<Native>(address, port, file, policy, window, launch);
         else
-            detail::openWith<Browser>(address, port, file, policy, window);
+            detail::openWith<Browser>(address, port, file, policy, window, ViewLaunch{"", launch.origin});
     }
 
 private:
     template <typename Used>
     static bool closeWith(std::optional<UISession> session) {
-        if constexpr (requires { { Used::requestClose(session) } -> std::same_as<bool>; })
+        if constexpr (requires {
+                          { Used::requestClose(session) } -> std::same_as<bool>;
+                      })
             return Used::requestClose(session);
-        else if constexpr (requires { { Used::requestClose() } -> std::same_as<bool>; })
+        else if constexpr (requires {
+                               { Used::requestClose() } -> std::same_as<bool>;
+                           })
             return Used::requestClose();
         else
             return false;
