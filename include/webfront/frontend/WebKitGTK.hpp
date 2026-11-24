@@ -188,11 +188,10 @@ inline void requireMainThread() {
 inline void initialize(SandboxMode mode = SandboxMode::development) {
     requireMainThread();
     if (inheritedSnapToolkitPaths() && !snapConfinementVerified()) {
-        std::string names;
-        for (const auto& name : scrubInheritedSnapEnvironment())
-            names += (names.empty() ? "" : ", ") + name;
-        log::warn("WebKitGTK: inherited Snap library or toolkit paths would break host WebKit processes; repaired " + names
-                  + " for this process (see docs/WEBKITGTK.md)");
+        // Printed on stderr, not through the logger: an application that has not enabled logging would otherwise
+        // run with a changed environment and no trace of it.
+        const auto message = snapRepairMessage(scrubInheritedSnapEnvironment());
+        std::fwrite(message.data(), 1, message.size(), stderr);
     }
     requireSandboxEnvironment(mode);
     static std::optional<SandboxMode> prepared;

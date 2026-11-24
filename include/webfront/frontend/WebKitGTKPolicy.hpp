@@ -183,6 +183,15 @@ inline std::string withoutSnapPaths(std::string_view value, std::string_view sep
     return kept;
 }
 
+/// The line printed on stderr when `names` were repaired, independent of the logger, which is silent until enabled.
+inline std::string snapRepairMessage(const std::vector<std::string>& names) {
+    std::string list;
+    for (const auto& name : names)
+        list += (list.empty() ? "" : ", ") + name;
+    return "WebFront: inherited Snap environment would break WebKit's processes; repaired " + list
+         + " for this process (see docs/WEBKITGTK.md, \"Snap-hosted editor terminals\")\n";
+}
+
 /// Repairs the variables that name Snap paths, for the application and the processes WebKit launches. A Snap-packaged
 /// VS Code or VSCodium terminal keeps the original value in `<NAME>_VSCODE_SNAP_ORIG`: restore it (an empty one means
 /// unset). Otherwise drop the Snap entries of a list, or unset a single path. Returns the names changed. It must run

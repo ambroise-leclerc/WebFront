@@ -127,6 +127,12 @@ const Scenario webKitGTKScrubsSnap{
                 check(scrubInheritedSnapEnvironment().empty());
             });
         });
+        then("names the repaired variables in a one-line message for stderr", [] {
+            const auto message = snapRepairMessage({"GIO_MODULE_DIR", "XDG_DATA_DIRS"});
+            check(message.find("GIO_MODULE_DIR, XDG_DATA_DIRS") != std::string::npos);
+            check(message.ends_with("\n"));
+            check(message.find('\n') == message.size() - 1);
+        });
         then("leaves a clean environment untouched", [] {
             withSnapEnvironment([] {
                 setenv("GTK_PATH", "/usr/lib/x86_64-linux-gnu/gtk-3.0", 1);
