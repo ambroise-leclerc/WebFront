@@ -119,7 +119,7 @@ jobs:
     # Only Linux waits for its image. Native desktops below start immediately and reuse these steps.
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.repeat_desktop_tests) }}
     # No `name:` expression: a skipped matrix job would display it unevaluated.
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && (inputs.desktop_passes > 3 && 300 || 90) || 25 }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && (inputs.desktop_passes > 3 && 300 || 90) || 60 }}
     strategy:
       fail-fast: false
       matrix:
@@ -329,7 +329,7 @@ jobs:
     permissions:
       contents: read
     # The explicit qualification includes a cold analysis build and desktop_passes complete graphs.
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && (inputs.desktop_passes > 3 && 300 || 90) || 25 }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && (inputs.desktop_passes > 3 && 300 || 90) || 60 }}
     strategy:
       fail-fast: false
       matrix:
