@@ -155,6 +155,30 @@ const Scenario webKitGTKScrubsSnap{
                 check(current("GIO_MODULE_DIR") == "<unset>");
             });
         });
+        then("repairs the image loaders the editor points at its own cache and modules", [] {
+            withSnapEnvironment([] {
+                setenv("GDK_PIXBUF_MODULE_FILE", "/home/user/snap/codium/common/.cache/gdk-pixbuf-loaders.cache", 1);
+                setenv("GDK_PIXBUF_MODULE_FILE_VSCODE_SNAP_ORIG", "/usr/lib/loaders.cache", 1);
+                setenv("GDK_PIXBUF_MODULEDIR", "/snap/codium/495/usr/lib/gdk-pixbuf-2.0/loaders", 1);
+                setenv("GDK_PIXBUF_MODULEDIR_VSCODE_SNAP_ORIG", "", 1);
+                check(inheritedSnapToolkitPaths());
+                check(scrubInheritedSnapEnvironment() == std::vector<std::string>{"GDK_PIXBUF_MODULE_FILE", "GDK_PIXBUF_MODULEDIR"});
+                check(current("GDK_PIXBUF_MODULE_FILE") == "/usr/lib/loaders.cache");
+                check(current("GDK_PIXBUF_MODULEDIR") == "<unset>");
+            });
+        });
+        then("never turns an empty LD_PRELOAD entry into a preloaded current directory", [] {
+            withSnapEnvironment([] {
+                setenv("LD_PRELOAD", "/snap/pkg/lib.so", 1);
+                setenv("LD_PRELOAD_VSCODE_SNAP_ORIG", ":/snap/pkg/lib.so", 1);
+                scrubInheritedSnapEnvironment();
+                check(current("LD_PRELOAD") == "<unset>");
+                setenv("LD_PRELOAD", "/snap/pkg/lib.so", 1);
+                setenv("LD_PRELOAD_VSCODE_SNAP_ORIG", ":/snap/pkg/lib.so:/opt/lib.so", 1);
+                scrubInheritedSnapEnvironment();
+                check(current("LD_PRELOAD") == ":/opt/lib.so");
+            });
+        });
         then("leaves a variable the editor saved unchanged", [] {
             withSnapEnvironment([] {
                 setenv("GTK_PATH", "/usr/lib/gtk-3.0", 1);

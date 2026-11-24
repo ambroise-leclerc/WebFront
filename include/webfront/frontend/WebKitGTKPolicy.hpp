@@ -144,6 +144,8 @@ inline constexpr std::array snapSensitiveVariables = {
     SnapSensitiveVariable{  "GTK_IM_MODULE_FILE",   ""},
     SnapSensitiveVariable{"GSETTINGS_SCHEMA_DIR",   ""},
     SnapSensitiveVariable{             "LOCPATH",  ":"},
+    SnapSensitiveVariable{"GDK_PIXBUF_MODULE_FILE",   ""},
+    SnapSensitiveVariable{"GDK_PIXBUF_MODULEDIR",     ""},
     SnapSensitiveVariable{       "XDG_DATA_DIRS",  ":"},
     SnapSensitiveVariable{     "XDG_CONFIG_DIRS",  ":"}
 };
@@ -183,7 +185,7 @@ inline bool inheritedSnapToolkitPaths() {
 
 /// `value` without its Snap entries; `separators` must not be empty. Other entries are kept as they are, empty ones
 /// included: an empty element of LD_LIBRARY_PATH names the current directory.
-inline std::string withoutSnapPaths(std::string_view value, std::string_view separators) {
+inline std::string withoutSnapPaths(std::string_view value, std::string_view separators, bool emptyIsCurrentDirectory = false) {
     std::string kept;
     bool        first = true, keptEmpty = false;
     for (;;) {
@@ -200,8 +202,9 @@ inline std::string withoutSnapPaths(std::string_view value, std::string_view sep
             break;
         value.remove_prefix(end + 1);
     }
-    // A lone empty entry would read as "no path" once joined: spell the current directory it stands for.
-    return kept.empty() && keptEmpty ? "." : kept;
+    // Only in a library search path does an empty entry stand for the current directory, and a lone one would read as "no
+    // path" once joined: spell it. In LD_PRELOAD "." would be a library to preload, so there the variable is unset.
+    return kept.empty() && keptEmpty && emptyIsCurrentDirectory ? "." : kept;
 }
 
 /// The line printed on stderr when `names` were repaired, independent of the logger, which is silent until enabled.
@@ -281,7 +284,7 @@ inline std::vector<std::string> scrubInheritedSnapEnvironment() {
         if (start.empty())
             ;  // the editor saved "absent": nothing to filter, and the filter's "." would add the current directory
         else if (!separators.empty())
-            replacement = withoutSnapPaths(start, separators);
+            replacement = withoutSnapPaths(start, separators, std::string_view(name) == "LD_LIBRARY_PATH");
         else if (!containsSnapPath(start))
             replacement = start;
         if (!replacement.empty())

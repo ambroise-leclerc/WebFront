@@ -75,8 +75,9 @@ WebFront.
 VS Code and VSCodium overwrite a set of variables in their terminals and keep each
 original value in `<NAME>_VSCODE_SNAP_ORIG`. That mark is the evidence WebFront
 relies on: when `LD_LIBRARY_PATH`, `LD_PRELOAD`, `GIO_MODULE_DIR`, `GTK_PATH`,
-`GTK_EXE_PREFIX`, `GTK_IM_MODULE_FILE`, `GSETTINGS_SCHEMA_DIR`, `LOCPATH`,
-`XDG_DATA_DIRS` or `XDG_CONFIG_DIRS` has such a mark and a value that differs from
+`GTK_EXE_PREFIX`, `GTK_IM_MODULE_FILE`, `GDK_PIXBUF_MODULE_FILE`,
+`GDK_PIXBUF_MODULEDIR`, `GSETTINGS_SCHEMA_DIR`, `LOCPATH`, `XDG_DATA_DIRS` or
+`XDG_CONFIG_DIRS` has such a mark and a value that differs from
 it, outside a verified Snap confinement, the frontend repairs the variable before the
 toolkit starts and prints the names it changed on `stderr`. It does not use the
 WebFront logger, which is silent until the application enables a level and registers
@@ -87,8 +88,9 @@ a sink.
 - From it, the Snap entries are removed from a list, or a single Snap path is unset.
   A Snap path inside the saved original is dropped too, and the saved original is
   rewritten to the repaired value, so nothing is repaired twice.
-- Removing Snap entries keeps the others unchanged, empty entries included (an empty
-  element of `LD_LIBRARY_PATH` names the current directory).
+- Removing Snap entries keeps the others unchanged, empty entries included. A lone
+  empty entry left in `LD_LIBRARY_PATH`, where it names the current directory, becomes
+  `.`; in any other list, `LD_PRELOAD` included, nothing left means the variable is unset.
 
 A Snap path alone is not repaired. An application may configure one on purpose, for
 example `XDG_DATA_DIRS=/opt/share:/snap/pkg/current/share`, and a `/snap/` or
