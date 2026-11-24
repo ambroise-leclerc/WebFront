@@ -189,19 +189,27 @@ inline void initialize(SandboxMode mode = SandboxMode::development) {
     requireMainThread();
     static std::atomic<bool> snapRepairClaimed{false};  // initialize() runs again from open(), threads may exist by then
     if (claimOnce(snapRepairClaimed) && !keepSnapEnvironmentRequested() && !snapConfinementVerified()) {
-        if (inheritedSnapToolkitPaths()) {
-            // Printed on stderr, not through the logger: an application that has not enabled logging would otherwise
-            // run with a changed environment, or a broken WebKit, and no trace of it.
+        // Printed on stderr, not through the logger: an application that has not enabled logging would otherwise
+        // run with a changed environment, or a broken WebKit, and no trace of it.
+        const bool repairing = inheritedSnapToolkitPaths();
+        if (repairing) {
             const auto threads = processThreadCount();
             const auto message = threads == 1 ? snapRepairMessage(scrubInheritedSnapEnvironment())
                                               : snapRepairSkippedMessage(snapOverriddenNames(), threads);
             std::fwrite(message.data(), 1, message.size(), stderr);
-        } else if (const auto unmarked = snapPathsWithoutEditorMark(); !unmarked.empty()) {
-            std::string names;
-            for (const auto& name : unmarked)
-                names += (names.empty() ? "" : ", ") + name;
-            log::warn("WebKitGTK: " + names + " hold Snap paths that no editor marked as inherited; left unchanged, see "
-                      "docs/WEBKITGTK.md if WebKit fails to start");
+        }
+        // Looked up whether or not something was repaired: one unmarked variable (GIO_MODULE_DIR) can break WebKit alone.
+        if (const auto unmarked = snapPathsWithoutEditorMark(); !unmarked.empty()) {
+            if (repairing) {
+                const auto message = snapUnmarkedMessage(unmarked);
+                std::fwrite(message.data(), 1, message.size(), stderr);
+            } else {
+                std::string names;
+                for (const auto& name : unmarked)
+                    names += (names.empty() ? "" : ", ") + name;
+                log::warn("WebKitGTK: " + names + " hold Snap paths that no editor marked as inherited; left unchanged, see "
+                          "docs/WEBKITGTK.md if WebKit fails to start");
+            }
         }
     }
     requireSandboxEnvironment(mode);

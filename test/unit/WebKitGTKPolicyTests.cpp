@@ -103,6 +103,21 @@ const Scenario webKitGTKScrubsSnap{
                 check(snapPathsWithoutEditorMark() == std::vector<std::string>{"XDG_DATA_DIRS"});
             });
         });
+        then("still reports an unmarked Snap path after repairing a marked variable", [] {
+            withSnapEnvironment([] {
+                setenv("GTK_EXE_PREFIX", "/snap/codium/495/usr", 1);
+                setenv("GTK_EXE_PREFIX_VSCODE_SNAP_ORIG", "", 1);
+                setenv("GIO_MODULE_DIR", "/snap/codium/495/usr/lib/gio", 1);
+                check(inheritedSnapToolkitPaths());
+                check(scrubInheritedSnapEnvironment() == std::vector<std::string>{"GTK_EXE_PREFIX"});
+                const auto unmarked = snapPathsWithoutEditorMark();
+                check(unmarked == std::vector<std::string>{"GIO_MODULE_DIR"});
+                check(current("GIO_MODULE_DIR") == "/snap/codium/495/usr/lib/gio");
+                const auto message = snapUnmarkedMessage(unmarked);
+                check(message.find("GIO_MODULE_DIR") != std::string::npos && message.find("left unchanged") != std::string::npos);
+                check(message.find('\n') == message.size() - 1);
+            });
+        });
         then("unsets a Snap path the editor marked, and leaves an unmarked variable alone", [] {
             withSnapEnvironment([] {
                 setenv("GIO_MODULE_DIR", "/home/user/snap/codium/common/.cache/gio-modules", 1);

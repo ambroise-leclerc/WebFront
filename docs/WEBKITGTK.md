@@ -95,9 +95,10 @@ a sink.
 A Snap path alone is not repaired. An application may configure one on purpose, for
 example `XDG_DATA_DIRS=/opt/share:/snap/pkg/current/share`, and a `/snap/` or
 `/var/lib/snapd/snap/` value without the editor's mark is left unchanged, as is a
-value equal to its saved original. The frontend only logs a `warn` (silent unless the
-application enables logging) naming those variables, for the case where WebKit then
-fails. The price of the mark is that a value you set yourself in an editor terminal,
+value equal to its saved original. The frontend names those variables, for the case where
+WebKit then fails, whether or not it repaired others: on `stderr` when it also
+repaired or skipped a repair (one unmarked `GIO_MODULE_DIR` can break WebKit alone),
+otherwise as a `warn` that stays silent unless the application enables logging. The price of the mark is that a value you set yourself in an editor terminal,
 such as `export XDG_DATA_DIRS=$XDG_DATA_DIRS:/foo`, is replaced by the saved original.
 Snap-packaged editors other than VS Code and VSCodium are not covered unless they
 use the same mark. Nothing changes inside a verified Snap confinement.

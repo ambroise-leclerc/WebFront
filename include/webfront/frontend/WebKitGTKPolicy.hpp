@@ -264,6 +264,16 @@ inline std::string snapRepairSkippedMessage(const std::vector<std::string>& name
            "docs/WEBKITGTK.md, \"Snap-hosted editor terminals\")\n";
 }
 
+/// The note for Snap paths no editor marked: left unchanged, but they can still break WebKit on their own.
+inline std::string snapUnmarkedMessage(const std::vector<std::string>& names) {
+    std::string list;
+    for (const auto& name : names)
+        list += (list.empty() ? "" : ", ") + name;
+    return "WebFront: " + list
+         + " hold Snap paths that no editor marked as inherited and were left unchanged; if WebKit still fails to start, "
+           "clean them (see docs/WEBKITGTK.md, \"Snap-hosted editor terminals\")\n";
+}
+
 /// Repairs the variables that name Snap paths, for the application and the processes WebKit launches. A Snap-packaged
 /// VS Code or VSCodium terminal keeps the original value in `<NAME>_VSCODE_SNAP_ORIG`: that value is the starting
 /// point (an empty one means unset), and a Snap path inside it is dropped like any other, since the editor's own
