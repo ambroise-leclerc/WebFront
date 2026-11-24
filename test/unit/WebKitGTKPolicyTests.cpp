@@ -18,6 +18,7 @@
 #include <fstream>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -167,6 +168,37 @@ const Scenario webKitGTKScrubsSnap{
                 check(scrubInheritedSnapEnvironment().empty());
                 check(current("XDG_DATA_DIRS") == "/usr/local/share:/usr/share");
             });
+        });
+        then("unsets a list whose saved original is empty instead of setting the current directory", [] {
+            withSnapEnvironment([] {
+                setenv("LD_LIBRARY_PATH", "/snap/core20/current/lib", 1);
+                setenv("LD_LIBRARY_PATH_VSCODE_SNAP_ORIG", "", 1);
+                setenv("XDG_DATA_DIRS", "/snap/codium/495/usr/share", 1);
+                setenv("XDG_DATA_DIRS_VSCODE_SNAP_ORIG", "", 1);
+                scrubInheritedSnapEnvironment();
+                check(current("LD_LIBRARY_PATH") == "<unset>");
+                check(current("XDG_DATA_DIRS") == "<unset>");
+                check(scrubInheritedSnapEnvironment().empty());
+            });
+        });
+        then("reports the names to repair without touching the environment, and counts threads", [] {
+            withSnapEnvironment([] {
+                setenv("GTK_EXE_PREFIX", "/snap/codium/495/usr", 1);
+                check(snapOverriddenNames() == std::vector<std::string>{"GTK_EXE_PREFIX"});
+                check(current("GTK_EXE_PREFIX") == "/snap/codium/495/usr");
+            });
+            const auto before = processThreadCount();
+            std::atomic<bool> stop{false};
+            std::thread       worker([&] {
+                while (!stop)
+                    std::this_thread::yield();
+            });
+            check(processThreadCount() > before);
+            stop = true;
+            worker.join();
+            const auto message = snapRepairSkippedMessage({"GIO_MODULE_DIR"}, 3);
+            check(message.find("GIO_MODULE_DIR") != std::string::npos && message.find("3 threads") != std::string::npos);
+            check(message.find('\n') == message.size() - 1);
         });
         then("lets only the first initialization claim the repair", [] {
             std::atomic<bool> flag{false};

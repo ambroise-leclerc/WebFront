@@ -14,6 +14,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -198,9 +199,40 @@ inline std::string snapRepairMessage(const std::vector<std::string>& names) {
          + " for this process (see docs/WEBKITGTK.md, \"Snap-hosted editor terminals\")\n";
 }
 
+/// Names `scrubInheritedSnapEnvironment()` would change, without changing anything.
+inline std::vector<std::string> snapOverriddenNames() {
+    std::vector<std::string> names;
+    for (const auto& variable : snapSensitiveVariables)
+        if (snapOverridden(variable))
+            names.emplace_back(variable.name);
+    return names;
+}
+
+/// Threads of this process, from /proc/self/task; 1 when it cannot be read.
+inline std::size_t processThreadCount() {
+    std::error_code error;
+    std::size_t     count = 0;
+    for (std::filesystem::directory_iterator it("/proc/self/task", error), end; !error && it != end; it.increment(error))
+        ++count;
+    return count == 0 ? 1 : count;
+}
+
 inline bool keepSnapEnvironmentRequested() {
     const auto* value = std::getenv("WEBFRONT_KEEP_SNAP_ENVIRONMENT");
     return value && std::string_view(value) != "0";
+}
+
+/// The stderr line when the repair is not applied because other threads already run: setenv is not safe against a
+/// concurrent getenv in them, so the process is left as it is and the cause stays visible.
+inline std::string snapRepairSkippedMessage(const std::vector<std::string>& names, std::size_t threads) {
+    std::string list;
+    for (const auto& name : names)
+        list += (list.empty() ? "" : ", ") + name;
+    return "WebFront: inherited Snap environment would break WebKit's processes (" + list + "), but this process already runs "
+         + std::to_string(threads)
+         + " threads and changing the environment now is not safe, so nothing was repaired; construct the WebKitGTK frontend "
+           "before starting threads, or start the application with those variables cleaned (see docs/WEBKITGTK.md, "
+           "\"Snap-hosted editor terminals\")\n";
 }
 
 /// Repairs the variables that name Snap paths, for the application and the processes WebKit launches. A Snap-packaged
@@ -220,7 +252,9 @@ inline std::vector<std::string> scrubInheritedSnapEnvironment() {
         const auto*       saved    = std::getenv(original.c_str());
         const std::string start    = saved ? saved : std::getenv(name);
         std::string       replacement;
-        if (!separators.empty())
+        if (start.empty())
+            ;  // the editor saved "absent": nothing to filter, and the filter's "." would add the current directory
+        else if (!separators.empty())
             replacement = withoutSnapPaths(start, separators);
         else if (!containsSnapPath(start))
             replacement = start;

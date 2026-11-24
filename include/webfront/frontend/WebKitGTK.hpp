@@ -191,8 +191,10 @@ inline void initialize(SandboxMode mode = SandboxMode::development) {
     if (claimOnce(snapRepairClaimed) && !keepSnapEnvironmentRequested() && inheritedSnapToolkitPaths()
         && !snapConfinementVerified()) {
         // Printed on stderr, not through the logger: an application that has not enabled logging would otherwise
-        // run with a changed environment and no trace of it.
-        const auto message = snapRepairMessage(scrubInheritedSnapEnvironment());
+        // run with a changed environment, or a broken WebKit, and no trace of it.
+        const auto threads = processThreadCount();
+        const auto message = threads > 1 ? snapRepairSkippedMessage(snapOverriddenNames(), threads)
+                                         : snapRepairMessage(scrubInheritedSnapEnvironment());
         std::fwrite(message.data(), 1, message.size(), stderr);
     }
     requireSandboxEnvironment(mode);
