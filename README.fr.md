@@ -12,7 +12,7 @@
 
 [English](README.md) · [Français](README.fr.md)
 
-WebFront est une **bibliothèque C++23 header-only pour créer des interfaces utilisateur riches et modernes.** Conservez la logique applicative en C++ et créez des interfaces réactives avec TypeScript, React et les paquets de l’écosystème JavaScript. WebFront intègre les outils de développement d’interfaces à votre application : aucun environnement de développement TypeScript séparé n’est à installer.
+WebFront est une bibliothèque d’interface C++ **conçue pour le développement agentique.** Elle est C++23 header-only : votre logique reste en C++ et l’interface s’écrit en TypeScript, React et avec l’écosystème de paquets du navigateur. Un seul appel, `app.bootstrap("developer")`, fait héberger à votre application, dans sa propre fenêtre, un environnement complet de développement et de test : compilateur TypeScript/TSX, vérification des types, exécution des tests Jasmine, dépendances verrouillées et embarquement, tous pilotés par les mêmes commandes `wf`. Une personne les saisit dans le terminal ; **tout agent de programmation qui parle MCP les exécute lui-même**, puis regarde le résultat, clique dessus et appelle les fonctions C++ que vous autorisez. Aucun Node.js, npm ou outil séparé n’est à installer, et l’application finale tient en un exécutable qui fonctionne hors ligne.
 
 WebFront n’a aucune dépendance et peut être déployé sur tout appareil disposant d’une bibliothèque standard C++ récente.
 
@@ -20,13 +20,12 @@ WebFront n’a aucune dépendance et peut être déployé sur tout appareil disp
 
 L'animation présente le programme C++ et l'interface ; les temps d'attente sont condensés et l'aperçu agrandi pour la lisibilité. Le [parcours ci-dessous](#jeu-de-la-vie--du-calcul-c-à-lapplication-native) utilise les sources compilées du dépôt.
 
-- **Intégrez WebFront à une application existante.** Conservez votre simulation, le contrôle de vos appareils, vos calculs SIMD, vos noyaux CUDA… et vos threads de travail en C++. Utilisez une fenêtre native ou même un navigateur web tout en gardant la maîtrise de votre boucle d’événements. [Intégration à l’application hôte →](docs/HOST_INTEGRATION.md)
-- **Équipez les développeurs et les agents de programmation.** Les outils `wf` intégrés compilent l’interface, vérifient les types, exécutent les tests et embarquent ses ressources. Un serveur MCP activable à la demande et une interface en ligne de commande JSON permettent aux agents de piloter la fenêtre de votre application et d’exécuter les vérifications et les fonctions de rappel autorisées. [Développer avec un agent →](#développer-avec-un-agent)
+- **Laissez un agent faire le travail.** Il crée l’interface, installe les paquets, vérifie les types, teste, prévisualise et embarque par MCP, puis inspecte et clique la fenêtre en cours d’exécution et appelle les fonctions C++ que vous avez listées. L’application est le serveur MCP : aucun autre programme, rien d’actif par défaut, et chaque autorisation reste la vôtre, fixée dans le code natif. [Développer avec un agent →](#développer-avec-un-agent) · [Automatisation →](#laisser-un-agent-piloter-votre-application)
+- **Obtenez un environnement complet sans installation.** `wf` compile, vérifie les types, teste et embarque l’interface depuis un environnement épinglé, vérifié par SHA-512 et mis en cache au premier usage. Le manifeste et le verrou font reproduire à chaque machine, et à chaque agent, la même construction. [Environnement de développement →](docs/DEVELOPER_ENVIRONMENT.md)
+- **Intégrez WebFront à une application existante.** Conservez votre simulation, le contrôle de vos appareils, vos calculs SIMD, vos noyaux CUDA… et vos threads de travail en C++. Utilisez une fenêtre native ou même un navigateur web tout en gardant la maîtrise de votre boucle d’événements, et lancez plusieurs applications ou fenêtres côte à côte. [Intégration à l’application hôte →](docs/HOST_INTEGRATION.md)
 - **Transférez directement les données numériques.** Les tableaux typés et les ensembles de bits compactés transitent par une passerelle WebSocket binaire, sans conversion en JSON ou en base64. Coroutines, futures et senders relient les appels asynchrones de l’interface aux traitements natifs. [Modèle d’exécution →](docs/ASYNC_EXECUTION.md)
-- **Préparez votre application pour la distribution.** Embarquez les ressources, verrouillez les versions des paquets et vérifiez les téléchargements ; l’application obtenue fonctionne hors ligne. Les cibles CMake destinées aux projets utilisateurs et les tests dans le navigateur facilitent les compilations reproductibles et l’intégration continue. [Intégration →](#intégrer-webfront-dans-votre-projet) · [Tests →](#tester-votre-application)
+- **Préparez votre application pour la distribution.** Embarquez les ressources, verrouillez les versions des paquets et vérifiez les téléchargements ; l’application obtenue fonctionne hors ligne. Les cibles CMake pour les projets utilisateurs, les tests dans le navigateur et le framework public `webfront::bdd` facilitent les compilations reproductibles et l’intégration continue. [Intégration →](#intégrer-webfront-dans-votre-projet) · [Tests →](#tester-votre-application)
 - **Choisissez vos technologies d’interface.** Utilisez TypeScript, React et des paquets compatibles avec les navigateurs, ou créez des îlots DOM directement en C++. Des composants optionnels permettent de générer des formulaires et des inspecteurs à partir de descripteurs de types C++. [DOM →](docs/DOM.md) · [React →](docs/REACT.md) · [Formulaires →](docs/FORMS.md)
-
-
 
 **Site et livre : [webfront.fr](https://webfront.fr/fr/)** · [Le livre WebFront](https://webfront.fr/fr/book/) · [Documentation](docs/) · [Historique des versions](docs/CHANGELOG.md)
 
@@ -83,9 +82,9 @@ Scène de 960 × 720, quatre rayons par pixel ; fenêtre de 800 × 600 pixels CS
 
 ## Par où commencer ?
 
+- **Travailler avec un agent :** [parcours de développement](#développer-avec-un-agent) et [automation de l'application](#laisser-un-agent-piloter-votre-application).
 - **Évaluer la bibliothèque :** [Hello World](#hello-world), puis le [parcours du jeu de la vie](#jeu-de-la-vie--du-calcul-c-à-lapplication-native).
 - **Ajouter une interface à un logiciel existant :** [intégration CMake](#intégrer-webfront-dans-votre-projet) et [exemple de boucle hôte](examples/host-loop/HostLoop.cpp).
-- **Travailler avec un agent :** [parcours de développement](#développer-avec-un-agent) et [automation de l'application](#laisser-un-agent-piloter-votre-application).
 - **Préparer la production :** [tests](#tester-votre-application), [contrats et limites](#contrats-et-limites) et [état du support](docs/PROJECT_STATUS.md).
 
 ## Développer avec un agent
