@@ -171,6 +171,22 @@ foreach(command "cmake --build build --target WebFrontHostLoop --parallel 2"
         _require("${${language}}" "${command}" "${language} runnable path")
     endforeach()
 endforeach()
+# The Chinese quick start shares the same build, package and embedding commands.
+_read(readme_zh README.zh-CN.md)
+_require("${readme}" "[简体中文](README.zh-CN.md)" "Chinese language switch from English")
+_require("${readme_fr}" "[简体中文](README.zh-CN.md)" "Chinese language switch from French")
+_require("${readme_zh}" "[English](README.md)" "English language switch from Chinese")
+_require("${readme_zh}" "[Français](README.fr.md)" "French language switch from Chinese")
+foreach(command "CMake **${cmake_minimum}+**" "wf create life" "wf init"
+        "wf install react@19.3.1 react-dom@19.3.1" "wf dev ui/main.tsx"
+        "wf install jasmine-core@7.0.2"
+        "wf install typescript@5.9.3 @types/react@19.3.0 @types/react-dom@19.3.0"
+        "wf check" "wf test" "wf embed ui/main.tsx --output generated/LifeUI.hpp"
+        "target_link_libraries(MyApp PRIVATE WebFront::WebFront)"
+        "-DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_ENABLE_TESTING=ON"
+        "ctest --test-dir build --output-on-failure --parallel 4")
+    _require("${readme_zh}" "${command}" "readme_zh runnable path")
+endforeach()
 if(failures)
     list(JOIN failures "\n  " joined)
     message(FATAL_ERROR "Newcomer documentation drifted from the code:\n  ${joined}")

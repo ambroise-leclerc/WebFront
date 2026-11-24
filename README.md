@@ -9,23 +9,24 @@
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C)](CMakeLists.txt)
 [![Header-only](https://img.shields.io/badge/library-header--only-2EA043)](include/)
 
-[English](README.md) · [Français](README.fr.md)
+[English](README.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
 
-WebFront is a **header-only C++23 library for building rich, modern user interfaces.** Keep application logic in C++ and create reactive interfaces with TypeScript, React and the existing JavaScript package ecosystem. WebFront brings UI development tools into your application: there is no separate TypeScript development environment to install.
+Build a modern interface for your C++ application, then ship it as a single executable. WebFront is a header-only C++23 library that lets you keep your application logic in C++ and build a reactive UI with TypeScript, React and browser-compatible packages.
 
-WebFront has no dependencies and can be deployed on any device with a recent C++ standard library.
+Your application can open its own development environment with `app.bootstrap("developer")`. In that window, `wf` builds and previews the UI, checks types and runs Jasmine tests. You can work in the terminal or let a coding agent drive the same workflow over MCP. Node.js and npm are unnecessary.
+
+When the UI is ready, embed its assets in the executable. This produces a compact, self-contained app that runs offline in a native window or via a web browser on embedded and headless systems.
 
 <a href="#game-of-life-from-console-to-native-application"><img src="docs/images/life-bootstrap.gif" width="100%" alt="Game of Life walkthrough: the C++ application beside the WebFront window, where wf create life, dependency installation and wf preview bring the React interface up below the terminal"></a>
 
 The animation shows the C++ application and the Game of Life example, with terminal output and timing condensed and the preview expanded for readability. [Follow the walkthrough below ↓](#game-of-life-from-console-to-native-application)
 
-- **Integrate into an existing application.** Keep your simulation, device control, SIMD computations, CUDA kernels... and worker threads in C++. Use a native window or even a web browser without surrendering your event loop. [Host integration →](docs/HOST_INTEGRATION.md)
-- **Support human developers and coding agents.** The integrated `wf` tools compile, type-check, test and embed the UI. An opt-in MCP server and JSON CLI let coding agents operate your application's own window and run permitted checks and callbacks. [Agent workflow →](#developing-with-an-agent)
+- **Develop with a coding agent.** Let it create the UI, install packages, preview, test and embed through MCP. With the permissions you grant, it can inspect the running application, interact with its interface and call selected C++ functions. [Agent workflow →](#developing-with-an-agent) · [Automation →](#let-an-agent-drive-your-application)
+- **Build with locked dependencies.** The pinned developer environment is verified with SHA-512 and cached on first use. The project manifest and lockfile record the dependencies for your team and your agents. [Developer environment →](docs/DEVELOPER_ENVIRONMENT.md)
+- **Give existing C++ software a UI.** Keep your event loop, worker threads, device control and SIMD or CUDA workloads. Open a native window or use the system browser, and run multiple applications or windows side by side. [Host integration →](docs/HOST_INTEGRATION.md)
 - **Move numerical data directly.** Typed arrays and packed bitsets cross a binary WebSocket bridge without JSON or base64 conversion. Coroutines, futures and senders connect asynchronous UI calls to native work. [Execution model →](docs/ASYNC_EXECUTION.md)
-- **Build for distribution.** Embed assets, pin package versions and verify downloads; run the resulting application offline. CMake consumer targets and browser tests support repeatable builds and CI. [Integrate →](#use-webfront-in-your-project) · [Test →](#test-your-application)
+- **Test and package your application.** Use the browser test runner and the public `webfront::bdd` framework alongside your CMake build. Embed the finished UI for offline distribution. [Integrate →](#use-webfront-in-your-project) · [Test →](#test-your-application)
 - **Choose your UI stack.** Use TypeScript, React and browser-compatible packages, or build DOM islands directly from C++. Optional forms and inspectors derive from C++ type descriptors. [DOM →](docs/DOM.md) · [React →](docs/REACT.md) · [Forms →](docs/FORMS.md)
-
-
 
 **Website and book: [webfront.fr](https://webfront.fr/en/)** · [The WebFront Book](https://webfront.fr/en/book/) · [Documentation](docs/) · [Changelog](docs/CHANGELOG.md)
 
@@ -82,9 +83,9 @@ Scene: 960 × 720, four rays per pixel; window: 800 × 600 CSS pixels. Release b
 
 ## Find your starting point
 
+- **Work with a coding agent:** [developer workflow](#developing-with-an-agent) and [application automation](#let-an-agent-drive-your-application).
 - **Evaluate the library:** [Hello World](#hello-world), then the [Game of Life walkthrough](#game-of-life-from-console-to-native-application).
 - **Add a UI to existing software:** [CMake integration](#use-webfront-in-your-project) and the [host loop example](examples/host-loop/HostLoop.cpp).
-- **Work with a coding agent:** [developer workflow](#developing-with-an-agent) and [application automation](#let-an-agent-drive-your-application).
 - **Plan production:** [testing](#test-your-application), [contracts and limitations](#contracts-and-limitations) and [support status](docs/PROJECT_STATUS.md).
 
 ## Developing with an agent
