@@ -77,7 +77,8 @@ confinement in `LD_LIBRARY_PATH`, `LD_PRELOAD`, `GIO_MODULE_DIR`, `GTK_PATH`,
 `GTK_EXE_PREFIX`, `GTK_IM_MODULE_FILE`, `GSETTINGS_SCHEMA_DIR`, `LOCPATH`,
 `XDG_DATA_DIRS` or `XDG_CONFIG_DIRS`, the frontend repairs them before the toolkit
 starts, in the application's own environment, which the processes WebKit launches
-inherit, and logs the names it changed at `warn`:
+inherit, and logs the names it changed at `warn` (the WebFront logger is silent until
+the application enables a level and registers a sink, so the repair is silent too):
 
 - the value saved by VS Code and VSCodium in `<NAME>_VSCODE_SNAP_ORIG` is restored
   (an empty one means the variable is unset);
