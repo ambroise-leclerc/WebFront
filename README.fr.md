@@ -12,7 +12,7 @@
 
 [English](README.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
 
-Créez une interface moderne pour votre application C++, puis distribuez le tout dans un seul exécutable. WebFront est une bibliothèque C++23 distribuée sous forme d’en-têtes. Votre logique applicative reste en C++ et vous créez une interface réactive avec TypeScript, React et les paquets compatibles avec le navigateur.
+WebFront est un framework d’interface utilisateur C++ qui produit des interfaces modernes et réactives. C’est une bibliothèque C++23 distribuée sous forme d’en-têtes : la logique de votre application reste en C++, l’interface se construit avec TypeScript, React et les paquets compatibles avec les navigateurs, et l’application terminée se distribue dans un seul exécutable.
 
 Avec `app.bootstrap("developer")`, l’application ouvre son propre environnement de développement. Dans cette fenêtre, `wf` compile l’interface, affiche un aperçu, vérifie les types et lance les tests Jasmine. Vous pouvez utiliser le terminal ou confier les mêmes opérations à un agent de programmation via MCP. Tout cela fonctionne sans Node.js ni npm.
 

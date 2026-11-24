@@ -11,7 +11,7 @@
 
 [English](README.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
 
-给 C++ 程序加上现代界面，再把整个应用打包成一个可执行文件。WebFront 是一个纯头文件的 C++23 库。应用逻辑留在 C++ 中，响应式界面可以用 TypeScript、React 和兼容浏览器的第三方包来构建。
+WebFront 是一个 C++ UI 框架，用来构建现代、响应式的界面。它是纯头文件的 C++23 库：应用逻辑留在 C++ 中，界面使用 TypeScript、React 和兼容浏览器的第三方包构建，完成后的应用可以打包成一个可执行文件。
 
 调用 `app.bootstrap("developer")`，应用就能打开自己的开发环境。在应用窗口中，`wf` 可以编译和预览界面、检查类型，并运行 Jasmine 测试。你可以在终端里操作，也可以让编程智能体通过 MCP 执行同样的流程。无需安装 Node.js 或 npm。
 
