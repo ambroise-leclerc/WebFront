@@ -10,6 +10,9 @@ these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
+### Fixed
+- An application started from the terminal of a Snap-packaged editor (VSCodium) no longer fails with `undefined symbol: __libc_pthread_init`: the WebKitGTK frontend restores or removes the inherited Snap paths, which now include `XDG_DATA_DIRS` and `XDG_CONFIG_DIRS`, and logs what it changed (#662, `docs/WEBKITGTK.md`).
+
 ## [1.2.0] - 2026-11-24
 
 WebFront 1.2 ships with developer environment 1.2.0. The application itself becomes the MCP server that a coding agent drives

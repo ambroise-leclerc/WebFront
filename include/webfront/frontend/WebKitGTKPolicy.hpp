@@ -125,25 +125,87 @@ inline bool containsSnapPath(std::string_view value, std::string_view separators
     return false;
 }
 
+struct SnapSensitiveVariable {
+    const char*      name;
+    std::string_view separators;
+};
+
+// Variables a Snap-packaged host (an IDE terminal) can leave pointing at its own runtime. GIO_MODULE_DIR alone is enough
+// to break WebKit's network process: the Snap's GIO modules carry an RPATH to /snap/core20, which loads its libpthread.
+inline constexpr std::array snapSensitiveVariables = {
+    SnapSensitiveVariable{     "LD_LIBRARY_PATH", ":;"},
+    SnapSensitiveVariable{          "LD_PRELOAD", ": "},
+    SnapSensitiveVariable{      "GIO_MODULE_DIR",   ""},
+    SnapSensitiveVariable{            "GTK_PATH",  ":"},
+    SnapSensitiveVariable{      "GTK_EXE_PREFIX",   ""},
+    SnapSensitiveVariable{  "GTK_IM_MODULE_FILE",   ""},
+    SnapSensitiveVariable{"GSETTINGS_SCHEMA_DIR",   ""},
+    SnapSensitiveVariable{             "LOCPATH",  ":"},
+    SnapSensitiveVariable{       "XDG_DATA_DIRS",  ":"},
+    SnapSensitiveVariable{     "XDG_CONFIG_DIRS",  ":"}
+};
+
+/// True when `name` still holds what a Snap-packaged editor put there: a Snap path, or any value that differs from the one
+/// the editor saved in `<NAME>_VSCODE_SNAP_ORIG` (the editor's own mark that it overrode the variable). The second case
+/// catches a per-user directory such as `~/snap/codium/common/.cache/gio-modules`, whose files link into the Snap.
+inline bool snapOverridden(const SnapSensitiveVariable& variable) {
+    const auto* value = std::getenv(variable.name);
+    if (!value)
+        return false;
+    if (containsSnapPath(value, variable.separators))
+        return true;
+    const auto* saved = std::getenv((std::string(variable.name) + "_VSCODE_SNAP_ORIG").c_str());
+    return saved && std::string_view(saved) != value;
+}
+
 inline bool inheritedSnapToolkitPaths() {
-    struct Variable {
-        const char*      name;
-        std::string_view separators;
-    };
-    constexpr std::array variables = {
-        Variable{     "LD_LIBRARY_PATH", ":;"},
-        Variable{          "LD_PRELOAD", ": "},
-        Variable{      "GIO_MODULE_DIR",   ""},
-        Variable{            "GTK_PATH",  ":"},
-        Variable{      "GTK_EXE_PREFIX",   ""},
-        Variable{  "GTK_IM_MODULE_FILE",   ""},
-        Variable{"GSETTINGS_SCHEMA_DIR",   ""},
-        Variable{             "LOCPATH",  ":"}
-    };
-    for (const auto& [name, separators] : variables)
-        if (const auto* value = std::getenv(name); value && containsSnapPath(value, separators))
+    for (const auto& variable : snapSensitiveVariables)
+        if (snapOverridden(variable))
             return true;
     return false;
+}
+
+/// `value` without its Snap entries; `separators` must not be empty.
+inline std::string withoutSnapPaths(std::string_view value, std::string_view separators) {
+    std::string kept;
+    while (!value.empty()) {
+        const auto end  = value.find_first_of(separators);
+        const auto part = value.substr(0, end);
+        if (!part.empty() && !containsSnapPath(part)) {
+            if (!kept.empty())
+                kept += separators.front();
+            kept += part;
+        }
+        if (end == std::string_view::npos)
+            break;
+        value.remove_prefix(end + 1);
+    }
+    return kept;
+}
+
+/// Repairs the variables that name Snap paths, for the application and the processes WebKit launches. A Snap-packaged
+/// VS Code or VSCodium terminal keeps the original value in `<NAME>_VSCODE_SNAP_ORIG`: restore it (an empty one means
+/// unset). Otherwise drop the Snap entries of a list, or unset a single path. Returns the names changed. It must run
+/// before the toolkit initializes, on the main thread, and never inside a verified Snap confinement.
+inline std::vector<std::string> scrubInheritedSnapEnvironment() {
+    std::vector<std::string> changed;
+    for (const auto& [name, separators] : snapSensitiveVariables) {
+        if (!snapOverridden({name, separators}))
+            continue;
+        const auto*                value = std::getenv(name);
+        std::optional<std::string> replacement;
+        const std::string          original = std::string(name) + "_VSCODE_SNAP_ORIG";
+        if (const auto* saved = std::getenv(original.c_str()))
+            replacement = saved;
+        else if (!separators.empty())
+            replacement = withoutSnapPaths(value, separators);
+        if (replacement && !replacement->empty())
+            setenv(name, replacement->c_str(), 1);
+        else
+            unsetenv(name);
+        changed.emplace_back(name);
+    }
+    return changed;
 }
 
 // Development is the default, independently of optimization level. A distribution binary requires the sandbox;

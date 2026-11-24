@@ -63,31 +63,30 @@ uses X11/Xvfb. No WSL-specific library environment changes are applied.
 
 ### Snap-hosted editor terminals
 
-A terminal inherited from a Snap-packaged editor can expose Snap library or GTK
-module paths to a host application. This has been observed with VSCodium: the
-system WebKit network process loaded Snap's `libpthread.so.0` and failed with a
-`GLIBC_PRIVATE` symbol error. The particular variable responsible has not been
-isolated; other Snap-hosted editors, including VS Code, may pass similar paths,
-but have not been verified. WebFront warns when the common variables below contain
-`/snap/` or `/var/lib/snapd/snap/` paths outside verified Snap confinement. This
-heuristic does not prove a failure or cover every possible path and does not alter
-the environment. The warning uses the WebFront logger and can be filtered by the
-application.
+A terminal inherited from a Snap-packaged editor exposes Snap library and GTK
+module paths. This is a normal way to start an application, so WebFront repairs it.
+The cause is isolated: `GIO_MODULE_DIR` alone is enough. With VSCodium the Snap's
+GIO modules (`libgiognutls.so`, `libgiolibproxy.so`) carry an RPATH to
+`/snap/core20/current/lib`; the system `WebKitNetworkProcess` loads them and then
+Snap's `libpthread.so.0`, which fails with a `GLIBC_PRIVATE` symbol error
+(`undefined symbol: __libc_pthread_init`). Any GIO program does the same, not only
+WebFront.
 
-If this failure occurs, start the host application with a clean environment for
-these variables, replacing the executable path as needed:
+When `/snap/` or `/var/lib/snapd/snap/` paths appear outside a verified Snap
+confinement in `LD_LIBRARY_PATH`, `LD_PRELOAD`, `GIO_MODULE_DIR`, `GTK_PATH`,
+`GTK_EXE_PREFIX`, `GTK_IM_MODULE_FILE`, `GSETTINGS_SCHEMA_DIR`, `LOCPATH`,
+`XDG_DATA_DIRS` or `XDG_CONFIG_DIRS`, the frontend repairs them before the toolkit
+starts, in the application's own environment, which the processes WebKit launches
+inherit, and logs the names it changed at `warn`:
 
-```bash
-env -u LD_LIBRARY_PATH -u LD_PRELOAD \
-    -u GIO_MODULE_DIR -u GTK_PATH -u GTK_EXE_PREFIX \
-    -u GTK_IM_MODULE_FILE -u GSETTINGS_SCHEMA_DIR -u LOCPATH \
-    ./examples/WebFrontLifeDeveloper
-```
+- the value saved by VS Code and VSCodium in `<NAME>_VSCODE_SNAP_ORIG` is restored
+  (an empty one means the variable is unset);
+- otherwise the Snap entries are removed from a list, or a single Snap path is unset.
 
-This removes all values of those variables for the application and its children,
-including legitimate custom configuration. Adjust the launcher if it needs any of
-them. WebFront cannot safely remove them globally: the host application and other
-threads may depend on them, and WebKit may launch child processes later.
+Values that name no Snap path, including `/home/<user>/snap/...`, are left alone, and
+nothing changes inside a verified Snap confinement. Other variables are not yet
+covered; report a failure with its variable. A launcher that needs a Snap value
+there must set it again after `show()` or `start()` returns.
 
 Persistent data lives in `$XDG_DATA_HOME/webfront/<executable>-<path-hash>` and caches
 in `$XDG_CACHE_HOME/webfront/<executable>-<path-hash>`. Absolute XDG paths are honored;
