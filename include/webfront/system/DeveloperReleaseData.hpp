@@ -4,7 +4,7 @@
 #include <string_view>
 
 namespace webfront::developer::release {
-inline constexpr std::string_view version{"1.0.2"};
-inline constexpr std::string_view environment{"https://dist.webfront.fr/developer/1.0.2/environment.tgz"};
-inline constexpr std::string_view integrity{"sha512-An03RE80keNQZnPBCng5lO1P/O5I+hQ/K7SEh1mL4bfyZLQs2g6QxiUi3rD+Yas14zm7gDdoUxTxHc/Wn+g/Xw=="};
+inline constexpr std::string_view version{"1.2.0"};
+inline constexpr std::string_view environment{"https://dist.webfront.fr/developer/1.2.0/environment.tgz"};
+inline constexpr std::string_view integrity{"sha512-cD2G+jM1i08t77RG6vCDbKskAjVyshtrKYRDByja272r0s2hVVFZxI8nbX8LGed1WtoiN8WPfitCjjIzRFP9XA=="};
 } // namespace webfront::developer::release
