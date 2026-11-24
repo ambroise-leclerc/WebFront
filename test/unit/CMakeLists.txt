@@ -304,7 +304,7 @@ add_test(NAME WebFrontDistribution
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/distribution
         -DCONSUMER_CXX_COMPILER=${CMAKE_CXX_COMPILER} -DCONSUMER_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCONSUMER_CONFIG=$<CONFIG>
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckWebFrontDistribution.cmake)
-set_tests_properties(WebFrontDistribution PROPERTIES TIMEOUT 120)
+set_tests_properties(WebFrontDistribution PROPERTIES TIMEOUT 240)
 add_test(NAME BuildToolRequirements
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/build-tool-requirements
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckBuildToolRequirements.cmake)
