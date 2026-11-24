@@ -288,11 +288,11 @@ add_test(NAME RepositoryLayoutRejectsVendoredSources
 add_test(NAME SourceHeaders
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckSourceHeaders.cmake)
-set_tests_properties(SourceHeaders PROPERTIES TIMEOUT 60 LABELS fast)
+set_tests_properties(SourceHeaders PROPERTIES TIMEOUT 60)
 add_test(NAME SourceHeadersRejectsDrift
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/source-headers-negative
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckSourceHeadersNegative.cmake)
-set_tests_properties(SourceHeadersRejectsDrift PROPERTIES TIMEOUT 60 LABELS fast)
+set_tests_properties(SourceHeadersRejectsDrift PROPERTIES TIMEOUT 60)
 add_test(NAME NewcomerDocsMatchExamples
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckNewcomerDocs.cmake)
 # What an agent reads first states the development model and how it runs wf itself (#561).

@@ -110,7 +110,7 @@ To ensure consistency, we use `.clang-format` and `clang-tidy` to enforce our co
 
 Please run these tools on your code before submitting a pull request.
 
-CI runs `.github/scripts/check-clang-format.sh` on every tracked C++ source (`clang-format --dry-run --Werror`) with a pinned version of `clang-format`
+CI runs `.github/scripts/check-clang-format.sh` weekly, on pull requests into `master` and on manual dispatch (not on every pull request into `develop`), on every tracked C++ source (`clang-format --dry-run --Werror`) with a pinned version of `clang-format`
 (`.github/workflows/SourceFormat.yml`); run the script locally with the same version before you push. Generated headers (the embedded assets) and the gzip
 fixtures are exempt. The commit that reformatted the whole code base is listed in `.git-blame-ignore-revs`; to make `git blame` skip it, run
 `git config blame.ignoreRevsFile .git-blame-ignore-revs` once (GitHub applies the file by itself).
