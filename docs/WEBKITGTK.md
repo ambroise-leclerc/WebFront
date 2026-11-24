@@ -79,9 +79,11 @@ confinement in `LD_LIBRARY_PATH`, `LD_PRELOAD`, `GIO_MODULE_DIR`, `GTK_PATH`,
 starts and prints the names it changed on `stderr`. It does not use the WebFront
 logger, which is silent until the application enables a level and registers a sink.
 
-- The value saved by VS Code and VSCodium in `<NAME>_VSCODE_SNAP_ORIG` is restored
-  (an empty one means the variable is unset).
-- Otherwise the Snap entries are removed from a list, or a single Snap path is unset.
+- The value saved by VS Code and VSCodium in `<NAME>_VSCODE_SNAP_ORIG` is the starting
+  point (an empty one means the variable is unset); without it, the current value is.
+- From that value, the Snap entries are removed from a list, or a single Snap path is
+  unset. A Snap path inside the saved original is dropped too, and the saved original
+  is rewritten to the repaired value, so nothing is repaired twice.
 
 A variable is also repaired without any Snap path when its value differs from the
 `<NAME>_VSCODE_SNAP_ORIG` the editor saved, which catches per-user directories such
@@ -99,8 +101,10 @@ This revises an earlier position: WebFront used to leave these variables alone,
 because the host application and its other threads may depend on them. It now changes
 the application's own environment, with `setenv`/`unsetenv`, which is not safe
 against a concurrent `getenv` in another thread. The repair runs in the frontend's
-initialization, on the main thread before the toolkit starts, so construct the
-frontend before the application starts threads that read the environment.
+initialization, on the main thread before the toolkit starts, and only the first
+initialization of the process does it: the second one, when `show()` opens the page,
+never changes the environment again. Construct the frontend before the application
+starts threads that read the environment.
 
 The repair applies to the processes WebKit launches, which inherit the environment at
 that moment, so restoring a value after `show()` or `start()` is too late for them.

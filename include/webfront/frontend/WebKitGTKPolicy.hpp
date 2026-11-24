@@ -12,6 +12,7 @@
 #include "../ContentPolicy.hpp"
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <exception>
 #include <filesystem>
@@ -197,35 +198,47 @@ inline std::string snapRepairMessage(const std::vector<std::string>& names) {
          + " for this process (see docs/WEBKITGTK.md, \"Snap-hosted editor terminals\")\n";
 }
 
-/// Repairs the variables that name Snap paths, for the application and the processes WebKit launches. A Snap-packaged
-/// VS Code or VSCodium terminal keeps the original value in `<NAME>_VSCODE_SNAP_ORIG`: restore it (an empty one means
-/// unset). Otherwise drop the Snap entries of a list, or unset a single path. Returns the names changed. It must run
-/// before the toolkit initializes, on the main thread before other threads read the environment (setenv is not safe
-/// against a concurrent getenv), and never inside a verified Snap confinement.
 inline bool keepSnapEnvironmentRequested() {
     const auto* value = std::getenv("WEBFRONT_KEEP_SNAP_ENVIRONMENT");
     return value && std::string_view(value) != "0";
 }
 
+/// Repairs the variables that name Snap paths, for the application and the processes WebKit launches. A Snap-packaged
+/// VS Code or VSCodium terminal keeps the original value in `<NAME>_VSCODE_SNAP_ORIG`: that value is the starting
+/// point (an empty one means unset), and a Snap path inside it is dropped like any other, since the editor's own
+/// environment may have carried one. Without a saved original the starting point is the current value. From it, drop the
+/// Snap entries of a list, or unset a single Snap path. The saved original is rewritten to the repaired value, so a
+/// second call finds nothing to do. Returns the names changed. The caller runs it once, on the main thread before the
+/// toolkit starts and before other threads read the environment (setenv is not safe against a concurrent getenv), and
+/// never inside a verified Snap confinement.
 inline std::vector<std::string> scrubInheritedSnapEnvironment() {
     std::vector<std::string> changed;
     for (const auto& [name, separators] : snapSensitiveVariables) {
         if (!snapOverridden({name, separators}))
             continue;
-        const auto*                value = std::getenv(name);
-        std::optional<std::string> replacement;
-        const std::string          original = std::string(name) + "_VSCODE_SNAP_ORIG";
-        if (const auto* saved = std::getenv(original.c_str()))
-            replacement = saved;
-        else if (!separators.empty())
-            replacement = withoutSnapPaths(value, separators);
-        if (replacement && !replacement->empty())
-            setenv(name, replacement->c_str(), 1);
+        const std::string original = std::string(name) + "_VSCODE_SNAP_ORIG";
+        const auto*       saved    = std::getenv(original.c_str());
+        const std::string start    = saved ? saved : std::getenv(name);
+        std::string       replacement;
+        if (!separators.empty())
+            replacement = withoutSnapPaths(start, separators);
+        else if (!containsSnapPath(start))
+            replacement = start;
+        if (!replacement.empty())
+            setenv(name, replacement.c_str(), 1);
         else
             unsetenv(name);
+        if (saved)
+            setenv(original.c_str(), replacement.c_str(), 1);
         changed.emplace_back(name);
     }
     return changed;
+}
+
+/// True for the first caller of `flag` only: the repair belongs to one early initialization phase, never to a later call
+/// that could find the server and other threads already running.
+inline bool claimOnce(std::atomic<bool>& flag) {
+    return !flag.exchange(true);
 }
 
 // Development is the default, independently of optimization level. A distribution binary requires the sandbox;

@@ -12,6 +12,7 @@
 #include <webfront/testing/Bdd.hpp>
 
 #include <array>
+#include <atomic>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -151,6 +152,27 @@ const Scenario webKitGTKScrubsSnap{
             check(message.find("GIO_MODULE_DIR, XDG_DATA_DIRS") != std::string::npos);
             check(message.ends_with("\n"));
             check(message.find('\n') == message.size() - 1);
+        });
+        then("drops a Snap path that the saved original carries, and is idempotent", [] {
+            withSnapEnvironment([] {
+                setenv("GIO_MODULE_DIR", "/home/user/snap/codium/common/.cache/gio-modules", 1);
+                setenv("GIO_MODULE_DIR_VSCODE_SNAP_ORIG", "/snap/codium/495/usr/lib/gio", 1);
+                setenv("XDG_DATA_DIRS", "/snap/codium/495/usr/share:/usr/share", 1);
+                setenv("XDG_DATA_DIRS_VSCODE_SNAP_ORIG", "/snap/codium/495/usr/share:/usr/local/share:/usr/share", 1);
+                const auto changed = scrubInheritedSnapEnvironment();
+                check(changed == std::vector<std::string>{"GIO_MODULE_DIR", "XDG_DATA_DIRS"});
+                check(current("GIO_MODULE_DIR") == "<unset>");
+                check(current("XDG_DATA_DIRS") == "/usr/local/share:/usr/share");
+                check(!inheritedSnapToolkitPaths());
+                check(scrubInheritedSnapEnvironment().empty());
+                check(current("XDG_DATA_DIRS") == "/usr/local/share:/usr/share");
+            });
+        });
+        then("lets only the first initialization claim the repair", [] {
+            std::atomic<bool> flag{false};
+            check(claimOnce(flag));
+            check(!claimOnce(flag));
+            check(!claimOnce(flag));
         });
         then("honors the opt-out variable", [] {
             withSnapEnvironment([] {
