@@ -1,5 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-02
+//
+// WebFront — tests/web
+// Role: CEF integration test of the file services: dialogs, downloads and storage through a real browser.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: requires WEBFRONT_EMBED_CEF; scenarios drive the dialogs by tasks on the CEF thread
+
 // Qualification of <input type="file"> and downloads in the CEF frontend (issue #451): the chooser is answered by the
 // client's injection point and opened by a real mouse click sent to the engine; the download goes to a private folder.
+
 #include <webfront/frontend/CEF.hpp>
 #include <webfront/system/NativeFS.hpp>
 #include <webfront/WebFront.hpp>
@@ -18,12 +28,12 @@ void require(bool value, const char* message) {
 }
 
 struct Scenario {
-    std::string           mode;  // download | choose | cancel | dialogs | hold (script dialogs, issue #452)
-    std::filesystem::path folder;
-    std::filesystem::path fixture;
-    std::string           title;
-    std::string           downloaded;
-    bool                  asked = false;
+    std::string              mode;  // download | choose | cancel | dialogs | hold (script dialogs, issue #452)
+    std::filesystem::path    folder;
+    std::filesystem::path    fixture;
+    std::string              title;
+    std::string              downloaded;
+    bool                     asked = false;
     std::vector<std::string> dialogs;  // What the injection point saw, in order.
 };
 Scenario scenario;
@@ -91,7 +101,7 @@ public:
     }
     // The window may not take input right away: click again until the chooser was requested.
     struct Click : CefTask {
-        Click(Client* owner, int left) : client(owner), remaining(left) {}
+        Click(Client* owner, int left) : client(owner), remaining(left) { }
         void Execute() override {
             if (scenario.asked || remaining == 0)
                 return;
@@ -103,7 +113,7 @@ public:
         IMPLEMENT_REFCOUNTING(Click);
     };
     struct Deadline : CefTask {
-        explicit Deadline(Client* owner) : client(owner) {}
+        explicit Deadline(Client* owner) : client(owner) { }
         void Execute() override {
             client->close();
         }
@@ -143,7 +153,7 @@ int main(int argc, char** argv) {
         webfront::BasicWFWithFrontend<webfront::NetProvider, FS, Frontend> app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
         app.show(scenario.mode == "hold"      ? std::string("script-dialogs.html?hold")
                  : scenario.mode == "dialogs" ? std::string("script-dialogs.html")
-                                            : "file-services.html?" + (scenario.mode == "download" ? std::string("download") : std::string("choose")));
+                                              : "file-services.html?" + (scenario.mode == "download" ? std::string("download") : std::string("choose")));
         if (scenario.mode == "download") {
             require(!scenario.downloaded.empty(), "The download did not finish");
             // The engine neutralizes the page's "../webfront-download.txt" itself (Chrome writes "_webfront-download.txt").

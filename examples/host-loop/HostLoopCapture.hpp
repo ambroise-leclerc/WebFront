@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-16
+//
+// WebFront — examples
+// Role: Bounded capture options of the host-loop example: frame count, file naming and checked writes.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: example support; at most 600 frames at a fixed 25 fps scene clock
+
 #pragma once
 
 #include <webfront/frontend/Capture.hpp>

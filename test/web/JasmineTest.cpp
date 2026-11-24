@@ -1,22 +1,32 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2023-05-12
+//
+// WebFront — tests/web
+// Role: The C++ callbacks of the Jasmine browser integration specs (webtest): bridge types, errors, lists and limits.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: real-browser test; the process status is that of wf test, or 1 if a call was not observed
+
 // The browser integration test: the specs of test/web/suite run under `wf test` in the developer environment of an
 // application that registers the C++ callbacks they call. Usage is that of webfront-wf (test/driver/WfDriver.hpp), e.g.
 //   webtest --project <copy of test/web/suite, after wf install> --registry-dir <registry> -- test --timeout 120
 // The status is that of `wf test`, and 1 when the specs passed but C++ did not observe every call they make.
+
 #include <webfront/components/forms/Form.hpp>
+#include <webfront/PtyPage.hpp>
 #include <webfront/system/FileSystem.hpp>
 #include <webfront/tooling/Logger.hpp>
-#include <webfront/PtyPage.hpp>
 #include <webfront/WebFront.hpp>
 
 #ifdef WEBFRONT_TEST_TLS_FIXTURE
-#include <webfront/tls/Server.hpp>
+    #include <webfront/tls/Server.hpp>
 #endif
 
-#include "../driver/WfDriver.hpp"
 #include "../../examples/host-loop/HostLoopUI.hpp"
 #include "../../examples/life/react/LifeReact.hpp"
-#include "RejectedWebSocketServer.hpp"
+#include "../driver/WfDriver.hpp"
 #include "../unit/FormsSettings.hpp"
+#include "RejectedWebSocketServer.hpp"
 
 #include <array>
 #include <atomic>
@@ -93,7 +103,7 @@ public:
             ifstream   stream(path, ios::binary);
             if (stream && filesystem::is_regular_file(path))
                 return fs::File{std::move(stream)};
-        } catch (const exception&) {}
+        } catch (const exception&) { }
         return {};
     }
 
@@ -114,22 +124,23 @@ using TestWF = DeveloperAppWithNetwork<TestNet, testdriver::DriverFrontend<WEBFR
 
 class BrowserIntegrationTest {
 public:
-    using Pages = TestPages;
+    using Pages       = TestPages;
     using Application = TestWF;
 
     ~BrowserIntegrationTest() {
         joinHostLoop();
         joinBitsetFutureChecks();
         error_code ignored;
-        if (!mediaFile.empty()) filesystem::remove(mediaFile, ignored);
+        if (!mediaFile.empty())
+            filesystem::remove(mediaFile, ignored);
     }
 
     void configureApplication(WebFrontConfig& config) {
         config.contentPolicy.allowMissingOrigin = false;
-        config.allowPtyPages = true;
+        config.allowPtyPages                    = true;
 #ifdef WEBFRONT_TEST_TLS_FIXTURE
         const filesystem::path fixture(WEBFRONT_TEST_TLS_FIXTURE);
-        config.tlsCredentials = make_shared<tls::Credentials>(fixture / "cert.pem", fixture / "key.pem");
+        config.tlsCredentials      = make_shared<tls::Credentials>(fixture / "cert.pem", fixture / "key.pem");
         config.remoteFileTransport = RemoteFileTransport::httpsByDeployment;
 #endif
     }
@@ -144,13 +155,16 @@ public:
         });
         rejectedWebSocket.emplace();
         registerCallbacks();
-        registerPtyPage(app, {
+        registerPtyPage(app,
+                        {
 #ifdef _WIN32
-            .argv = {"cmd.exe", "/d", "/q"},
+                            .argv = {"cmd.exe", "/d", "/q"},
 #else
-            .argv = {"sh", "-i"},
+                            .argv = {"sh", "-i"},
 #endif
-            .directory = {}, .environment = {{"WF_PTY_MARKER", "WEBFRONT_PTY_OK"}}, .size = {}
+                            .directory   = {},
+                            .environment = {{"WF_PTY_MARKER", "WEBFRONT_PTY_OK"}},
+                            .size        = {}
         });
         registerBitsetCallbacks();
         registerListCallbacks();
@@ -158,8 +172,9 @@ public:
         registerHostLoop(app);
         registerMediaRoute(app);
         registerReadRoute(app);
-        streamRoute           = app.addRoute("/webfront/services/test-stream/", [](const http::RouteRequest& request) {
-            if (request.query.find("fail=1") != std::string_view::npos) throw std::runtime_error("route failure requested by the spec");
+        streamRoute = app.addRoute("/webfront/services/test-stream/", [](const http::RouteRequest& request) {
+            if (request.query.find("fail=1") != std::string_view::npos)
+                throw std::runtime_error("route failure requested by the spec");
             std::uint64_t size = 0;
             if (const auto at = request.query.find("size="); at != std::string_view::npos)
                 size = std::stoull(std::string(request.query.substr(at + 5)));
@@ -169,7 +184,8 @@ public:
             reply.contentLength = size;
             reply.body          = [size, produced = std::uint64_t{0}](std::span<char> out) mutable {
                 const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(out.size(), size - produced));
-                for (std::size_t index = 0; index < count; ++index) out[index] = static_cast<char>((((produced + index) * 7) + 3) % 251);
+                for (std::size_t index = 0; index < count; ++index)
+                    out[index] = static_cast<char>((((produced + index) * 7) + 3) % 251);
                 produced += count;
                 return count;
             };
@@ -205,51 +221,58 @@ public:
     }
 
 private:
-    TestWF*                          webFront{};
+    TestWF*                           webFront{};
     optional<RejectedWebSocketServer> rejectedWebSocket;
-    optional<TaskHandle>             cancelledTask;
-    TestState            state;
+    optional<TaskHandle>              cancelledTask;
+    TestState                         state;
     // Accessed only by callbacks on the server context. finish() runs after WfDriver joins app.shutdown().
     std::map<std::uint32_t, std::string> domRejections;
-    std::array<std::uint32_t, 6> domEventCounts{};
+    std::array<std::uint32_t, 6>         domEventCounts{};
     std::map<WebLinkId, dom::Node>       documentTexts, documentInputs;
     std::map<WebLinkId, TaskHandle>      documentReads;
     // The forms of #383 built for each browser, with the object their events write.
     struct FormsFixture {
-        std::shared_ptr<forms_fixture::Settings>        object;
-        forms::Form<forms_fixture::Settings>            form;
-        forms::Inspector<forms_fixture::Settings>       inspector;
+        std::shared_ptr<forms_fixture::Settings>  object;
+        forms::Form<forms_fixture::Settings>      form;
+        forms::Inspector<forms_fixture::Settings> inspector;
     };
-    std::map<WebLinkId, FormsFixture>    formsFixtures;
-    std::map<WebLinkId, bool>            documentCancelled;
-    std::map<WebLinkId, TaskHandle>      documentAwaits;
-    std::map<WebLinkId, bool>            awaitCancelled;
-    optional<dom::Document<TestWF::UI>>  shutdownDocument;
-    dom::Node                            shutdownNode;
-    optional<TestWF::UI> connectedUI;
-    UISubscription                   uiSubscription;
-    UISubscription                   lifeReactSubscription;
-    http::RouteTable::Registration   streamRoute, mediaRoute;
-    ReadRoute                        readRoute;
-    filesystem::path                 mediaFile;
-    mutex                            mediaMutex;
-    vector<string>                   mediaRanges;
+    std::map<WebLinkId, FormsFixture>                                                     formsFixtures;
+    std::map<WebLinkId, bool>                                                             documentCancelled;
+    std::map<WebLinkId, TaskHandle>                                                       documentAwaits;
+    std::map<WebLinkId, bool>                                                             awaitCancelled;
+    optional<dom::Document<TestWF::UI>>                                                   shutdownDocument;
+    dom::Node                                                                             shutdownNode;
+    optional<TestWF::UI>                                                                  connectedUI;
+    UISubscription                                                                        uiSubscription;
+    UISubscription                                                                        lifeReactSubscription;
+    http::RouteTable::Registration                                                        streamRoute, mediaRoute;
+    ReadRoute                                                                             readRoute;
+    filesystem::path                                                                      mediaFile;
+    mutex                                                                                 mediaMutex;
+    vector<string>                                                                        mediaRanges;
     std::map<WebLinkId, react::Store<TestWF::UI, std::tuple<std::uint32_t, std::string>>> reactStores;
-    UISubscription                       closedDomSubscription;
-    std::map<WebLinkId, bool>            closedDocumentRejected;
-    future<string> cppResult;
-    jthread bitsetFutureThread;
-    static constexpr chrono::seconds cppResultWaitTimeout{10};
+    UISubscription                                                                        closedDomSubscription;
+    std::map<WebLinkId, bool>                                                             closedDocumentRejected;
+    future<string>                                                                        cppResult;
+    jthread                                                                               bitsetFutureThread;
+    static constexpr chrono::seconds                                                      cppResultWaitTimeout{10};
 
     // The host of examples/host-loop, with its loop on a thread of this program as the example runs it beside a native
     // window. The page of the example is added on request of its specs, which also stop the loop from its button.
-    boing::Host hostLoop{{boing::Engine::cpu, false, false, 0}, 2};
-    jthread     hostLoopThread;
+    boing::Host hostLoop{
+        {boing::Engine::cpu, false, false, 0},
+        2
+    };
+    jthread hostLoopThread;
 
     void registerHostLoop(TestWF& app) {
         boing::install(app, hostLoop);
-        app.cppFunction("hostLoopTest.mount", [](TestWF::UI ui) { ui.addScript(boing::page); });
-        app.cppFunction("hostLoopTest.ended", [this] { return state.hostLoopEnded.load(); });
+        app.cppFunction("hostLoopTest.mount", [](TestWF::UI ui) {
+            ui.addScript(boing::page);
+        });
+        app.cppFunction("hostLoopTest.ended", [this] {
+            return state.hostLoopEnded.load();
+        });
         hostLoopThread = jthread([this] {
             hostLoop.run();
             state.hostLoopEnded = true;
@@ -414,8 +437,12 @@ private:
         webFront->cppFunction("deepEcho", [](const vector<Nested<32>::type>& value) {
             return value;
         });
-        webFront->cppFunction("deferredEcho", [this](string value, int delayMs) { return deferredEcho(webFront, std::move(value), delayMs); });
-        webFront->cppFunction("deferredFailure", [this]() { return deferredFailure(webFront, "rejected after a delay"); });
+        webFront->cppFunction("deferredEcho", [this](string value, int delayMs) {
+            return deferredEcho(webFront, std::move(value), delayMs);
+        });
+        webFront->cppFunction("deferredFailure", [this]() {
+            return deferredFailure(webFront, "rejected after a delay");
+        });
 
         webFront->cppFunction("listEcho", [](const vector<string>& value) {
             return value;
@@ -431,9 +458,12 @@ private:
             return entries;
         });
         webFront->cppFunction("pageFromCpp", []() {
-            return tuple<vector<string>, string>{{"a", "b"}, "cursor"};
+            return tuple<vector<string>, string>{
+                {"a", "b"},
+                "cursor"
+            };
         });
-        webFront->cppFunction("heterogeneousList", [](const vector<string>&) {});
+        webFront->cppFunction("heterogeneousList", [](const vector<string>&) { });
     }
 
     /// "<code>|<message>" of the BridgeError that the browser function `name` raises, called with `argument` if any, or
@@ -454,7 +484,9 @@ private:
     Task checkErrorCodes(TestWF::UI ui) {
         bool passed = false;
         try {
-            const auto codeIs = [](const string& rejection, string_view code) { return rejection.starts_with(string(code) + "|"); };
+            const auto codeIs = [](const string& rejection, string_view code) {
+                return rejection.starts_with(string(code) + "|");
+            };
             const auto application = co_await rejectionOf(ui, "webfrontTests.rejectWithCode", "quota:exceeded");
             const auto reserved    = co_await rejectionOf(ui, "webfrontTests.rejectWithCode", "webfront.cancelled");
             const auto missing     = co_await rejectionOf(ui, "webfrontTests.noSuchFunction");
@@ -474,11 +506,14 @@ private:
         bool passed = false;
         try {
             const vector<string> names{"alpha", "", string(70000, 'z'), "\xe2\x82\xac"};
-            const auto echoed = co_await ui.jsFunctionSender<vector<string>>("webfrontTests.listEcho")(names);
-            const vector<Record> records{{"a.txt", 12.5, true, {1, 2, 3}}, {"b", 0, false, {}}};
-            const auto echoedRecords = co_await ui.jsFunctionSender<vector<Record>>("webfrontTests.recordsEcho")(records);
-            const auto none = co_await ui.jsFunctionSender<vector<string>>("webfrontTests.listEcho")(vector<string>{});
-            bool heterogeneousRejected = false;
+            const auto           echoed = co_await ui.jsFunctionSender<vector<string>>("webfrontTests.listEcho")(names);
+            const vector<Record> records{
+                {"a.txt", 12.5,  true, {1, 2, 3}},
+                {    "b",    0, false,        {}}
+            };
+            const auto echoedRecords         = co_await ui.jsFunctionSender<vector<Record>>("webfrontTests.recordsEcho")(records);
+            const auto none                  = co_await ui.jsFunctionSender<vector<string>>("webfrontTests.listEcho")(vector<string>{});
+            bool       heterogeneousRejected = false;
             try {
                 co_await ui.jsFunctionSender<vector<string>>("webfrontTests.heterogeneousList")();
             } catch (const runtime_error&) {
@@ -573,8 +608,9 @@ private:
         });
         webFront->cppFunction("mediaRanges", [this]() {
             lock_guard lock(mediaMutex);
-            string joined;
-            for (const auto& range : mediaRanges) joined += range + "\n";
+            string     joined;
+            for (const auto& range : mediaRanges)
+                joined += range + "\n";
             return joined;
         });
     }
@@ -582,18 +618,35 @@ private:
     /// Read grants bound to the browser client (#469): hostile active content is served by a bound route.
     void registerReadRoute(TestWF& app) {
         readRoute = app.addReadRoute("/webfront/services/test-read/", [](const http::RouteRequest&, const ReadGrant& grant) {
-            const string_view marker = "try { window.top.__readExecuted = true; parent.__readExecuted = true; } catch (e) {} fetch('/webfront/services/test-read/executed').catch(() => {});";
-            string type, body;
-            if (grant.rest == "hello.txt") { type = "text/plain"; body = "hello"; }
-            else if (grant.rest == "evil.html") { type = "text/html"; body = "<script>" + string(marker) + "</script>"; }
-            else if (grant.rest == "evil.svg") { type = "image/svg+xml"; body = "<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'><script>" + string(marker) + "</script><rect width='4' height='4' fill='red'/></svg>"; }
-            else if (grant.rest == "legacy.js") { type = "text/javascript1.5"; body = string(marker); }
-            else if (grant.rest == "legacy-ecma.js") { type = "application/x-ecmascript"; body = string(marker); }
-            else { http::RouteReply reply; reply.status = http::Response::notFound; reply.contentLength = 0; return reply; }
+            const string_view marker = "try { window.top.__readExecuted = true; parent.__readExecuted = true; } catch (e) {} "
+                                       "fetch('/webfront/services/test-read/executed').catch(() => {});";
+            string            type, body;
+            if (grant.rest == "hello.txt") {
+                type = "text/plain";
+                body = "hello";
+            } else if (grant.rest == "evil.html") {
+                type = "text/html";
+                body = "<script>" + string(marker) + "</script>";
+            } else if (grant.rest == "evil.svg") {
+                type = "image/svg+xml";
+                body = "<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'><script>" + string(marker)
+                       + "</script><rect width='4' height='4' fill='red'/></svg>";
+            } else if (grant.rest == "legacy.js") {
+                type = "text/javascript1.5";
+                body = string(marker);
+            } else if (grant.rest == "legacy-ecma.js") {
+                type = "application/x-ecmascript";
+                body = string(marker);
+            } else {
+                http::RouteReply reply;
+                reply.status        = http::Response::notFound;
+                reply.contentLength = 0;
+                return reply;
+            }
             http::RouteReply reply;
             reply.headers.emplace_back("Content-Type", type);
             reply.contentLength = body.size();
-            reply.body = [body = std::move(body), position = size_t{0}](span<char> out) mutable {
+            reply.body          = [body = std::move(body), position = size_t{0}](span<char> out) mutable {
                 const auto count = min(out.size(), body.size() - position);
                 copy_n(body.data() + position, count, out.data());
                 position += count;
@@ -601,7 +654,9 @@ private:
             };
             return reply;
         });
-        webFront->cppFunction("readUrl", [this](TestWF::UI ui, string name) { return ui.grantRead(readRoute, name); });
+        webFront->cppFunction("readUrl", [this](TestWF::UI ui, string name) {
+            return ui.grantRead(readRoute, name);
+        });
     }
 
     void registerCallbacks() {
@@ -686,7 +741,7 @@ private:
         });
         // C++ changes the object, then refreshes the form and the inspector.
         webFront->cppFunction("formsChange", [this](TestWF::UI ui) {
-            auto& fixture          = formsFixtures.at(ui.id());
+            auto& fixture           = formsFixtures.at(ui.id());
             fixture.object->speed   = 9;
             fixture.object->density = 0.5;
             fixture.object->wrap    = true;
@@ -726,12 +781,13 @@ private:
             static_cast<void>(ui.document());
             const auto [id, operations] = msg::DomBatch::decode(std::as_bytes(std::span(bytes)));
             msg::DomBatch batch(id);
-            for (const auto& operation : operations) batch.add(operation);
+            for (const auto& operation : operations)
+                batch.add(operation);
             ui.sendDomBatch(batch);
             state.domBatchSent = true;
         });
         webFront->cppFunction("wfDom.rejected", [this](uint32_t id, const string& reason) {
-            domRejections[id] = reason;
+            domRejections[id]          = reason;
             state.domRejectionObserved = true;
         });
         webFront->cppFunction("domBatchRejection", [this](uint32_t id) {
@@ -742,15 +798,20 @@ private:
         webFront->cppFunction("wfDom.event", [this](uint32_t node, uint32_t event, const string& value) {
             using Event = tuple<uint32_t, uint32_t, string_view>;
             static constexpr array<Event, 5> expected{
-                Event{10, 4, "hello"}, Event{11, 5, "true"}, Event{11, 5, "false"},
-                Event{10, 6, "Escape"}, Event{10, 7, ""}};
+                Event{10, 4,  "hello"},
+                Event{11, 5,   "true"},
+                Event{11, 5,  "false"},
+                Event{10, 6, "Escape"},
+                Event{10, 7,       ""}
+            };
             size_t index = 0;
             while (index < expected.size() && expected[index] != Event{node, event, value})
                 ++index;
-            ++domEventCounts.at(index); // Last slot counts all unexpected identities or values.
+            ++domEventCounts.at(index);  // Last slot counts all unexpected identities or values.
         });
         webFront->cppFunction("domEventCounts", [this] {
-            if (domEventCounts == array<uint32_t, 6>{1, 1, 1, 1, 1, 0}) state.domEventsObserved = true;
+            if (domEventCounts == array<uint32_t, 6>{1, 1, 1, 1, 1, 0})
+                state.domEventsObserved = true;
             return domEventCounts;
         });
 
@@ -765,7 +826,9 @@ private:
             const auto origin = webfront::detail::applicationOrigin("127.0.0.1", webFront->port(), networking::secureTransport<TestNet>);
             return frontend::detail::applicationUrl("127.0.0.1", webFront->port(), "a+b.html", origin);
         });
-        webFront->cppFunction<string>("rejectedWebSocketUrl", [this] { return rejectedWebSocket->url(); });
+        webFront->cppFunction<string>("rejectedWebSocketUrl", [this] {
+            return rejectedWebSocket->url();
+        });
         uiSubscription = webFront->subscribeUIStarted([this](TestWF::UI) {
             state.subscriberNotified = true;
         });
@@ -795,20 +858,39 @@ private:
         webFront->cppFunction("specsFinished", [this] {
             specsFinished();
         });
-        webFront->cppFunction<string, string>("returnFromCpp", [](const string& value) { return "cpp-result:" + value; });
-        webFront->cppFunction<void>("throwFromCpp", [] { throw runtime_error("C++ callback failed"); });
-        webFront->cppFunction<void>("throwCodedFromCpp", [] { throw BridgeError("denied", "the user said no"); });
-        webFront->cppFunction<string, size_t>("longStringFromCpp", [](size_t size) { return string(size, 'x'); });
-        webFront->cppFunction<string, string>("echoString", [](const string& value) { return value; });
+        webFront->cppFunction<string, string>("returnFromCpp", [](const string& value) {
+            return "cpp-result:" + value;
+        });
+        webFront->cppFunction<void>("throwFromCpp", [] {
+            throw runtime_error("C++ callback failed");
+        });
+        webFront->cppFunction<void>("throwCodedFromCpp", [] {
+            throw BridgeError("denied", "the user said no");
+        });
+        webFront->cppFunction<string, size_t>("longStringFromCpp", [](size_t size) {
+            return string(size, 'x');
+        });
+        webFront->cppFunction<string, string>("echoString", [](const string& value) {
+            return value;
+        });
         webFront->cppFunction("integerInCpp", [](int value) {
             return value;
         });
-        webFront->cppFunction<size_t, string>("lengthInCpp", [](const string& value) { return value.size(); });
+        webFront->cppFunction<size_t, string>("lengthInCpp", [](const string& value) {
+            return value.size();
+        });
         // Ten typed arrays as ten top-level parameters, the signature deduced from the lambda.
         webFront->cppFunction("recordArraysFromJs",
-                              [this](const vector<uint8_t>& u8, const vector<int8_t>& i8, const vector<uint16_t>& u16, const vector<int16_t>& i16,
-                                     const vector<uint32_t>& u32, const vector<int32_t>& i32, const vector<uint64_t>& u64, const vector<int64_t>& i64,
-                                     const vector<float>& floats, const vector<double>& doubles) {
+                              [this](const vector<uint8_t>&  u8,
+                                     const vector<int8_t>&   i8,
+                                     const vector<uint16_t>& u16,
+                                     const vector<int16_t>&  i16,
+                                     const vector<uint32_t>& u32,
+                                     const vector<int32_t>&  i32,
+                                     const vector<uint64_t>& u64,
+                                     const vector<int64_t>&  i64,
+                                     const vector<float>&    floats,
+                                     const vector<double>&   doubles) {
                                   recordArraysFromJs(u8, i8, u16, i16, u32, i32, u64, i64, floats, doubles);
                               });
         webFront->cppFunction("recordTupleFromJs", [this](const tuple<int, string>& value) {
@@ -835,8 +917,7 @@ private:
     /// Arity follows the bridge signature under test: ten typed arrays as ten top-level parameters.
     template <typename... Arrays>
     void recordArraysFromJs(const Arrays&... arrays) {
-        state.jsArraysObserved =
-          matchesAll(tie(arrays...), tie(cppU8, cppI8, cppU16, cppI16, cppU32, cppI32, cppU64, cppI64, cppFloat, cppDouble));
+        state.jsArraysObserved = matchesAll(tie(arrays...), tie(cppU8, cppI8, cppU16, cppI16, cppU32, cppI32, cppU64, cppI64, cppFloat, cppDouble));
     }
 
     void browserReady() {
@@ -848,13 +929,13 @@ private:
         webFront->spawn(checkErrorCodes(requireUI()));
         cancelledTask = requireUI().spawn(awaitCancelledSender(requireUI()));
         requireUI().jsFunction("webfrontTests.receiveFromCpp")(cppToJsToken);
-        requireUI().jsFunction("webfrontTests.receiveArraysFromCpp")(
-          cppU8, cppI8, cppU16, cppI16, cppU32, cppI32, cppU64, cppI64, cppFloat, cppDouble);
+        requireUI().jsFunction("webfrontTests.receiveArraysFromCpp")(cppU8, cppI8, cppU16, cppI16, cppU32, cppI32, cppU64, cppI64, cppFloat, cppDouble);
         cppResult = requireUI().template jsFunction<string>("webfrontTests.returnToCpp")("from-cpp");
     }
 
     bool cppResultMatches() {
-        if (!cppResult.valid()) return false;
+        if (!cppResult.valid())
+            return false;
         try {
             if (cppResult.wait_for(cppResultWaitTimeout) != future_status::ready) {
                 log::error("C++ result call timed out after {} seconds", cppResultWaitTimeout.count());
@@ -896,8 +977,9 @@ private:
             log::error("The specs did not report the end of the run");
             return 1;
         }
-        if (!(state.domDocumentObserved && state.domAwaitObserved && state.domBatchSent && state.domRejectionObserved && state.domEventsObserved && state.formsObserved && state.browserReady
-              && state.subscriberNotified && state.hostLoopStoppedByPage && browserCallsObserved() && cppCallsObserved() && rejectedWebSocket->rejectedRequests() >= 2)) {
+        if (!(state.domDocumentObserved && state.domAwaitObserved && state.domBatchSent && state.domRejectionObserved && state.domEventsObserved
+              && state.formsObserved && state.browserReady && state.subscriberNotified && state.hostLoopStoppedByPage && browserCallsObserved()
+              && cppCallsObserved() && rejectedWebSocket->rejectedRequests() >= 2)) {
             log::error("The specs passed but one of the bridge-direction checks failed");
             return 1;
         }
@@ -918,8 +1000,7 @@ int main(int argc, char** argv) {
     vector<char*> driverArgs{argv[0]};
     for (int i = 1; i < argc; ++i) {
         const string_view option(argv[i]);
-        if (!option.starts_with("--ignore-certificate-errors-spki-list=") && !option.starts_with("--user-data-dir=")
-            && option != "--disable-frame-rate-limit")
+        if (!option.starts_with("--ignore-certificate-errors-spki-list=") && !option.starts_with("--user-data-dir=") && option != "--disable-frame-rate-limit")
             driverArgs.push_back(argv[i]);
     }
     argc = static_cast<int>(driverArgs.size());

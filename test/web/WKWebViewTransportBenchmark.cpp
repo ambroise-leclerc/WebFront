@@ -1,5 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-25
+//
+// WebFront — tests/web
+// Role: Transport benchmark of the WKWebView frontend through a direct channel.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: macOS only; benchmark
+
 // ADR-017: one WKWebView, the HTTP bridge and public Cocoa message/evaluation APIs.
 // Kept in C++ like the adapter: Objective-C runtime calls and Clang Blocks, without ARC.
+
 #include "TransportBenchmark.hpp"
 
 #include <cstdio>

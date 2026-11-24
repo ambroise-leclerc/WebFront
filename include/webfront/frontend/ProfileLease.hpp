@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-21
+//
+// WebFront — frontend
+// Role: A browser profile directory kept across runs but never used by two live processes at once.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: lock-file based; the first instance keeps the directory, others get a sibling .instances directory
+
 #pragma once
 
 /// A browser profile directory that persists across runs but is never used by two live processes at once.
@@ -15,8 +24,8 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <utility>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #ifndef _WIN32
@@ -33,10 +42,10 @@ namespace detail {
 /// An exclusive flock on a file: held until destruction (or the death of the process, which the system releases).
 class FileLock {
 public:
-    FileLock() = default;
+    FileLock()                           = default;
     FileLock(const FileLock&)            = delete;
     FileLock& operator=(const FileLock&) = delete;
-    FileLock(FileLock&& other) noexcept : fd(std::exchange(other.fd, -1)) {}
+    FileLock(FileLock&& other) noexcept : fd(std::exchange(other.fd, -1)) { }
     ~FileLock() {
         if (fd >= 0)
             ::close(fd);
@@ -44,10 +53,14 @@ public:
 
     /// Takes the lock of `file`, creating it. Returns nullopt when another process holds it (contention, the only expected
     /// refusal) and throws std::system_error for any other failure (no descriptor left, a file that cannot be created...).
-    [[nodiscard]] static std::optional<FileLock> tryLock(const std::filesystem::path& file) { return lock(file, LOCK_EX | LOCK_NB); }
+    [[nodiscard]] static std::optional<FileLock> tryLock(const std::filesystem::path& file) {
+        return lock(file, LOCK_EX | LOCK_NB);
+    }
 
     /// Waits for the lock of `file`; used for the short critical section that coordinates the leases of a directory.
-    [[nodiscard]] static FileLock wait(const std::filesystem::path& file) { return std::move(*lock(file, LOCK_EX)); }
+    [[nodiscard]] static FileLock wait(const std::filesystem::path& file) {
+        return std::move(*lock(file, LOCK_EX));
+    }
 
 private:
     static std::optional<FileLock> lock(const std::filesystem::path& file, int operation) {
@@ -89,11 +102,10 @@ struct LeaseHolder {
                 continue;
             // Under the registry lock, like the scan of another process: the directory does not vanish while it is visited.
             try {
-                const auto registry = FileLock::wait(lease.remove.parent_path() / registryFile);
+                const auto      registry = FileLock::wait(lease.remove.parent_path() / registryFile);
                 std::error_code ignored;
                 std::filesystem::remove_all(lease.remove, ignored);
-            } catch (...) {
-            }
+            } catch (...) { }
         }
     }
 };

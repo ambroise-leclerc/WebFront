@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-03
+//
+// WebFront — frontend
+// Role: Value types of the JavaScript dialogs (alert, confirm, prompt, beforeunload) an embedded frontend shows and answers.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: data types only; the toolkit adapters fill and consume them
+
 #pragma once
 
 #include <functional>

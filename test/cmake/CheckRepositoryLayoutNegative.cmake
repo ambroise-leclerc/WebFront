@@ -7,7 +7,7 @@ if(NOT ROOT OR NOT GIT_EXECUTABLE OR NOT WORK_DIR)
 endif()
 file(REMOVE_RECURSE "${WORK_DIR}" "${WORK_DIR}-archive")
 file(MAKE_DIRECTORY "${WORK_DIR}/include/webfront")
-foreach(entry .gitattributes .github .gitignore AGENTS.md CMakeLists.txt README.md
+foreach(entry .gitattributes .git-blame-ignore-revs .github .gitignore AGENTS.md CMakeLists.txt README.md
         cmake docs examples js test)
     file(WRITE "${WORK_DIR}/${entry}/placeholder" "")
 endforeach()

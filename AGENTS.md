@@ -117,6 +117,7 @@ Exception: a purely C++ change that reuses an existing encoding, introduces no n
 ## Coding and testing conventions
 
 - Use C++23, four-space indentation, the `.clang-format` of the directory (`include/webfront/`, `test/`, `examples/`), and the naming rules in `.github/CONTRIBUTING.md`.
+- Every tracked C++ source starts with the normalized file header (SPDX, Author, Created, subsystem, Role, Thread, Alloc, LLM) described in `.github/CONTRIBUTING.md`; read it first, keep it true when you change the file, and give a new file one. The `SourceHeaders` CTest case checks it, and CI checks the format with `.github/scripts/check-clang-format.sh` (pinned `clang-format`); generated headers are exempt.
 - Keep production implementation header-only under `include/`; browser resources live in `js/`.
 - Prefer standard-library facilities and explicit ownership. Keep public headers ODR-safe (`inline`/templates as appropriate).
 - Unit tests are named `const Scenario` objects whose `given`/`when`/`then` sections are lambdas, checked with `require`/`check` (`include/webfront/testing/Bdd.hpp`), and use deterministic mocks.

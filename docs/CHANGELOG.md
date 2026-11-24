@@ -51,6 +51,7 @@ in a native pseudoterminal, and a faster, less flashy start of the native window
 - Choose the colour of the WebKitGTK view under the page with `WindowOptions::background` (WebKitGTK; the other embedded frontends are listed here), and read the start-up milestones of a WebKitGTK view with `WEBFRONT_STARTUP_TRACE=1` (#611, `docs/WEBKITGTK.md`).
 
 ### Changed
+- The whole C++ code base is reformatted with `clang-format` and every source starts with a normalized header (SPDX, author, creation date, role, thread and allocation model, reading hint); CI checks both (`SourceHeaders` case, `.github/workflows/SourceFormat.yml`), and `.git-blame-ignore-revs` skips the reformatting in `git blame` (#653, `.github/CONTRIBUTING.md`).
 - WebKitGTK takes a `startupTimeout` (30 s by default), and WebView2 refuses a secondary window once the first one closed, even for a page already open (#652).
 - Open every native window from one `ViewOptions` (`WKWebViewOptions` and `WebView2Options` are aliases), whose test injections reach the secondary windows too (#652, `docs/FRONTENDS.md`).
 - Write a native frontend from shared headers: `EmbeddedFrontend` (facade and every `open()` overload), `WindowRegistry`/`InterfaceSession`, `StartupTrace` and `Presentation`, tested on Linux with fake windows (#652, `docs/FRONTENDS.md`).

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — tests/fuzz
+// Role: libFuzzer entry point of the gzip decoder.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: fuzz entry point; the decoder must reject anything invalid without overrun
+
 #include <webfront/http/Gzip.hpp>
 
 #include <cstddef>

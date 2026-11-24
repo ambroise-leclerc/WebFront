@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-21
+//
+// WebFront — tests/web
+// Role: Interoperability test of the TLS provider with a real browser.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: real-browser test; uses a local certificate
+
 #include <webfront/tls/WebFront.hpp>
 
 #include <iostream>

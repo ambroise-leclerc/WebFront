@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-26
+//
+// WebFront — tests/driver
+// Role: Frontend of the test driver: serves a project without opening a window.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: test driver; satisfies FrontendType
+
 #pragma once
 #include <webfront/WebFront.hpp>
 
@@ -23,8 +32,12 @@ struct TestFrontend : Frontend {
         open(address, port, page, policy, window, ViewLaunch{});
     }
     // The launch proof reaches the engine as it does in an application: the suite runs the same association.
-    static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy, const WindowOptions& window,
-                     const ViewLaunch& launch) {
+    static void open(std::string_view     address,
+                     std::string_view     port,
+                     std::string_view     page,
+                     const ContentPolicy& policy,
+                     const WindowOptions& window,
+                     const ViewLaunch&    launch) {
         // Rendering stays visible where the frontend can hide its window; the Linux engines use one Xvfb display around a
         // complete suite and their native windows stay real.
         if constexpr (requires { Frontend::startingOptions(); }) {

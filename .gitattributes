@@ -37,6 +37,7 @@
 # Exclude files from exporting
 .gitattributes export-ignore
 .gitignore     export-ignore
+.git-blame-ignore-revs export-ignore
 .gitkeep       export-ignore
 
 # Embedded headers hold the exact bytes of their text sources. Freshness tests

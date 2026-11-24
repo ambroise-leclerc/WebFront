@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-20
+//
+// WebFront — examples
+// Role: Game of Life rules shared by the console, developer and embedded stages.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: pure computation of the walkthrough; no WebFront dependency
+
 #pragma once
 
 #include <bitset>

@@ -1,10 +1,17 @@
-/// @date 26/04/2023 16:39:42
-/// @author Ambroise Leclerc
-/// @brief Native file system providing direct access to the operating system's file system.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2023-04-26
+//
+// WebFront — system
+// Role: Native file system giving direct access to the operating system's files.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: development only, not a production sandbox
+
 #pragma once
 
 #include "FileSystem.hpp"
 #include "FontStacks.hpp"
+
 #include <fstream>
 #include <system_error>
 
@@ -17,13 +24,15 @@ public:
     std::optional<File> open(std::filesystem::path path) {
         std::ifstream file;
         file.open(rootPath / path, std::ios::binary);
-        if (file.is_open()) return File{std::move(file)};
+        if (file.is_open())
+            return File{std::move(file)};
         return {};
     }
+
 protected:
     std::filesystem::path rootPath;
 };
-} // namespace detail
+}  // namespace detail
 
 /// @brief Native file system for debugging purposes.
 class NativeDebugFS : public detail::NativeRawFS {
@@ -66,4 +75,4 @@ public:
     }
 };
 
-} // namespace webfront::fs
+}  // namespace webfront::fs

@@ -1,15 +1,25 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-21
+//
+// WebFront — tls
+// Role: TLS 1.3 stream provider layered on TCPStdnet: handshake, reads and writes on the server I/O context.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: security sensitive; the caller enforces the handshake deadline (http::Server does)
+
 #pragma once
 #include "../networking/Tasks.hpp"
 #include "../networking/TCPNetworkingStdnet.hpp"
 #include "Credentials.hpp"
 #include "detail/Protocol.hpp"
+
 #include <cassert>
 
 #ifdef _MSC_VER
-// C4737: MSVC cannot always turn the awaits of the handshake coroutines into tail calls. It costs stack depth, not correctness,
-// and /WX would otherwise break every consumer of this header.
-#pragma warning(push)
-#pragma warning(disable : 4737)
+    // C4737: MSVC cannot always turn the awaits of the handshake coroutines into tail calls. It costs stack depth, not correctness,
+    // and /WX would otherwise break every consumer of this header.
+    #pragma warning(push)
+    #pragma warning(disable : 4737)
 #endif
 
 namespace webfront::tls {
@@ -48,7 +58,7 @@ public:
     };
 
     struct Socket : TCP::Socket {
-        explicit Socket(TCP::Socket&& accepted) : TCP::Socket(std::move(accepted)) {}
+        explicit Socket(TCP::Socket&& accepted) : TCP::Socket(std::move(accepted)) { }
 
     private:
         friend class Server;
@@ -72,7 +82,9 @@ public:
         ++acceptor.pendingHandshakes;
         struct Slot {
             std::size_t& pending;
-            ~Slot() { --pending; }
+            ~Slot() {
+                --pending;
+            }
         } slot{acceptor.pendingHandshakes};
         co_await runHandshake(socket, acceptor);
     }
@@ -177,7 +189,7 @@ private:
         try {
             const std::array<Byte, 2> alert{2, failure->alert};
             co_await writeRecord(socket, detail::alert, alert);
-        } catch (const std::system_error&) {}
+        } catch (const std::system_error&) { }
         throw std::system_error(std::make_error_code(std::errc::protocol_error), failure->what());
     }
 
@@ -314,26 +326,25 @@ private:
     }
 
 #ifdef _MSC_VER
-// MSVC reports C4737 as an error from its optimizer. The handshake stages run once per connection: build them unoptimized,
-// and keep the data path (Receive, Send) optimized.
-#pragma optimize("", off)
+    // MSVC reports C4737 as an error from its optimizer. The handshake stages run once per connection: build them unoptimized,
+    // and keep the data path (Receive, Send) optimized.
+    #pragma optimize("", off)
 #endif
     // MSVC refuses (C4737) one coroutine holding the whole flight, so the handshake runs in three stages.
     static Task negotiate(Socket& socket, std::shared_ptr<const detail::Identity> identity) {
         using namespace detail;
-        Sha256         transcript;
-        Bytes          message;
-        ClientHello    hello;
-        Secret<>       shared{}, clientHandshake{};
-        Digest         afterFinished{};
+        Sha256      transcript;
+        Bytes       message;
+        ClientHello hello;
+        Secret<>    shared{}, clientHandshake{};
+        Digest      afterFinished{};
         co_await receiveHello(socket, transcript, message, hello, shared);
         co_await sendFlight(socket, transcript, *identity, hello.alpn, shared, clientHandshake, afterFinished);
         co_await receiveFinished(socket, clientHandshake, afterFinished);
     }
 
     // From the first ClientHello to the ServerHello, including a HelloRetryRequest. Fills the X25519 shared secret.
-    static Task receiveHello(Socket& socket, detail::Sha256& transcript, detail::Bytes& message, detail::ClientHello& hello,
-                             detail::Secret<>& shared) {
+    static Task receiveHello(Socket& socket, detail::Sha256& transcript, detail::Bytes& message, detail::ClientHello& hello, detail::Secret<>& shared) {
         using namespace detail;
         auto& state = *socket.connection;
         message     = co_await readHandshake(socket, 65536, false, true);
@@ -403,8 +414,13 @@ private:
     }
 
     // EncryptedExtensions to server Finished, then the application keys.
-    static Task sendFlight(Socket& socket, detail::Sha256& transcript, const detail::Identity& identity, bool alpn, const detail::Secret<>& shared,
-                           detail::Secret<>& client, detail::Digest& afterFinished) {
+    static Task sendFlight(Socket&                 socket,
+                           detail::Sha256&         transcript,
+                           const detail::Identity& identity,
+                           bool                    alpn,
+                           const detail::Secret<>& shared,
+                           detail::Secret<>&       client,
+                           detail::Digest&         afterFinished) {
         using namespace detail;
         auto&          state = *socket.connection;
         const auto     empty = hash();
@@ -449,11 +465,11 @@ private:
         state.established = true;
     }
 #ifdef _MSC_VER
-#pragma optimize("", on)
+    #pragma optimize("", on)
 #endif
 };
 }  // namespace webfront::tls
 
 #ifdef _MSC_VER
-#pragma warning(pop)
+    #pragma warning(pop)
 #endif

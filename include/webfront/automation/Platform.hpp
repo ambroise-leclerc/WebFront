@@ -1,4 +1,12 @@
-/// @brief Shared native declarations: WinSock must precede Windows for every automation include order.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-29
+//
+// WebFront — automation
+// Role: Shared native declarations: WinSock must precede Windows for every automation include order.
+// Thread: worker-safe | Alloc: zero-hot-path
+// LLM: include-order shim; do not add logic
+
 #pragma once
 #include <cerrno>
 #ifdef _WIN32

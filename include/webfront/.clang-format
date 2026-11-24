@@ -1,6 +1,6 @@
 ---
 # Modern C++20+ clang-format configuration for WebFront project
-# Compatible with clang-format 22+
+# Reference version: clang-format 23.1.5 (pinned in .github/workflows/SourceFormat.yml); another major version may format differently
 Language: Cpp
 BasedOnStyle: WebKit
 

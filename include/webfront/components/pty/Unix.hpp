@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-19
+//
+// WebFront — components/pty
+// Role: POSIX pseudoterminal backend: openpty, child launch, resize and cleanup.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: optional component; file descriptors are owned by PtyFd, one worker thread drives reads
+
 #pragma once
 
 #if !defined(__linux__) && !defined(__APPLE__)
@@ -41,7 +50,7 @@ namespace webfront::pty::detail {
 
 class PtyFd {
 public:
-    explicit PtyFd(int descriptor = -1) : fd(descriptor) {}
+    explicit PtyFd(int descriptor = -1) : fd(descriptor) { }
     ~PtyFd() {
         reset();
     }
@@ -159,11 +168,11 @@ public:
     bool atEnd() const {
         return eof;
     }
-    void beginDrain() const {}
+    void beginDrain() const { }
 
     void wake() const {
         const char byte = 0;
-        while (::write(wakeWrite.get(), &byte, 1) < 0 && errno == EINTR) {}
+        while (::write(wakeWrite.get(), &byte, 1) < 0 && errno == EINTR) { }
     }
 
     // The owner excludes concurrent wake() calls before retiring these descriptors.

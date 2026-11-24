@@ -12,7 +12,7 @@ if(NOT ROOT)
 endif()
 
 set(expected
-    .gitattributes .github .gitignore
+    .gitattributes .git-blame-ignore-revs .github .gitignore
     AGENTS.md CMakeLists.txt LICENSE README.md README.fr.md
     cmake docs examples include js test)
 
@@ -58,8 +58,8 @@ foreach(document LICENSE README.fr.md)
         list(APPEND actual "${document}")
     endif()
 endforeach()
-# .gitattributes and .gitignore are export-ignored, so archives legitimately lack them.
-set(archive_optional .gitattributes .gitignore)
+# .gitattributes, .git-blame-ignore-revs and .gitignore are export-ignored, so archives legitimately lack them.
+set(archive_optional .gitattributes .git-blame-ignore-revs .gitignore)
 list(REMOVE_ITEM actual "" ${archive_optional})
 list(REMOVE_ITEM expected ${archive_optional})
 list(REMOVE_DUPLICATES actual)

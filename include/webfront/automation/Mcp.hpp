@@ -1,4 +1,12 @@
-/// @brief Deliberately limited MCP profile, shared by stdio and Streamable HTTP: lifecycle, ping and bounded developer tools.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-28
+//
+// WebFront — automation
+// Role: Deliberately limited MCP profile shared by stdio and Streamable HTTP: lifecycle, ping and bounded developer tools.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: protocol layer; the transport counts only valid JSON-RPC messages as session activity
+
 #pragma once
 #include "Instructions.hpp"
 #include "Session.hpp"
@@ -51,9 +59,10 @@ public:
                 initialized = true;
                 // Lifecycle version negotiation: offer our supported version when the requested one differs.
                 // A client that does not support it should disconnect, rather than use a mismatched profile.
-                return success(id,
-                               R"({"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"webfront-developer","version":"1.0.0"},"instructions":)"
-                                   + json::quote(mcpInstructions) + "}");
+                return success(
+                    id,
+                    R"({"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"webfront-developer","version":"1.0.0"},"instructions":)"
+                        + json::quote(mcpInstructions) + "}");
             }
             if (!ready)
                 return error(id, -32600, "Initialize the MCP connection first");

@@ -1,4 +1,12 @@
-/// @brief Per-connection DOM handles, batched mutations and explicit asynchronous reads.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-27
+//
+// WebFront — dom
+// Role: Per-connection DOM handles, batched mutations, events and explicit asynchronous reads.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: optional API; see docs/DOM.md, writes are batched and reads go through the sender
+
 #pragma once
 #include "../Task.hpp"
 #include "../weblink/DomBatch.hpp"
@@ -396,7 +404,7 @@ class EventOperationState : public EventWaiter, public std::enable_shared_from_t
         {
             std::lock_guard lock(mutex);
             nameIndex = index;
-            ended = outcome != Outcome::pending;
+            ended     = outcome != Outcome::pending;
         }
         if (ended)
             state->drop({node, index}, this->weak_from_this());  // stopped from another thread while subscribing
@@ -469,8 +477,8 @@ class EventSender {
 
 public:
     using sender_concept        = networking::ex::sender_tag;
-    using completion_signatures = networking::ex::completion_signatures<networking::ex::set_value_t(std::string), networking::ex::set_error_t(std::exception_ptr),
-                                                                        networking::ex::set_stopped_t()>;
+    using completion_signatures = networking::ex::
+        completion_signatures<networking::ex::set_value_t(std::string), networking::ex::set_error_t(std::exception_ptr), networking::ex::set_stopped_t()>;
     EventSender(std::weak_ptr<State> document, std::uint32_t id, std::string name, EventOptions flags)
         : owner(std::move(document)), node(id), event(std::move(name)), options(flags) { }
     template <typename Receiver>

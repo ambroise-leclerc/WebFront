@@ -1,6 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-05
+//
+// WebFront — tests/unit
+// Role: The host file system storage: confinement, links, replacement, quotas and failure cases.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: security tests; pins ADR-002 and ADR-020 behavior
+
 #include "TemporaryDirectory.hpp"
-#include <webfront/testing/Bdd.hpp>
 #include <webfront/system/NativeStorage.hpp>
+#include <webfront/testing/Bdd.hpp>
 
 #include <algorithm>
 #include <array>
@@ -156,806 +165,818 @@ shared_ptr<fs::StorageHooks> hooksAt(function<void(fs::StoragePoint, string_view
 }  // namespace
 
 const Scenario nativeStorage{"A native storage reads and writes under its root", [] {
-    Sandbox           sandbox;
-    fs::NativeStorage storage(sandbox.root);
+                                 Sandbox           sandbox;
+                                 fs::NativeStorage storage(sandbox.root);
 
-    then("its location is the canonical root", [&] {
-        require(storage.location() == stdfs::canonical(sandbox.root));
-    });
-    given("entries created through it", [&] {
-        storage.createDirectory("docs");
-        writeFile(storage, "docs/a.txt", "alpha");
-        writeFile(storage, "b.txt", "beta");
+                                 then("its location is the canonical root", [&] {
+                                     require(storage.location() == stdfs::canonical(sandbox.root));
+                                 });
+                                 given("entries created through it", [&] {
+                                     storage.createDirectory("docs");
+                                     writeFile(storage, "docs/a.txt", "alpha");
+                                     writeFile(storage, "b.txt", "beta");
 
-        then("they are on disk, listed, inspected and read", [&] {
-            require(readDisk(sandbox.root / "docs" / "a.txt") == "alpha");
-            auto page = storage.list("");
-            require(page.entries.size() == 2);
-            require(page.entries[0].name == "b.txt");
-            require(page.entries[0].type == fs::EntryType::file);
-            require(page.entries[0].size == 4);
-            require(page.entries[0].readable);
-            require(page.entries[0].writable);
-            require(page.entries[1].type == fs::EntryType::directory);
-            require(storage.status("docs/a.txt").size == 5);
-            require(storage.status("").type == fs::EntryType::directory);
-            auto file = storage.openRead("docs/a.txt");
-            require(file.knownSize() == 5u);
-            require(readAll(std::move(file)) == "alpha");
-        });
-        then("a file is read from any position", [&] {
-            auto            file = storage.openRead("docs/a.txt");
-            array<char, 16> buffer{};
-            require(file.seek(3));
-            require(file.read(buffer) == 2);
-            require(string_view(buffer.data(), 2) == "ha");
-        });
-        then("a write replaces atomically only when asked to", [&] {
-            require(errorOf([&] {
-                        writeFile(storage, "b.txt", "other");
-                    })
-                    == fs::StorageErrc::alreadyExists);
-            writeFile(storage, "b.txt", "gamma", fs::WriteMode::replace);
-            require(readDisk(sandbox.root / "b.txt") == "gamma");
-            require(errorOf([&] {
-                        writeFile(storage, "docs", "x", fs::WriteMode::replace);
-                    })
-                    == fs::StorageErrc::isDirectory);
-        });
-        then("entries are renamed without replacing and removed", [&] {
-            require(errorOf([&] {
-                        storage.rename("b.txt", "docs/a.txt");
-                    })
-                    == fs::StorageErrc::alreadyExists);
-            storage.rename("b.txt", "docs/b.txt");
-            require(stdfs::exists(sandbox.root / "docs" / "b.txt"));
-            require(errorOf([&] {
-                        storage.remove("docs");
-                    })
-                    == fs::StorageErrc::notEmpty);
-            storage.remove("docs/a.txt");
-            storage.remove("docs/b.txt");
-            storage.remove("docs");
-            require(namesOn(sandbox.root).empty());
-        });
-        then("operations through a file or a missing entry fail with their reason", [&] {
-            require(errorOf([&] {
-                        storage.list("b.txt");
-                    })
-                    == fs::StorageErrc::notDirectory);
-            require(errorOf([&] {
-                        storage.openRead("b.txt/x");
-                    })
-                    == fs::StorageErrc::notDirectory);
-            require(errorOf([&] {
-                        storage.openRead("missing.txt");
-                    })
-                    == fs::StorageErrc::notFound);
-            require(errorOf([&] {
-                        storage.openRead("docs");
-                    })
-                    == fs::StorageErrc::isDirectory);
-            require(errorOf([&] {
-                        storage.createDirectory("docs");
-                    })
-                    == fs::StorageErrc::alreadyExists);
-        });
-    });
-    given("paths SafePath rejects", [&] {
-        then("they are refused before touching the disk", [&] {
-            for (string path : {"../outside/secret.txt", "/etc/passwd", "a/../../outside", "C:/x", "nul", "a\\..\\b"}) {
-                auto scope = info(path);
-                require(errorOf([&] { storage.openRead(path); }) == fs::StorageErrc::invalidPath);
-                require(errorOf([&] { storage.createDirectory(path); }) == fs::StorageErrc::invalidPath);
-                require(sandbox.outsideUntouched());
-            }
-        });
-    });
-    given("a location that is not a directory", [&] {
-        writeDisk(sandbox.base.path() / "file", "x");
-        then("it cannot be declared", [&] {
-            require(errorOf([&] {
-                        fs::NativeStorage{sandbox.base.path() / "missing"};
-                    })
-                    == fs::StorageErrc::notFound);
-            require(errorOf([&] {
-                        fs::NativeStorage{sandbox.base.path() / "file"};
-                    })
-                    == fs::StorageErrc::notDirectory);
-        });
-    });
-}};
+                                     then("they are on disk, listed, inspected and read", [&] {
+                                         require(readDisk(sandbox.root / "docs" / "a.txt") == "alpha");
+                                         auto page = storage.list("");
+                                         require(page.entries.size() == 2);
+                                         require(page.entries[0].name == "b.txt");
+                                         require(page.entries[0].type == fs::EntryType::file);
+                                         require(page.entries[0].size == 4);
+                                         require(page.entries[0].readable);
+                                         require(page.entries[0].writable);
+                                         require(page.entries[1].type == fs::EntryType::directory);
+                                         require(storage.status("docs/a.txt").size == 5);
+                                         require(storage.status("").type == fs::EntryType::directory);
+                                         auto file = storage.openRead("docs/a.txt");
+                                         require(file.knownSize() == 5u);
+                                         require(readAll(std::move(file)) == "alpha");
+                                     });
+                                     then("a file is read from any position", [&] {
+                                         auto            file = storage.openRead("docs/a.txt");
+                                         array<char, 16> buffer{};
+                                         require(file.seek(3));
+                                         require(file.read(buffer) == 2);
+                                         require(string_view(buffer.data(), 2) == "ha");
+                                     });
+                                     then("a write replaces atomically only when asked to", [&] {
+                                         require(errorOf([&] {
+                                                     writeFile(storage, "b.txt", "other");
+                                                 })
+                                                 == fs::StorageErrc::alreadyExists);
+                                         writeFile(storage, "b.txt", "gamma", fs::WriteMode::replace);
+                                         require(readDisk(sandbox.root / "b.txt") == "gamma");
+                                         require(errorOf([&] {
+                                                     writeFile(storage, "docs", "x", fs::WriteMode::replace);
+                                                 })
+                                                 == fs::StorageErrc::isDirectory);
+                                     });
+                                     then("entries are renamed without replacing and removed", [&] {
+                                         require(errorOf([&] {
+                                                     storage.rename("b.txt", "docs/a.txt");
+                                                 })
+                                                 == fs::StorageErrc::alreadyExists);
+                                         storage.rename("b.txt", "docs/b.txt");
+                                         require(stdfs::exists(sandbox.root / "docs" / "b.txt"));
+                                         require(errorOf([&] {
+                                                     storage.remove("docs");
+                                                 })
+                                                 == fs::StorageErrc::notEmpty);
+                                         storage.remove("docs/a.txt");
+                                         storage.remove("docs/b.txt");
+                                         storage.remove("docs");
+                                         require(namesOn(sandbox.root).empty());
+                                     });
+                                     then("operations through a file or a missing entry fail with their reason", [&] {
+                                         require(errorOf([&] {
+                                                     storage.list("b.txt");
+                                                 })
+                                                 == fs::StorageErrc::notDirectory);
+                                         require(errorOf([&] {
+                                                     storage.openRead("b.txt/x");
+                                                 })
+                                                 == fs::StorageErrc::notDirectory);
+                                         require(errorOf([&] {
+                                                     storage.openRead("missing.txt");
+                                                 })
+                                                 == fs::StorageErrc::notFound);
+                                         require(errorOf([&] {
+                                                     storage.openRead("docs");
+                                                 })
+                                                 == fs::StorageErrc::isDirectory);
+                                         require(errorOf([&] {
+                                                     storage.createDirectory("docs");
+                                                 })
+                                                 == fs::StorageErrc::alreadyExists);
+                                     });
+                                 });
+                                 given("paths SafePath rejects", [&] {
+                                     then("they are refused before touching the disk", [&] {
+                                         for (string path : {"../outside/secret.txt", "/etc/passwd", "a/../../outside", "C:/x", "nul", "a\\..\\b"}) {
+                                             auto scope = info(path);
+                                             require(errorOf([&] {
+                                                         storage.openRead(path);
+                                                     })
+                                                     == fs::StorageErrc::invalidPath);
+                                             require(errorOf([&] {
+                                                         storage.createDirectory(path);
+                                                     })
+                                                     == fs::StorageErrc::invalidPath);
+                                             require(sandbox.outsideUntouched());
+                                         }
+                                     });
+                                 });
+                                 given("a location that is not a directory", [&] {
+                                     writeDisk(sandbox.base.path() / "file", "x");
+                                     then("it cannot be declared", [&] {
+                                         require(errorOf([&] {
+                                                     fs::NativeStorage{sandbox.base.path() / "missing"};
+                                                 })
+                                                 == fs::StorageErrc::notFound);
+                                         require(errorOf([&] {
+                                                     fs::NativeStorage{sandbox.base.path() / "file"};
+                                                 })
+                                                 == fs::StorageErrc::notDirectory);
+                                     });
+                                 });
+                             }};
 
 const Scenario nativeStorageReserves{"A native storage reserves the names of its temporary files", [] {
-    Sandbox           sandbox;
-    fs::NativeStorage storage(sandbox.root);
-    require(errorOf([&] {
-                writeFile(storage, ".wf-tmp-report.txt", "report");
-            })
-            == fs::StorageErrc::invalidPath);
-    require(errorOf([&] {
-                storage.rename("a", ".wf-tmp-a");
-            })
-            == fs::StorageErrc::invalidPath);
-    require(namesOn(sandbox.root).empty());
-    given("a write in progress, its temporary file named in another case", [&] {
-        auto writer = storage.beginWrite("report.txt", fs::WriteMode::createNew);
-        writer.write(span<const char>("partial", 7));
-        const auto temporary = namesOn(sandbox.root).at(0);
-        auto       upper     = temporary;
-        ranges::transform(upper, upper.begin(), [](char c) {
-            return c >= 'a' && c <= 'z' ? static_cast<char>(c - 'a' + 'A') : c;
-        });
-        then("it can be neither read nor published, on a case-insensitive volume as elsewhere", [&] {
-            // macOS (by default) and Windows volumes name the same file in any case: the reservation must cover it.
-            if (!stdfs::exists(sandbox.root / upper))
-                warn("This volume is case-sensitive: the other case names no file here");
-            require(errorOf([&] {
-                        storage.openRead(upper);
-                    })
-                    == fs::StorageErrc::invalidPath);
-            require(errorOf([&] {
-                        storage.rename(upper, "published.txt");
-                    })
-                    == fs::StorageErrc::invalidPath);
-            require(errorOf([&] {
-                        storage.remove(upper);
-                    })
-                    == fs::StorageErrc::invalidPath);
-            require(!stdfs::exists(sandbox.root / "published.txt"));
-        });
-    });
-}};
+                                         Sandbox           sandbox;
+                                         fs::NativeStorage storage(sandbox.root);
+                                         require(errorOf([&] {
+                                                     writeFile(storage, ".wf-tmp-report.txt", "report");
+                                                 })
+                                                 == fs::StorageErrc::invalidPath);
+                                         require(errorOf([&] {
+                                                     storage.rename("a", ".wf-tmp-a");
+                                                 })
+                                                 == fs::StorageErrc::invalidPath);
+                                         require(namesOn(sandbox.root).empty());
+                                         given("a write in progress, its temporary file named in another case", [&] {
+                                             auto writer = storage.beginWrite("report.txt", fs::WriteMode::createNew);
+                                             writer.write(span<const char>("partial", 7));
+                                             const auto temporary = namesOn(sandbox.root).at(0);
+                                             auto       upper     = temporary;
+                                             ranges::transform(upper, upper.begin(), [](char c) {
+                                                 return c >= 'a' && c <= 'z' ? static_cast<char>(c - 'a' + 'A') : c;
+                                             });
+                                             then("it can be neither read nor published, on a case-insensitive volume as elsewhere", [&] {
+                                                 // macOS (by default) and Windows volumes name the same file in any case: the reservation must cover it.
+                                                 if (!stdfs::exists(sandbox.root / upper))
+                                                     warn("This volume is case-sensitive: the other case names no file here");
+                                                 require(errorOf([&] {
+                                                             storage.openRead(upper);
+                                                         })
+                                                         == fs::StorageErrc::invalidPath);
+                                                 require(errorOf([&] {
+                                                             storage.rename(upper, "published.txt");
+                                                         })
+                                                         == fs::StorageErrc::invalidPath);
+                                                 require(errorOf([&] {
+                                                             storage.remove(upper);
+                                                         })
+                                                         == fs::StorageErrc::invalidPath);
+                                                 require(!stdfs::exists(sandbox.root / "published.txt"));
+                                             });
+                                         });
+                                     }};
 
 const Scenario interruptedWrite{"An interrupted write leaves no partial file", [] {
-    Sandbox           sandbox;
-    fs::NativeStorage storage(sandbox.root);
-    writeFile(storage, "kept.txt", "original");
+                                    Sandbox           sandbox;
+                                    fs::NativeStorage storage(sandbox.root);
+                                    writeFile(storage, "kept.txt", "original");
 
-    given("writes destroyed before their commit, new or replacing", [&] {
-        {
-            auto writer = storage.beginWrite("new.txt", fs::WriteMode::createNew);
-            writer.write(span<const char>("partial", 7));
-            require(namesOn(sandbox.root).size() == 2);  // kept.txt and the temporary file
-            require(storage.list("").entries.size() == 1);
-            require(errorOf([&] {
-                        storage.status("new.txt");
-                    })
-                    == fs::StorageErrc::notFound);
-        }
-        {
-            auto writer = storage.beginWrite("kept.txt", fs::WriteMode::replace);
-            writer.write(span<const char>("half", 4));
-        }
-        then("neither the partial file nor the temporary one remains, and the replaced file is intact", [&] {
-            require(namesOn(sandbox.root) == vector<string>{"kept.txt"});
-            require(readDisk(sandbox.root / "kept.txt") == "original");
-        });
-    });
-}};
+                                    given("writes destroyed before their commit, new or replacing", [&] {
+                                        {
+                                            auto writer = storage.beginWrite("new.txt", fs::WriteMode::createNew);
+                                            writer.write(span<const char>("partial", 7));
+                                            require(namesOn(sandbox.root).size() == 2);  // kept.txt and the temporary file
+                                            require(storage.list("").entries.size() == 1);
+                                            require(errorOf([&] {
+                                                        storage.status("new.txt");
+                                                    })
+                                                    == fs::StorageErrc::notFound);
+                                        }
+                                        {
+                                            auto writer = storage.beginWrite("kept.txt", fs::WriteMode::replace);
+                                            writer.write(span<const char>("half", 4));
+                                        }
+                                        then("neither the partial file nor the temporary one remains, and the replaced file is intact", [&] {
+                                            require(namesOn(sandbox.root) == vector<string>{"kept.txt"});
+                                            require(readDisk(sandbox.root / "kept.txt") == "original");
+                                        });
+                                    });
+                                }};
 
 const Scenario committedWriter{"A committed writer holds none of its directories", [] {
-    Sandbox           sandbox;
-    fs::NativeStorage storage(sandbox.root);
-    storage.createDirectory("dir");
-    auto writer = storage.beginWrite("dir/file.txt", fs::WriteMode::createNew);
-    writer.write(span<const char>("data", 4));
-    writer.commit();
-    // The writer stays alive: on Windows, handles it kept without FILE_SHARE_DELETE would make these fail.
-    std::error_code renamed, removed;
-    stdfs::rename(sandbox.root / "dir", sandbox.root / "moved", renamed);
-    require(!renamed);
-    stdfs::remove(sandbox.root / "moved" / "file.txt", removed);
-    require(!removed);
-    stdfs::remove(sandbox.root / "moved", removed);
-    require(!removed);
-}};
+                                   Sandbox           sandbox;
+                                   fs::NativeStorage storage(sandbox.root);
+                                   storage.createDirectory("dir");
+                                   auto writer = storage.beginWrite("dir/file.txt", fs::WriteMode::createNew);
+                                   writer.write(span<const char>("data", 4));
+                                   writer.commit();
+                                   // The writer stays alive: on Windows, handles it kept without FILE_SHARE_DELETE would make these fail.
+                                   std::error_code renamed, removed;
+                                   stdfs::rename(sandbox.root / "dir", sandbox.root / "moved", renamed);
+                                   require(!renamed);
+                                   stdfs::remove(sandbox.root / "moved" / "file.txt", removed);
+                                   require(!removed);
+                                   stdfs::remove(sandbox.root / "moved", removed);
+                                   require(!removed);
+                               }};
 
 const Scenario nativeListings{"Native listings are paginated and stable", [] {
-    Sandbox sandbox;
-    for (int index = 10; index < 40; ++index)
-        writeDisk(sandbox.root / ("f" + to_string(index)), "x");
+                                  Sandbox sandbox;
+                                  for (int index = 10; index < 40; ++index)
+                                      writeDisk(sandbox.root / ("f" + to_string(index)), "x");
 #ifndef _WIN32
-    writeDisk(sandbox.root / "trailing.", "unaddressable");  // a name SafePath rejects is not listed
+                                  writeDisk(sandbox.root / "trailing.", "unaddressable");  // a name SafePath rejects is not listed
 #endif
-    fs::NativeStorage storage(sandbox.root);
+                                  fs::NativeStorage storage(sandbox.root);
 
-    auto first = storage.list("", {}, 10);
-    require(first.entries.size() == 10);
-    require(first.next == "f19");
-    writeDisk(sandbox.root / "f05", "x");
-    writeDisk(sandbox.root / "f195", "x");
-    stdfs::remove(sandbox.root / "f30");
-    vector<string> seen;
-    for (auto& entry : first.entries)
-        seen.push_back(entry.name);
-    for (auto after = first.next; after;) {
-        auto page = storage.list("", *after, 10);
-        for (auto& entry : page.entries)
-            seen.push_back(entry.name);
-        after = page.next;
-    }
-    vector<string> expected;
-    for (int index = 10; index < 40; ++index)
-        if (index != 30)
-            expected.push_back("f" + to_string(index));
-    expected.push_back("f195");
-    ranges::sort(expected);
-    require(seen == expected);
-}};
+                                  auto first = storage.list("", {}, 10);
+                                  require(first.entries.size() == 10);
+                                  require(first.next == "f19");
+                                  writeDisk(sandbox.root / "f05", "x");
+                                  writeDisk(sandbox.root / "f195", "x");
+                                  stdfs::remove(sandbox.root / "f30");
+                                  vector<string> seen;
+                                  for (auto& entry : first.entries)
+                                      seen.push_back(entry.name);
+                                  for (auto after = first.next; after;) {
+                                      auto page = storage.list("", *after, 10);
+                                      for (auto& entry : page.entries)
+                                          seen.push_back(entry.name);
+                                      after = page.next;
+                                  }
+                                  vector<string> expected;
+                                  for (int index = 10; index < 40; ++index)
+                                      if (index != 30)
+                                          expected.push_back("f" + to_string(index));
+                                  expected.push_back("f195");
+                                  ranges::sort(expected);
+                                  require(seen == expected);
+                              }};
 
 const Scenario linksNever{"Links never lead a native storage outside its root", [] {
-    Sandbox sandbox;
-    makeDirectories(sandbox.root / "inside");
-    writeDisk(sandbox.root / "inside" / "note.txt", "note");
-    linkDirectory(sandbox.outside, sandbox.root / "escape");
+                              Sandbox sandbox;
+                              makeDirectories(sandbox.root / "inside");
+                              writeDisk(sandbox.root / "inside" / "note.txt", "note");
+                              linkDirectory(sandbox.outside, sandbox.root / "escape");
 
-    given("a root that refuses links (the default)", [&] {
-        fs::NativeStorage storage(sandbox.root);
-        then("every operation through the link is refused and the outside is untouched", [&] {
-            require(errorOf([&] {
-                        storage.list("escape");
-                    })
-                    == fs::StorageErrc::linkRefused);
-            require(errorOf([&] {
-                        storage.openRead("escape/secret.txt");
-                    })
-                    == fs::StorageErrc::linkRefused);
-            require(errorOf([&] {
-                        writeFile(storage, "escape/new.txt", "x");
-                    })
-                    == fs::StorageErrc::linkRefused);
-            require(errorOf([&] {
-                        writeFile(storage, "escape/secret.txt", "x", fs::WriteMode::replace);
-                    })
-                    == fs::StorageErrc::linkRefused);
-            require(errorOf([&] {
-                        storage.createDirectory("escape/dir");
-                    })
-                    == fs::StorageErrc::linkRefused);
-            require(errorOf([&] {
-                        storage.remove("escape/secret.txt");
-                    })
-                    == fs::StorageErrc::linkRefused);
-            require(errorOf([&] {
-                        storage.rename("escape/secret.txt", "stolen.txt");
-                    })
-                    == fs::StorageErrc::linkRefused);
-            require(errorOf([&] {
-                        storage.rename("inside/note.txt", "escape/note.txt");
-                    })
-                    == fs::StorageErrc::linkRefused);
-            require(sandbox.outsideUntouched());
-        });
-        then("the link is listed as a link, not followed", [&] {
-            auto page = storage.list("");
-            require(page.entries.size() == 2);
-            require(page.entries[0].name == "escape");
-            require(page.entries[0].type == fs::EntryType::link);
-            require(storage.status("escape").type == fs::EntryType::link);
-        });
-        then("removing the link removes the link only", [&] {
-            storage.remove("escape");
-            require(!stdfs::exists(stdfs::symlink_status(sandbox.root / "escape")));
-            require(sandbox.outsideUntouched());
-        });
-    });
+                              given("a root that refuses links (the default)", [&] {
+                                  fs::NativeStorage storage(sandbox.root);
+                                  then("every operation through the link is refused and the outside is untouched", [&] {
+                                      require(errorOf([&] {
+                                                  storage.list("escape");
+                                              })
+                                              == fs::StorageErrc::linkRefused);
+                                      require(errorOf([&] {
+                                                  storage.openRead("escape/secret.txt");
+                                              })
+                                              == fs::StorageErrc::linkRefused);
+                                      require(errorOf([&] {
+                                                  writeFile(storage, "escape/new.txt", "x");
+                                              })
+                                              == fs::StorageErrc::linkRefused);
+                                      require(errorOf([&] {
+                                                  writeFile(storage, "escape/secret.txt", "x", fs::WriteMode::replace);
+                                              })
+                                              == fs::StorageErrc::linkRefused);
+                                      require(errorOf([&] {
+                                                  storage.createDirectory("escape/dir");
+                                              })
+                                              == fs::StorageErrc::linkRefused);
+                                      require(errorOf([&] {
+                                                  storage.remove("escape/secret.txt");
+                                              })
+                                              == fs::StorageErrc::linkRefused);
+                                      require(errorOf([&] {
+                                                  storage.rename("escape/secret.txt", "stolen.txt");
+                                              })
+                                              == fs::StorageErrc::linkRefused);
+                                      require(errorOf([&] {
+                                                  storage.rename("inside/note.txt", "escape/note.txt");
+                                              })
+                                              == fs::StorageErrc::linkRefused);
+                                      require(sandbox.outsideUntouched());
+                                  });
+                                  then("the link is listed as a link, not followed", [&] {
+                                      auto page = storage.list("");
+                                      require(page.entries.size() == 2);
+                                      require(page.entries[0].name == "escape");
+                                      require(page.entries[0].type == fs::EntryType::link);
+                                      require(storage.status("escape").type == fs::EntryType::link);
+                                  });
+                                  then("removing the link removes the link only", [&] {
+                                      storage.remove("escape");
+                                      require(!stdfs::exists(stdfs::symlink_status(sandbox.root / "escape")));
+                                      require(sandbox.outsideUntouched());
+                                  });
+                              });
 #ifndef _WIN32
-    given("a file link to the outside", [&] {
-        stdfs::create_symlink(sandbox.outside / "secret.txt", sandbox.root / "secret-link");
-        fs::NativeStorage storage(sandbox.root);
-        then("it is not read, and replacing it replaces the link, not its target", [&] {
-            require(errorOf([&] {
-                        storage.openRead("secret-link");
-                    })
-                    == fs::StorageErrc::linkRefused);
-            writeFile(storage, "secret-link", "replaced", fs::WriteMode::replace);
-            require(stdfs::is_regular_file(stdfs::symlink_status(sandbox.root / "secret-link")));
-            require(sandbox.outsideUntouched());
-        });
-    });
-    given("a root that follows links inside it", [&] {
-        stdfs::create_directory_symlink("inside", sandbox.root / "alias");
-        stdfs::create_symlink("../inside/note.txt", sandbox.root / "inside" / "self");
-        stdfs::create_directory_symlink("../../outside", sandbox.root / "inside" / "up");
-        stdfs::create_symlink(sandbox.outside / "secret.txt", sandbox.root / "absolute");
-        stdfs::create_symlink("loop", sandbox.root / "loop");
-        stdfs::create_symlink("..", sandbox.root / "parent");
-        fs::NativeStorage storage(sandbox.root, {.links = fs::LinkPolicy::followInside});
-        then("a link whose resolution stays inside is followed", [&] {
-            require(readAll(storage.openRead("alias/note.txt")) == "note");
-            require(readAll(storage.openRead("inside/self")) == "note");
-            writeFile(storage, "alias/added.txt", "added");
-            require(readDisk(sandbox.root / "inside" / "added.txt") == "added");
-            require(storage.list("alias").entries.size() == 4);  // note.txt, self, up, added.txt
-        });
-        then("a link that leaves the root, an absolute link and a loop are refused", [&] {
-            require(errorOf([&] {
-                        storage.list("escape");
-                    })
-                    == fs::StorageErrc::linkRefused);
-            require(errorOf([&] {
-                        storage.openRead("inside/up/secret.txt");
-                    })
-                    == fs::StorageErrc::linkRefused);
-            require(errorOf([&] {
-                        writeFile(storage, "inside/up/new.txt", "x");
-                    })
-                    == fs::StorageErrc::linkRefused);
-            require(errorOf([&] {
-                        storage.openRead("absolute");
-                    })
-                    == fs::StorageErrc::linkRefused);
-            require(errorOf([&] {
-                        storage.openRead("loop");
-                    })
-                    == fs::StorageErrc::linkRefused);
-            require(sandbox.outsideUntouched());
-        });
-    });
+                              given("a file link to the outside", [&] {
+                                  stdfs::create_symlink(sandbox.outside / "secret.txt", sandbox.root / "secret-link");
+                                  fs::NativeStorage storage(sandbox.root);
+                                  then("it is not read, and replacing it replaces the link, not its target", [&] {
+                                      require(errorOf([&] {
+                                                  storage.openRead("secret-link");
+                                              })
+                                              == fs::StorageErrc::linkRefused);
+                                      writeFile(storage, "secret-link", "replaced", fs::WriteMode::replace);
+                                      require(stdfs::is_regular_file(stdfs::symlink_status(sandbox.root / "secret-link")));
+                                      require(sandbox.outsideUntouched());
+                                  });
+                              });
+                              given("a root that follows links inside it", [&] {
+                                  stdfs::create_directory_symlink("inside", sandbox.root / "alias");
+                                  stdfs::create_symlink("../inside/note.txt", sandbox.root / "inside" / "self");
+                                  stdfs::create_directory_symlink("../../outside", sandbox.root / "inside" / "up");
+                                  stdfs::create_symlink(sandbox.outside / "secret.txt", sandbox.root / "absolute");
+                                  stdfs::create_symlink("loop", sandbox.root / "loop");
+                                  stdfs::create_symlink("..", sandbox.root / "parent");
+                                  fs::NativeStorage storage(sandbox.root, {.links = fs::LinkPolicy::followInside});
+                                  then("a link whose resolution stays inside is followed", [&] {
+                                      require(readAll(storage.openRead("alias/note.txt")) == "note");
+                                      require(readAll(storage.openRead("inside/self")) == "note");
+                                      writeFile(storage, "alias/added.txt", "added");
+                                      require(readDisk(sandbox.root / "inside" / "added.txt") == "added");
+                                      require(storage.list("alias").entries.size() == 4);  // note.txt, self, up, added.txt
+                                  });
+                                  then("a link that leaves the root, an absolute link and a loop are refused", [&] {
+                                      require(errorOf([&] {
+                                                  storage.list("escape");
+                                              })
+                                              == fs::StorageErrc::linkRefused);
+                                      require(errorOf([&] {
+                                                  storage.openRead("inside/up/secret.txt");
+                                              })
+                                              == fs::StorageErrc::linkRefused);
+                                      require(errorOf([&] {
+                                                  writeFile(storage, "inside/up/new.txt", "x");
+                                              })
+                                              == fs::StorageErrc::linkRefused);
+                                      require(errorOf([&] {
+                                                  storage.openRead("absolute");
+                                              })
+                                              == fs::StorageErrc::linkRefused);
+                                      require(errorOf([&] {
+                                                  storage.openRead("loop");
+                                              })
+                                              == fs::StorageErrc::linkRefused);
+                                      require(sandbox.outsideUntouched());
+                                  });
+                              });
 #endif
-}};
+                          }};
 
 const Scenario componentReplaced{"A component replaced by a link during the resolution does not lead outside", [] {
-    Sandbox sandbox;
+                                     Sandbox sandbox;
 
-    // Before each operation: root/a/b/file.txt. When `a` has been opened and `b` not yet, b is replaced by a link to
-    // the outside directory, as a concurrent local process could do between two resolution steps.
-    auto prepare = [&] {
-        stdfs::remove_all(sandbox.root / "a");
-        makeDirectories(sandbox.root / "a" / "b");
-        writeDisk(sandbox.root / "a" / "b" / "secret.txt", "inner");
-    };
-    auto              swapB = hooksAt([&](fs::StoragePoint point, string_view name) {
-        if (point == fs::StoragePoint::componentOpened && name == "a") {
-            stdfs::rename(sandbox.root / "a" / "b", sandbox.root / "b-moved");
-            linkDirectory(sandbox.outside, sandbox.root / "a" / "b");
-        }
-    });
-    fs::NativeStorage storage(sandbox.root, {}, swapB);
+                                     // Before each operation: root/a/b/file.txt. When `a` has been opened and `b` not yet, b is replaced by a link to
+                                     // the outside directory, as a concurrent local process could do between two resolution steps.
+                                     auto prepare = [&] {
+                                         stdfs::remove_all(sandbox.root / "a");
+                                         makeDirectories(sandbox.root / "a" / "b");
+                                         writeDisk(sandbox.root / "a" / "b" / "secret.txt", "inner");
+                                     };
+                                     auto              swapB = hooksAt([&](fs::StoragePoint point, string_view name) {
+                                         if (point == fs::StoragePoint::componentOpened && name == "a") {
+                                             stdfs::rename(sandbox.root / "a" / "b", sandbox.root / "b-moved");
+                                             linkDirectory(sandbox.outside, sandbox.root / "a" / "b");
+                                         }
+                                     });
+                                     fs::NativeStorage storage(sandbox.root, {}, swapB);
 
-    const vector<function<void()>> operations{[&] {
-                                                  storage.openRead("a/b/secret.txt");
-                                              },
-                                              [&] {
-                                                  storage.list("a/b");
-                                              },
-                                              [&] {
-                                                  writeFile(storage, "a/b/new.txt", "x");
-                                              },
-                                              [&] {
-                                                  writeFile(storage, "a/b/secret.txt", "x", fs::WriteMode::replace);
-                                              },
-                                              [&] {
-                                                  storage.createDirectory("a/b/dir");
-                                              },
-                                              [&] {
-                                                  storage.remove("a/b/secret.txt");
-                                              },
-                                              [&] {
-                                                  storage.rename("a/b/secret.txt", "stolen.txt");
-                                              },
-                                              [&] {
-                                                  storage.status("a/b/secret.txt");
-                                              }};
-    for (size_t index = 0; index != operations.size(); ++index)
-        section("operation " + to_string(index), [&] {
-            prepare();
-            stdfs::remove_all(sandbox.root / "b-moved");
-            require(errorOf(operations[index]) == fs::StorageErrc::linkRefused);
-            require(sandbox.outsideUntouched());
-        });
-}};
+                                     const vector<function<void()>> operations{[&] {
+                                                                                   storage.openRead("a/b/secret.txt");
+                                                                               },
+                                                                               [&] {
+                                                                                   storage.list("a/b");
+                                                                               },
+                                                                               [&] {
+                                                                                   writeFile(storage, "a/b/new.txt", "x");
+                                                                               },
+                                                                               [&] {
+                                                                                   writeFile(storage, "a/b/secret.txt", "x", fs::WriteMode::replace);
+                                                                               },
+                                                                               [&] {
+                                                                                   storage.createDirectory("a/b/dir");
+                                                                               },
+                                                                               [&] {
+                                                                                   storage.remove("a/b/secret.txt");
+                                                                               },
+                                                                               [&] {
+                                                                                   storage.rename("a/b/secret.txt", "stolen.txt");
+                                                                               },
+                                                                               [&] {
+                                                                                   storage.status("a/b/secret.txt");
+                                                                               }};
+                                     for (size_t index = 0; index != operations.size(); ++index)
+                                         section("operation " + to_string(index), [&] {
+                                             prepare();
+                                             stdfs::remove_all(sandbox.root / "b-moved");
+                                             require(errorOf(operations[index]) == fs::StorageErrc::linkRefused);
+                                             require(sandbox.outsideUntouched());
+                                         });
+                                 }};
 
 const Scenario finalFile{"A final file replaced by a link after the resolution does not lead outside", [] {
-    Sandbox sandbox;
-    auto    swapFile = hooksAt([&](fs::StoragePoint point, string_view name) {
-        if (point == fs::StoragePoint::resolved && name == "target.txt") {
-            stdfs::remove(sandbox.root / "target.txt");
+                             Sandbox sandbox;
+                             auto    swapFile = hooksAt([&](fs::StoragePoint point, string_view name) {
+                                 if (point == fs::StoragePoint::resolved && name == "target.txt") {
+                                     stdfs::remove(sandbox.root / "target.txt");
 #ifdef _WIN32
-            linkDirectory(sandbox.outside, sandbox.root / "target.txt");
+                                     linkDirectory(sandbox.outside, sandbox.root / "target.txt");
 #else
             stdfs::create_symlink(sandbox.outside / "secret.txt", sandbox.root / "target.txt");
 #endif
-        }
-    });
-    fs::NativeStorage storage(sandbox.root, {}, swapFile);
-    writeDisk(sandbox.root / "target.txt", "inner");
+                                 }
+                             });
+                             fs::NativeStorage storage(sandbox.root, {}, swapFile);
+                             writeDisk(sandbox.root / "target.txt", "inner");
 
-    when("it is read", [&] {
-        then("the link is refused", [&] {
-            require(errorOf([&] {
-                        storage.openRead("target.txt");
-                    })
-                    == fs::StorageErrc::linkRefused);
-        });
-    });
-    when("it is removed", [&] {
-        storage.remove("target.txt");
-        then("the link goes, not the outside file", [&] {
-            require(!stdfs::exists(stdfs::symlink_status(sandbox.root / "target.txt")));
-        });
-    });
-    when("it is inspected", [&] {
-        then("the link is reported, not followed", [&] {
-            require(storage.status("target.txt").type == fs::EntryType::link);
-        });
-    });
-    require(sandbox.outsideUntouched());
-}};
+                             when("it is read", [&] {
+                                 then("the link is refused", [&] {
+                                     require(errorOf([&] {
+                                                 storage.openRead("target.txt");
+                                             })
+                                             == fs::StorageErrc::linkRefused);
+                                 });
+                             });
+                             when("it is removed", [&] {
+                                 storage.remove("target.txt");
+                                 then("the link goes, not the outside file", [&] {
+                                     require(!stdfs::exists(stdfs::symlink_status(sandbox.root / "target.txt")));
+                                 });
+                             });
+                             when("it is inspected", [&] {
+                                 then("the link is reported, not followed", [&] {
+                                     require(storage.status("target.txt").type == fs::EntryType::link);
+                                 });
+                             });
+                             require(sandbox.outsideUntouched());
+                         }};
 
 #ifndef _WIN32
 const Scenario repeatedRaces{"Repeated races between a link swap and the operations never reach the outside", [] {
-    Sandbox           sandbox;
-    fs::NativeStorage storage(sandbox.root);
-    makeDirectories(sandbox.root / "a");
-    atomic<bool> stop{false};
-    // Swaps `a` between a real directory and a link to the outside, as fast as it can.
-    thread swapper([&] {
-        const auto directory = sandbox.root / "a";
-        const auto parked    = sandbox.root / "parked";
-        const auto link      = sandbox.base.path() / "link";
-        while (!stop) {
-            std::error_code ignored;
-            stdfs::create_directory_symlink(sandbox.outside, link, ignored);
-            stdfs::rename(directory, parked, ignored);
-            stdfs::rename(link, directory, ignored);
-            std::this_thread::yield();
-            stdfs::rename(directory, link, ignored);
-            stdfs::rename(parked, directory, ignored);
-        }
-    });
-    int    refused = 0;
-    auto   attempt = [&](auto&& operation) {
-        try {
-            operation();
-        } catch (const fs::StorageError& error) {
-            refused += error.errc() == fs::StorageErrc::linkRefused;
-        }
-    };
-    for (int iteration = 0; iteration < 2000; ++iteration) {
-        const auto name = "f" + to_string(iteration);
-        attempt([&] {
-            writeFile(storage, "a/" + name, "x");
-        });
-        attempt([&] {
-            storage.createDirectory("a/d" + name);
-        });
-        attempt([&] {
-            storage.remove("a/secret.txt");
-        });
-        attempt([&] {
-            storage.rename("a/secret.txt", "stolen" + name);
-        });
-        attempt([&] {
-            readAll(storage.openRead("a/secret.txt"));
-            fail("The outside file was read");
-        });
-    }
-    stop = true;
-    swapper.join();
-    require(sandbox.outsideUntouched());
-    require(refused > 0);  // the operations did meet the link
-}};
+                                 Sandbox           sandbox;
+                                 fs::NativeStorage storage(sandbox.root);
+                                 makeDirectories(sandbox.root / "a");
+                                 atomic<bool> stop{false};
+                                 // Swaps `a` between a real directory and a link to the outside, as fast as it can.
+                                 thread swapper([&] {
+                                     const auto directory = sandbox.root / "a";
+                                     const auto parked    = sandbox.root / "parked";
+                                     const auto link      = sandbox.base.path() / "link";
+                                     while (!stop) {
+                                         std::error_code ignored;
+                                         stdfs::create_directory_symlink(sandbox.outside, link, ignored);
+                                         stdfs::rename(directory, parked, ignored);
+                                         stdfs::rename(link, directory, ignored);
+                                         std::this_thread::yield();
+                                         stdfs::rename(directory, link, ignored);
+                                         stdfs::rename(parked, directory, ignored);
+                                     }
+                                 });
+                                 int    refused = 0;
+                                 auto   attempt = [&](auto&& operation) {
+                                     try {
+                                         operation();
+                                     } catch (const fs::StorageError& error) {
+                                         refused += error.errc() == fs::StorageErrc::linkRefused;
+                                     }
+                                 };
+                                 for (int iteration = 0; iteration < 2000; ++iteration) {
+                                     const auto name = "f" + to_string(iteration);
+                                     attempt([&] {
+                                         writeFile(storage, "a/" + name, "x");
+                                     });
+                                     attempt([&] {
+                                         storage.createDirectory("a/d" + name);
+                                     });
+                                     attempt([&] {
+                                         storage.remove("a/secret.txt");
+                                     });
+                                     attempt([&] {
+                                         storage.rename("a/secret.txt", "stolen" + name);
+                                     });
+                                     attempt([&] {
+                                         readAll(storage.openRead("a/secret.txt"));
+                                         fail("The outside file was read");
+                                     });
+                                 }
+                                 stop = true;
+                                 swapper.join();
+                                 require(sandbox.outsideUntouched());
+                                 require(refused > 0);  // the operations did meet the link
+                             }};
 
 const Scenario directoryMoved{"A directory moved out of the root by the same user is detected before the commit", [] {
-    Sandbox sandbox;
-    makeDirectories(sandbox.root / "a" / "b");
-    const auto moved = sandbox.outside / "b";
+                                  Sandbox sandbox;
+                                  makeDirectories(sandbox.root / "a" / "b");
+                                  const auto moved = sandbox.outside / "b";
 
-    given("a directory moved out while the temporary file is written", [&] {
-        auto              hooks = hooksAt([&](fs::StoragePoint point, string_view) {
-            if (point == fs::StoragePoint::temporaryCreated)
-                stdfs::rename(sandbox.root / "a" / "b", moved);
-        });
-        fs::NativeStorage storage(sandbox.root, {}, hooks);
-        auto              writer = storage.beginWrite("a/b/file.txt", fs::WriteMode::createNew);
-        writer.write(span<const char>("data", 4));
-        then("the commit is abandoned with confinementViolated, without a file nor a temporary file outside", [&] {
-            require(errorOf([&] {
-                        writer.commit();
-                    })
-                    == fs::StorageErrc::confinementViolated);
-            require(stdfs::is_empty(moved));
-        });
-    });
-    given("a directory moved out just before the commit's check", [&] {
-        auto              hooks = hooksAt([&](fs::StoragePoint point, string_view) {
-            if (point == fs::StoragePoint::beforeCommit)
-                stdfs::rename(sandbox.root / "a", sandbox.outside / "a");
-        });
-        fs::NativeStorage storage(sandbox.root, {}, hooks);
-        then("the rename does not happen", [&] {
-            require(errorOf([&] {
-                        writeFile(storage, "a/b/file.txt", "data");
-                    })
-                    == fs::StorageErrc::confinementViolated);
-            require(stdfs::is_empty(sandbox.outside / "a" / "b"));
-        });
-    });
-    given("a directory moved out between its opening and the operation", [&] {
-        bool              once  = true;
-        auto              hooks = hooksAt([&](fs::StoragePoint point, string_view) {
-            if (point == fs::StoragePoint::resolved && std::exchange(once, false))
-                stdfs::rename(sandbox.root / "a" / "b", moved);
-        });
-        fs::NativeStorage storage(sandbox.root, {}, hooks);
-        then("the operation reports the violation it detected afterwards", [&] {
-            require(errorOf([&] {
-                        storage.createDirectory("a/b/dir");
-                    })
-                    == fs::StorageErrc::confinementViolated);
-            require(errorOf([&] {
-                        storage.status("a/b");
-                    })
-                    == fs::StorageErrc::notFound);
-        });
-    });
-}};
+                                  given("a directory moved out while the temporary file is written", [&] {
+                                      auto              hooks = hooksAt([&](fs::StoragePoint point, string_view) {
+                                          if (point == fs::StoragePoint::temporaryCreated)
+                                              stdfs::rename(sandbox.root / "a" / "b", moved);
+                                      });
+                                      fs::NativeStorage storage(sandbox.root, {}, hooks);
+                                      auto              writer = storage.beginWrite("a/b/file.txt", fs::WriteMode::createNew);
+                                      writer.write(span<const char>("data", 4));
+                                      then("the commit is abandoned with confinementViolated, without a file nor a temporary file outside", [&] {
+                                          require(errorOf([&] {
+                                                      writer.commit();
+                                                  })
+                                                  == fs::StorageErrc::confinementViolated);
+                                          require(stdfs::is_empty(moved));
+                                      });
+                                  });
+                                  given("a directory moved out just before the commit's check", [&] {
+                                      auto              hooks = hooksAt([&](fs::StoragePoint point, string_view) {
+                                          if (point == fs::StoragePoint::beforeCommit)
+                                              stdfs::rename(sandbox.root / "a", sandbox.outside / "a");
+                                      });
+                                      fs::NativeStorage storage(sandbox.root, {}, hooks);
+                                      then("the rename does not happen", [&] {
+                                          require(errorOf([&] {
+                                                      writeFile(storage, "a/b/file.txt", "data");
+                                                  })
+                                                  == fs::StorageErrc::confinementViolated);
+                                          require(stdfs::is_empty(sandbox.outside / "a" / "b"));
+                                      });
+                                  });
+                                  given("a directory moved out between its opening and the operation", [&] {
+                                      bool              once  = true;
+                                      auto              hooks = hooksAt([&](fs::StoragePoint point, string_view) {
+                                          if (point == fs::StoragePoint::resolved && std::exchange(once, false))
+                                              stdfs::rename(sandbox.root / "a" / "b", moved);
+                                      });
+                                      fs::NativeStorage storage(sandbox.root, {}, hooks);
+                                      then("the operation reports the violation it detected afterwards", [&] {
+                                          require(errorOf([&] {
+                                                      storage.createDirectory("a/b/dir");
+                                                  })
+                                                  == fs::StorageErrc::confinementViolated);
+                                          require(errorOf([&] {
+                                                      storage.status("a/b");
+                                                  })
+                                                  == fs::StorageErrc::notFound);
+                                      });
+                                  });
+                              }};
 
 const Scenario rootMovedSame{"A root moved by the same user is no longer used", [] {
-    Sandbox    sandbox;
-    const auto elsewhere = sandbox.base.path() / "elsewhere";
+                                 Sandbox    sandbox;
+                                 const auto elsewhere = sandbox.base.path() / "elsewhere";
 
-    given("a root moved before an operation", [&] {
-        fs::NativeStorage storage(sandbox.root);
-        stdfs::rename(sandbox.root, elsewhere);
-        then("every operation fails with rootMoved, without effect, even once a directory is back at the location", [&] {
-            require(errorOf([&] {
-                        storage.createDirectory("dir");
-                    })
-                    == fs::StorageErrc::rootMoved);
-            require(stdfs::is_empty(elsewhere));
-            stdfs::rename(elsewhere, sandbox.root);
-            require(errorOf([&] {
-                        storage.list("");
-                    })
-                    == fs::StorageErrc::rootMoved);
-            require(stdfs::is_empty(sandbox.root));
-        });
-    });
-    given("another directory put at the location", [&] {
-        fs::NativeStorage storage(sandbox.root);
-        stdfs::rename(sandbox.root, elsewhere);
-        makeDirectories(sandbox.root);
-        then("it is not taken for the root", [&] {
-            require(errorOf([&] {
-                        writeFile(storage, "file.txt", "x");
-                    })
-                    == fs::StorageErrc::rootMoved);
-            require(stdfs::is_empty(sandbox.root));
-        });
-    });
-    given("a root moved during a write", [&] {
-        auto              hooks = hooksAt([&](fs::StoragePoint point, string_view) {
-            if (point == fs::StoragePoint::temporaryCreated)
-                stdfs::rename(sandbox.root, elsewhere);
-        });
-        fs::NativeStorage storage(sandbox.root, {}, hooks);
-        then("the commit is abandoned with confinementViolated", [&] {
-            require(errorOf([&] {
-                        writeFile(storage, "file.txt", "x");
-                    })
-                    == fs::StorageErrc::confinementViolated);
-            require(stdfs::is_empty(elsewhere));
-        });
-    });
-}};
+                                 given("a root moved before an operation", [&] {
+                                     fs::NativeStorage storage(sandbox.root);
+                                     stdfs::rename(sandbox.root, elsewhere);
+                                     then("every operation fails with rootMoved, without effect, even once a directory is back at the location", [&] {
+                                         require(errorOf([&] {
+                                                     storage.createDirectory("dir");
+                                                 })
+                                                 == fs::StorageErrc::rootMoved);
+                                         require(stdfs::is_empty(elsewhere));
+                                         stdfs::rename(elsewhere, sandbox.root);
+                                         require(errorOf([&] {
+                                                     storage.list("");
+                                                 })
+                                                 == fs::StorageErrc::rootMoved);
+                                         require(stdfs::is_empty(sandbox.root));
+                                     });
+                                 });
+                                 given("another directory put at the location", [&] {
+                                     fs::NativeStorage storage(sandbox.root);
+                                     stdfs::rename(sandbox.root, elsewhere);
+                                     makeDirectories(sandbox.root);
+                                     then("it is not taken for the root", [&] {
+                                         require(errorOf([&] {
+                                                     writeFile(storage, "file.txt", "x");
+                                                 })
+                                                 == fs::StorageErrc::rootMoved);
+                                         require(stdfs::is_empty(sandbox.root));
+                                     });
+                                 });
+                                 given("a root moved during a write", [&] {
+                                     auto              hooks = hooksAt([&](fs::StoragePoint point, string_view) {
+                                         if (point == fs::StoragePoint::temporaryCreated)
+                                             stdfs::rename(sandbox.root, elsewhere);
+                                     });
+                                     fs::NativeStorage storage(sandbox.root, {}, hooks);
+                                     then("the commit is abandoned with confinementViolated", [&] {
+                                         require(errorOf([&] {
+                                                     writeFile(storage, "file.txt", "x");
+                                                 })
+                                                 == fs::StorageErrc::confinementViolated);
+                                         require(stdfs::is_empty(elsewhere));
+                                     });
+                                 });
+                             }};
 
 const Scenario pOSIXDirectories{"POSIX directories another user could move refuse the root or the operation", [] {
-    Sandbox                              sandbox;
-    const auto                           otherUser = ::geteuid() == 4242u ? 4243u : 4242u;
-    const auto                           base      = stdfs::canonical(sandbox.base.path());
-    const auto                           root      = base / "root";
-    auto                                 hooks     = make_shared<fs::StorageHooks>();
-    map<stdfs::path, fs::DirectoryFacts> overrides;
-    hooks->facts = [&](const stdfs::path& path, fs::DirectoryFacts& facts) {
-        if (auto found = overrides.find(path); found != overrides.end())
-            facts = found->second;
-    };
-    const auto own   = static_cast<uint32_t>(::geteuid());
-    auto       facts = [](uint32_t owner, uint32_t mode) {
-        return fs::DirectoryFacts{owner, S_IFDIR | mode};
-    };
+                                    Sandbox                              sandbox;
+                                    const auto                           otherUser = ::geteuid() == 4242u ? 4243u : 4242u;
+                                    const auto                           base      = stdfs::canonical(sandbox.base.path());
+                                    const auto                           root      = base / "root";
+                                    auto                                 hooks     = make_shared<fs::StorageHooks>();
+                                    map<stdfs::path, fs::DirectoryFacts> overrides;
+                                    hooks->facts = [&](const stdfs::path& path, fs::DirectoryFacts& facts) {
+                                        if (auto found = overrides.find(path); found != overrides.end())
+                                            facts = found->second;
+                                    };
+                                    const auto own   = static_cast<uint32_t>(::geteuid());
+                                    auto       facts = [](uint32_t owner, uint32_t mode) {
+                                        return fs::DirectoryFacts{owner, S_IFDIR | mode};
+                                    };
 
-    given("a root owned by another user, even in mode 0755", [&] {
-        overrides[root] = facts(otherUser, 0755);
-        then("its declaration is refused", [&] {
-            require(errorOf([&] {
-                        fs::NativeStorage(sandbox.root, {}, hooks);
-                    })
-                    == fs::StorageErrc::unsafeDirectory);
-        });
-    });
-    given("a root its group can write", [&] {
-        stdfs::permissions(sandbox.root, stdfs::perms::group_write, stdfs::perm_options::add);
-        then("its declaration is refused, unless the root is declared shared", [&] {
-            require(errorOf([&] {
-                        fs::NativeStorage(sandbox.root);
-                    })
-                    == fs::StorageErrc::unsafeDirectory);
-            fs::NativeStorage shared(sandbox.root, {.shared = true});
-            shared.createDirectory("dir");
-        });
-    });
-    given("an ancestor owned by another user, in mode 0755", [&] {
-        overrides[base] = facts(otherUser, 0755);
-        then("the declaration is refused", [&] {
-            require(errorOf([&] {
-                        fs::NativeStorage(sandbox.root, {}, hooks);
-                    })
-                    == fs::StorageErrc::unsafeDirectory);
-        });
-    });
-    given("an ancestor writable by the others", [&] {
-        overrides[base] = facts(own, 0777);
-        then("the declaration is refused", [&] {
-            require(errorOf([&] {
-                        fs::NativeStorage(sandbox.root, {}, hooks);
-                    })
-                    == fs::StorageErrc::unsafeDirectory);
-        });
-    });
-    given("a sticky ancestor owned by another user", [&] {
-        overrides[base] = facts(otherUser, 01777);
-        then("the declaration is refused", [&] {
-            require(errorOf([&] {
-                        fs::NativeStorage(sandbox.root, {}, hooks);
-                    })
-                    == fs::StorageErrc::unsafeDirectory);
-        });
-    });
-    given("a sticky ancestor of the superuser, as /tmp", [&] {
-        overrides[base] = facts(0, 01777);
-        then("a next element of the effective user is accepted", [&] {
-            fs::NativeStorage storage(sandbox.root, {}, hooks);
-            storage.createDirectory("dir");
-        });
-        then("a next element of another user is refused", [&] {
-            overrides[root] = facts(otherUser, 0755);
-            require(errorOf([&] {
-                        fs::NativeStorage(sandbox.root, {}, hooks);
-                    })
-                    == fs::StorageErrc::unsafeDirectory);
-        });
-    });
-    given("a root declared, then an ancestor that becomes unsafe", [&] {
-        fs::NativeStorage storage(sandbox.root, {}, hooks);
-        overrides[base] = facts(otherUser, 0755);
-        then("the next operation is refused before any effect", [&] {
-            require(errorOf([&] {
-                        storage.createDirectory("dir");
-                    })
-                    == fs::StorageErrc::unsafeDirectory);
-            require(stdfs::is_empty(sandbox.root));
-        });
-    });
-    given("directories inside the root another user could move", [&] {
-        makeDirectories(sandbox.root / "group" / "deep");
-        makeDirectories(sandbox.root / "foreign" / "deep");
-        stdfs::permissions(sandbox.root / "group", stdfs::perms::group_write, stdfs::perm_options::add);
-        overrides[root / "foreign"] = facts(otherUser, 0755);
-        fs::NativeStorage storage(sandbox.root, {}, hooks);
-        then("operations traversing them are refused before any effect", [&] {
-            require(errorOf([&] {
-                        storage.createDirectory("group/deep/new");
-                    })
-                    == fs::StorageErrc::unsafeDirectory);
-            require(errorOf([&] {
-                        writeFile(storage, "foreign/deep/new.txt", "x");
-                    })
-                    == fs::StorageErrc::unsafeDirectory);
-            require(stdfs::is_empty(sandbox.root / "group" / "deep"));
-            require(stdfs::is_empty(sandbox.root / "foreign" / "deep"));
-        });
-    });
-    given("directories the storage creates, whatever the umask", [&] {
-        const auto        previous = ::umask(0);
-        fs::NativeStorage storage(sandbox.root);
-        storage.createDirectory("created");
-        writeFile(storage, "created/file.txt", "x");
-        ::umask(previous);
-        then("they stay usable by the storage", [&] {
-            require((stdfs::status(sandbox.root / "created").permissions() & (stdfs::perms::group_write | stdfs::perms::others_write)) == stdfs::perms::none);
-            require(storage.list("created").entries.size() == 1);
-        });
-    });
-}};
+                                    given("a root owned by another user, even in mode 0755", [&] {
+                                        overrides[root] = facts(otherUser, 0755);
+                                        then("its declaration is refused", [&] {
+                                            require(errorOf([&] {
+                                                        fs::NativeStorage(sandbox.root, {}, hooks);
+                                                    })
+                                                    == fs::StorageErrc::unsafeDirectory);
+                                        });
+                                    });
+                                    given("a root its group can write", [&] {
+                                        stdfs::permissions(sandbox.root, stdfs::perms::group_write, stdfs::perm_options::add);
+                                        then("its declaration is refused, unless the root is declared shared", [&] {
+                                            require(errorOf([&] {
+                                                        fs::NativeStorage(sandbox.root);
+                                                    })
+                                                    == fs::StorageErrc::unsafeDirectory);
+                                            fs::NativeStorage shared(sandbox.root, {.shared = true});
+                                            shared.createDirectory("dir");
+                                        });
+                                    });
+                                    given("an ancestor owned by another user, in mode 0755", [&] {
+                                        overrides[base] = facts(otherUser, 0755);
+                                        then("the declaration is refused", [&] {
+                                            require(errorOf([&] {
+                                                        fs::NativeStorage(sandbox.root, {}, hooks);
+                                                    })
+                                                    == fs::StorageErrc::unsafeDirectory);
+                                        });
+                                    });
+                                    given("an ancestor writable by the others", [&] {
+                                        overrides[base] = facts(own, 0777);
+                                        then("the declaration is refused", [&] {
+                                            require(errorOf([&] {
+                                                        fs::NativeStorage(sandbox.root, {}, hooks);
+                                                    })
+                                                    == fs::StorageErrc::unsafeDirectory);
+                                        });
+                                    });
+                                    given("a sticky ancestor owned by another user", [&] {
+                                        overrides[base] = facts(otherUser, 01777);
+                                        then("the declaration is refused", [&] {
+                                            require(errorOf([&] {
+                                                        fs::NativeStorage(sandbox.root, {}, hooks);
+                                                    })
+                                                    == fs::StorageErrc::unsafeDirectory);
+                                        });
+                                    });
+                                    given("a sticky ancestor of the superuser, as /tmp", [&] {
+                                        overrides[base] = facts(0, 01777);
+                                        then("a next element of the effective user is accepted", [&] {
+                                            fs::NativeStorage storage(sandbox.root, {}, hooks);
+                                            storage.createDirectory("dir");
+                                        });
+                                        then("a next element of another user is refused", [&] {
+                                            overrides[root] = facts(otherUser, 0755);
+                                            require(errorOf([&] {
+                                                        fs::NativeStorage(sandbox.root, {}, hooks);
+                                                    })
+                                                    == fs::StorageErrc::unsafeDirectory);
+                                        });
+                                    });
+                                    given("a root declared, then an ancestor that becomes unsafe", [&] {
+                                        fs::NativeStorage storage(sandbox.root, {}, hooks);
+                                        overrides[base] = facts(otherUser, 0755);
+                                        then("the next operation is refused before any effect", [&] {
+                                            require(errorOf([&] {
+                                                        storage.createDirectory("dir");
+                                                    })
+                                                    == fs::StorageErrc::unsafeDirectory);
+                                            require(stdfs::is_empty(sandbox.root));
+                                        });
+                                    });
+                                    given("directories inside the root another user could move", [&] {
+                                        makeDirectories(sandbox.root / "group" / "deep");
+                                        makeDirectories(sandbox.root / "foreign" / "deep");
+                                        stdfs::permissions(sandbox.root / "group", stdfs::perms::group_write, stdfs::perm_options::add);
+                                        overrides[root / "foreign"] = facts(otherUser, 0755);
+                                        fs::NativeStorage storage(sandbox.root, {}, hooks);
+                                        then("operations traversing them are refused before any effect", [&] {
+                                            require(errorOf([&] {
+                                                        storage.createDirectory("group/deep/new");
+                                                    })
+                                                    == fs::StorageErrc::unsafeDirectory);
+                                            require(errorOf([&] {
+                                                        writeFile(storage, "foreign/deep/new.txt", "x");
+                                                    })
+                                                    == fs::StorageErrc::unsafeDirectory);
+                                            require(stdfs::is_empty(sandbox.root / "group" / "deep"));
+                                            require(stdfs::is_empty(sandbox.root / "foreign" / "deep"));
+                                        });
+                                    });
+                                    given("directories the storage creates, whatever the umask", [&] {
+                                        const auto        previous = ::umask(0);
+                                        fs::NativeStorage storage(sandbox.root);
+                                        storage.createDirectory("created");
+                                        writeFile(storage, "created/file.txt", "x");
+                                        ::umask(previous);
+                                        then("they stay usable by the storage", [&] {
+                                            require((stdfs::status(sandbox.root / "created").permissions()
+                                                     & (stdfs::perms::group_write | stdfs::perms::others_write))
+                                                    == stdfs::perms::none);
+                                            require(storage.list("created").entries.size() == 1);
+                                        });
+                                    });
+                                }};
 
     #if defined(__APPLE__)
-const Scenario macOSACLs{"macOS ACLs that let another user change a directory refuse the root or the operation", [] {
-    Sandbox sandbox;
-    auto    grant = [](const stdfs::path& directory, const string& who) {
-        const auto command = "chmod +a '" + who + " allow add_file,add_subdirectory,delete_child' '" + directory.string() + "'";
-        require(std::system(command.c_str()) == 0);
-    };
+const Scenario macOSACLs{
+    "macOS ACLs that let another user change a directory refuse the root or the operation",
+    [] {
+        Sandbox sandbox;
+        auto    grant = [](const stdfs::path& directory, const string& who) {
+            const auto command = "chmod +a '" + who + " allow add_file,add_subdirectory,delete_child' '" + directory.string() + "'";
+            require(std::system(command.c_str()) == 0);
+        };
 
-    given("a root in mode 0700 whose ACL lets everyone add and remove entries", [&] {
-        stdfs::permissions(sandbox.root, stdfs::perms::owner_all, stdfs::perm_options::replace);
-        grant(sandbox.root, "everyone");
-        then("its declaration is refused, unless the root is declared shared", [&] {
-            require(errorOf([&] {
-                        fs::NativeStorage(sandbox.root);
-                    })
-                    == fs::StorageErrc::unsafeDirectory);
-            fs::NativeStorage shared(sandbox.root, {.shared = true});
-            shared.createDirectory("dir");
+        given("a root in mode 0700 whose ACL lets everyone add and remove entries", [&] {
+            stdfs::permissions(sandbox.root, stdfs::perms::owner_all, stdfs::perm_options::replace);
+            grant(sandbox.root, "everyone");
+            then("its declaration is refused, unless the root is declared shared", [&] {
+                require(errorOf([&] {
+                            fs::NativeStorage(sandbox.root);
+                        })
+                        == fs::StorageErrc::unsafeDirectory);
+                fs::NativeStorage shared(sandbox.root, {.shared = true});
+                shared.createDirectory("dir");
+            });
         });
-    });
-    given("an ancestor whose ACL lets everyone remove its entries", [&] {
-        grant(sandbox.base.path(), "everyone");
-        then("the declaration is refused", [&] {
-            require(errorOf([&] {
-                        fs::NativeStorage(sandbox.root);
-                    })
-                    == fs::StorageErrc::unsafeDirectory);
+        given("an ancestor whose ACL lets everyone remove its entries", [&] {
+            grant(sandbox.base.path(), "everyone");
+            then("the declaration is refused", [&] {
+                require(errorOf([&] {
+                            fs::NativeStorage(sandbox.root);
+                        })
+                        == fs::StorageErrc::unsafeDirectory);
+            });
         });
-    });
-    given("a directory inside the root granted to everyone after the declaration", [&] {
-        fs::NativeStorage storage(sandbox.root);
-        makeDirectories(sandbox.root / "shared" / "deep");
-        grant(sandbox.root / "shared", "everyone");
-        then("operations through it are refused before any effect", [&] {
-            require(errorOf([&] {
-                        storage.createDirectory("shared/deep/new");
-                    })
-                    == fs::StorageErrc::unsafeDirectory);
-            require(stdfs::is_empty(sandbox.root / "shared" / "deep"));
-        });
-    });
-    given("a root whose ACL passes those rights to everyone, only to its descendants", [&] {
-        stdfs::permissions(sandbox.root, stdfs::perms::owner_all, stdfs::perm_options::replace);
-        const auto command = "chmod +a 'everyone allow add_file,add_subdirectory,delete_child,file_inherit,directory_inherit,only_inherit' '"
-                             + sandbox.root.string() + "'";
-        require(std::system(command.c_str()) == 0);
-        then("the root is accepted, and a subdirectory that inherits the rights is refused when traversed", [&] {
+        given("a directory inside the root granted to everyone after the declaration", [&] {
             fs::NativeStorage storage(sandbox.root);
-            storage.createDirectory("inherits");
-            require(errorOf([&] {
-                        storage.list("inherits");
-                    })
-                    == fs::StorageErrc::unsafeDirectory);
+            makeDirectories(sandbox.root / "shared" / "deep");
+            grant(sandbox.root / "shared", "everyone");
+            then("operations through it are refused before any effect", [&] {
+                require(errorOf([&] {
+                            storage.createDirectory("shared/deep/new");
+                        })
+                        == fs::StorageErrc::unsafeDirectory);
+                require(stdfs::is_empty(sandbox.root / "shared" / "deep"));
+            });
         });
-    });
-    given("an ACL that grants those rights to the effective user only", [&] {
-        grant(sandbox.root, "user:" + string(::getpwuid(::geteuid())->pw_name));
-        then("the root is accepted", [&] {
-            fs::NativeStorage storage(sandbox.root);
-            storage.createDirectory("dir");
+        given("a root whose ACL passes those rights to everyone, only to its descendants", [&] {
+            stdfs::permissions(sandbox.root, stdfs::perms::owner_all, stdfs::perm_options::replace);
+            const auto command = "chmod +a 'everyone allow add_file,add_subdirectory,delete_child,file_inherit,directory_inherit,only_inherit' '"
+                                 + sandbox.root.string() + "'";
+            require(std::system(command.c_str()) == 0);
+            then("the root is accepted, and a subdirectory that inherits the rights is refused when traversed", [&] {
+                fs::NativeStorage storage(sandbox.root);
+                storage.createDirectory("inherits");
+                require(errorOf([&] {
+                            storage.list("inherits");
+                        })
+                        == fs::StorageErrc::unsafeDirectory);
+            });
         });
-    });
-}};
+        given("an ACL that grants those rights to the effective user only", [&] {
+            grant(sandbox.root, "user:" + string(::getpwuid(::geteuid())->pw_name));
+            then("the root is accepted", [&] {
+                fs::NativeStorage storage(sandbox.root);
+                storage.createDirectory("dir");
+            });
+        });
+    }};
     #endif
 
 const Scenario replacedFile{"A replaced file keeps the permission bits it has at the commit", [] {
-    Sandbox           sandbox;
-    fs::NativeStorage storage(sandbox.root);
-    static constexpr auto    privateBits = stdfs::perms::owner_read | stdfs::perms::owner_write;
-    given("a private file", [&] {
-        writeDisk(sandbox.root / "private.txt", "old");
-        stdfs::permissions(sandbox.root / "private.txt", privateBits, stdfs::perm_options::replace);
-        writeFile(storage, "private.txt", "new secret", fs::WriteMode::replace);
-        then("its replacement is private too", [&] {
-            require(readDisk(sandbox.root / "private.txt") == "new secret");
-            require(stdfs::status(sandbox.root / "private.txt").permissions() == privateBits);
-        });
-    });
-    given("a public file that the storage replaces by a private one while a write to it is open", [&] {
-        writeDisk(sandbox.root / "doc.txt", "public");
-        stdfs::permissions(sandbox.root / "doc.txt", privateBits | stdfs::perms::group_read | stdfs::perms::others_read, stdfs::perm_options::replace);
-        auto writer = storage.beginWrite("doc.txt", fs::WriteMode::replace);
-        writer.write(span<const char>("new", 3));
-        writeDisk(sandbox.root / "private.txt", "private");
-        stdfs::permissions(sandbox.root / "private.txt", privateBits, stdfs::perm_options::replace);
-        storage.remove("doc.txt");
-        storage.rename("private.txt", "doc.txt");
-        writer.commit();
-        then("the commit takes the rights of the file it replaces at that moment", [&] {
-            require(readDisk(sandbox.root / "doc.txt") == "new");
-            require(stdfs::status(sandbox.root / "doc.txt").permissions() == privateBits);
-        });
-    });
-}};
+                                Sandbox               sandbox;
+                                fs::NativeStorage     storage(sandbox.root);
+                                static constexpr auto privateBits = stdfs::perms::owner_read | stdfs::perms::owner_write;
+                                given("a private file", [&] {
+                                    writeDisk(sandbox.root / "private.txt", "old");
+                                    stdfs::permissions(sandbox.root / "private.txt", privateBits, stdfs::perm_options::replace);
+                                    writeFile(storage, "private.txt", "new secret", fs::WriteMode::replace);
+                                    then("its replacement is private too", [&] {
+                                        require(readDisk(sandbox.root / "private.txt") == "new secret");
+                                        require(stdfs::status(sandbox.root / "private.txt").permissions() == privateBits);
+                                    });
+                                });
+                                given("a public file that the storage replaces by a private one while a write to it is open", [&] {
+                                    writeDisk(sandbox.root / "doc.txt", "public");
+                                    stdfs::permissions(sandbox.root / "doc.txt",
+                                                       privateBits | stdfs::perms::group_read | stdfs::perms::others_read,
+                                                       stdfs::perm_options::replace);
+                                    auto writer = storage.beginWrite("doc.txt", fs::WriteMode::replace);
+                                    writer.write(span<const char>("new", 3));
+                                    writeDisk(sandbox.root / "private.txt", "private");
+                                    stdfs::permissions(sandbox.root / "private.txt", privateBits, stdfs::perm_options::replace);
+                                    storage.remove("doc.txt");
+                                    storage.rename("private.txt", "doc.txt");
+                                    writer.commit();
+                                    then("the commit takes the rights of the file it replaces at that moment", [&] {
+                                        require(readDisk(sandbox.root / "doc.txt") == "new");
+                                        require(stdfs::status(sandbox.root / "doc.txt").permissions() == privateBits);
+                                    });
+                                });
+                            }};
 
     #if !defined(__APPLE__)
 namespace {
@@ -977,34 +998,34 @@ const string            aclVersion("\x02\0\0\0", 4);
     #endif
 
 const Scenario replacedFileKeeps{"A replaced file keeps its access control list", [] {
-    Sandbox           sandbox;
-    fs::NativeStorage storage(sandbox.root);
-    const auto        file = sandbox.root / "guarded.txt";
-    writeDisk(file, "old");
+                                     Sandbox           sandbox;
+                                     fs::NativeStorage storage(sandbox.root);
+                                     const auto        file = sandbox.root / "guarded.txt";
+                                     writeDisk(file, "old");
     #if defined(__APPLE__)
-    given("an ACL that denies another user reading the file", [&] {
-        require(std::system(("chmod +a 'user:nobody deny read' '" + file.string() + "'").c_str()) == 0);
-        writeFile(storage, "guarded.txt", "new secret", fs::WriteMode::replace);
-        then("the new file keeps it", [&] {
-            require(readDisk(file) == "new secret");
-            require(std::system(("ls -le '" + file.string() + "' | grep -q 'user:nobody deny read'").c_str()) == 0);
-        });
-    });
-    given("an ACL that denies everyone, the effective user included, reading the file", [&] {
-        require(std::system(("chmod +a 'everyone deny read' '" + file.string() + "'").c_str()) == 0);
-        then("the ACL cannot be read, so the replacement is refused and the file left as it was", [&] {
-            require(errorOf([&] {
-                        storage.openRead("guarded.txt");
-                    })
-                    == fs::StorageErrc::accessDenied);
-            require(errorOf([&] {
-                        writeFile(storage, "guarded.txt", "new secret", fs::WriteMode::replace);
-                    })
-                    == fs::StorageErrc::accessDenied);
-            require(std::system(("ls -le '" + file.string() + "' | grep -q 'everyone deny read'").c_str()) == 0);
-            require(namesOn(sandbox.root) == vector<string>{"guarded.txt"});
-        });
-    });
+                                     given("an ACL that denies another user reading the file", [&] {
+                                         require(std::system(("chmod +a 'user:nobody deny read' '" + file.string() + "'").c_str()) == 0);
+                                         writeFile(storage, "guarded.txt", "new secret", fs::WriteMode::replace);
+                                         then("the new file keeps it", [&] {
+                                             require(readDisk(file) == "new secret");
+                                             require(std::system(("ls -le '" + file.string() + "' | grep -q 'user:nobody deny read'").c_str()) == 0);
+                                         });
+                                     });
+                                     given("an ACL that denies everyone, the effective user included, reading the file", [&] {
+                                         require(std::system(("chmod +a 'everyone deny read' '" + file.string() + "'").c_str()) == 0);
+                                         then("the ACL cannot be read, so the replacement is refused and the file left as it was", [&] {
+                                             require(errorOf([&] {
+                                                         storage.openRead("guarded.txt");
+                                                     })
+                                                     == fs::StorageErrc::accessDenied);
+                                             require(errorOf([&] {
+                                                         writeFile(storage, "guarded.txt", "new secret", fs::WriteMode::replace);
+                                                     })
+                                                     == fs::StorageErrc::accessDenied);
+                                             require(std::system(("ls -le '" + file.string() + "' | grep -q 'everyone deny read'").c_str()) == 0);
+                                             require(namesOn(sandbox.root) == vector<string>{"guarded.txt"});
+                                         });
+                                     });
     #else
     // The POSIX access ACL: the owner reads and writes, the user nobody gets nothing, the group and the others read.
     const string acl = aclVersion + aclEntry(0x01, 6, aclUndefined) + aclEntry(0x02, 0, aclNobody) + aclEntry(0x04, 4, aclUndefined)
@@ -1020,293 +1041,302 @@ const Scenario replacedFileKeeps{"A replaced file keeps its access control list"
     kept.resize(static_cast<size_t>(size));
     require(kept.find(aclEntry(0x02, 0, aclNobody)) != string::npos);
     #endif
-}};
+                                 }};
 
-const Scenario replacedFileWithout{"A replaced file without an ACL gets none from its directory", [] {
-    Sandbox           sandbox;
-    fs::NativeStorage storage(sandbox.root);
-    const auto        file = sandbox.root / "plain.txt";
-    writeDisk(file, "old");
-    stdfs::permissions(file, stdfs::perms::owner_read | stdfs::perms::owner_write | stdfs::perms::group_read, stdfs::perm_options::replace);
+const Scenario replacedFileWithout{
+    "A replaced file without an ACL gets none from its directory",
+    [] {
+        Sandbox           sandbox;
+        fs::NativeStorage storage(sandbox.root);
+        const auto        file = sandbox.root / "plain.txt";
+        writeDisk(file, "old");
+        stdfs::permissions(file, stdfs::perms::owner_read | stdfs::perms::owner_write | stdfs::perms::group_read, stdfs::perm_options::replace);
     #if defined(__APPLE__)
-    // Entries the directory passes on to new files: the temporary file receives them, the file it replaces had none.
-    require(std::system(("chmod +a 'user:nobody allow read,file_inherit' '" + sandbox.root.string() + "'").c_str()) == 0);
-    writeFile(storage, "plain.txt", "new secret", fs::WriteMode::replace);
-    require(std::system(("ls -le '" + file.string() + "' | grep -q nobody").c_str()) != 0);
+        // Entries the directory passes on to new files: the temporary file receives them, the file it replaces had none.
+        require(std::system(("chmod +a 'user:nobody allow read,file_inherit' '" + sandbox.root.string() + "'").c_str()) == 0);
+        writeFile(storage, "plain.txt", "new secret", fs::WriteMode::replace);
+        require(std::system(("ls -le '" + file.string() + "' | grep -q nobody").c_str()) != 0);
     #else
-    // A default ACL of the directory that lets the user nobody read new files.
-    const string defaults = aclVersion + aclEntry(0x01, 7, aclUndefined) + aclEntry(0x02, 4, aclNobody) + aclEntry(0x04, 5, aclUndefined)
-                            + aclEntry(0x10, 5, aclUndefined) + aclEntry(0x20, 5, aclUndefined);
-    if (::setxattr(sandbox.root.c_str(), "system.posix_acl_default", defaults.data(), defaults.size(), 0) != 0)
-        skip("This file system has no POSIX ACL");
-    writeFile(storage, "plain.txt", "new secret", fs::WriteMode::replace);
-    require(::getxattr(file.c_str(), "system.posix_acl_access", nullptr, 0) < 0);
+        // A default ACL of the directory that lets the user nobody read new files.
+        const string defaults = aclVersion + aclEntry(0x01, 7, aclUndefined) + aclEntry(0x02, 4, aclNobody) + aclEntry(0x04, 5, aclUndefined)
+                                + aclEntry(0x10, 5, aclUndefined) + aclEntry(0x20, 5, aclUndefined);
+        if (::setxattr(sandbox.root.c_str(), "system.posix_acl_default", defaults.data(), defaults.size(), 0) != 0)
+            skip("This file system has no POSIX ACL");
+        writeFile(storage, "plain.txt", "new secret", fs::WriteMode::replace);
+        require(::getxattr(file.c_str(), "system.posix_acl_access", nullptr, 0) < 0);
     #endif
-    require(readDisk(file) == "new secret");
-    require(stdfs::status(file).permissions() == (stdfs::perms::owner_read | stdfs::perms::owner_write | stdfs::perms::group_read));
-}};
+        require(readDisk(file) == "new secret");
+        require(stdfs::status(file).permissions() == (stdfs::perms::owner_read | stdfs::perms::owner_write | stdfs::perms::group_read));
+    }};
 
 const Scenario runningOut{"Running out of descriptors does not mark the root as moved", [] {
-    Sandbox           sandbox;
-    fs::NativeStorage storage(sandbox.root);
-    // GCC 13's UBSan vptr check opens a pipe. Exercise the error types before denying it the descriptors for its
-    // first check; checks stay enabled, and an invalid vptr still misses that valid-type cache entry.
-    require(errorOf([&] {
-                storage.openRead("missing-before-exhaustion");
-            })
-            == fs::StorageErrc::notFound);
-    struct ::rlimit previous{};
-    require(::getrlimit(RLIMIT_NOFILE, &previous) == 0);
-    struct Pressure {
-        ::rlimit    previous;
-        vector<int> held;
-        int         release() {
-            for (const int descriptor : held)
-                ::close(descriptor);
-            held.clear();
-            return ::setrlimit(RLIMIT_NOFILE, &previous);
-        }
-        ~Pressure() {
-            release();
-        }
-    } pressure{previous, {}};
-    auto lowered     = previous;
-    lowered.rlim_cur = std::min<rlim_t>(previous.rlim_cur, 256);
-    require(::setrlimit(RLIMIT_NOFILE, &lowered) == 0);
-    auto& held = pressure.held;
-    for (int descriptor = ::dup(0); descriptor >= 0; descriptor = ::dup(0))
-        held.push_back(descriptor);
-    // One descriptor left: `/` opens, the next component of the declared location does not.
-    const bool         hadDescriptors = !held.empty();
-    std::exception_ptr exhausted;
-    if (hadDescriptors) {
-        ::close(held.back());
-        held.pop_back();
-        try {
-            storage.createDirectory("dir");
-        } catch (...) {
-            exhausted = std::current_exception();
-        }
-    }
-    // Failure reports and sanitizer diagnostics may themselves open files. Do not assert under descriptor exhaustion.
-    const int restored = pressure.release();
-    require(restored == 0);
-    require(hadDescriptors);
-    require(exhausted);
-    try {
-        std::rethrow_exception(exhausted);
-    } catch (const fs::StorageError& error) {
-        require(error.errc() != fs::StorageErrc::rootMoved);
-    }
-    storage.createDirectory("dir");
-    require(stdfs::is_directory(sandbox.root / "dir"));
-}};
+                              Sandbox           sandbox;
+                              fs::NativeStorage storage(sandbox.root);
+                              // GCC 13's UBSan vptr check opens a pipe. Exercise the error types before denying it the descriptors for its
+                              // first check; checks stay enabled, and an invalid vptr still misses that valid-type cache entry.
+                              require(errorOf([&] {
+                                          storage.openRead("missing-before-exhaustion");
+                                      })
+                                      == fs::StorageErrc::notFound);
+                              struct ::rlimit previous{};
+                              require(::getrlimit(RLIMIT_NOFILE, &previous) == 0);
+                              struct Pressure {
+                                  ::rlimit    previous;
+                                  vector<int> held;
+                                  int         release() {
+                                      for (const int descriptor : held)
+                                          ::close(descriptor);
+                                      held.clear();
+                                      return ::setrlimit(RLIMIT_NOFILE, &previous);
+                                  }
+                                  ~Pressure() {
+                                      release();
+                                  }
+                              } pressure{previous, {}};
+                              auto lowered     = previous;
+                              lowered.rlim_cur = std::min<rlim_t>(previous.rlim_cur, 256);
+                              require(::setrlimit(RLIMIT_NOFILE, &lowered) == 0);
+                              auto& held = pressure.held;
+                              for (int descriptor = ::dup(0); descriptor >= 0; descriptor = ::dup(0))
+                                  held.push_back(descriptor);
+                              // One descriptor left: `/` opens, the next component of the declared location does not.
+                              const bool         hadDescriptors = !held.empty();
+                              std::exception_ptr exhausted;
+                              if (hadDescriptors) {
+                                  ::close(held.back());
+                                  held.pop_back();
+                                  try {
+                                      storage.createDirectory("dir");
+                                  } catch (...) {
+                                      exhausted = std::current_exception();
+                                  }
+                              }
+                              // Failure reports and sanitizer diagnostics may themselves open files. Do not assert under descriptor exhaustion.
+                              const int restored = pressure.release();
+                              require(restored == 0);
+                              require(hadDescriptors);
+                              require(exhausted);
+                              try {
+                                  std::rethrow_exception(exhausted);
+                              } catch (const fs::StorageError& error) {
+                                  require(error.errc() != fs::StorageErrc::rootMoved);
+                              }
+                              storage.createDirectory("dir");
+                              require(stdfs::is_directory(sandbox.root / "dir"));
+                          }};
 
     #if defined(__APPLE__)
 const Scenario temporaryFile{"The temporary file of a replacing write keeps no inherited ACL", [] {
-    Sandbox           sandbox;
-    fs::NativeStorage storage(sandbox.root);
-    writeDisk(sandbox.root / "private.txt", "old");
-    stdfs::permissions(sandbox.root / "private.txt", stdfs::perms::owner_read | stdfs::perms::owner_write, stdfs::perm_options::replace);
-    // The ACL the directory passes on lets everyone read new files: not the temporary file of a private one.
-    require(std::system(("chmod +a 'everyone allow read,file_inherit' '" + sandbox.root.string() + "'").c_str()) == 0);
-    auto writer = storage.beginWrite("private.txt", fs::WriteMode::replace);
-    writer.write(span<const char>("secret", 6));
-    // The temporary file lives in a private directory created without the inherited entries, so it never had them.
-    const auto temporary = temporaryOf(sandbox.root);
-    require(std::system(("ls -led '" + temporary.parent_path().string() + "' | grep -q everyone").c_str()) != 0);
-    require(std::system(("ls -le '" + temporary.string() + "' | grep -q everyone").c_str()) != 0);
-    writer.commit();
-    require(std::system(("ls -le '" + (sandbox.root / "private.txt").string() + "' | grep -q everyone").c_str()) != 0);
-    require(stdfs::status(sandbox.root / "private.txt").permissions() == (stdfs::perms::owner_read | stdfs::perms::owner_write));
-}};
+                                 Sandbox           sandbox;
+                                 fs::NativeStorage storage(sandbox.root);
+                                 writeDisk(sandbox.root / "private.txt", "old");
+                                 stdfs::permissions(sandbox.root / "private.txt",
+                                                    stdfs::perms::owner_read | stdfs::perms::owner_write,
+                                                    stdfs::perm_options::replace);
+                                 // The ACL the directory passes on lets everyone read new files: not the temporary file of a private one.
+                                 require(std::system(("chmod +a 'everyone allow read,file_inherit' '" + sandbox.root.string() + "'").c_str()) == 0);
+                                 auto writer = storage.beginWrite("private.txt", fs::WriteMode::replace);
+                                 writer.write(span<const char>("secret", 6));
+                                 // The temporary file lives in a private directory created without the inherited entries, so it never had them.
+                                 const auto temporary = temporaryOf(sandbox.root);
+                                 require(std::system(("ls -led '" + temporary.parent_path().string() + "' | grep -q everyone").c_str()) != 0);
+                                 require(std::system(("ls -le '" + temporary.string() + "' | grep -q everyone").c_str()) != 0);
+                                 writer.commit();
+                                 require(std::system(("ls -le '" + (sandbox.root / "private.txt").string() + "' | grep -q everyone").c_str()) != 0);
+                                 require(stdfs::status(sandbox.root / "private.txt").permissions() == (stdfs::perms::owner_read | stdfs::perms::owner_write));
+                             }};
     #endif
 
 const Scenario replacingWrite{"A replacing write is private from the creation of its temporary file", [] {
-    Sandbox           sandbox;
-    fs::NativeStorage storage(sandbox.root);
-    // No file to replace when the write begins: a private one may appear under that name before the commit.
-    auto writer = storage.beginWrite("later.txt", fs::WriteMode::replace);
-    writer.write(span<const char>("secret", 6));
-    const auto temporary = temporaryOf(sandbox.root);
-    require(fs::isTemporaryName(temporary.parent_path().filename().string()));
-    require(stdfs::status(temporary).permissions() == (stdfs::perms::owner_read | stdfs::perms::owner_write));
-    require(stdfs::status(temporary.parent_path()).permissions() == stdfs::perms::owner_all);
-    writer.commit();
-    require(readDisk(sandbox.root / "later.txt") == "secret");
-    require(stdfs::status(sandbox.root / "later.txt").permissions() == (stdfs::perms::owner_read | stdfs::perms::owner_write));
-    require(namesOn(sandbox.root) == vector<string>{"later.txt"});
-}};
+                                  Sandbox           sandbox;
+                                  fs::NativeStorage storage(sandbox.root);
+                                  // No file to replace when the write begins: a private one may appear under that name before the commit.
+                                  auto writer = storage.beginWrite("later.txt", fs::WriteMode::replace);
+                                  writer.write(span<const char>("secret", 6));
+                                  const auto temporary = temporaryOf(sandbox.root);
+                                  require(fs::isTemporaryName(temporary.parent_path().filename().string()));
+                                  require(stdfs::status(temporary).permissions() == (stdfs::perms::owner_read | stdfs::perms::owner_write));
+                                  require(stdfs::status(temporary.parent_path()).permissions() == stdfs::perms::owner_all);
+                                  writer.commit();
+                                  require(readDisk(sandbox.root / "later.txt") == "secret");
+                                  require(stdfs::status(sandbox.root / "later.txt").permissions() == (stdfs::perms::owner_read | stdfs::perms::owner_write));
+                                  require(namesOn(sandbox.root) == vector<string>{"later.txt"});
+                              }};
 
 const Scenario replacedFileKeepsGroup{"A replaced file keeps its group", [] {
-    // A group of the effective user other than its effective group, which a new file would not get.
-    const int     count = ::getgroups(0, nullptr);
-    vector<gid_t> groups(static_cast<size_t>(max(count, 0)));
-    if (count > 0)
-        groups.resize(static_cast<size_t>(::getgroups(count, groups.data())));
-    const auto other = ranges::find_if(groups, [](gid_t group) {
-        return group != ::getegid();
-    });
-    if (other == groups.end())
-        skip("The effective user belongs to no other group");
-    Sandbox           sandbox;
-    fs::NativeStorage storage(sandbox.root);
-    const auto        file = sandbox.root / "shared.txt";
-    writeDisk(file, "old");
-    require(::chown(file.c_str(), static_cast<uid_t>(-1), *other) == 0);
-    stdfs::permissions(file, stdfs::perms::owner_read | stdfs::perms::owner_write | stdfs::perms::group_read, stdfs::perm_options::replace);
-    writeFile(storage, "shared.txt", "new", fs::WriteMode::replace);
-    struct ::stat status{};
-    require(::stat(file.c_str(), &status) == 0);
-    require(status.st_gid == *other);
-    require((status.st_mode & 0777) == 0640);
-    require(readDisk(file) == "new");
-}};
+                                          // A group of the effective user other than its effective group, which a new file would not get.
+                                          const int     count = ::getgroups(0, nullptr);
+                                          vector<gid_t> groups(static_cast<size_t>(max(count, 0)));
+                                          if (count > 0)
+                                              groups.resize(static_cast<size_t>(::getgroups(count, groups.data())));
+                                          const auto other = ranges::find_if(groups, [](gid_t group) {
+                                              return group != ::getegid();
+                                          });
+                                          if (other == groups.end())
+                                              skip("The effective user belongs to no other group");
+                                          Sandbox           sandbox;
+                                          fs::NativeStorage storage(sandbox.root);
+                                          const auto        file = sandbox.root / "shared.txt";
+                                          writeDisk(file, "old");
+                                          require(::chown(file.c_str(), static_cast<uid_t>(-1), *other) == 0);
+                                          stdfs::permissions(file,
+                                                             stdfs::perms::owner_read | stdfs::perms::owner_write | stdfs::perms::group_read,
+                                                             stdfs::perm_options::replace);
+                                          writeFile(storage, "shared.txt", "new", fs::WriteMode::replace);
+                                          struct ::stat status{};
+                                          require(::stat(file.c_str(), &status) == 0);
+                                          require(status.st_gid == *other);
+                                          require((status.st_mode & 0777) == 0640);
+                                          require(readDisk(file) == "new");
+                                      }};
 
-#ifndef _WIN32
+    #ifndef _WIN32
 const Scenario directoriesMade{"Directories made by the tests stay closed to group and others under a permissive umask", [] {
-    // Restores the umask on every exit, a failing REQUIRE or an exception included: it is process-wide.
-    struct UmaskScope {
-        mode_t previous;
-        UmaskScope() : previous(::umask(0)) {}
-        UmaskScope(const UmaskScope&)            = delete;
-        UmaskScope& operator=(const UmaskScope&) = delete;
-        ~UmaskScope() {
-            ::umask(previous);
-        }
-    } umaskScope;
-    Sandbox sandbox;
-    makeDirectories(sandbox.root / "a" / "b");
-    for (const auto& directory : {sandbox.root / "a", sandbox.root / "a" / "b"}) {
-        struct stat status{};
-        require(::stat(directory.c_str(), &status) == 0);
-        require((status.st_mode & (S_IWGRP | S_IWOTH)) == 0);
-    }
-    fs::NativeStorage storage(sandbox.root);
-    require(storage.list("a").entries.size() == 1);
-    require(storage.list("a/b").entries.empty());
-}};
-#endif
+                                   // Restores the umask on every exit, a failing REQUIRE or an exception included: it is process-wide.
+                                   struct UmaskScope {
+                                       mode_t previous;
+                                       UmaskScope() : previous(::umask(0)) { }
+                                       UmaskScope(const UmaskScope&)            = delete;
+                                       UmaskScope& operator=(const UmaskScope&) = delete;
+                                       ~UmaskScope() {
+                                           ::umask(previous);
+                                       }
+                                   } umaskScope;
+                                   Sandbox sandbox;
+                                   makeDirectories(sandbox.root / "a" / "b");
+                                   for (const auto& directory : {sandbox.root / "a", sandbox.root / "a" / "b"}) {
+                                       struct stat status{};
+                                       require(::stat(directory.c_str(), &status) == 0);
+                                       require((status.st_mode & (S_IWGRP | S_IWOTH)) == 0);
+                                   }
+                                   fs::NativeStorage storage(sandbox.root);
+                                   require(storage.list("a").entries.size() == 1);
+                                   require(storage.list("a/b").entries.empty());
+                               }};
+    #endif
 
 const Scenario linkFollowed{"A link followed inside the root never reaches a temporary file", [] {
-    Sandbox           sandbox;
-    fs::NativeStorage storage(sandbox.root, {.links = fs::LinkPolicy::followInside});
-    auto              writer = storage.beginWrite("report.txt", fs::WriteMode::createNew);
-    writer.write(span<const char>("partial", 7));
-    const auto temporary = namesOn(sandbox.root).at(0);
-    stdfs::create_symlink(temporary, sandbox.root / "alias");
-    makeDirectories(sandbox.root / "dir");
-    stdfs::create_symlink("../" + temporary, sandbox.root / "dir" / "deep");
-    require(errorOf([&] {
-                storage.openRead("alias");
-            })
-            == fs::StorageErrc::linkRefused);
-    require(errorOf([&] {
-                storage.openRead("dir/deep");
-            })
-            == fs::StorageErrc::linkRefused);
-    writer.commit();
-    require(readAll(storage.openRead("report.txt")) == "partial");
-}};
+                                Sandbox           sandbox;
+                                fs::NativeStorage storage(sandbox.root, {.links = fs::LinkPolicy::followInside});
+                                auto              writer = storage.beginWrite("report.txt", fs::WriteMode::createNew);
+                                writer.write(span<const char>("partial", 7));
+                                const auto temporary = namesOn(sandbox.root).at(0);
+                                stdfs::create_symlink(temporary, sandbox.root / "alias");
+                                makeDirectories(sandbox.root / "dir");
+                                stdfs::create_symlink("../" + temporary, sandbox.root / "dir" / "deep");
+                                require(errorOf([&] {
+                                            storage.openRead("alias");
+                                        })
+                                        == fs::StorageErrc::linkRefused);
+                                require(errorOf([&] {
+                                            storage.openRead("dir/deep");
+                                        })
+                                        == fs::StorageErrc::linkRefused);
+                                writer.commit();
+                                require(readAll(storage.openRead("report.txt")) == "partial");
+                            }};
 
 const Scenario rootUnder{"A root under the real /tmp of the superuser is accepted", [] {
-    // /tmp is owned by the superuser, writable by all and sticky: an element of the effective user under it is safe.
-    std::error_code error;
-    if (!stdfs::is_directory("/tmp", error))
-        skip("No /tmp on this system");
-    struct ::stat status{};
-    require(::stat("/tmp", &status) == 0);
-    if (status.st_uid != 0 || (status.st_mode & S_ISVTX) == 0)
-        skip("/tmp is not a sticky directory of the superuser here");
-    const auto root = stdfs::path("/tmp") / ("webfront_storage_" + to_string(::getpid()));
-    stdfs::create_directory(root);
-    stdfs::permissions(root, stdfs::perms::owner_all, stdfs::perm_options::replace);
-    fs::NativeStorage storage(root);
-    writeFile(storage, "file.txt", "x");
-    require(storage.list("").entries.size() == 1);
-    stdfs::remove_all(root);
-}};
+                             // /tmp is owned by the superuser, writable by all and sticky: an element of the effective user under it is safe.
+                             std::error_code error;
+                             if (!stdfs::is_directory("/tmp", error))
+                                 skip("No /tmp on this system");
+                             struct ::stat status{};
+                             require(::stat("/tmp", &status) == 0);
+                             if (status.st_uid != 0 || (status.st_mode & S_ISVTX) == 0)
+                                 skip("/tmp is not a sticky directory of the superuser here");
+                             const auto root = stdfs::path("/tmp") / ("webfront_storage_" + to_string(::getpid()));
+                             stdfs::create_directory(root);
+                             stdfs::permissions(root, stdfs::perms::owner_all, stdfs::perm_options::replace);
+                             fs::NativeStorage storage(root);
+                             writeFile(storage, "file.txt", "x");
+                             require(storage.list("").entries.size() == 1);
+                             stdfs::remove_all(root);
+                         }};
 #endif
 
 #ifdef _WIN32
-const Scenario windowsOpens{"Windows opens a root from its drive, its share or its volume", [] {
-    using Split      = std::pair<std::wstring, vector<string>>;
-    const auto split = [](const wchar_t* path) {
-        return fs::detail::windows::splitLocation(path);
-    };
-    require(split(LR"(C:\a\b)")
-            == Split{
-                LR"(\\?\C:\)",
-                {"a", "b"}
-    });
-    require(split(LR"(C:\)") == Split{LR"(\\?\C:\)", {}});
-    require(split(LR"(\\server\share\a)") == Split{LR"(\\?\UNC\server\share\)", {"a"}});
-    require(split(LR"(\\server\share)") == Split{LR"(\\?\UNC\server\share\)", {}});
-    // Extended paths, whose root name MSVC reports as `\\?`.
-    require(split(LR"(\\?\C:\a\b)")
-            == Split{
-                LR"(\\?\C:\)",
-                {"a", "b"}
-    });
-    require(split(LR"(\\?\UNC\server\share\a)") == Split{LR"(\\?\UNC\server\share\)", {"a"}});
-    require(split(LR"(\\?\Volume{12345678-0000-0000-0000-000000000000}\a)") == Split{LR"(\\?\Volume{12345678-0000-0000-0000-000000000000}\)", {"a"}});
-    for (const auto* refused : {LR"(\\server)", LR"(\\?\UNC\server)", LR"(\\?\GLOBALROOT\Device\HarddiskVolume1\a)", LR"(\\?\globalroot\Device\X)", LR"(a\b)"})
-        require(errorOf([&] {
-                    split(refused);
-                })
-                == fs::StorageErrc::invalidPath);
-}};
+const Scenario windowsOpens{
+    "Windows opens a root from its drive, its share or its volume",
+    [] {
+        using Split      = std::pair<std::wstring, vector<string>>;
+        const auto split = [](const wchar_t* path) {
+            return fs::detail::windows::splitLocation(path);
+        };
+        require(split(LR"(C:\a\b)")
+                == Split{
+                    LR"(\\?\C:\)",
+                    {"a", "b"}
+        });
+        require(split(LR"(C:\)") == Split{LR"(\\?\C:\)", {}});
+        require(split(LR"(\\server\share\a)") == Split{LR"(\\?\UNC\server\share\)", {"a"}});
+        require(split(LR"(\\server\share)") == Split{LR"(\\?\UNC\server\share\)", {}});
+        // Extended paths, whose root name MSVC reports as `\\?`.
+        require(split(LR"(\\?\C:\a\b)")
+                == Split{
+                    LR"(\\?\C:\)",
+                    {"a", "b"}
+        });
+        require(split(LR"(\\?\UNC\server\share\a)") == Split{LR"(\\?\UNC\server\share\)", {"a"}});
+        require(split(LR"(\\?\Volume{12345678-0000-0000-0000-000000000000}\a)") == Split{LR"(\\?\Volume{12345678-0000-0000-0000-000000000000}\)", {"a"}});
+        for (const auto* refused :
+             {LR"(\\server)", LR"(\\?\UNC\server)", LR"(\\?\GLOBALROOT\Device\HarddiskVolume1\a)", LR"(\\?\globalroot\Device\X)", LR"(a\b)"})
+            require(errorOf([&] {
+                        split(refused);
+                    })
+                    == fs::StorageErrc::invalidPath);
+    }};
 
 const Scenario windowsFinds{"Windows finds a directory below a root at the top of its volume", [] {
-    using fs::detail::windows::isBelow;
-    require(isBelow(LR"(\Device\HarddiskVolume3\Users)", LR"(\Device\HarddiskVolume3\)"));
-    require(isBelow(LR"(\Device\HarddiskVolume3\)", LR"(\Device\HarddiskVolume3\)"));
-    require(isBelow(LR"(\Device\HarddiskVolume3\a\b)", LR"(\device\harddiskvolume3\A)"));
-    require(!isBelow(LR"(\Device\HarddiskVolume3\ab)", LR"(\Device\HarddiskVolume3\a)"));
-    require(!isBelow(LR"(\Device\HarddiskVolume4\a)", LR"(\Device\HarddiskVolume3\)"));
+                                using fs::detail::windows::isBelow;
+                                require(isBelow(LR"(\Device\HarddiskVolume3\Users)", LR"(\Device\HarddiskVolume3\)"));
+                                require(isBelow(LR"(\Device\HarddiskVolume3\)", LR"(\Device\HarddiskVolume3\)"));
+                                require(isBelow(LR"(\Device\HarddiskVolume3\a\b)", LR"(\device\harddiskvolume3\A)"));
+                                require(!isBelow(LR"(\Device\HarddiskVolume3\ab)", LR"(\Device\HarddiskVolume3\a)"));
+                                require(!isBelow(LR"(\Device\HarddiskVolume4\a)", LR"(\Device\HarddiskVolume3\)"));
 
-    given("a root declared at the top of the volume of the temporary directory", [&] {
-        Sandbox           sandbox;
-        const auto        root     = stdfs::canonical(sandbox.root).root_path();
-        const auto        relative = stdfs::canonical(sandbox.root).relative_path().generic_string();
-        fs::NativeStorage storage(root);
-        then("its subdirectories are listed and written in, inside the root", [&] {
-            require(!storage.list("").entries.empty());
-            storage.createDirectory(relative + "/dir");
-            require(stdfs::is_directory(sandbox.root / "dir"));
-            require(storage.list(relative).entries.size() == 1);
-            writeFile(storage, relative + "/dir/file.txt", "data");
-            require(readDisk(sandbox.root / "dir" / "file.txt") == "data");
-        });
-    });
-}};
+                                given("a root declared at the top of the volume of the temporary directory", [&] {
+                                    Sandbox           sandbox;
+                                    const auto        root     = stdfs::canonical(sandbox.root).root_path();
+                                    const auto        relative = stdfs::canonical(sandbox.root).relative_path().generic_string();
+                                    fs::NativeStorage storage(root);
+                                    then("its subdirectories are listed and written in, inside the root", [&] {
+                                        require(!storage.list("").entries.empty());
+                                        storage.createDirectory(relative + "/dir");
+                                        require(stdfs::is_directory(sandbox.root / "dir"));
+                                        require(storage.list(relative).entries.size() == 1);
+                                        writeFile(storage, relative + "/dir/file.txt", "data");
+                                        require(readDisk(sandbox.root / "dir" / "file.txt") == "data");
+                                    });
+                                });
+                            }};
 
 const Scenario windowsHolds{"Windows holds the directories of an operation so that nobody moves them", [] {
-    Sandbox sandbox;
-    makeDirectories(sandbox.root / "a" / "b");
-    std::error_code rootRename, directoryRename, ancestorRename, baseRename;
+                                Sandbox sandbox;
+                                makeDirectories(sandbox.root / "a" / "b");
+                                std::error_code rootRename, directoryRename, ancestorRename, baseRename;
 
-    given("moves attempted while the temporary file is written and before the commit", [&] {
-        auto              hooks = hooksAt([&](fs::StoragePoint point, string_view) {
-            if (point == fs::StoragePoint::temporaryCreated) {
-                stdfs::rename(sandbox.root / "a" / "b", sandbox.outside / "b", directoryRename);
-                // An ancestor of the root is not held: NTFS refuses to rename a directory below which a handle is open.
-                stdfs::rename(sandbox.base.path(), sandbox.base.path().string() + "-moved", baseRename);
-            }
-            if (point == fs::StoragePoint::beforeCommit)
-                stdfs::rename(sandbox.root / "a", sandbox.outside / "a", ancestorRename);
-        });
-        fs::NativeStorage storage(sandbox.root, {}, hooks);
-        stdfs::rename(sandbox.root, sandbox.base.path() / "elsewhere", rootRename);
-        writeFile(storage, "a/b/file.txt", "data");
-        then("each move fails and the write ends under the root", [&] {
-            require(rootRename);
-            require(directoryRename);
-            require(ancestorRename);
-            require(baseRename);
-            require(readDisk(sandbox.root / "a" / "b" / "file.txt") == "data");
-            require(sandbox.outsideUntouched());
-        });
-    });
-}};
+                                given("moves attempted while the temporary file is written and before the commit", [&] {
+                                    auto              hooks = hooksAt([&](fs::StoragePoint point, string_view) {
+                                        if (point == fs::StoragePoint::temporaryCreated) {
+                                            stdfs::rename(sandbox.root / "a" / "b", sandbox.outside / "b", directoryRename);
+                                            // An ancestor of the root is not held: NTFS refuses to rename a directory below which a handle is open.
+                                            stdfs::rename(sandbox.base.path(), sandbox.base.path().string() + "-moved", baseRename);
+                                        }
+                                        if (point == fs::StoragePoint::beforeCommit)
+                                            stdfs::rename(sandbox.root / "a", sandbox.outside / "a", ancestorRename);
+                                    });
+                                    fs::NativeStorage storage(sandbox.root, {}, hooks);
+                                    stdfs::rename(sandbox.root, sandbox.base.path() / "elsewhere", rootRename);
+                                    writeFile(storage, "a/b/file.txt", "data");
+                                    then("each move fails and the write ends under the root", [&] {
+                                        require(rootRename);
+                                        require(directoryRename);
+                                        require(ancestorRename);
+                                        require(baseRename);
+                                        require(readDisk(sandbox.root / "a" / "b" / "file.txt") == "data");
+                                        require(sandbox.outsideUntouched());
+                                    });
+                                });
+                            }};
 #endif

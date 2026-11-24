@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-28
+//
+// WebFront — tests/web
+// Role: Program that runs the Jasmine instrumentation of a consumer's real page.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: test support; see Jasmine.hpp
+
 #include "../driver/WfDriver.hpp"
 #include <webfront/testing/Jasmine.hpp>
 

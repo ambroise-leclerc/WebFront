@@ -1,4 +1,14 @@
-/** @brief Module-free WebFront diagnostic facade (ADR-003 Decision 3). */
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-01
+//
+// WebFront — tooling
+// Role: Module-free WebFront diagnostic facade over mddlog (ADR-003 decision 3).
+// Thread: thread-safe | Alloc: heap-init
+// LLM: facade only; the module-consuming TU is cmake/mddlog/Logger.cpp
+
+// Module-free WebFront diagnostic facade (ADR-003 Decision 3).
+
 #pragma once
 
 #include <array>

@@ -1,6 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-21
+//
+// WebFront — tests/web
+// Role: Test that several instances of one executable run at once with distinct profiles.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: exercises ProfileLease.hpp across live processes
+
 // Several applications at once, none with a configured port: each one starts, is reachable on the port it announces, and stops.
 // `multi_instance <count>`; the first application takes 9002 when it is free (the test holds that port's lock), the others get
 // free ports.
+
 #include <webfront/WebFront.hpp>
 
 #include <array>
@@ -20,7 +30,9 @@ using Net = webfront::NetProvider;
 
 struct Instance {
     webfront::WebFront app;
-    std::thread        server{[this] { app.run(); }};
+    std::thread        server{[this] {
+        app.run();
+    }};
     ~Instance() {
         app.stop();
         if (server.joinable())

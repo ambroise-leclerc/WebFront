@@ -1,4 +1,12 @@
-/// @brief Relative paths received from the browser, checked to stay inside the directory they name a file of.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-23
+//
+// WebFront — system
+// Role: Relative paths received from the browser, checked to stay inside the directory they name a file of.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: security sensitive; rejects reserved Windows names and unsafe characters
+
 #pragma once
 
 #include <algorithm>

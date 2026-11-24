@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-27
+//
+// WebFront — examples
+// Role: The C++ side of the React variant: per-browser sessions publishing snapshots through a Store.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: example of react::Store; one Session per connected browser
+
 #pragma once
 #include "../Life.hpp"
 #include <webfront/components/react/Store.hpp>

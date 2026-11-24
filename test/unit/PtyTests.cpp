@@ -1,6 +1,15 @@
-#include <webfront/testing/Bdd.hpp>
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-19
+//
+// WebFront — tests/unit
+// Role: The native pseudoterminal: output ring, resize, child lifecycle and cleanup.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: runs a probe child program
+
 #include "TemporaryDirectory.hpp"
 #include <webfront/Pty.hpp>
+#include <webfront/testing/Bdd.hpp>
 
 #include <charconv>
 #include <fstream>
@@ -54,11 +63,11 @@ std::string plain(std::string_view raw) {
             continue;
         }
         const char kind = raw[++i];
-        if (kind == '[') { // CSI: parameters, then a final byte in 0x40-0x7e
+        if (kind == '[') {  // CSI: parameters, then a final byte in 0x40-0x7e
             while (i + 1 < raw.size() && (raw[i + 1] < '@' || raw[i + 1] > '~'))
                 ++i;
             ++i;
-        } else if (kind == ']') { // OSC: up to BEL or ESC followed by a backslash
+        } else if (kind == ']') {  // OSC: up to BEL or ESC followed by a backslash
             while (i + 1 < raw.size() && raw[i + 1] != '\a' && raw[i + 1] != '\x1b')
                 ++i;
             ++i;
@@ -149,10 +158,10 @@ const Scenario ptyShell{"PTY exchanges bytes with an interactive shell and resiz
 #ifdef _WIN32
                                     // The console control event can also affect cmd itself. Exercise it with a directly hosted probe.
                                     Pty        foreground({
-                                               .argv        = {probe(), "interrupt"},
-                                               .directory   = {},
-                                               .environment = {},
-                                               .size        = {}
+                                        .argv        = {probe(), "interrupt"},
+                                        .directory   = {},
+                                        .environment = {},
+                                        .size        = {}
                                     });
                                     Transcript interrupted;
                                     interrupted.until(foreground, "INTERRUPT_READY");
@@ -178,7 +187,8 @@ const Scenario ptyShell{"PTY exchanges bytes with an interactive shell and resiz
 
 const Scenario ptyControlSequences{"PTY test markers are found through terminal control sequences inserted in the output", [] {
                                        // ConPTY sets the window title while the probe starts, here in the middle of the marker.
-                                       const std::string raw = "\x1b[2J\x1b[4;1H> probe stall\r\nSTALLED:\x1b]0;cmd.exe - probe\a" "25776:END\r\n\x1b]0;t\x1b\\";
+                                       const std::string raw = "\x1b[2J\x1b[4;1H> probe stall\r\nSTALLED:\x1b]0;cmd.exe - probe\a"
+                                                               "25776:END\r\n\x1b]0;t\x1b\\";
                                        require(plain(raw) == "> probe stall\r\nSTALLED:25776:END\r\n");
                                        require(stallPid(raw) == 25776);
                                    }};
@@ -218,10 +228,10 @@ const Scenario ptyHangUp{"PTY refuses oversized input promptly and terminates a 
 
 const Scenario ptyInterruptRead{"PTY blocking reads observe a stop request", [] {
                                     Pty        terminal({
-                                               .argv        = {probe(), "stall"},
-                                               .directory   = {},
-                                               .environment = {},
-                                               .size        = {}
+                                        .argv        = {probe(), "stall"},
+                                        .directory   = {},
+                                        .environment = {},
+                                        .size        = {}
                                     });
                                     Transcript output;
                                     output.until(terminal, ":END");
@@ -244,10 +254,10 @@ const Scenario ptyInterruptRead{"PTY blocking reads observe a stop request", [] 
 #ifdef _WIN32
 const Scenario ptyDescendantOutput{"ConPTY drains a descendant's output after the leader exits", [] {
                                        Pty        terminal({
-                                                  .argv        = {probe(), "leave-child"},
-                                                  .directory   = {},
-                                                  .environment = {},
-                                                  .size        = {}
+                                           .argv        = {probe(), "leave-child"},
+                                           .directory   = {},
+                                           .environment = {},
+                                           .size        = {}
                                        });
                                        Transcript output;
                                        output.until(terminal, "DESCENDANT_OUTPUT");
@@ -264,10 +274,10 @@ const Scenario ptyBatchShim{"PTY resolves Windows npm-style batch shims from the
                                 }
                                 const auto path = root.u8string();
                                 Pty        terminal({
-                                           .argv        = {"pty test", "a & b"},
-                                           .directory   = root,
-                                           .environment = {{"Path", {reinterpret_cast<const char*>(path.data()), path.size()}}},
-                                           .size        = {}
+                                    .argv        = {"pty test", "a & b"},
+                                    .directory   = root,
+                                    .environment = {{"Path", {reinterpret_cast<const char*>(path.data()), path.size()}}},
+                                    .size        = {}
                                 });
                                 Transcript output;
                                 output.until(terminal, "[\"a & b\"]");
@@ -310,10 +320,10 @@ const Scenario ptyReplay{"PTY resolves PATH in the child directory and bounds it
 
 const Scenario ptyReopen{"PTY resumes output when the live child reopens its slave", [] {
                              Pty        terminal({
-                                        .argv        = {probe(), "reopen"},
-                                        .directory   = {},
-                                        .environment = {},
-                                        .size        = {}
+                                 .argv        = {probe(), "reopen"},
+                                 .directory   = {},
+                                 .environment = {},
+                                 .size        = {}
                              });
                              Transcript output;
                              output.until(terminal, "REOPENED");
@@ -323,10 +333,10 @@ const Scenario ptyReopen{"PTY resumes output when the live child reopens its sla
 
 const Scenario ptyOrphan{"PTY cleans up a foreground group that ignores SIGHUP after the session leader exits", [] {
                              Pty        terminal({
-                                        .argv        = {probe(), "orphan"},
-                                        .directory   = {},
-                                        .environment = {},
-                                        .size        = {}
+                                 .argv        = {probe(), "orphan"},
+                                 .directory   = {},
+                                 .environment = {},
+                                 .size        = {}
                              });
                              Transcript output;
                              output.until(terminal, ":END");
@@ -348,10 +358,10 @@ const Scenario ptyDescriptors{"PTY child does not inherit an application descrip
                                   require(descriptor.get() >= 3);
                                   require(::fcntl(descriptor.get(), F_GETFD) == 0);
                                   Pty        terminal({
-                                             .argv        = {probe(), "fd", std::to_string(descriptor.get())},
-                                             .directory   = {},
-                                             .environment = {},
-                                             .size        = {}
+                                      .argv        = {probe(), "fd", std::to_string(descriptor.get())},
+                                      .directory   = {},
+                                      .environment = {},
+                                      .size        = {}
                                   });
                                   Transcript output;
                                   output.until(terminal, "");

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-18
+//
+// WebFront — core
+// Role: Shared per-application content rules (origins, popups, navigation) applied by every frontend.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: public API; see docs/CONTENT_POLICY.md before changing defaults
+
 #pragma once
 
 #include <algorithm>

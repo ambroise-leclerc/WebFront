@@ -1,22 +1,32 @@
-/// @brief Opt-in automation of a consumer's own developer window.
-///
-/// `enableAutomation(app, options)` mounts the controller (`Session`) and the page binding (`Binding`) on an application
-/// that already called `bootstrap("developer")`, then serves MCP from this process, over Streamable HTTP on a loopback
-/// listener of its own (ADR-025), and publishes a discovery record. An MCP client connects to `mcpUrl()` with the private
-/// configuration `clientConfiguration()`; no other program is involved. Check, build, test, preview, inspect and interact
-/// run in the page of the application, whose `cppFunction` callbacks stay registered. Nothing is registered unless this
-/// function is called, and the grants are fixed here by the native owner. Automation does not exist in a distribution
-/// build: this header refuses to compile with `WEBFRONT_DISTRIBUTION`.
-///
-/// ```cpp
-/// webfront::NativeApp app{project};
-/// app.bootstrap("developer");
-/// app.cppFunction("bf.render", render);
-/// auto automation = webfront::automation::enableAutomation(app, {.grants = {"check", "build", "inspect", "interact"}});
-/// app.show(automation->launchPage());
-/// automation->close();
-/// app.shutdown();
-/// ```
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-08
+//
+// WebFront — automation
+// Role: Opt-in automation of a consumer's own developer window: enableAutomation mounts the controller, the page binding and the MCP listener.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: public entry point (ADR-025); nothing is registered unless called, grants are fixed by the native owner
+
+// Opt-in automation of a consumer's own developer window.
+//
+// `enableAutomation(app, options)` mounts the controller (`Session`) and the page binding (`Binding`) on an application
+// that already called `bootstrap("developer")`, then serves MCP from this process, over Streamable HTTP on a loopback
+// listener of its own (ADR-025), and publishes a discovery record. An MCP client connects to `mcpUrl()` with the private
+// configuration `clientConfiguration()`; no other program is involved. Check, build, test, preview, inspect and interact
+// run in the page of the application, whose `cppFunction` callbacks stay registered. Nothing is registered unless this
+// function is called, and the grants are fixed here by the native owner. Automation does not exist in a distribution
+// build: this header refuses to compile with `WEBFRONT_DISTRIBUTION`.
+//
+// ```cpp
+// webfront::NativeApp app{project};
+// app.bootstrap("developer");
+// app.cppFunction("bf.render", render);
+// auto automation = webfront::automation::enableAutomation(app, {.grants = {"check", "build", "inspect", "interact"}});
+// app.show(automation->launchPage());
+// automation->close();
+// app.shutdown();
+// ```
+
 #pragma once
 #if defined(WEBFRONT_DISTRIBUTION) && WEBFRONT_DISTRIBUTION
     #error "WebFront automation does not exist in a distribution build (WEBFRONT_DISTRIBUTION, ADR-025): gate enableAutomation out of it"
@@ -64,7 +74,7 @@ template <typename Duration>
 
 /// The end of the startup window, saturated (see `deadlineAfter`).
 [[nodiscard]] constexpr std::chrono::steady_clock::time_point startupDeadline(std::chrono::steady_clock::time_point launched,
-                                                                              std::chrono::seconds startup) noexcept {
+                                                                              std::chrono::seconds                  startup) noexcept {
     return deadlineAfter(launched, startup);
 }
 
@@ -201,7 +211,7 @@ public:
         for (const auto& callback : callbackNames)
             names += (names.empty() ? "" : ", ") + callback;
         const auto granted = std::string{authenticationDisabled ? "WARNING: MCP authentication disabled; local processes can use granted operations; " : ""}
-                           + "grants: " + (list.empty() ? std::string{"none"} : list) + (names.empty() ? "" : "; callbacks: " + names);
+                             + "grants: " + (list.empty() ? std::string{"none"} : list) + (names.empty() ? "" : "; callbacks: " + names);
         return "WebFront MCP (" + granted + "): " + mcp.url() + " - client configuration: " + mcp.configuration().generic_string();
     }
     /// `base` marked as shared with an agent, for a window title: automation must be visible to the person using it.
@@ -239,11 +249,13 @@ private:
             throw std::invalid_argument("Automation startupTimeout must be positive");
         if (options.closeGrace < std::chrono::milliseconds::zero())
             throw std::invalid_argument("Automation closeGrace must not be negative");
-        return std::make_shared<Session>(SessionOptions{.project = app.projectDirectory(), .allow = options.grants, .timeout = options.timeout, .callbacks = options.callbacks});
+        return std::make_shared<Session>(
+            SessionOptions{.project = app.projectDirectory(), .allow = options.grants, .timeout = options.timeout, .callbacks = options.callbacks});
     }
     // `directory`, or a new directory named after the session in the (private) discovery directory. The records of the
     // instances that ended without closing (a forced end) are removed first, with the private directories named after them.
-    static std::filesystem::path privateDirectoryFor(const AutomationOptions& options, const std::filesystem::path& directoryOfRecords, const Session& session) {
+    static std::filesystem::path
+    privateDirectoryFor(const AutomationOptions& options, const std::filesystem::path& directoryOfRecords, const Session& session) {
         discovery::preparePrivateDirectory(directoryOfRecords);
         (void)discovery::list(directoryOfRecords);
         if (!options.directory.empty())
@@ -262,22 +274,22 @@ private:
                 .configuration = mcp.configuration().generic_string()};
     }
 
-    std::shared_ptr<Session>      session;
-    std::filesystem::path         discoveryDirectory;
-    channel::PrivateDirectory     privateDirectory;
-    mcphttp::Server<Session>      mcp;
-    discovery::Registration       registration;
-    std::vector<std::string>      grants;
-    std::vector<std::string>      callbackNames;
-    bool                          authenticationDisabled;
-    std::chrono::milliseconds     grace;
-    std::function<void()>         unresponsive;
-    std::mutex                    revocation;
-    bool                          revoked = false;
+    std::shared_ptr<Session>              session;
+    std::filesystem::path                 discoveryDirectory;
+    channel::PrivateDirectory             privateDirectory;
+    mcphttp::Server<Session>              mcp;
+    discovery::Registration               registration;
+    std::vector<std::string>              grants;
+    std::vector<std::string>              callbackNames;
+    bool                                  authenticationDisabled;
+    std::chrono::milliseconds             grace;
+    std::function<void()>                 unresponsive;
+    std::mutex                            revocation;
+    bool                                  revoked = false;
     std::chrono::steady_clock::time_point launched;
-    std::chrono::seconds          startup;
-    Binding<App>                  binding;
-    std::jthread                  supervisor;
+    std::chrono::seconds                  startup;
+    Binding<App>                          binding;
+    std::jthread                          supervisor;
 };
 
 /// Enables automation on an application; keep the result alive until after `show()` and call `close()` before

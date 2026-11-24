@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-22
+//
+// WebFront — tests/web
+// Role: Test host that runs an application with automation enabled for the MCP integration tests.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: browser integration support; started by CTest with its own listener
+
 // An application that opts in to automation (#501, ADR-025): its own window, its own `cppFunction` callbacks, and the MCP
 // URL it serves itself. The browser regressions (AutomationClient.py, AutomationSdkClient.py) launch it and drive it from
 // another process through that URL only; nothing here is a fake of the application the agent drives. It is a test
@@ -13,6 +22,7 @@
 // to start (its reason on stderr), 71 when the native deadline of an operation revoked the session; a window that does not
 // close after a deadline ends the process with enableAutomation's own status 72. An occupied MCP port exits with 73 so
 // the test client can retry a port lost between reservation and bind.
+
 #include "../driver/WfDriver.hpp"
 #include <webfront/automation/Enable.hpp>
 
@@ -22,13 +32,14 @@
 #include <system_error>
 #ifndef _WIN32
     #include <cerrno>
+
     #include <poll.h>
     #include <unistd.h>
 #endif
 
 namespace {
 struct Pages {
-    explicit Pages(const std::filesystem::path&) {}
+    explicit Pages(const std::filesystem::path&) { }
     std::optional<webfront::fs::File> open(std::filesystem::path) const {
         return {};
     }
@@ -85,8 +96,8 @@ int main(int argc, char** argv) {
         std::filesystem::path project, environment, registry, directory, sessions, called;
         std::string           integrity, manifest, grants = "check,build,preview,inspect,interact,call", callbacks = "consumer.render";
         std::chrono::seconds  timeout{30}, startupTimeout{90};
-        unsigned short mcpPort = 0;
-        bool stableMcp = false;
+        unsigned short        mcpPort   = 0;
+        bool                  stableMcp = false;
         for (int i = 1; i + 1 < argc; i += 2) {
             const std::string_view name{argv[i]};
             const std::string      value{argv[i + 1]};
@@ -131,8 +142,11 @@ int main(int argc, char** argv) {
         }
         webfront::testdriver::sources() = {std::filesystem::canonical(environment),
                                            registry.empty() ? std::nullopt : std::optional{std::filesystem::canonical(registry)}};
-        using App = webfront::BasicDeveloperApp<webfront::testdriver::DriverFrontend<Frontend>, webfront::testdriver::DriverFS, Pages>;
-        App app{project, {.port = "0", .remoteFileTransport = webfront::RemoteFileTransport::loopbackAttested}};
+        using App                       = webfront::BasicDeveloperApp<webfront::testdriver::DriverFrontend<Frontend>, webfront::testdriver::DriverFS, Pages>;
+        App app{
+            project,
+            {.port = "0", .remoteFileTransport = webfront::RemoteFileTransport::loopbackAttested}
+        };
         if (!called.empty()) {
             // The application's own callback: what a preview in this window can reach and a separate process cannot.
             app.cppFunction("consumer.render", [called](std::string text) {
@@ -164,14 +178,19 @@ int main(int argc, char** argv) {
             while (!shown.stop_requested() && !inputClosed())
                 std::this_thread::sleep_for(std::chrono::milliseconds{20});
             if (!shown.stop_requested())
-                webfront::testdriver::closeUntilShown(shown, [&] { return app.requestClose(); }, std::chrono::seconds{10});
+                webfront::testdriver::closeUntilShown(
+                    shown,
+                    [&] {
+                        return app.requestClose();
+                    },
+                    std::chrono::seconds{10});
         });
         app.show(automation->launchPage());
         closer.request_stop();
         closer.join();
         const webfront::automation::Object state{automation->controller()->describe()};
-        const auto                        failure = state.string("failure");
-        int                               status  = 0;
+        const auto                         failure = state.string("failure");
+        int                                status  = 0;
         if (failure == "Native automation deadline exceeded")
             status = 71;
         else if (!automation->controller()->wasReady() && !failure.empty()) {

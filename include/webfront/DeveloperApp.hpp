@@ -1,4 +1,12 @@
-/// @brief Opt-in developer environment (terminal and wf commands) running in the application window. Downloaded code has project/bridge authority.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-20
+//
+// WebFront — core
+// Role: Opt-in developer environment (terminal and wf commands) running in the application window.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: public API; downloaded code has project and bridge authority, read DeveloperBootstrapOptions first
+
 #pragma once
 
 #include "system/DeveloperFS.hpp"
@@ -66,11 +74,10 @@ inline constexpr std::string_view defaultRegistry{"https://registry.npmjs.org/"}
 /// The configuration the environment reads. "registry" always names a usable registry, for environments
 /// that predate "registryExplicit"; the latter tells whether the application chose it.
 inline std::string bootstrapConfig(const DeveloperBootstrapOptions& options) {
-    return "{\"environment\":" + json::quote(options.environment) + ",\"integrity\":" + json::quote(options.integrity)
-         + ",\"registry\":" + json::quote(options.registry.value_or(std::string(defaultRegistry)))
-         + ",\"registryExplicit\":" + (options.registry ? "true" : "false")
-         + (options.manifestDirectory.empty() ? std::string{} : ",\"manifestDirectory\":" + json::quote(options.manifestDirectory))
-         + ",\"supported\":{\"protocol\":[" + std::to_string(protocolVersion) + "],\"api\":[" + std::to_string(apiVersion) + "]}}";
+    return "{\"environment\":" + json::quote(options.environment) + ",\"integrity\":" + json::quote(options.integrity) + ",\"registry\":"
+           + json::quote(options.registry.value_or(std::string(defaultRegistry))) + ",\"registryExplicit\":" + (options.registry ? "true" : "false")
+           + (options.manifestDirectory.empty() ? std::string{} : ",\"manifestDirectory\":" + json::quote(options.manifestDirectory))
+           + ",\"supported\":{\"protocol\":[" + std::to_string(protocolVersion) + "],\"api\":[" + std::to_string(apiVersion) + "]}}";
 }
 }  // namespace developer
 

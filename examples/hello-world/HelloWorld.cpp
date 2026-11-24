@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-02-03
+//
+// WebFront — examples
+// Role: Minimal example: a C++ callback called from the browser, served by an embedded page.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: smallest complete application; the README quick start must stay in step with it
+
 #include <webfront/WebFront.hpp>
 
 // Switching to an embedded Chromium window only changes this alias (CEF must be enabled at

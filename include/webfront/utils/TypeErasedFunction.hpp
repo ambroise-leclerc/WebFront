@@ -1,51 +1,56 @@
-/// @date 12/02/2022 11:05:42
-/// @author Ambroise Leclerc
-/// @brief Type erased functions for uniform storable functions
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-02-12
+//
+// WebFront — utils
+// Role: Type-erased storable functions and the traits that deduce callback signatures.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: foundation of cppFunction deduction; generic lambdas need explicit signatures
+
 #pragma once
+#include <array>
+#include <cstddef>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <type_traits>
 
-#include <array>
-#include <cstddef>
-#include <iostream>
-
 namespace webfront::utils {
 
-template<typename R>
-struct function_traits : public function_traits<decltype(&R::operator())> {};
+template <typename R>
+struct function_traits : public function_traits<decltype(&R::operator())> { };
 
-template<typename R, typename... Args>
+template <typename R, typename... Args>
 struct function_traits<R (*)(Args...)> {
     using result_type = R;
-    using type = typename std::function<R(Args...)>;
-    using void_type = typename std::function<void(Args...)>;
+    using type        = typename std::function<R(Args...)>;
+    using void_type   = typename std::function<void(Args...)>;
 };
 
-template<typename R, typename... Args>
+template <typename R, typename... Args>
 struct function_traits<std::function<R(Args...)>> {
     using result_type = R;
-    using type = typename std::function<R(Args...)>;
-    using void_type = typename std::function<void(Args...)>;
+    using type        = typename std::function<R(Args...)>;
+    using void_type   = typename std::function<void(Args...)>;
 };
 
-template<typename R, typename ClassType, typename... Args>
+template <typename R, typename ClassType, typename... Args>
 struct function_traits<R (ClassType::*)(Args...) const> {
     using result_type = R;
-    using type = typename std::function<R(Args...)>;
-    using void_type = typename std::function<void(Args...)>;
+    using type        = typename std::function<R(Args...)>;
+    using void_type   = typename std::function<void(Args...)>;
 };
 
-template<typename R, typename ClassType, typename... Args>
+template <typename R, typename ClassType, typename... Args>
 struct function_traits<R (ClassType::*)(Args...)> {
     using result_type = R;
-    using type = typename std::function<R(Args...)>;
-    using void_type = typename std::function<void(Args...)>;
+    using type        = typename std::function<R(Args...)>;
+    using void_type   = typename std::function<void(Args...)>;
 };
 
 namespace impl {
-template<typename T>
+template <typename T>
 constexpr const auto& RawTypeName() {
 #ifdef _MSC_VER
     return __FUNCSIG__;
@@ -64,8 +69,8 @@ inline constexpr bool GetRawTypeNameFormat(RawTypeNameFormat* format) {
     for (std::size_t i = 0;; i++) {
         if (str[i] == 'i' && str[i + 1] == 'n' && str[i + 2] == 't') {
             if (format) {
-                format->leading_junk = i;
-                format->trailing_junk = sizeof(str) - i - 3 - 1; // `3` is the length of "int", `1` is the space for the null terminator.
+                format->leading_junk  = i;
+                format->trailing_junk = sizeof(str) - i - 3 - 1;  // `3` is the length of "int", `1` is the space for the null terminator.
             }
             return true;
         }
@@ -79,23 +84,24 @@ inline static constexpr RawTypeNameFormat format = [] {
     GetRawTypeNameFormat(&rawFormat);
     return rawFormat;
 }();
-} // namespace impl
+}  // namespace impl
 
 // Returns the type name in a `std::array<char, N>` (null-terminated).
-template<typename T>
+template <typename T>
 [[nodiscard]] constexpr auto CexprTypeName() {
     constexpr std::size_t len = sizeof(impl::RawTypeName<T>()) - impl::format.leading_junk - impl::format.trailing_junk;
     std::array<char, len> name{};
-    for (std::size_t i = 0; i < len - 1; i++) name[i] = impl::RawTypeName<T>()[i + impl::format.leading_junk];
+    for (std::size_t i = 0; i < len - 1; i++)
+        name[i] = impl::RawTypeName<T>()[i + impl::format.leading_junk];
     return name;
 }
 
-template<typename T>
+template <typename T>
 [[nodiscard]] const char* TypeName() {
     static constexpr auto name = CexprTypeName<T>();
     return name.data();
 }
-template<typename T>
+template <typename T>
 [[nodiscard]] const char* TypeName(const T&) {
     return TypeName<T>();
 }
@@ -103,20 +109,20 @@ template<typename T>
 class TypeErasedFunction {
 private:
     struct TypeErased {
-        TypeErased() {}
-        virtual ~TypeErased() {}
+        TypeErased() { }
+        virtual ~TypeErased() { }
     };
 
-    template<typename T>
+    template <typename T>
     struct FunctionPointer : TypeErased {
-        FunctionPointer(T arg) : functionPointer(arg) {}
+        FunctionPointer(T arg) : functionPointer(arg) { }
 
-        template<typename... Args>
+        template <typename... Args>
         void call(Args&&... args) {
             functionPointer(std::forward<Args>(args)...);
         }
 
-        template<typename R, typename... Args>
+        template <typename R, typename... Args>
         R callRet(Args&&... args) {
             return functionPointer(std::forward<Args>(args)...);
         }
@@ -125,13 +131,14 @@ private:
     };
 
 public:
-    template<typename T, std::enable_if_t<!std::is_same_v<std::decay_t<T>, TypeErasedFunction>, int> = 0>
+    template <typename T, std::enable_if_t<!std::is_same_v<std::decay_t<T>, TypeErasedFunction>, int> = 0>
     TypeErasedFunction(T&& t)
-        : function(new FunctionPointer<typename function_traits<std::decay_t<T>>::type>(std::forward<T>(t))), voidFunction(new FunctionPointer<typename function_traits<std::decay_t<T>>::void_type>(std::forward<T>(t))) {
-            std::cout << "TypeErasedFunction constructor()\n";
-        }
+        : function(new FunctionPointer<typename function_traits<std::decay_t<T>>::type>(std::forward<T>(t))),
+          voidFunction(new FunctionPointer<typename function_traits<std::decay_t<T>>::void_type>(std::forward<T>(t))) {
+        std::cout << "TypeErasedFunction constructor()\n";
+    }
 
-    template<typename T, typename... Args, std::enable_if_t<!std::is_same_v<std::decay_t<T>, TypeErasedFunction> && (sizeof...(Args) > 0), int> = 0>
+    template <typename T, typename... Args, std::enable_if_t<!std::is_same_v<std::decay_t<T>, TypeErasedFunction> && (sizeof...(Args) > 0), int> = 0>
     TypeErasedFunction(T&& t, Args&&... args)
         : function(new FunctionPointer<typename function_traits<std::decay_t<T>>::type>(std::bind(std::forward<T>(t), std::forward<Args>(args)...))),
           voidFunction(new FunctionPointer<typename function_traits<std::decay_t<T>>::void_type>(std::bind(std::forward<T>(t), std::forward<Args>(args)...))) {
@@ -140,9 +147,11 @@ public:
         std::cout << ")\n";
     }
 
-    void operator()() { this->operator()<>(); }
+    void operator()() {
+        this->operator()<>();
+    }
 
-    template<typename... Args>
+    template <typename... Args>
     void operator()(Args&&... args) {
         std::cout << "TypeErasedFunction operator(";
         ((std::cout << TypeName(args)), ...);
@@ -155,10 +164,12 @@ public:
         throw std::invalid_argument("Wrong argument type");
     }
 
-    template<typename R, typename... Args>
+    template <typename R, typename... Args>
     R call(Args&&... args) {
         auto f = dynamic_cast<FunctionPointer<std::function<R(Args...)>>*>(function.get());
-        if (f) { return f->template callRet<R>(std::forward<Args>(args)...); }
+        if (f) {
+            return f->template callRet<R>(std::forward<Args>(args)...);
+        }
         throw std::invalid_argument("Wrong argument type");
     }
 
@@ -166,4 +177,4 @@ private:
     std::unique_ptr<TypeErased> function, voidFunction;
 };
 
-} // namespace webfront::utils
+}  // namespace webfront::utils

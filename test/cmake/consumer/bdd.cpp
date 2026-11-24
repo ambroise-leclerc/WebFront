@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
-/// @brief Scenarios of a project that embeds WebFront and tests with webfront::bdd.
+// Author: Ambroise Leclerc
+// Created: 2026-11-23
+//
+// WebFront — tests/cmake
+// Role: Scenarios of a project that embeds WebFront and tests with webfront::bdd.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: consumer fixture of the portability tier
+
 #include <webfront/testing/Bdd.hpp>
 
 using namespace webfront::bdd;

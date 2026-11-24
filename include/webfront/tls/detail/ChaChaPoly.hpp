@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-21
+//
+// WebFront — tls
+// Role: ChaCha20-Poly1305 AEAD used by the TLS record layer.
+// Thread: bridge-io | Alloc: zero-hot-path
+// LLM: cryptographic primitive; keep constant-time behavior, verify with test vectors
+
 #pragma once
 #include "Field.hpp"
 

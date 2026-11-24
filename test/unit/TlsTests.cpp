@@ -1,6 +1,15 @@
-#include <webfront/testing/Bdd.hpp>
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-21
+//
+// WebFront — tests/unit
+// Role: The TLS implementation: primitives, handshake parsing and records against known answers.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: known-answer tests
+
 #include "TemporaryDirectory.hpp"
 #include <webfront/http/Encodings.hpp>
+#include <webfront/testing/Bdd.hpp>
 #include <webfront/tls/Credentials.hpp>
 #include <webfront/tls/detail/Protocol.hpp>
 
@@ -121,7 +130,7 @@ const Scenario tlsRefusals("TLS rejects invalid framing and negotiation", {"fast
         });
     });
     then("a missing signature_algorithms extension elicits missing_extension", [] {
-        auto hello = traceHello();
+        auto       hello     = traceHello();
         const auto extension = std::ranges::search(hello, tlsHex("000d0020001e"));
         require(!extension.empty());
         *extension.begin() = 0xfe;  // Unknown extension of the same length.
@@ -142,15 +151,23 @@ const Scenario tlsRefusals("TLS rejects invalid framing and negotiation", {"fast
         tls::append(hello, tlsHex("002a00000029002c000700010100000000002120"));
         hello.resize(hello.size() + 32);
         const auto lengths = [&] {
-            hello[3] = static_cast<tls::Byte>(hello.size() - 4);
+            hello[3]  = static_cast<tls::Byte>(hello.size() - 4);
             hello[50] = static_cast<tls::Byte>(hello.size() - 51);
         };
         lengths();
-        requireThrows<tls::Error>([&] { tls::parseHello(hello, false); }, contains("missing psk_key_exchange_modes"));
+        requireThrows<tls::Error>(
+            [&] {
+                tls::parseHello(hello, false);
+            },
+            contains("missing psk_key_exchange_modes"));
         hello.insert(hello.begin() + 51, modes.begin(), modes.end());
         lengths();
         require(tls::parseHello(hello, false).earlyData);
-        requireThrows<tls::Error>([&] { tls::parseHello(hello, true); }, contains("unexpected early_data"));
+        requireThrows<tls::Error>(
+            [&] {
+                tls::parseHello(hello, true);
+            },
+            contains("unexpected early_data"));
     });
     then("oversized records and corrupted authentication tags are refused", [] {
         requireThrows<tls::Error>([] {
@@ -191,8 +208,16 @@ const Scenario tlsRefusals("TLS rejects invalid framing and negotiation", {"fast
         require(payload.size() == tls::maxPlaintext);
         require(open(10, 200, payload) == tls::applicationData);
         require(payload.size() == 10);
-        requireThrows<tls::Error>([&] { open(tls::maxPlaintext + 1, 0, payload); }, contains("oversized inner plaintext"));
-        requireThrows<tls::Error>([&] { open(tls::maxPlaintext + 1, 1, payload); }, contains("oversized inner plaintext"));
+        requireThrows<tls::Error>(
+            [&] {
+                open(tls::maxPlaintext + 1, 0, payload);
+            },
+            contains("oversized inner plaintext"));
+        requireThrows<tls::Error>(
+            [&] {
+                open(tls::maxPlaintext + 1, 1, payload);
+            },
+            contains("oversized inner plaintext"));
     });
     then("an exhausted record sequence fails as a transport error before wrapping", [] {
         require(tls::recordNonce({}, UINT64_MAX - 1).back() == 0xfe);
@@ -374,10 +399,10 @@ const Scenario tlsCredentials("TLS loads matching PEM formats and preserves the 
         tls::Reader input{leaf};
         tls::Reader outer{input.der(0x30)};
         outer.der(0x30);
-        const auto  size = leaf.size() - outer.remaining.size();
+        const auto size = leaf.size() - outer.remaining.size();
         leaf.resize(size);
-        leaf[2] = static_cast<tls::Byte>((size - 4) >> 8);
-        leaf[3] = static_cast<tls::Byte>(size - 4);
+        leaf[2]                 = static_cast<tls::Byte>((size - 4) >> 8);
+        leaf[3]                 = static_cast<tls::Byte>(size - 4);
         const auto unsignedLeaf = temporary.path() / "unsigned.pem";
         writePem(unsignedLeaf, "CERTIFICATE", std::move(leaf));
         requireThrows<tls::Error>([&] {

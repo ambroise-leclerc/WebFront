@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-21
+//
+// WebFront — tls
+// Role: Parsing of PEM certificates and private keys (EC P-256) for the TLS server provider.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: security sensitive; secrets are wiped on destruction
+
 #pragma once
 #include "detail/Wire.hpp"
 
@@ -212,7 +221,7 @@ inline std::shared_ptr<const Identity> loadIdentity(const std::filesystem::path&
 /// The PEM chain starts with the P-256 leaf. Reload publishes both files atomically or throws.
 class Credentials {
 public:
-    Credentials(const std::filesystem::path& chain, const std::filesystem::path& key) : identity(detail::loadIdentity(chain, key)) {}
+    Credentials(const std::filesystem::path& chain, const std::filesystem::path& key) : identity(detail::loadIdentity(chain, key)) { }
 
     void reload(const std::filesystem::path& chain, const std::filesystem::path& key) {
         auto             next = detail::loadIdentity(chain, key);

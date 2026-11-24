@@ -1,4 +1,12 @@
-/// @brief Optional local developer session controller. Permissions are fixed by its native owner.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-28
+//
+// WebFront — automation
+// Role: Optional local developer session controller; permissions are fixed by its native owner.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: opt-in; grants are fixed at construction, newer operations report the first version that implements them
+
 #pragma once
 
 #include "../system/DeveloperPaths.hpp"
@@ -58,7 +66,8 @@ public:
                + json::quote(closed  ? "closed"
                              : ready ? "ready"
                                      : "starting")
-               + ",\"allow\":" + stringArray(options.allow) + ",\"callbacks\":" + stringArray(options.callbacks) + ",\"failure\":" + json::quote(failure) + ",\"audit\":" + auditJson() + "}";
+               + ",\"allow\":" + stringArray(options.allow) + ",\"callbacks\":" + stringArray(options.callbacks) + ",\"failure\":" + json::quote(failure)
+               + ",\"audit\":" + auditJson() + "}";
     }
 
     std::string start(const Object& request, Clock::time_point now = Clock::now()) {
@@ -253,8 +262,8 @@ private:
     /// A name an application registered, never an internal `webfront.*` one: letters, digits, `.`, `_`, `-`, at most 128.
     static bool callbackName(std::string_view name) {
         return !name.empty() && name.size() <= 128 && !name.starts_with("webfront.") && std::ranges::all_of(name, [](char c) {
-                   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
-               });
+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+        });
     }
     static bool knownPermission(std::string_view name) {
         for (const auto& [operation, definition] : operationDefinitions())

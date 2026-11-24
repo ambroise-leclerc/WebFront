@@ -1,4 +1,12 @@
-/// @brief Opt-in Jasmine instrumentation of a consumer's real page, enabled by a CTest configuration.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-28
+//
+// WebFront — testing
+// Role: Opt-in Jasmine instrumentation of a consumer's real page, enabled by a CTest configuration.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: test support; inert unless the runner sets its environment variables
+
 #pragma once
 
 #include "../utils/Json.hpp"
@@ -278,7 +286,7 @@ public:
     static constexpr std::size_t chunkSize = jasmineChunkSize;
 
     JasmineSession(std::vector<std::string> contents, std::filesystem::path reportPath, std::shared_ptr<CaptureStore> captureStore = nullptr)
-        : files(std::move(contents)), report(std::move(reportPath)), store(std::move(captureStore)) {}
+        : files(std::move(contents)), report(std::move(reportPath)), store(std::move(captureStore)) { }
 
     /// The newest page is the one under test (a reload replaces the previous connection). Returns false once finished.
     bool attach(const Caller& caller) {
@@ -525,7 +533,7 @@ inline namespace jasmine_inert {
 template <typename App>
 class JasmineTest {
 public:
-    explicit JasmineTest(App&) {}
+    explicit JasmineTest(App&) { }
     [[nodiscard]] int exitCode() const {
         return 0;
     }

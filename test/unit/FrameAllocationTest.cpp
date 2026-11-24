@@ -1,7 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-24
+//
+// WebFront — tests/unit
+// Role: Regression: adding a buffer to a WebSocket frame must not format the hex dump when Debug is disabled.
+// Thread: bridge-io | Alloc: zero-hot-path
+// LLM: own executable, it replaces the global operator new to count bytes
+
 // Regression (#363): with the Debug level disabled, adding a buffer to a WebSocket frame must not format it. The hex
 // dump passed to log::debug() was built before the level was tested, on every buffer of every frame sent, and cost
 // two thirds of a 32 KiB bridge call (ADR-017 measurements). The dump is not observable once disabled, so this program
 // counts the bytes allocated: its own executable, because it replaces the global operator new.
+
 #include <webfront/http/WebSocket.hpp>
 #include <webfront/networking/NetworkingMock.hpp>
 

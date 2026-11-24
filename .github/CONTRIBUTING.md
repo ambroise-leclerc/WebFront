@@ -110,6 +110,36 @@ To ensure consistency, we use `.clang-format` and `clang-tidy` to enforce our co
 
 Please run these tools on your code before submitting a pull request.
 
+CI runs `.github/scripts/check-clang-format.sh` weekly, on pull requests into `master` and on manual dispatch (not on every pull request into `develop`), on every tracked C++ source (`clang-format --dry-run --Werror`) with a pinned version of `clang-format`
+(`.github/workflows/SourceFormat.yml`); the reference version is **clang-format 23.1.5** (`python3 -m pip install clang-format==23.1.5`, or any 23.x: a patch release does not change the output, another major version may); run the script locally with it before you push, and never run `clang-format -i` with another major version. Generated headers (the embedded assets) and the gzip
+fixtures are exempt. The commit that reformatted the whole code base is listed in `.git-blame-ignore-revs`; to make `git blame` skip it, run
+`git config blame.ignoreRevsFile .git-blame-ignore-revs` once (GitHub applies the file by itself).
+
+## File header
+
+Every tracked C++ source (`.hpp`, `.cpp`, `.h`, `.cu`, `.cuh`, `.mm`) starts with this header, before `#pragma once` or the first `#include`:
+
+```cpp
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: AAAA-MM-JJ
+//
+// WebFront — <subsystem / component>
+// Role: <exact responsibility of the file in one short sentence>.
+// Thread: <ui-loop | bridge-io | worker-safe | thread-safe> | Alloc: <zero-hot-path | heap-init | unrestricted>
+// LLM: <how to read or modify the file, for example "public API; read struct contracts before impl">
+```
+
+- **Author** is the author of the file; **Created** is the date of its first commit, in ISO format.
+- **Thread** tells where the code may run: `ui-loop` (the thread of `show()` or of the frontend's interface loop), `bridge-io` (the server's I/O context thread),
+  `worker-safe` (a pure or self-contained unit that any thread may use on its own objects) or `thread-safe` (shared objects synchronized inside).
+- **Alloc** tells what the code may allocate: `zero-hot-path` (nothing on the hot path), `heap-init` (heap allocation at construction or setup only) or `unrestricted`.
+- **Role** and **LLM** are written for the file, from its content and the invariants of `AGENTS.md` and the ADRs; never copy a generic value. An agent reads them
+  first, so keep them true when the file changes.
+- Files with another license (third-party code) and generated files (the embedded asset headers, the gzip fixtures) keep their own header; they are listed in
+  `test/cmake/CheckSourceHeaders.cmake`, which fails the `SourceHeaders` CTest case for a tracked source whose header is missing or malformed.
+- Build files (`CMakeLists.txt`, `*.cmake`) and the TypeScript under `js/` do not need the header.
+
 ## Changelog format
 
 [`docs/CHANGELOG.md`](../docs/CHANGELOG.md) answers three questions quickly: what changes for me, is anything breaking, and

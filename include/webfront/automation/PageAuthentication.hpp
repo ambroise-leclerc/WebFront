@@ -1,7 +1,15 @@
-/// @brief Authenticate page callbacks without putting a reusable secret on their wire messages.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-29
+//
+// WebFront — automation
+// Role: Authenticates page callbacks without putting a reusable secret on their wire messages (HMAC over a sequence).
+// Thread: bridge-io | Alloc: heap-init
+// LLM: security sensitive; read ADR-025 before changing the payload layout
+
 #pragma once
-#include "Channel.hpp"
 #include "../utils/Sha256.hpp"
+#include "Channel.hpp"
 
 #include <bit>
 #include <limits>
@@ -35,7 +43,7 @@ inline std::string payload(std::string_view sequence, std::string_view method, s
 }
 class PageAuthentication {
 public:
-    explicit PageAuthentication(std::string secret = channel::nonce()) : key(std::move(secret)) {}
+    explicit PageAuthentication(std::string secret = channel::nonce()) : key(std::move(secret)) { }
     const std::string& secret() const {
         return key;
     }

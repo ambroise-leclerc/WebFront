@@ -1,6 +1,12 @@
-/// @date 28/02/2026
-/// @author Ambroise Leclerc
-/// @brief Configurable buffer sizes policy for WebFront internal buffers
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-02-28
+//
+// WebFront — http
+// Role: Configurable buffer sizes (maxMessageSize and others) of the WebFront internal buffers.
+// Thread: worker-safe | Alloc: zero-hot-path
+// LLM: policy concept and defaults; limits here bound the bridge wire format (ADR-003)
+
 #pragma once
 
 #include <concepts>
@@ -16,7 +22,7 @@ public:
 };
 
 /// Concept defining requirements for a valid buffers policy
-template<typename T>
+template <typename T>
 concept BuffersPolicyType = requires {
     { T::receptionBufferSize } -> std::convertible_to<size_t>;
     { T::emissionBufferSize } -> std::convertible_to<size_t>;
@@ -34,32 +40,32 @@ inline constexpr size_t defaultMaxDecodedAssetCacheSize = 8 * 1024 * 1024;
 
 /// Default buffer sizes as specified in issue #40
 struct DefaultBuffersPolicy {
-    static constexpr size_t receptionBufferSize    = 8192;
-    static constexpr size_t emissionBufferSize     = 8192;
-    static constexpr size_t functionCallBufferSize = 32768;
-    static constexpr size_t maxMessageSize         = defaultMaxMessageSize;
-    static constexpr size_t maxDecodedAssetSize    = defaultMaxDecodedAssetSize;
+    static constexpr size_t receptionBufferSize      = 8192;
+    static constexpr size_t emissionBufferSize       = 8192;
+    static constexpr size_t functionCallBufferSize   = 32768;
+    static constexpr size_t maxMessageSize           = defaultMaxMessageSize;
+    static constexpr size_t maxDecodedAssetSize      = defaultMaxDecodedAssetSize;
     static constexpr size_t maxDecodedAssetCacheSize = defaultMaxDecodedAssetCacheSize;
     /// Optional gzip worker limits; legacy policies use these defaults too.
-    static constexpr size_t maxGzipDecodeJobs = 4;
-    static constexpr size_t maxGzipDecodeWaiters = 16;
-    static constexpr size_t maxGzipDecodeBytes = 64 * 1024 * 1024;
+    static constexpr size_t maxGzipDecodeJobs       = 4;
+    static constexpr size_t maxGzipDecodeWaiters    = 16;
+    static constexpr size_t maxGzipDecodeBytes      = 64 * 1024 * 1024;
     static constexpr size_t maxGzipEncodedAssetSize = 4 * 1024 * 1024;
 };
 
 /// Custom policy template for user-defined buffer sizes
-template <size_t ReceptionSize       = 8192,
-          size_t EmissionSize        = 8192,
-          size_t FunctionCallSize    = 32768,
-          size_t MaxMessageSize      = defaultMaxMessageSize,
-          size_t MaxDecodedAssetSize = defaultMaxDecodedAssetSize,
+template <size_t ReceptionSize            = 8192,
+          size_t EmissionSize             = 8192,
+          size_t FunctionCallSize         = 32768,
+          size_t MaxMessageSize           = defaultMaxMessageSize,
+          size_t MaxDecodedAssetSize      = defaultMaxDecodedAssetSize,
           size_t MaxDecodedAssetCacheSize = defaultMaxDecodedAssetCacheSize>
 struct CustomBuffersPolicy {
-    static constexpr size_t receptionBufferSize    = ReceptionSize;
-    static constexpr size_t emissionBufferSize     = EmissionSize;
-    static constexpr size_t functionCallBufferSize = FunctionCallSize;
-    static constexpr size_t maxMessageSize         = MaxMessageSize;
-    static constexpr size_t maxDecodedAssetSize    = MaxDecodedAssetSize;
+    static constexpr size_t receptionBufferSize      = ReceptionSize;
+    static constexpr size_t emissionBufferSize       = EmissionSize;
+    static constexpr size_t functionCallBufferSize   = FunctionCallSize;
+    static constexpr size_t maxMessageSize           = MaxMessageSize;
+    static constexpr size_t maxDecodedAssetSize      = MaxDecodedAssetSize;
     static constexpr size_t maxDecodedAssetCacheSize = MaxDecodedAssetCacheSize;
 };
 
@@ -67,9 +73,11 @@ struct CustomBuffersPolicy {
 /// std::errc::message_size as soon as a frame header announces a message larger than this, in one
 /// frame or adding up its fragments, before buffering its payload. Control frames (close, ping,
 /// pong) have their own 125-byte protocol limit instead.
-template<BuffersPolicyType Policy>
+template <BuffersPolicyType Policy>
 constexpr size_t maxMessageSize() {
-    if constexpr (requires { { Policy::maxMessageSize } -> std::convertible_to<size_t>; })
+    if constexpr (requires {
+                      { Policy::maxMessageSize } -> std::convertible_to<size_t>;
+                  })
         return Policy::maxMessageSize;
     else
         return defaultMaxMessageSize;
@@ -99,4 +107,4 @@ constexpr size_t maxDecodedAssetCacheSize() {
 
 static_assert(BuffersPolicyType<DefaultBuffersPolicy>);
 
-} // namespace webfront::http
+}  // namespace webfront::http

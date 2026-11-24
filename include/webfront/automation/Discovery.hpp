@@ -1,15 +1,24 @@
-/// @brief Per-user discovery of the automation sessions their owners chose to share.
-///
-/// An application that enables automation publishes one small record in a private per-user directory, so that a human or
-/// an agent finds the running instances instead of being told where they are. A record names the project, the grants, the
-/// process, the private directory, the MCP URL and the path of the client configuration. It never holds the token, which
-/// only that private configuration file contains: reading a record does not allow operating the session. Records are
-/// removed on closure; one whose process is gone is dropped by the next listing, with the private directory named after it.
-#pragma once
-#include "Platform.hpp"
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-08
+//
+// WebFront — automation
+// Role: Per-user discovery of the automation sessions their owners chose to share, as records in a private directory.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: records never hold the token; stale records are dropped by the next listing
 
+// Per-user discovery of the automation sessions their owners chose to share.
+//
+// An application that enables automation publishes one small record in a private per-user directory, so that a human or
+// an agent finds the running instances instead of being told where they are. A record names the project, the grants, the
+// process, the private directory, the MCP URL and the path of the client configuration. It never holds the token, which
+// only that private configuration file contains: reading a record does not allow operating the session. Records are
+// removed on closure; one whose process is gone is dropped by the next listing, with the private directory named after it.
+
+#pragma once
 #include "Channel.hpp"
 #include "Json.hpp"
+#include "Platform.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -22,7 +31,7 @@
 #include <thread>
 #include <utility>
 #ifndef _WIN32
-#include <csignal>
+    #include <csignal>
 #endif
 #include <string>
 #include <vector>
@@ -67,8 +76,8 @@ inline std::filesystem::path defaultDirectory() {
 /// A session identifier names the record file: only plain alphanumeric names are ever opened.
 inline bool validIdentifier(std::string_view id) {
     return !id.empty() && id.size() <= 64 && std::ranges::all_of(id, [](char c) {
-               return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-           });
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+    });
 }
 
 /// One shared session as its owner published it. `allow` is the JSON array of its grants.
@@ -83,14 +92,14 @@ struct Entry {
     /// The record as it is written.
     std::string json() const {
         std::map<std::string, std::string> members{
-            {"version",                                     "1"},
-            {"session",                   webfront::json::quote(session)},
-            {"pid",                              std::to_string(pid)},
-            {"project",                   webfront::json::quote(project)},
-            {"allow",                                         allow},
-            {"callbacks",                                 callbacks},
-            {"endpoint",                 webfront::json::quote(endpoint)},
-            {"state",                       webfront::json::quote("running")},
+            {  "version",                              "1"},
+            {  "session",   webfront::json::quote(session)},
+            {      "pid",              std::to_string(pid)},
+            {  "project",   webfront::json::quote(project)},
+            {    "allow",                            allow},
+            {"callbacks",                        callbacks},
+            { "endpoint",  webfront::json::quote(endpoint)},
+            {    "state", webfront::json::quote("running")},
         };
         if (!mcp.empty()) {
             members.emplace("mcp", webfront::json::quote(mcp));
@@ -140,7 +149,9 @@ inline void preparePrivateDirectory(const std::filesystem::path& directory) {
         throw std::runtime_error("The automation discovery directory must be a real directory");
     struct Closer {
         int fd;
-        ~Closer() { ::close(fd); }
+        ~Closer() {
+            ::close(fd);
+        }
     } closer{descriptor};
     struct stat info{};
     if (::fstat(descriptor, &info) != 0 || !S_ISDIR(info.st_mode) || info.st_uid != ::geteuid())
@@ -215,15 +226,15 @@ inline std::optional<Entry> readRecord(const std::filesystem::path& path) {
     try {
         const Object record{text, recordLimit};
         Entry        entry;
-        entry.session  = record.string("session");
-        entry.project  = record.string("project");
-        entry.endpoint = record.string("endpoint");
-        entry.allow    = record.raw("allow", "[]");
-        entry.callbacks = record.raw("callbacks", "[]");
+        entry.session       = record.string("session");
+        entry.project       = record.string("project");
+        entry.endpoint      = record.string("endpoint");
+        entry.allow         = record.raw("allow", "[]");
+        entry.callbacks     = record.raw("callbacks", "[]");
         entry.mcp           = record.string("mcp");
         entry.configuration = record.string("configuration");
-        const auto pid = record.raw("pid", "0");
-        entry.pid      = std::stol(pid);
+        const auto pid      = record.raw("pid", "0");
+        entry.pid           = std::stol(pid);
         if (record.raw("version") != "1" || !validIdentifier(entry.session) || path.stem().string() != entry.session || entry.project.empty()
             || entry.endpoint.empty() || !entry.allow.starts_with('[') || !entry.callbacks.starts_with('[') || entry.pid <= 0)
             return std::nullopt;
@@ -263,7 +274,7 @@ inline std::vector<Entry> list(const std::filesystem::path& directory, bool prun
                 // the resolved path (channel::outsideProject), so the discovery directory is resolved the same way, and
                 // the session's directory must be a real child of it, not a link put in its place.
                 std::error_code unresolved;
-                const auto      own = std::filesystem::weakly_canonical(std::filesystem::absolute(directory), unresolved) / entry->session;
+                const auto      own  = std::filesystem::weakly_canonical(std::filesystem::absolute(directory), unresolved) / entry->session;
                 const auto      kind = std::filesystem::symlink_status(own, unresolved);
                 if (!unresolved && std::filesystem::is_directory(kind)
                     && std::filesystem::path(entry->endpoint).lexically_normal().generic_string() == own.lexically_normal().generic_string()) {

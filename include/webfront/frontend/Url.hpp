@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-17
+//
+// WebFront — frontend
+// Role: Builds the application URL opened by a frontend, percent-encoding the page reference.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: pure string helpers; keep consistent with ApplicationOrigin.hpp
+
 #pragma once
 
 #include "../ApplicationOrigin.hpp"

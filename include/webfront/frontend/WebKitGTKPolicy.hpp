@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — frontend
+// Role: Navigation, new-window and response decisions of the WebKitGTK frontend, applying the bound content policy.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: decision logic kept free of GTK calls so unit tests can reach it
+
 #pragma once
 
 #include "../ContentPolicy.hpp"
@@ -19,9 +28,9 @@
     #include <cstdlib>
 
     #include <fcntl.h>
-    #include <spawn.h>
     #include <poll.h>
     #include <signal.h>
+    #include <spawn.h>
     #include <sys/wait.h>
     #include <unistd.h>
 #endif
@@ -105,7 +114,7 @@ enum class SandboxMode { development, distribution };
 // from a different runtime. Inspect names only in diagnostics; values may be private.
 inline bool containsSnapPath(std::string_view value, std::string_view separators = {}) {
     while (!value.empty()) {
-        const auto end = value.find_first_of(separators);
+        const auto end  = value.find_first_of(separators);
         const auto part = value.substr(0, end);
         if (part.starts_with("/snap/") || part.starts_with("/var/lib/snapd/snap/"))
             return true;
@@ -118,13 +127,19 @@ inline bool containsSnapPath(std::string_view value, std::string_view separators
 
 inline bool inheritedSnapToolkitPaths() {
     struct Variable {
-        const char* name;
+        const char*      name;
         std::string_view separators;
     };
-    constexpr std::array variables = {Variable{"LD_LIBRARY_PATH", ":;"}, Variable{"LD_PRELOAD", ": "},
-                                       Variable{"GIO_MODULE_DIR", ""}, Variable{"GTK_PATH", ":"},
-                                       Variable{"GTK_EXE_PREFIX", ""}, Variable{"GTK_IM_MODULE_FILE", ""},
-                                       Variable{"GSETTINGS_SCHEMA_DIR", ""}, Variable{"LOCPATH", ":"}};
+    constexpr std::array variables = {
+        Variable{     "LD_LIBRARY_PATH", ":;"},
+        Variable{          "LD_PRELOAD", ": "},
+        Variable{      "GIO_MODULE_DIR",   ""},
+        Variable{            "GTK_PATH",  ":"},
+        Variable{      "GTK_EXE_PREFIX",   ""},
+        Variable{  "GTK_IM_MODULE_FILE",   ""},
+        Variable{"GSETTINGS_SCHEMA_DIR",   ""},
+        Variable{             "LOCPATH",  ":"}
+    };
     for (const auto& [name, separators] : variables)
         if (const auto* value = std::getenv(name); value && containsSnapPath(value, separators))
             return true;
@@ -238,7 +253,7 @@ inline std::optional<std::string> sandboxLauncherFailure(const std::filesystem::
     if (!ended)
         kill(-child, SIGKILL);
     int status;
-    while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+    while (waitpid(child, &status, 0) < 0 && errno == EINTR) { }
     if (!ended)
         return "bubblewrap probe timed out or its diagnostic channel failed";
     constexpr std::string_view marker = "\nWEBFRONT_PROBE_STATUS=";
@@ -323,7 +338,7 @@ class ScopedEnvironment {
     std::vector<Entry> entries;
 
 public:
-    ScopedEnvironment() = default;
+    ScopedEnvironment()                                    = default;
     ScopedEnvironment(const ScopedEnvironment&)            = delete;
     ScopedEnvironment& operator=(const ScopedEnvironment&) = delete;
     ScopedEnvironment(ScopedEnvironment&& other) noexcept : entries(std::exchange(other.entries, {})) { }
@@ -350,7 +365,7 @@ public:
 }  // namespace webfront::frontend::detail::webkitgtk
 
 namespace webfront::frontend {
-struct WebKitGTKHost {};
+struct WebKitGTKHost { };
 template <detail::webkitgtk::SandboxMode Mode>
 struct BasicWebKitGTKFrontend;
 #if defined(WEBFRONT_DISTRIBUTION) && WEBFRONT_DISTRIBUTION

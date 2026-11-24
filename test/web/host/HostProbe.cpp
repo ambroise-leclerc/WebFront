@@ -1,4 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-01
+//
+// WebFront — tests/web
+// Role: Probe program that the host-capability tests start to observe the environment a spec is granted.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: test fixture; reads its configuration from environment variables
+
 // A tiny native program for the tests of webFrontHost and runProcess: one behaviour per first argument.
+
 #ifdef _WIN32
     #define _CRT_SECURE_NO_WARNINGS
     #define NOMINMAX

@@ -1,6 +1,15 @@
-/** @brief Facade declarations shared by the ordinary header and the module-consuming TU.
- * Include after the standard headers in Logger.hpp, or after import std.
- */
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-01
+//
+// WebFront — tooling
+// Role: Facade declarations shared by the ordinary header and the module-consuming translation unit.
+// Thread: thread-safe | Alloc: heap-init
+// LLM: module-free declarations; no module types may appear in this header
+
+// Facade declarations shared by the ordinary header and the module-consuming TU.
+// Include after the standard headers in Logger.hpp, or after import std.
+
 #pragma once
 
 namespace webfront::log {
@@ -20,7 +29,7 @@ public:
 private:
     struct Registration;
     /** @brief Wrap one independent callback registration. */
-    explicit SinkHandle(std::shared_ptr<Registration> registration) : value(std::move(registration)) {}
+    explicit SinkHandle(std::shared_ptr<Registration> registration) : value(std::move(registration)) { }
     std::shared_ptr<Registration> value;
     friend SinkHandle             addSink(std::function<void(std::string_view)> callback);
     friend void                   removeSink(const SinkHandle& handle);
@@ -145,7 +154,7 @@ public:
 private:
     struct Registration;
     /** @brief Wrap one transport registration. */
-    explicit TransportHandle(std::shared_ptr<Registration> registration) : value(std::move(registration)) {}
+    explicit TransportHandle(std::shared_ptr<Registration> registration) : value(std::move(registration)) { }
     std::shared_ptr<Registration> value;
     friend TransportHandle        addTransport(std::function<void(const TransportRecord&)> write);
     friend void                   removeTransport(const TransportHandle& handle);

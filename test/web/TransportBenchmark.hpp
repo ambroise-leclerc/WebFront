@@ -1,8 +1,18 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-24
+//
+// WebFront — tests/web
+// Role: Shared transport benchmark of the frontends: calls in both directions, timed, reported in one format.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: benchmark; not a pass or fail test of performance
+
 // ADR-017 (#363): what the transport benchmarks of every engine share. The page (transport-benchmark.html) runs the same
 // echo calls through the HTML bridge (WebSocket to the embedded server) and through the engine's own message channel,
 // which the engine's benchmark registers before navigation under the names wfecho and wfrun. This header holds the
 // application side: the bridge callbacks, the C++ to JS bridge loop and the report. It fails on a wrong echo, never on a
 // timing.
+
 #pragma once
 
 #include <webfront/system/NativeFS.hpp>
@@ -53,7 +63,7 @@ int run(int argc, char** argv, const char* usage, const char* page = "transport-
     try {
         if (argc > 2)
             throw std::runtime_error(usage);
-        Report         report;
+        Report        report;
         App<Frontend> app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
         app.template cppFunction<std::string, std::string>("echo", [](const std::string& value) {
             return value;

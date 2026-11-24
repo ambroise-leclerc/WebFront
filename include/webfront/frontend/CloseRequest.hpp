@@ -1,9 +1,19 @@
-/// @brief Asking the window of an embedded frontend to close, from any thread (#567).
-///
-/// A host application that keeps its own loop ends a WebFront session with `BasicWF::requestClose()`, which forwards to the
-/// frontend's optional `static bool requestClose()`. The embedded adapters implement it with `requestWindowClose`: the
-/// toolkit call that closes the window runs on the interface thread (UIExecutor.hpp), with the window the frontend
-/// published (NativeWindow.hpp). The window then closes as it does for the user, so `open()` returns the same way.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-13
+//
+// WebFront — frontend
+// Role: Asking the window of an embedded frontend to close, from any thread.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: public contract behind BasicWF::requestClose(); the toolkit call runs on the interface thread
+
+// Asking the window of an embedded frontend to close, from any thread (#567).
+//
+// A host application that keeps its own loop ends a WebFront session with `BasicWF::requestClose()`, which forwards to the
+// frontend's optional `static bool requestClose()`. The embedded adapters implement it with `requestWindowClose`: the
+// toolkit call that closes the window runs on the interface thread (UIExecutor.hpp), with the window the frontend
+// published (NativeWindow.hpp). The window then closes as it does for the user, so `open()` returns the same way.
+
 #pragma once
 
 #include "NativeWindow.hpp"
@@ -20,7 +30,9 @@ namespace webfront::frontend {
 /// `static constexpr bool requiresMainThread` says; a frontend that does not declare it is taken to run on any thread.
 template <typename Frontend>
 inline constexpr bool requiresMainThread = [] {
-    if constexpr (requires { { Frontend::requiresMainThread } -> std::convertible_to<bool>; })
+    if constexpr (requires {
+                      { Frontend::requiresMainThread } -> std::convertible_to<bool>;
+                  })
         return static_cast<bool>(Frontend::requiresMainThread);
     else
         return false;
@@ -43,7 +55,9 @@ template <typename Frontend>
 inline constexpr bool endsOnRequest = [] {
     if constexpr (!CanRequestClose<Frontend>)
         return false;
-    else if constexpr (requires { { Frontend::endsOnRequest } -> std::convertible_to<bool>; })
+    else if constexpr (requires {
+                           { Frontend::endsOnRequest } -> std::convertible_to<bool>;
+                       })
         return static_cast<bool>(Frontend::endsOnRequest);
     else
         return true;
@@ -80,15 +94,14 @@ struct WindowCloseRequest {
         }
     };
 
-    UIExecutor                                                           executor;
-    NativeWindow                                                         window;
-    Close                                                                close;
-    std::optional<UISession>                                             session;
+    UIExecutor                                                                       executor;
+    NativeWindow                                                                     window;
+    Close                                                                            close;
+    std::optional<UISession>                                                         session;
     ex::connect_result_t<decltype(std::declval<UIExecutor&>().schedule()), Receiver> operation;
 
     WindowCloseRequest(const UIExecutor& loop, NativeWindow target, Close function, std::optional<UISession> owner)
-        : executor(loop), window(std::move(target)), close(std::move(function)), session(owner),
-          operation(ex::connect(loop.schedule(), Receiver{this})) { }
+        : executor(loop), window(std::move(target)), close(std::move(function)), session(owner), operation(ex::connect(loop.schedule(), Receiver{this})) { }
 };
 
 /// Runs `close(const NativeWindowHandle&)` on the interface thread with the published window. Returns false, having

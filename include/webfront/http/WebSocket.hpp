@@ -1,13 +1,19 @@
-/// @date 16/01/2022 22:27:42
-/// @author Ambroise Leclerc
-/// @brief WebSocket protocol implementation - RFC6455
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-01-16
+//
+// WebFront — http
+// Role: WebSocket protocol implementation (RFC 6455): frame header, masking and the read and write loops.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: bridge transport; loops are coroutines closed only on the io_context thread
+
 #pragma once
+#include "../networking/BasicNetworking.hpp"
+#include "../networking/Tasks.hpp"
+#include "../tooling/HexDump.hpp"
+#include "../tooling/Logger.hpp"
 #include "BuffersPolicy.hpp"
 #include "Encodings.hpp"
-#include "../tooling/HexDump.hpp"
-#include "../networking/Tasks.hpp"
-#include "../networking/BasicNetworking.hpp"
-#include "../tooling/Logger.hpp"
 
 #include <array>
 #include <atomic>
@@ -30,7 +36,7 @@ namespace webfront::websocket {
 using Handle = uint32_t;
 
 struct Header {
-    static constexpr size_t maxHeaderSize = 14;
+    static constexpr size_t              maxHeaderSize = 14;
     std::array<std::byte, maxHeaderSize> raw{};
 
     enum class Opcode {
@@ -52,27 +58,47 @@ struct Header {
         ctrl5,
     };
 
-    [[nodiscard]] bool FIN() const { return test(0, 7); }
-    [[nodiscard]] bool RSV1() const { return test(0, 6); }
-    [[nodiscard]] bool RSV2() const { return test(0, 5); }
-    [[nodiscard]] bool RSV3() const { return test(0, 4); }
-    [[nodiscard]] Opcode opcode() const { return static_cast<Opcode>(std::to_integer<uint8_t>(raw[0] & std::byte(0b1111))); }
-    [[nodiscard]] bool MASK() const { return test(1, 7); }
-    [[nodiscard]] uint8_t payloadLenField() const { return std::to_integer<uint8_t>(raw[1] & std::byte(0b1111111)); }
+    [[nodiscard]] bool FIN() const {
+        return test(0, 7);
+    }
+    [[nodiscard]] bool RSV1() const {
+        return test(0, 6);
+    }
+    [[nodiscard]] bool RSV2() const {
+        return test(0, 5);
+    }
+    [[nodiscard]] bool RSV3() const {
+        return test(0, 4);
+    }
+    [[nodiscard]] Opcode opcode() const {
+        return static_cast<Opcode>(std::to_integer<uint8_t>(raw[0] & std::byte(0b1111)));
+    }
+    [[nodiscard]] bool MASK() const {
+        return test(1, 7);
+    }
+    [[nodiscard]] uint8_t payloadLenField() const {
+        return std::to_integer<uint8_t>(raw[1] & std::byte(0b1111111));
+    }
     [[nodiscard]] uint64_t extendedLenField() const {
-        if (payloadLenField() < 126) return 0;
-        auto s = [this](size_t i, uint8_t shift = 0) constexpr { return std::to_integer<uint64_t>(raw[i]) << shift; };
+        if (payloadLenField() < 126)
+            return 0;
+        auto s = [this](size_t i, uint8_t shift = 0) constexpr {
+            return std::to_integer<uint64_t>(raw[i]) << shift;
+        };
         return payloadLenField() == 126 ? s(2, 8) | s(3) : s(2, 56) | s(3, 48) | s(4, 40) | s(5, 32) | s(6, 24) | s(7, 16) | s(8, 8) | s(9, 0);
     }
 
     [[nodiscard]] size_t headerSize() const {
-        if (payloadLenField() < 126) return MASK() ? 6 : 2;
-        if (payloadLenField() == 126) return MASK() ? 8 : 4;
+        if (payloadLenField() < 126)
+            return MASK() ? 6 : 2;
+        if (payloadLenField() == 126)
+            return MASK() ? 8 : 4;
         return MASK() ? 14 : 10;
     }
 
     [[nodiscard]] std::array<std::byte, 4> maskingKey() const {
-        if (!MASK()) return {};
+        if (!MASK())
+            return {};
         auto index = headerSize() - 4;
         return {raw[index], raw[index + 1], raw[index + 2], raw[index + 3]};
     }
@@ -82,19 +108,27 @@ struct Header {
         return len < 126 ? len : extendedLenField();
     }
 
-    [[nodiscard]] uint64_t getFrameSize() const { return payloadSize() + headerSize(); }
+    [[nodiscard]] uint64_t getFrameSize() const {
+        return payloadSize() + headerSize();
+    }
 
     void dump() const {
         log::debug("FIN:{} RSV1:{} RSV2:{} RSV3:{} opcode:{}", FIN(), RSV1(), RSV2(), RSV3(), static_cast<int>(opcode()));
         log::debug("-> MASK:{} payloadLenField:{} extendedLenField:{}", MASK(), +payloadLenField(), extendedLenField());
         auto k = maskingKey();
-        log::debug("-> maskingKey:0x{:02x}{:02x}{:02x}{:02x} getPayloadSize:{} headerSize:{}", std::to_integer<int>(k[0]), std::to_integer<int>(k[1]),
-                   std::to_integer<int>(k[2]), std::to_integer<int>(k[3]), payloadSize(), headerSize());
+        log::debug("-> maskingKey:0x{:02x}{:02x}{:02x}{:02x} getPayloadSize:{} headerSize:{}",
+                   std::to_integer<int>(k[0]),
+                   std::to_integer<int>(k[1]),
+                   std::to_integer<int>(k[2]),
+                   std::to_integer<int>(k[3]),
+                   payloadSize(),
+                   headerSize());
     }
 
     /// @return true if first 'size' bytes constitute a complete header
     [[nodiscard]] bool isComplete(size_t size) const {
-        if (size < 2) return false;
+        if (size < 2)
+            return false;
         return size >= headerSize();
     }
 
@@ -111,21 +145,24 @@ struct Header {
     }
 
     void setPayloadSize(size_t size) {
-        raw[1] = (raw[1] & std::byte(0b10000000)) | std::byte(size < 126 ? size : size < 65536 ? 126 : 127);
+        raw[1]     = (raw[1] & std::byte(0b10000000)) | std::byte(size < 126 ? size : size < 65536 ? 126 : 127);
         size_t len = size < 126 ? 0 : size < 65536 ? 2 : 8;
-        for (size_t i = 0; i < len; ++i) raw[2 + i] = std::byte(size >> (8 * (len - i - 1)));
+        for (size_t i = 0; i < len; ++i)
+            raw[2 + i] = std::byte(size >> (8 * (len - i - 1)));
     }
 
 protected:
-    bool test(size_t index, uint8_t bit) const { return std::to_integer<bool>(raw[index] & std::byte(1 << bit)); }
+    bool test(size_t index, uint8_t bit) const {
+        return std::to_integer<bool>(raw[index] & std::byte(1 << bit));
+    }
 };
 
 struct CloseEvent {
-    uint16_t status;
+    uint16_t    status;
     std::string reason;
 };
 
-template<typename Net>
+template <typename Net>
 struct Frame : public Header {
     Frame(std::string_view text) {
         setFIN(true);
@@ -139,20 +176,24 @@ struct Frame : public Header {
         setOpcode(Opcode::binary);
         setPayloadSize(dataHead.size() + dataNext.size());
         borrowedBuffers.emplace_back(dataHead);
-        if (!dataNext.empty()) borrowedBuffers.emplace_back(dataNext);
+        if (!dataNext.empty())
+            borrowedBuffers.emplace_back(dataNext);
     }
 
-    Frame(const Frame&) = delete;
+    Frame(const Frame&)            = delete;
     Frame& operator=(const Frame&) = delete;
-    Frame(Frame&&) = default;
-    Frame& operator=(Frame&&) = default;
+    Frame(Frame&&)                 = default;
+    Frame& operator=(Frame&&)      = default;
 
-    [[nodiscard]] size_t size() const { return payloadSize(); };
+    [[nodiscard]] size_t size() const {
+        return payloadSize();
+    };
 
     std::vector<typename Net::ConstBuffer> toBuffers() const {
         std::vector<typename Net::ConstBuffer> buffers;
-        auto appendPayload = [&buffers](const auto& source) {
-            for (const auto& buffer : source) buffers.emplace_back(buffer.data(), buffer.size());
+        auto                                   appendPayload = [&buffers](const auto& source) {
+            for (const auto& buffer : source)
+                buffers.emplace_back(buffer.data(), buffer.size());
         };
         // freeze() moves the payload from borrowedBuffers into ownedBuffers, so only one of the two holds it.
         buffers.reserve((ownedBuffers.empty() ? borrowedBuffers.size() : ownedBuffers.size()) + 1);
@@ -165,10 +206,12 @@ struct Frame : public Header {
     }
 
     void freeze() {
-        if (borrowedBuffers.empty()) return;
+        if (borrowedBuffers.empty())
+            return;
         ownedBuffers.clear();
         ownedBuffers.reserve(borrowedBuffers.size());
-        for (const auto buffer : borrowedBuffers) ownedBuffers.emplace_back(buffer.begin(), buffer.end());
+        for (const auto buffer : borrowedBuffers)
+            ownedBuffers.emplace_back(buffer.begin(), buffer.end());
         borrowedBuffers.clear();
     }
 
@@ -189,55 +232,65 @@ struct Frame : public Header {
 
 private:
     std::vector<std::span<const std::byte>> borrowedBuffers;
-    std::vector<std::vector<std::byte>> ownedBuffers;
+    std::vector<std::vector<std::byte>>     ownedBuffers;
 };
 
 class FrameDecoder {
 public:
     Header::Opcode frameType;
-    bool finalFrame = true;  ///< FIN bit: false for every fragment of a message but its last
+    bool           finalFrame = true;  ///< FIN bit: false for every fragment of a message but its last
 
 public:
-    FrameDecoder() : payloadBuffer(sizeof(Header)) { reset(); }
-    std::span<const std::byte> payload() const { return std::span(payloadBuffer.data(), payloadSize); }
-    [[nodiscard]] size_t consumed() const { return consumedSize; }
+    FrameDecoder() : payloadBuffer(sizeof(Header)) {
+        reset();
+    }
+    std::span<const std::byte> payload() const {
+        return std::span(payloadBuffer.data(), payloadSize);
+    }
+    [[nodiscard]] size_t consumed() const {
+        return consumedSize;
+    }
     /// True when the last frame's header announced more than its budget: nothing was reserved for it.
-    [[nodiscard]] bool rejected() const { return oversized; }
+    [[nodiscard]] bool rejected() const {
+        return oversized;
+    }
 
     // Parses some incoming data and tries to decode it.
     // @return true if the frame is complete, false if it needs more data
     bool parse(std::span<const std::byte> buffer) {
-        return parse(buffer, [](Header::Opcode) { return std::numeric_limits<size_t>::max(); });
+        return parse(buffer, [](Header::Opcode) {
+            return std::numeric_limits<size_t>::max();
+        });
     }
 
     // Same, rejecting a frame whose header announces more than maxPayload(opcode) bytes before
     // reserving them: parse() then returns false and rejected() true.
-    template<typename Budget>
+    template <typename Budget>
     bool parse(std::span<const std::byte> buffer, Budget&& maxPayload) {
         consumedSize = 0;
         switch (state) {
-        case DecodingState::starting:
-            return parseStart(buffer, maxPayload);
-        case DecodingState::partialHeader:
-            return parsePartialHeader(buffer, maxPayload);
-        case DecodingState::decodingPayload:
-            return parsePayload(buffer);
+            case DecodingState::starting:
+                return parseStart(buffer, maxPayload);
+            case DecodingState::partialHeader:
+                return parsePartialHeader(buffer, maxPayload);
+            case DecodingState::decodingPayload:
+                return parsePayload(buffer);
         }
         return false;
     }
 
     void reset() {
-        maskIndex = 0;
+        maskIndex          = 0;
         headerBufferParser = 0;
         payloadBuffer.clear();
-        state = DecodingState::starting;
+        state        = DecodingState::starting;
         consumedSize = 0;
-        oversized = false;
+        oversized    = false;
     }
 
 private:
     // A frame whose header may be complete in `buffer`; otherwise its first bytes are kept.
-    template<typename Budget>
+    template <typename Budget>
     bool parseStart(std::span<const std::byte> buffer, Budget& maxPayload) {
         const auto* header = reinterpret_cast<const Header*>(buffer.data());
         if (!header->isComplete(buffer.size())) {
@@ -250,7 +303,7 @@ private:
         return startPayload(*header, buffer.subspan(consumedSize), maxPayload);
     }
 
-    template<typename Budget>
+    template <typename Budget>
     bool parsePartialHeader(std::span<const std::byte> buffer, Budget& maxPayload) {
         consumedSize = bufferizeHeaderData(buffer);
         if (!headerBuffer.isComplete(headerBufferParser))
@@ -259,7 +312,7 @@ private:
     }
 
     // Decodes a complete header, then the start of its payload found in `rest`.
-    template<typename Budget>
+    template <typename Budget>
     bool startPayload(const Header& header, std::span<const std::byte> rest, Budget& maxPayload) {
         if (!decodeHeader(header, maxPayload))
             return false;
@@ -276,7 +329,7 @@ private:
     }
 
     // Rejects a frame announcing more than maxPayload(opcode) bytes before reserving them.
-    template<typename Budget>
+    template <typename Budget>
     bool decodeHeader(const Header& header, Budget& maxPayload) {
         payloadSize = header.payloadSize();
         headerSize  = header.headerSize();
@@ -306,17 +359,17 @@ private:
     }
 
     enum class DecodingState { starting, partialHeader, decodingPayload } state;
-    std::vector<std::byte> payloadBuffer;
-    Header headerBuffer;
-    size_t headerBufferParser;
-    size_t payloadSize, headerSize;
-    size_t consumedSize;
-    bool oversized = false;
+    std::vector<std::byte>   payloadBuffer;
+    Header                   headerBuffer;
+    size_t                   headerBufferParser;
+    size_t                   payloadSize, headerSize;
+    size_t                   consumedSize;
+    bool                     oversized = false;
     std::array<std::byte, 4> mask;
-    uint8_t maskIndex;
+    uint8_t                  maskIndex;
 };
 
-template<typename Net, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
+template <typename Net, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
 class WebSocket : public std::enable_shared_from_this<WebSocket<Net, Policy>> {
     typename Net::Socket socket;
 
@@ -327,11 +380,13 @@ public:
     [[nodiscard]] static std::shared_ptr<WebSocket> create(typename Net::Socket netSocket, networking::TaskScope& scope) {
         return std::shared_ptr<WebSocket>(new WebSocket(std::move(netSocket), scope));
     }
-    WebSocket(const WebSocket&) = delete;
-    WebSocket(WebSocket&&) = delete;
+    WebSocket(const WebSocket&)            = delete;
+    WebSocket(WebSocket&&)                 = delete;
     WebSocket& operator=(const WebSocket&) = delete;
-    WebSocket& operator=(WebSocket&&) = delete;
-    ~WebSocket() { log::debug("WebSocket destructor"); }
+    WebSocket& operator=(WebSocket&&)      = delete;
+    ~WebSocket() {
+        log::debug("WebSocket destructor");
+    }
 
     void start() {
         started = true;
@@ -344,18 +399,36 @@ public:
             stopSource->request_stop();
     }
 
-    void onMessage(std::function<void(std::string_view)>&& handler) { textHandler = std::move(handler); }
-    void onMessage(std::function<void(std::span<const std::byte>)>&& handler) { binaryHandler = std::move(handler); }
-    void onClose(std::function<void(CloseEvent)>&& handler) { closeHandler = std::move(handler); }
+    void onMessage(std::function<void(std::string_view)>&& handler) {
+        textHandler = std::move(handler);
+    }
+    void onMessage(std::function<void(std::span<const std::byte>)>&& handler) {
+        binaryHandler = std::move(handler);
+    }
+    void onClose(std::function<void(CloseEvent)>&& handler) {
+        closeHandler = std::move(handler);
+    }
     /// Called on every failed write, before its diagnostic and even after stop(): frames queued
     /// before stopping still fail, and their producer must be detached rather than fed the error.
-    void onWriteError(std::function<void(std::error_code)>&& handler) { writeErrorHandler = std::move(handler); }
+    void onWriteError(std::function<void(std::error_code)>&& handler) {
+        writeErrorHandler = std::move(handler);
+    }
     /// Called, outside the write lock, each time the queue shrinks: a frame was written, or a failure dropped them all.
-    void onWritten(std::function<void()>&& handler) { writtenHandler = std::move(handler); }
-    void write(std::string_view text) { writeData(Frame<Net>(text)); }
-    void write(std::span<const std::byte> data) { writeData(Frame<Net>(data)); }
-    void write(std::span<const std::byte> data, std::span<const std::byte> data2) { writeData(Frame<Net>(data, data2)); }
-    void write(Frame<Net> frame) { writeData(std::move(frame)); }
+    void onWritten(std::function<void()>&& handler) {
+        writtenHandler = std::move(handler);
+    }
+    void write(std::string_view text) {
+        writeData(Frame<Net>(text));
+    }
+    void write(std::span<const std::byte> data) {
+        writeData(Frame<Net>(data));
+    }
+    void write(std::span<const std::byte> data, std::span<const std::byte> data2) {
+        writeData(Frame<Net>(data, data2));
+    }
+    void write(Frame<Net> frame) {
+        writeData(std::move(frame));
+    }
     /// Queue a frame made by Frame::share(), without copying it.
     void write(std::shared_ptr<const Frame<Net>> frame) {
         static_cast<void>(enqueue(std::move(frame), std::numeric_limits<std::size_t>::max()));
@@ -368,8 +441,9 @@ public:
         {
             std::lock_guard lock(writeMutex);
             if constexpr (networking::secureTransport<Net>)
-                if (closing) return;
-            auto            group = latestGroups.find(key);
+                if (closing)
+                    return;
+            auto group = latestGroups.find(key);
             if (group == latestGroups.end())
                 group = latestGroups.emplace(std::string(key), LatestGroup{}).first;
             auto& latest = group->second;
@@ -399,13 +473,13 @@ public:
 
 private:
     std::array<std::byte, Policy::receptionBufferSize> readBuffer;
-    FrameDecoder decoder;
-    std::function<void(std::string_view)> textHandler;
-    std::function<void(std::span<const std::byte>)> binaryHandler;
-    std::function<void(CloseEvent)> closeHandler;
-    std::function<void(std::error_code)> writeErrorHandler;
-    std::function<void()> writtenHandler;
-    mutable std::mutex writeMutex;
+    FrameDecoder                                       decoder;
+    std::function<void(std::string_view)>              textHandler;
+    std::function<void(std::span<const std::byte>)>    binaryHandler;
+    std::function<void(CloseEvent)>                    closeHandler;
+    std::function<void(std::error_code)>               writeErrorHandler;
+    std::function<void()>                              writtenHandler;
+    mutable std::mutex                                 writeMutex;
     // The frames of a writeLatest() key that are queued, and the one held back; guarded by writeMutex.
     struct LatestGroup {
         std::size_t                       queued = 0;
@@ -415,10 +489,10 @@ private:
     using LatestGroups = std::map<std::string, LatestGroup, std::less<>>;
     LatestGroups latestGroups;  // a key is forgotten once nothing is queued for it
     struct PendingFrame {
-        std::shared_ptr<const Frame<Net>>             frame;
-        std::optional<typename LatestGroups::iterator> group{};  // for writeLatest(): valid while the frame is queued
+        std::shared_ptr<const Frame<Net>>              frame;
+        std::optional<typename LatestGroups::iterator> group{};       // for writeLatest(): valid while the frame is queued
     };
-    std::deque<PendingFrame>                             writeQueue;                            // the first frame is the one being written
+    std::deque<PendingFrame>                             writeQueue;  // the first frame is the one being written
     networking::TaskScope&                               taskScope;
     std::shared_ptr<networking::ex::inplace_stop_source> stopSource{std::make_shared<networking::ex::inplace_stop_source>()};
     struct StopConnection {
@@ -431,13 +505,13 @@ private:
         }
     };
     networking::ex::stop_callback_for_t<networking::ex::inplace_stop_token, StopConnection> parentStop;
-    std::atomic_bool started;
+    std::atomic_bool                                                                        started;
     std::atomic_bool closing{false};  // set once the close is claimed: no frame is queued after it, whether or not start() ran
     // A message sent in several frames (RFC 6455, 5.4), as browsers do with large messages: its
     // type and the payloads received so far, at most http::maxMessageSize<Policy>() bytes
     // (payloadBudget()).
     std::optional<Header::Opcode> fragmentedType;
-    std::vector<std::byte> fragments;
+    std::vector<std::byte>        fragments;
 
 private:
     explicit WebSocket(typename Net::Socket netSocket, networking::TaskScope& scope)
@@ -477,16 +551,18 @@ private:
                 }
                 processFrames(std::span(readBuffer.data(), received));
             }
-        }
-        catch (const std::system_error& error) {
+        } catch (const std::system_error& error) {
             failure = error.code();
         }
-        if (failure) closeOnError(failure);
+        if (failure)
+            closeOnError(failure);
     }
 
     void processFrames(std::span<const std::byte> received) {
         while (!received.empty() && started) {
-            const auto frameComplete = decoder.parse(received, [this](Header::Opcode type) { return payloadBudget(type); });
+            const auto frameComplete = decoder.parse(received, [this](Header::Opcode type) {
+                return payloadBudget(type);
+            });
             if (decoder.rejected())
                 return rejectFrame();
             received = received.subspan(decoder.consumed());
@@ -572,7 +648,9 @@ private:
     // Control frames (close, ping, pong) carry at most 125 bytes (RFC 6455, 5.5), whatever maxMessageSize.
     static constexpr size_t maxControlPayload = 125;
 
-    static bool isControl(Header::Opcode type) { return type >= Header::Opcode::connectionClose; }
+    static bool isControl(Header::Opcode type) {
+        return type >= Header::Opcode::connectionClose;
+    }
 
     // The largest payload a frame may announce: 125 bytes for a control frame, what is left of
     // maxMessageSize for a continuation, all of it for another frame. Checked on the header, before
@@ -614,8 +692,7 @@ private:
         if (type == Header::Opcode::text) {
             if (textHandler)
                 textHandler(std::string_view(reinterpret_cast<const char*>(data.data()), data.size()));
-        }
-        else if (binaryHandler)
+        } else if (binaryHandler)
             binaryHandler(data);
     }
 
@@ -630,7 +707,9 @@ private:
         stopSource->request_stop();
     }
 
-    void writeData(Frame<Net> frame) { static_cast<void>(enqueue(std::move(frame), std::numeric_limits<std::size_t>::max())); }
+    void writeData(Frame<Net> frame) {
+        static_cast<void>(enqueue(std::move(frame), std::numeric_limits<std::size_t>::max()));
+    }
 
     bool enqueue(Frame<Net> frame, std::size_t maxPending) {
         return enqueue(std::move(frame).share(), maxPending);
@@ -640,10 +719,13 @@ private:
         {
             std::lock_guard lock(writeMutex);
             if constexpr (networking::secureTransport<Net>)
-                if (closing) return false;
-            if (writeQueue.size() >= maxPending) return false;
+                if (closing)
+                    return false;
+            if (writeQueue.size() >= maxPending)
+                return false;
             writeQueue.push_back({std::move(frame)});
-            if (writeQueue.size() > 1) return true;  // the running writeFrames() task will get to it
+            if (writeQueue.size() > 1)
+                return true;  // the running writeFrames() task will get to it
         }
         spawn(writeFrames(this->shared_from_this()));
         return true;
@@ -658,24 +740,26 @@ private:
                 if constexpr (networking::secureTransport<Net>) {
                     if (frame->opcode() == Header::Opcode::connectionClose) {
                         nextFrame(true);
-                        if (writtenHandler) writtenHandler();
+                        if (writtenHandler)
+                            writtenHandler();
                         co_await Net::Close(socket);
                         stopSource->request_stop();  // the reply is out: ends closeDeadline()
                         co_return;
                     }
                 }
                 frame = nextFrame(true);
-                if (writtenHandler) writtenHandler();
+                if (writtenHandler)
+                    writtenHandler();
             }
-        }
-        catch (const std::system_error& error) {
+        } catch (const std::system_error& error) {
             {
                 std::lock_guard lock(writeMutex);
                 writeQueue.clear();
                 latestGroups.clear();     // nothing will be written any more: the frames held back go too
             }
             onWriteFailed(error.code());  // reports the closure before the waiters for the queue resume
-            if (writtenHandler) writtenHandler();
+            if (writtenHandler)
+                writtenHandler();
         }
     }
 
@@ -701,7 +785,8 @@ private:
 
     /// The producer is detached before the diagnostic; the flag only gates the close sequence.
     void onWriteFailed(std::error_code ec) {
-        if (writeErrorHandler) writeErrorHandler(ec);
+        if (writeErrorHandler)
+            writeErrorHandler(ec);
         closeOnError(ec);
     }
 };
@@ -709,6 +794,6 @@ private:
 [[nodiscard]] inline std::string getHashedSecKey(std::string key) {
     constexpr auto rfc6455Guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     return base64::encodeInNetworkOrder(crypto::sha1(key + rfc6455Guid));
-}                    
+}
 
-} // namespace webfront::websocket
+}  // namespace webfront::websocket

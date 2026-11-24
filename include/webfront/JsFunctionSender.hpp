@@ -1,4 +1,12 @@
-/// @brief Lazy, cancellable C++ to browser calls using C++26 sender completions.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-18
+//
+// WebFront — core
+// Role: Lazy, cancellable C++ to browser calls using C++26 sender completions.
+// Thread: worker-safe | Alloc: unrestricted
+// LLM: internal; cancellation is local, a late reply is discarded; see docs/ASYNC_EXECUTION.md
+
 #pragma once
 #include "http/WebSocket.hpp"
 #include "weblink/CallFrame.hpp"
@@ -199,11 +207,11 @@ class BrowserCallSender {
     public:
         using operation_state_concept = ex::operation_state_tag;
         explicit Operation(std::shared_ptr<State<Receiver>> value) : state(std::move(value)) { }
-        Operation(const Operation&)                                  = delete;
-        Operation(Operation&&)                                       = delete;
-        Operation&                       operator=(const Operation&) = delete;
-        Operation&                       operator=(Operation&&)      = delete;
-        void                             start() noexcept {
+        Operation(const Operation&)            = delete;
+        Operation(Operation&&)                 = delete;
+        Operation& operator=(const Operation&) = delete;
+        Operation& operator=(Operation&&)      = delete;
+        void       start() noexcept {
             auto keepAlive = state;  // receiver completion may destroy this operation inline
             keepAlive->start();
         }
@@ -249,7 +257,7 @@ public:
     auto operator()(auto&&... arguments) const {
         msg::FunctionCall<Policy> command;
         const auto                frame = detail::encodeCall<Net>(command, name, std::forward<decltype(arguments)>(arguments)...);
-        std::vector<std::byte> payload;
+        std::vector<std::byte>    payload;
         payload.reserve(frame.size());
         auto buffers = frame.toBuffers();
         for (std::size_t i = 1; i < buffers.size(); ++i) {

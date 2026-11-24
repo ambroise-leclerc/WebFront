@@ -1,4 +1,12 @@
-/// @brief Subscriptions to connecting and disconnecting browsers (BasicWF::subscribeUIStarted, subscribeUIClosed).
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-14
+//
+// WebFront — core
+// Role: Subscriptions to connecting and disconnecting browsers (BasicWF::subscribeUIStarted, subscribeUIClosed).
+// Thread: thread-safe | Alloc: unrestricted
+// LLM: public API; UISubscription stays safe after the application is destroyed
+
 #pragma once
 
 #include <algorithm>
@@ -16,8 +24,8 @@ namespace webfront {
 class UISubscription {
 public:
     UISubscription() = default;
-    explicit UISubscription(std::function<void()> unsubscribe) : cancel(std::move(unsubscribe)) {}
-    UISubscription(UISubscription&& other) noexcept : cancel(std::exchange(other.cancel, {})) {}
+    explicit UISubscription(std::function<void()> unsubscribe) : cancel(std::move(unsubscribe)) { }
+    UISubscription(UISubscription&& other) noexcept : cancel(std::exchange(other.cancel, {})) { }
     UISubscription& operator=(UISubscription&& other) noexcept {
         if (this != &other) {
             reset();

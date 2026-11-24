@@ -1,10 +1,19 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-21
+//
+// WebFront — tls
+// Role: TLS wire reader and writers: length-prefixed vectors, handshake messages and extensions.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: protocol parser; Reader throws Error on any overrun
+
 #pragma once
 #include "Crypto.hpp"
 
 namespace webfront::tls::detail {
 inline constexpr std::size_t maxCredentialBytes = 256 * 1024;
 struct Error : std::runtime_error {
-    Error(std::string_view message, Byte code = 50) : std::runtime_error("TLS: " + std::string(message)), alert(code) {}
+    Error(std::string_view message, Byte code = 50) : std::runtime_error("TLS: " + std::string(message)), alert(code) { }
     Byte alert;
 };
 

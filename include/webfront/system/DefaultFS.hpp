@@ -1,5 +1,15 @@
-/// @brief Default filesystem for webfront::WebFront: embedded bridge script, an optional local
-/// development root, and an embedded fallback page - composed with the precedence documented below.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-07-22
+//
+// WebFront — system
+// Role: Default file system of webfront::WebFront: embedded bridge script, optional local development root and embedded fallback page.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: order is normative, the embedded WebFront.js can never be shadowed by a document root
+
+// Default filesystem for webfront::WebFront: embedded bridge script, an optional local
+// development root, and an embedded fallback page - composed with the precedence documented below.
+
 #pragma once
 
 #include "FileSystem.hpp"
@@ -16,11 +26,13 @@ namespace detail {
 /// Listed first in DefaultFS so a configured document root can never shadow it.
 class ProtectedWebFrontJsFS {
 public:
-    explicit ProtectedWebFrontJsFS(std::filesystem::path /*docRoot*/) {}
+    explicit ProtectedWebFrontJsFS(std::filesystem::path /*docRoot*/) { }
 
     static std::optional<File> open(std::filesystem::path file) {
-        if (file.relative_path().string() == "WebFront.js") return File{IndexFS::WebFrontJs{}};
-        if (file.relative_path().string() == "webfront-dom.mjs") return IndexFS::open(file);
+        if (file.relative_path().string() == "WebFront.js")
+            return File{IndexFS::WebFrontJs{}};
+        if (file.relative_path().string() == "webfront-dom.mjs")
+            return IndexFS::open(file);
         return {};
     }
 };
@@ -29,12 +41,14 @@ public:
 /// "no document root configured"), open() always returns nullopt without touching the filesystem.
 class OptionalDevRootFS {
 public:
-    explicit OptionalDevRootFS(std::filesystem::path docRoot) : root(std::move(docRoot)) {}
+    explicit OptionalDevRootFS(std::filesystem::path docRoot) : root(std::move(docRoot)) { }
 
     std::optional<File> open(std::filesystem::path file) const {
-        if (root.empty()) return {};
+        if (root.empty())
+            return {};
         std::ifstream stream(root / file, std::ios::binary);
-        if (stream.is_open()) return File{std::move(stream)};
+        if (stream.is_open())
+            return File{std::move(stream)};
         return {};
     }
 
@@ -42,7 +56,7 @@ private:
     std::filesystem::path root;
 };
 
-} // namespace detail
+}  // namespace detail
 
 /// Precedence (Multi<> serves the first provider that returns a file):
 ///  1. The embedded, version-matched WebFront.js and webfront-dom.mjs - never overridable.
@@ -57,4 +71,4 @@ using DefaultFS = Multi<detail::ProtectedWebFrontJsFS, detail::OptionalDevRootFS
 template <Provider... Extra>
 using DefaultFSWith = Multi<detail::ProtectedWebFrontJsFS, Extra..., detail::OptionalDevRootFS, IndexFS>;
 
-} // namespace webfront::fs
+}  // namespace webfront::fs

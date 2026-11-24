@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0 OR CECILL-B
-/// @brief The static facade shared by the embedded frontends (#652): what a native frontend declares once, the base provides.
+// Author: Ambroise Leclerc
+// Created: 2026-11-23
+//
+// WebFront — frontend
+// Role: The static facade shared by the embedded frontends: what a native frontend declares once, the base provides.
+// Thread: ui-loop | Alloc: heap-init
+// LLM: frontend base; read ViewOptions and the startup deadline rules before adding an adapter
+
+// The static facade shared by the embedded frontends (#652): what a native frontend declares once, the base provides.
+
 #pragma once
 
 #include "../ContentPolicy.hpp"
@@ -28,7 +37,8 @@ namespace detail {
 /// otherwise wrap around when it becomes the unsigned argument of the timer.
 [[nodiscard]] inline unsigned timerMilliseconds(std::chrono::milliseconds timeout, std::string_view frontend) {
     if (timeout.count() < 1 || timeout.count() > std::numeric_limits<int>::max())
-        throw std::invalid_argument(std::string(frontend) + ": startupTimeout must be positive and at most " + std::to_string(std::numeric_limits<int>::max()) + " milliseconds");
+        throw std::invalid_argument(std::string(frontend) + ": startupTimeout must be positive and at most " + std::to_string(std::numeric_limits<int>::max())
+                                    + " milliseconds");
     return static_cast<unsigned>(timeout.count());
 }
 }  // namespace detail
@@ -40,8 +50,8 @@ struct ViewOptions {
     /// depends on the engine: WKWebView, the end of the load; WebKitGTK, the commit of the navigation (resources still
     /// loading are not waited for); WebView2, the creation of its browser, before the navigation starts.
     std::chrono::milliseconds startupTimeout{30000};
-    ContentPolicy         contentPolicy{};
-    WindowOptions         window{};
+    ContentPolicy             contentPolicy{};
+    WindowOptions             window{};
     /// WKWebView and WebView2: keep the native window hidden and avoid activating the application.
     bool visible{true};
     /// Test injections (WKWebView, WebKitGTK): answers `<input type="file">` without a dialog (an empty list cancels).
@@ -82,7 +92,8 @@ struct ViewOptions {
  * - `using Options`: the frontend's options (`contentPolicy`, `window` and `launch` at least; ViewOptions has them), and an
  *   optional `static Options defaultOptions()` for the ones a call starts from;
  * - `static void openNative(address, port, file, const Options&)` and `closeNative(const NativeWindowHandle&)` (on the
- *   interface thread: the toolkit's own close request), and an optional `initializeNative()` (a frontend without one throws from initialize() when it is not compiled);
+ *   interface thread: the toolkit's own close request), and an optional `initializeNative()` (a frontend without one throws from initialize() when it is not
+ * compiled);
  * - `static constexpr bool secondaryWindows`, and when true `openSecondaryNative(address, port, page, const Options&)` and
  *   `closeSecondaryNative(page) -> bool`, which run on the interface thread; `waitsForFirstWindow` (optional) tells that
  *   the call may come before the first window is ready (invokeOnUIThreadWhenReady).
@@ -112,17 +123,25 @@ struct EmbeddedFrontend {
     /// Asks the window to close, from any thread; false when no window is open (see CloseRequest.hpp).
     static bool requestClose([[maybe_unused]] std::optional<UISession> session = std::nullopt) noexcept {
         if constexpr (Derived::compiled)
-            return detail::requestWindowClose(uiExecutor(), nativeWindow(), [](const NativeWindowHandle& window) {
-                Derived::closeNative(window);
-            }, session);
+            return detail::requestWindowClose(
+                uiExecutor(),
+                nativeWindow(),
+                [](const NativeWindowHandle& window) {
+                    Derived::closeNative(window);
+                },
+                session);
         else
             return false;
     }
 
     /// Opens `page` in a second window beside the one open() runs, or brings the window already showing it to the front
     /// (#616). Callable from any thread while open() runs; throws std::logic_error when no window is open.
-    static void openSecondaryWindow(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy,
-                                    const WindowOptions& window, const ViewLaunch& launch)
+    static void openSecondaryWindow(std::string_view     address,
+                                    std::string_view     port,
+                                    std::string_view     page,
+                                    const ContentPolicy& policy,
+                                    const WindowOptions& window,
+                                    const ViewLaunch&    launch)
         requires(Derived::secondaryWindows)
     {
         if constexpr (!Derived::compiled) {
@@ -176,8 +195,12 @@ struct EmbeddedFrontend {
     static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window) {
         open(address, port, file, optionsOf(policy, &window));
     }
-    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window,
-                     const ViewLaunch& launch) {
+    static void open(std::string_view     address,
+                     std::string_view     port,
+                     std::string_view     file,
+                     const ContentPolicy& policy,
+                     const WindowOptions& window,
+                     const ViewLaunch&    launch) {
         open(address, port, file, optionsOf(policy, &window, &launch));
     }
 

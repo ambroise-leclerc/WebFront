@@ -1,5 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-30
+//
+// WebFront — tests/unit
+// Role: Writes the TypeScript declaration of the hand-described settings to the file given as argument.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: tool of the developer journey; wf check type-checks its output
+
 // Writes the TypeScript declaration of the hand-described settings (#383) to the file given as argument: the developer
 // journey type-checks with wf check a module of its project that imports it.
+
 #include "FormsSettings.hpp"
 
 #include <filesystem>

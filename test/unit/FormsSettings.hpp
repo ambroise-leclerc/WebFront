@@ -1,6 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-30
+//
+// WebFront — tests/unit
+// Role: Settings type and its hand-written descriptors shared by the forms tests.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: test fixture
+
 // The settings type that the forms tests describe by hand in C++23 (#383). The C++26 reflection test annotates the same
 // members and must produce the same declaration and the same form; the developer journey writes this declaration into
 // its project and type-checks a module that uses it with wf check.
+
 #pragma once
 #include <webfront/components/forms/Description.hpp>
 

@@ -1,15 +1,24 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — frontend
+// Role: Opt-in macOS WKWebView frontend driving Cocoa through the Objective-C runtime.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: opt-in adapter (WEBFRONT_EMBED_WKWEBVIEW); main thread only, no engine download
+
 #pragma once
 
 #include "../ContentPolicy.hpp"
+#include "../ViewAssociation.hpp"
 #include "Action.hpp"
 #include "Capture.hpp"
 #include "CloseRequest.hpp"
 #include "Downloads.hpp"
 #include "EmbeddedFrontend.hpp"
-#include "../ViewAssociation.hpp"
+#include "NativeWindow.hpp"
 #include "ScriptDialogs.hpp"
 #include "StartupTrace.hpp"
-#include "NativeWindow.hpp"
 #include "UIExecutor.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
@@ -22,12 +31,12 @@
 #include <filesystem>
 #include <functional>
 #include <map>
-#include <stdexcept>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
-#include <vector>
 #include <type_traits>
+#include <vector>
 
 namespace webfront::frontend {
 
@@ -48,7 +57,7 @@ using WKWebViewOptions = ViewOptions;
     #include <functional>
     #include <future>
     #include <memory>
-#include <mutex>
+    #include <mutex>
     #include <string>
     #include <utility>
     #include <vector>
@@ -118,7 +127,7 @@ inline void initialize() {
 }
 
 inline long applicationActivationPolicy() {
-    Object agentKey(text("LSUIElement"));
+    Object     agentKey(text("LSUIElement"));
     const auto agent = send(send(type("NSBundle"), "mainBundle"), "objectForInfoDictionaryKey:", agentKey.get());
     return send<BOOL>(agent, "boolValue") ? 1L : 0L;  // Accessory for agent bundles, Regular otherwise.
 }
@@ -185,7 +194,7 @@ inline bool successfulHttpStatus(long status) {
 /// window finds it null.
 struct CaptureJob;
 struct CaptureTarget {
-    id                                       view = nullptr;
+    id                          view = nullptr;
     PendingCaptures<CaptureJob> pending;  // Requests nobody has answered yet, queued or in flight.
 };
 
@@ -284,8 +293,7 @@ inline CaptureProvider captureProvider(std::shared_ptr<CaptureTarget> target) {
 
 struct Session {
     explicit Session(std::string url, WKWebViewOptions options = {})
-        : url(std::move(url)), options(std::move(options)), contentPolicy(this->url, this->options.contentPolicy) {
-    }
+        : url(std::move(url)), options(std::move(options)), contentPolicy(this->url, this->options.contentPolicy) { }
 
     std::string                          url;
     WKWebViewOptions                     options;
@@ -293,35 +301,35 @@ struct Session {
     std::function<void()>                navigationCancelled;
     struct PendingDownload {
         std::unique_ptr<frontend::detail::DownloadStaging> staging;
-        std::filesystem::path target;
-        bool reserved;
-        bool replace;
+        std::filesystem::path                              target;
+        bool                                               reserved;
+        bool                                               replace;
     };
     frontend::detail::DownloadReservations reservations;
-    std::map<id, PendingDownload>        downloadDestinations;  // WKDownload -> its paths, until it ends.
+    std::map<id, PendingDownload>          downloadDestinations;  // WKDownload -> its paths, until it ends.
     /// What the answers of a system panel hold instead of `this`: AppKit may deliver one after the session is gone.
-    std::shared_ptr<Session*>            alive = std::make_shared<Session*>(this);
-    id                                   app = nullptr, window = nullptr, view = nullptr, delegate = nullptr, timer = nullptr;
+    std::shared_ptr<Session*> alive = std::make_shared<Session*>(this);
+    id                        app = nullptr, window = nullptr, view = nullptr, delegate = nullptr, timer = nullptr;
     /// The window is shown nearly transparent and made opaque at the page's first frame, or when this timer expires.
-    id                                   presentTimer = nullptr;
+    id presentTimer = nullptr;
     /// Test hook: false does not show the window when the document finishes loading, so only the delay can.
-    bool                                 revealOnLoad = true;
+    bool revealOnLoad = true;
     /// Seconds before the window is shown even if the document has not loaded. A test lengthens it so that a slow
     /// first launch of the web content process cannot make the delay win against the load it observes.
-    double                               presentDelay = 1.0;
+    double presentDelay = 1.0;
     /// Test hook: called on the main thread when the window has been made opaque.
-    frontend::detail::Presentation       presentation;
-    frontend::detail::StartupTrace       trace;
-    id                                   previousDelegate = nullptr, previousMenu = nullptr;
-    long                                 previousActivationPolicy = 0;
-    bool                                 installed = false, running = false, closed = false, loaded = false;
-    bool                                 secondary = false;
-    id                                   sharedDataStore = nullptr;
-    std::function<void()>                closedHook;
-    bool                                 receivedResponse = false, committed = false;
-    std::exception_ptr                   failure;
-    std::shared_ptr<CaptureTarget>       captureTarget = std::make_shared<CaptureTarget>();
-    CaptureRegistration                  captureRegistration;
+    frontend::detail::Presentation presentation;
+    frontend::detail::StartupTrace trace;
+    id                             previousDelegate = nullptr, previousMenu = nullptr;
+    long                           previousActivationPolicy = 0;
+    bool                           installed = false, running = false, closed = false, loaded = false;
+    bool                           secondary       = false;
+    id                             sharedDataStore = nullptr;
+    std::function<void()>          closedHook;
+    bool                           receivedResponse = false, committed = false;
+    std::exception_ptr             failure;
+    std::shared_ptr<CaptureTarget> captureTarget = std::make_shared<CaptureTarget>();
+    CaptureRegistration            captureRegistration;
 
     ~Session() {
         *alive = nullptr;
@@ -414,7 +422,7 @@ struct Session {
             if (closedHook) {
                 try {
                     closedHook();
-                } catch (...) {}
+                } catch (...) { }
             }
             return;
         }
@@ -516,22 +524,23 @@ struct Session {
         // so asynchronous bridge/Worker work and close requests keep progressing without a visible native window.
         if (!options.visible) {
             const auto preferences = send(configuration.get(), "preferences");
-            const auto selector = sel_registerName("setInactiveSchedulingPolicy:");
+            const auto selector    = sel_registerName("setInactiveSchedulingPolicy:");
             if (!send<BOOL>(preferences, "respondsToSelector:", selector))
                 throw std::runtime_error("WKWebView: hidden sessions require macOS 14 or later (inactiveSchedulingPolicy)");
-            send<void>(preferences, "setInactiveSchedulingPolicy:", 2L); // WKInactiveSchedulingPolicyNone
+            send<void>(preferences, "setInactiveSchedulingPolicy:", 2L);  // WKInactiveSchedulingPolicyNone
         }
         if (!options.launch.secret.empty()) {
             // At the start of every document, in the main frame only: the script itself checks the origin.
             Object source(text(::webfront::detail::viewSecretScript(options.launch.secret, options.launch.origin)));
-            Object script(send(send(type("WKUserScript"), "alloc"), "initWithSource:injectionTime:forMainFrameOnly:", source.get(), 0L, static_cast<BOOL>(true)));
+            Object script(
+                send(send(type("WKUserScript"), "alloc"), "initWithSource:injectionTime:forMainFrameOnly:", source.get(), 0L, static_cast<BOOL>(true)));
             send<void>(send(configuration.get(), "userContentController"), "addUserScript:", script.get());
         }
         // Deliver script-created popup attempts to the delegates, which always cancel unmanaged views.
         send<void>(send(configuration.get(), "preferences"), "setJavaScriptCanOpenWindowsAutomatically:", static_cast<BOOL>(true));
         const auto   windowOptions = frontend::detail::resolveWindow(options.window);
         const CGRect bounds{
-            {                                 0,                                   0},
+            {                                        0,                                          0},
             {static_cast<CGFloat>(windowOptions.width), static_cast<CGFloat>(windowOptions.height)}
         };
         view = send(send(reinterpret_cast<id>(viewClass()), "alloc"), "initWithFrame:configuration:", bounds, configuration.get());
@@ -551,8 +560,12 @@ struct Session {
             throw std::runtime_error("WKWebView: cannot create window (a WindowServer session is required)");
         send<void>(window, "setReleasedWhenClosed:", static_cast<BOOL>(false));
         if (const auto color = frontend::detail::parseBackground(windowOptions.background)) {
-            const auto native = send(type("NSColor"), "colorWithSRGBRed:green:blue:alpha:", static_cast<CGFloat>((*color)[0]), static_cast<CGFloat>((*color)[1]),
-                                     static_cast<CGFloat>((*color)[2]), static_cast<CGFloat>((*color)[3]));
+            const auto native = send(type("NSColor"),
+                                     "colorWithSRGBRed:green:blue:alpha:",
+                                     static_cast<CGFloat>((*color)[0]),
+                                     static_cast<CGFloat>((*color)[1]),
+                                     static_cast<CGFloat>((*color)[2]),
+                                     static_cast<CGFloat>((*color)[3]));
             send<void>(window, "setBackgroundColor:", native);
             // A translucent colour is only seen through if the window is not opaque: without this AppKit fills the window as
             // if the alpha were 1. Opaque colours keep the default opaque window, which is cheaper to composite.
@@ -691,7 +704,7 @@ struct Session {
             bool retained = false;
             try {
                 send<void>(panel, "retain");
-                retained = true;
+                retained               = true;
                 void (^finished)(long) = ^(long response) {
                     handler(response == 1 ? send(panel, "URLs") : nullptr);  // NSModalResponseOK
                     send<void>(panel, "release");
@@ -740,14 +753,19 @@ struct Session {
                     send<void>(alert, "addButtonWithTitle:", cancel.get());
                 }
                 if (dialog.kind == ScriptDialog::Kind::prompt) {
-                    field = send(send(type("NSTextField"), "alloc"), "initWithFrame:", CGRect{{0, 0}, {300, 24}});
+                    field = send(send(type("NSTextField"), "alloc"),
+                                 "initWithFrame:",
+                                 CGRect{
+                                     {  0,  0},
+                                     {300, 24}
+                    });
                     Object value(text(dialog.defaultText));
                     send<void>(field, "setStringValue:", value.get());
                     send<void>(alert, "setAccessoryView:", field);
                     send<void>(alert, "layout");
                     send<void>(send(alert, "window"), "setInitialFirstResponder:", field);
                 }
-                auto shared = std::make_shared<std::function<void(ScriptDialogAnswer)>>(std::move(answer));
+                auto shared            = std::make_shared<std::function<void(ScriptDialogAnswer)>>(std::move(answer));
                 void (^finished)(long) = ^(long response) {
                     ScriptDialogAnswer reply;
                     reply.accepted = response == 1000;  // endSheet: at window close reports NSModalResponseCancel.
@@ -801,7 +819,7 @@ struct Session {
                     reservations.release(destination);
                     throw;
                 }
-                const auto temporary = staging->path();
+                const auto temporary           = staging->path();
                 downloadDestinations[download] = {std::move(staging), destination, true, false};
                 Object path(text(temporary.string()));
                 result = send(type("NSURL"), "fileURLWithPath:", path.get());
@@ -816,11 +834,11 @@ struct Session {
             const id key      = download;  // By value: the panel answers after this lambda and its references are gone.
             try {
                 send<void>(panel, "retain");
-                retained = true;
+                retained               = true;
                 void (^finished)(long) = ^(long response) {
                     id chosen = response == 1 ? send(panel, "URL") : nullptr;  // NSModalResponseOK
                     if (chosen && !*token)
-                        chosen = nullptr;  // The session is gone: nobody could move the file afterwards.
+                        chosen = nullptr;                                      // The session is gone: nobody could move the file afterwards.
                     try {
                         if (chosen) {
                             const std::filesystem::path target = utf8(send(chosen, "path"));
@@ -830,13 +848,14 @@ struct Session {
                                 throw std::filesystem::filesystem_error("Cannot inspect download target", target, code);
                             auto& sessionReservations = (*token)->reservations;
                             if (!sessionReservations.reserveExact(target))
-                                throw std::filesystem::filesystem_error("Another download is writing this target", target,
+                                throw std::filesystem::filesystem_error("Another download is writing this target",
+                                                                        target,
                                                                         std::make_error_code(std::errc::file_exists));
                             try {
                                 auto       staging   = std::make_unique<frontend::detail::DownloadStaging>(target.parent_path());
                                 const auto temporary = staging->path();
                                 Object     path(text(temporary.string()));
-                                chosen = send(type("NSURL"), "fileURLWithPath:", path.get());
+                                chosen                              = send(type("NSURL"), "fileURLWithPath:", path.get());
                                 (*token)->downloadDestinations[key] = {std::move(staging), target, true, replace};
                             } catch (...) {
                                 sessionReservations.release(target);
@@ -1150,7 +1169,11 @@ struct WindowHooks {
     template <typename Registry>
     void scheduleReap(Registry&) {
         dispatch_async_f(
-            dispatch_get_main_queue(), nullptr, +[](void*) { reapSecondaryWindows(); });
+            dispatch_get_main_queue(),
+            nullptr,
+            +[](void*) {
+                reapSecondaryWindows();
+            });
     }
     void cancelReap() { }  // nothing is pending that clear() must withdraw: a late reap() finds the registry empty
     void present(Session& session) {
@@ -1216,17 +1239,20 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
     // The AppKit loop drains the main queue: a wake is a block on it. Closing completes pending operations stopped,
     // also when run() throws or returns at once because the window already closed. The window is published once the
     // loop is attached (this is the interface thread) and withdrawn before the session releases it.
-    auto& host = uiExecutorHostOf<WKWebViewFrontend>();
-    frontend::detail::InterfaceSession<Windows> interfaceSession(
-        host,
-        nativeWindowHostOf<WKWebViewFrontend>(),
-        Windows::instance(),
-        window,
-        [&host] {
-            dispatch_async_f(
-                dispatch_get_main_queue(), &host, +[](void* context) { static_cast<UIExecutorHost*>(context)->drain(); });
-        },
-        {.kind = NativeWindowKind::cocoa, .pointer = window.window, .portalParent = {}});
+    auto&                                       host = uiExecutorHostOf<WKWebViewFrontend>();
+    frontend::detail::InterfaceSession<Windows> interfaceSession(host,
+                                                                 nativeWindowHostOf<WKWebViewFrontend>(),
+                                                                 Windows::instance(),
+                                                                 window,
+                                                                 [&host] {
+                                                                     dispatch_async_f(
+                                                                         dispatch_get_main_queue(),
+                                                                         &host,
+                                                                         +[](void* context) {
+                                                                             static_cast<UIExecutorHost*>(context)->drain();
+                                                                         });
+                                                                 },
+                                                                 {.kind = NativeWindowKind::cocoa, .pointer = window.window, .portalParent = {}});
     window.run();
 }
 
@@ -1247,11 +1273,11 @@ struct WKWebViewFrontend : EmbeddedFrontend<WKWebViewFrontend> {
     static constexpr bool             secondaryWindows   = true;
     static constexpr std::string_view name               = "WKWebViewFrontend";
     static constexpr std::string_view enable             = "Configure on macOS with -DWEBFRONT_EMBED_WKWEBVIEW=ON";
-    using Host    = WKWebViewFrontend;
-    using Options = WKWebViewOptions;
+    using Host                                           = WKWebViewFrontend;
+    using Options                                        = WKWebViewOptions;
 #if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
     static constexpr bool compiled = true;
-    static void initializeNative() {
+    static void           initializeNative() {
         detail::wkwebview::initialize();
     }
     static void openNative(std::string_view address, std::string_view port, std::string_view file, const Options& options) {

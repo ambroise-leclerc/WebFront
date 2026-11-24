@@ -1,4 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-16
+//
+// WebFront — tests/unit
+// Role: CEF's macros must not reach a stdexec header: WebFront.hpp compiles once they are defined.
+// Thread: worker-safe | Alloc: zero-hot-path
+// LLM: compile-time regression; see SenderHeaders.hpp
+
 // CEF's macros must not reach a stdexec header (#243): WebFront.hpp must compile once they are defined.
+
 #include <webfront/testing/Bdd.hpp>
 
 #ifndef WEBFRONT_EMBED_CEF
@@ -23,9 +33,9 @@
 using namespace webfront::bdd;
 
 const Scenario webFrontCompiles{"WebFront compiles after CEF's compiler macros", [] {
-    given("the stdexec headers included before CEF's NO_UNIQUE_ADDRESS, ALWAYS_INLINE and NOINLINE", [&] {
-        then("every stdexec header WebFront.hpp includes was already included", [&] {
-            static_assert(std::is_default_constructible_v<webfront::WebFront>);
-        });
-    });
-}};
+                                    given("the stdexec headers included before CEF's NO_UNIQUE_ADDRESS, ALWAYS_INLINE and NOINLINE", [&] {
+                                        then("every stdexec header WebFront.hpp includes was already included", [&] {
+                                            static_assert(std::is_default_constructible_v<webfront::WebFront>);
+                                        });
+                                    });
+                                }};

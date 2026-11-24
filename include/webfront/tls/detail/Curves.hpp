@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-21
+//
+// WebFront — tls
+// Role: Elliptic curve points and operations (P-256) for TLS key exchange and signatures.
+// Thread: bridge-io | Alloc: zero-hot-path
+// LLM: cryptographic primitive; keep constant-time behavior, verify with test vectors
+
 #pragma once
 #include "Field.hpp"
 

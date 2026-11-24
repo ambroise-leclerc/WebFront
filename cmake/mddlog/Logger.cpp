@@ -1,4 +1,12 @@
-/** @brief WebFront-owned module-consuming TU; the facade header remains independent of modules. */
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-01
+//
+// WebFront — build/mddlog
+// Role: WebFront-owned module-consuming translation unit implementing the logger facade over mddlog; the facade header stays independent of modules.
+// Thread: thread-safe | Alloc: unrestricted
+// LLM: compiled only when modules are available; keep module types out of LoggerApi.hpp
+
 import std;
 import mddlog.core.loglevel;
 import mddlog.adapter.textlogger;
@@ -307,7 +315,7 @@ RingClaim::~RingClaim() {
 
 /** @brief Stops the consumer during static destruction, before the text adapter it may use. */
 struct LaneShutdown {
-    explicit LaneShutdown(TransportLane& value) : lane(&value) {}
+    explicit LaneShutdown(TransportLane& value) : lane(&value) { }
     LaneShutdown(const LaneShutdown&)            = delete;
     LaneShutdown& operator=(const LaneShutdown&) = delete;
     LaneShutdown(LaneShutdown&&)                 = delete;
@@ -503,15 +511,15 @@ TransportHandle addTransport(std::function<void(const TransportRecord&)> write) 
         const auto text = renderTransportText(record);
         try {
             write({.level            = facadeLevel(record.level),
-                      .timeAvailable    = record.timeAvailable,
-                      .time             = std::chrono::time_point_cast<std::chrono::nanoseconds>(record.timestamp),
-                      .location         = record.location,
-                      .message          = record.message,
-                      .messageTruncated = record.messageTruncated,
-                      .component        = record.category,
-                      .operationId      = record.operationId,
-                      .correlationId    = record.correlationId,
-                      .text             = text});
+                   .timeAvailable    = record.timeAvailable,
+                   .time             = std::chrono::time_point_cast<std::chrono::nanoseconds>(record.timestamp),
+                   .location         = record.location,
+                   .message          = record.message,
+                   .messageTruncated = record.messageTruncated,
+                   .component        = record.category,
+                   .operationId      = record.operationId,
+                   .correlationId    = record.correlationId,
+                   .text             = text});
         } catch (...) {
             // TransportConsumer detaches this transport and counts the failure.
             static_cast<void>(lane.detach(*attached));

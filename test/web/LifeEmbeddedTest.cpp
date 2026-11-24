@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-20
+//
+// WebFront — tests/web
+// Role: Real-browser test of the embedded Game of Life stage.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: real-browser test; serves the embedded provider only
+
 #include "../driver/TestFrontend.hpp"
 #include <webfront/WebFront.hpp>
 #include WEBFRONT_LIFE_ASSETS_HEADER

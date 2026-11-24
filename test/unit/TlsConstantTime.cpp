@@ -1,4 +1,12 @@
-// Mark only the private inputs undefined so Memcheck detects dependent branches or addresses.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-21
+//
+// WebFront — tests/unit
+// Role: Valgrind check that private TLS inputs never drive a branch or an address.
+// Thread: worker-safe | Alloc: zero-hot-path
+// LLM: run under Memcheck; marks only the private inputs undefined
+
 #include <webfront/tls/detail/Curves.hpp>
 
 #include <valgrind/memcheck.h>

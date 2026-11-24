@@ -1,6 +1,12 @@
-/// @date 25/01/2022 16:00:55
-/// @author Ambroise Leclerc
-/// @brief Some networking classes which provide common access to C++2x NetworkingTS, Mock networking or internal implementation
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2022-01-25
+//
+// WebFront — networking
+// Role: Common access to the networking providers: feature concepts, buffer types and the provider interface.
+// Thread: bridge-io | Alloc: heap-init
+// LLM: provider contract; real, mock and TLS providers all satisfy it
+
 #pragma once
 
 #include "../system/WindowsCompat.hpp"
@@ -35,8 +41,8 @@ inline constexpr bool secureTransport = []() -> bool {
 namespace buffers {
 class MutableBuffer {
 public:
-    MutableBuffer() noexcept : bufData(0), bufSize(0) {}
-    MutableBuffer(void* data, std::size_t size) noexcept : bufData(data), bufSize(size) {}
+    MutableBuffer() noexcept : bufData(0), bufSize(0) { }
+    MutableBuffer(void* data, std::size_t size) noexcept : bufData(data), bufSize(size) { }
     void* data() const noexcept {
         return bufData;
     }
@@ -57,9 +63,9 @@ private:
 
 class ConstBuffer {
 public:
-    ConstBuffer() noexcept : bufData(0), bufSize(0) {}
-    ConstBuffer(const void* data, std::size_t size) noexcept : bufData(data), bufSize(size) {}
-    ConstBuffer(const MutableBuffer& b) : bufData(b.data()), bufSize(b.size()) {}
+    ConstBuffer() noexcept : bufData(0), bufSize(0) { }
+    ConstBuffer(const void* data, std::size_t size) noexcept : bufData(data), bufSize(size) { }
+    ConstBuffer(const MutableBuffer& b) : bufData(b.data()), bufSize(b.size()) { }
     const void* data() const noexcept {
         return bufData;
     }

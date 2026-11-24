@@ -1,4 +1,12 @@
-/// @brief Trusted versioned JSON Schema contract, projected into CLI discovery and MCP schemas.
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-28
+//
+// WebFront — automation
+// Role: Trusted, versioned JSON Schema contract projected into CLI discovery and MCP schemas.
+// Thread: worker-safe | Alloc: heap-init
+// LLM: contract source of truth; OperationError and TransportError separate refusals from unknown outcomes
+
 #pragma once
 #include "Json.hpp"
 
@@ -93,9 +101,12 @@ inline const auto& operationDefinitions() {
         const Object                                            schemas{contractObject().raw("x-webfront-operations")};
         for (const auto& [name, raw] : schemas.members()) {
             const Object schema{raw};
-            values.emplace(
-                name,
-                OperationDefinition{schema, schema.string("permission"), contractStrings(schema.raw("arguments")), contractStrings(schema.raw("required")), schema.string("since")});
+            values.emplace(name,
+                           OperationDefinition{schema,
+                                               schema.string("permission"),
+                                               contractStrings(schema.raw("arguments")),
+                                               contractStrings(schema.raw("required")),
+                                               schema.string("since")});
         }
         return values;
     }();

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-10-19
+//
+// WebFront — tests/web
+// Role: Lifecycle cases of the WKWebView frontend: repeated show, main thread rules and failure diagnostics.
+// Thread: ui-loop | Alloc: unrestricted
+// LLM: macOS only; each case expects a precise diagnostic
+
 #include "../driver/TestFrontend.hpp"
 #include <webfront/system/NativeFS.hpp>
 #include <webfront/WebFront.hpp>
@@ -83,8 +92,7 @@ void nativeClose(bool quit) {
     {
         Session session("http://127.0.0.1:0/", {.visible = webfront::testdriver::visibleWindows});
         session.create();
-        require(static_cast<bool>(send<BOOL>(session.window, "isVisible")) == webfront::testdriver::visibleWindows,
-                "Window visibility option was ignored");
+        require(static_cast<bool>(send<BOOL>(session.window, "isVisible")) == webfront::testdriver::visibleWindows, "Window visibility option was ignored");
         // Exercise the real native entry points before any WebKit/bridge callback.
         if (quit)
             send<void>(app, "terminate:", static_cast<id>(nullptr));
@@ -103,7 +111,7 @@ void nativeClose(bool quit) {
 }
 
 struct TestSocket {
-    explicit TestSocket(int descriptor) : descriptor(descriptor) {}
+    explicit TestSocket(int descriptor) : descriptor(descriptor) { }
     TestSocket(const TestSocket&)            = delete;
     TestSocket& operator=(const TestSocket&) = delete;
     ~TestSocket() {
@@ -208,8 +216,7 @@ void settings() {
                             .visible       = webfront::testdriver::visibleWindows
         });
         session.create();
-        require(static_cast<bool>(send<BOOL>(session.window, "isVisible")) == webfront::testdriver::visibleWindows,
-                "Window visibility option was ignored");
+        require(static_cast<bool>(send<BOOL>(session.window, "isVisible")) == webfront::testdriver::visibleWindows, "Window visibility option was ignored");
         require(static_cast<bool>(send<BOOL>(session.view, "isInspectable")) == enabled, "Inspector policy was ignored");
         require(!send<BOOL>(send(send(session.view, "configuration"), "websiteDataStore"), "isPersistent"), "Website data was persistent");
         Object menu(send(type("NSMenu"), "new"));
@@ -223,7 +230,11 @@ void settings() {
 // A translucent background colour makes the window non-opaque, so what is behind it shows through; an opaque one does not.
 void translucentBackground() {
     Object pool(send(type("NSAutoreleasePool"), "new"));
-    for (const auto& [colour, translucent] : {std::pair<const char*, bool>{"#12345680", true}, {"#123456", false}, {"#123456ff", false}}) {
+    for (const auto& [colour, translucent] : {
+             std::pair<const char*, bool>{"#12345680",  true},
+             {  "#123456", false},
+             {"#123456ff", false}
+    }) {
         Session session("http://127.0.0.1:9002/", {.window = {.background = colour}, .visible = webfront::testdriver::visibleWindows});
         session.create();
         require(static_cast<bool>(send<BOOL>(session.window, "isOpaque")) != translucent,
@@ -236,13 +247,17 @@ void translucentBackground() {
 }
 
 void hiddenScheduling() {
-    Object  pool(send(type("NSAutoreleasePool"), "new"));
-    Object configuration(send(type("WKWebViewConfiguration"), "new"));
+    Object     pool(send(type("NSAutoreleasePool"), "new"));
+    Object     configuration(send(type("WKWebViewConfiguration"), "new"));
     const auto preferences = send(configuration.get(), "preferences");
-    Session session("http://127.0.0.1:0/", {.visible = false});
+    Session    session("http://127.0.0.1:0/", {.visible = false});
     // Check the runtime capability: a test binary built on macOS 14 can also run on macOS 13.3.
     if (!send<BOOL>(preferences, "respondsToSelector:", sel_registerName("setInactiveSchedulingPolicy:"))) {
-        expectFailure([&] { session.create(); }, "hidden sessions require macOS 14 or later");
+        expectFailure(
+            [&] {
+                session.create();
+            },
+            "hidden sessions require macOS 14 or later");
         return;
     }
     session.create();
@@ -256,8 +271,8 @@ void hiddenScheduling() {
 // A secondary window of a hidden application stays hidden, also when its page is opened again (which brings a visible
 // window to the front).
 void hiddenSecondary() {
-    Object  pool(send(type("NSAutoreleasePool"), "new"));
-    Object  configuration(send(type("WKWebViewConfiguration"), "new"));
+    Object pool(send(type("NSAutoreleasePool"), "new"));
+    Object configuration(send(type("WKWebViewConfiguration"), "new"));
     if (!send<BOOL>(send(configuration.get(), "preferences"), "respondsToSelector:", sel_registerName("setInactiveSchedulingPolicy:")))
         return;  // hidden sessions require macOS 14 (see hidden-scheduling)
     Session primary("http://127.0.0.1:0/", {.visible = false});
@@ -336,7 +351,7 @@ std::string readFile(const std::filesystem::path& path) {
 /// Opens a page with the file-service test injections of WKWebViewOptions, which a scenario fills in before show().
 struct ScenarioFrontend : Frontend {
     static inline std::function<void(webfront::frontend::WKWebViewOptions&)> configure;
-    static inline std::function<void(Session&)>                             started;
+    static inline std::function<void(Session&)>                              started;
 
     static void open(std::string_view port, std::string_view page) {
         initialize();
@@ -368,7 +383,7 @@ void download() {
     const auto folder = std::filesystem::temp_directory_path() / ("webfront-wk-download-" + std::to_string(getpid()));
     std::filesystem::remove_all(folder);
     std::string destination;
-    bool        done        = false;
+    bool        done            = false;
     ScenarioFrontend::configure = [&](webfront::frontend::WKWebViewOptions& options) {
         options.downloadDirectory = folder;  // Created by the frontend when the download starts.
         options.downloadFinished  = [&](const std::string& path) {
@@ -384,7 +399,8 @@ void download() {
     // The suggested name "../webfront-download.txt" must never leave the download folder. WebKit already neutralizes the
     // separators before the frontend sees the name (it arrives as "_webfront-download.txt"), so the folder is what is checked.
     const std::filesystem::path saved(destination);
-    require(saved.parent_path() == folder && saved.filename().string().ends_with("webfront-download.txt"), ("Unexpected download destination: " + destination).c_str());
+    require(saved.parent_path() == folder && saved.filename().string().ends_with("webfront-download.txt"),
+            ("Unexpected download destination: " + destination).c_str());
     require(readFile(destination) == "downloaded by WebFront", "The downloaded file has the wrong content");
     std::filesystem::remove_all(folder);
 }
@@ -392,7 +408,7 @@ void download() {
 void chooseFile(bool cancel, const char* page = "file-services.html?choose", const char* click = "document.getElementById('picker').click()") {
     const auto fixture = std::filesystem::temp_directory_path() / ("webfront-wk-chooser-" + std::to_string(getpid()) + ".txt");
     std::ofstream(fixture) << "chosen by the test";
-    bool asked                  = false;
+    bool               asked = false;
     static std::string finalTitle;
     finalTitle.clear();
     ScenarioFrontend::configure = [&](webfront::frontend::WKWebViewOptions& options) {
@@ -402,7 +418,7 @@ void chooseFile(bool cancel, const char* page = "file-services.html?choose", con
         };
     };
     static std::string clickScript;
-    clickScript = std::string("document.title === 'ready' && !window.clicked && (window.clicked = true, ") + click + ")";
+    clickScript               = std::string("document.title === 'ready' && !window.clicked && (window.clicked = true, ") + click + ")";
     ScenarioFrontend::started = [](Session& session) {
         // A chooser needs a user gesture, and evaluateJavaScript counts as one. The page reports through its title.
         Session* live = &session;
@@ -443,11 +459,11 @@ void chooseInSrcdocFrame() {
 
 /// Closing the window while a system panel is open: the panel answers "cancel" and its late answer touches nothing.
 void closeWithPanel(const char* page, const char* click) {
-    Object pool(send(type("NSAutoreleasePool"), "new"));
-    static bool sawPanel;
+    Object             pool(send(type("NSAutoreleasePool"), "new"));
+    static bool        sawPanel;
     static std::string script;
-    sawPanel = false;
-    script   = click;
+    sawPanel                    = false;
+    script                      = click;
     ScenarioFrontend::configure = [](webfront::frontend::WKWebViewOptions& options) {
         options.visible = true;  // No injection: the real NSSavePanel / NSOpenPanel opens as a sheet of a visible window.
     };
@@ -570,16 +586,16 @@ void replacedDownload() {
     const auto folder = std::filesystem::temp_directory_path() / ("webfront-wk-replace-" + std::to_string(getpid()));
     std::filesystem::remove_all(folder);
     std::filesystem::create_directories(folder);
-    const auto target    = folder / "report.txt";
-    std::filesystem::path temporary;
+    const auto               target = folder / "report.txt";
+    std::filesystem::path    temporary;
     std::vector<std::string> finished;
-    Session session("http://127.0.0.1:0/", {.visible = false, .downloadFinished = [&](const std::string& path) {
+    Session                  session("http://127.0.0.1:0/", {.visible = false, .downloadFinished = [&](const std::string& path) {
                                                 finished.push_back(path);
-                                            }});
-    const auto start = [&](std::uintptr_t key, std::string_view oldContent, std::string_view downloaded) {
+                                                             }});
+    const auto               start = [&](std::uintptr_t key, std::string_view oldContent, std::string_view downloaded) {
         std::ofstream(target) << oldContent;
         auto staging = std::make_unique<webfront::frontend::detail::DownloadStaging>(folder);
-        temporary = staging->path();
+        temporary    = staging->path();
         if (!downloaded.empty())
             std::ofstream(temporary) << downloaded;
         session.downloadDestinations[reinterpret_cast<id>(key)] = {std::move(staging), target, false, true};
@@ -599,7 +615,7 @@ void replacedDownload() {
 
     // A failed ordinary download removes its private fragment and releases its destination.
     const auto ordinary = session.reservations.reserve(folder, "ordinary.txt");
-    auto staging = std::make_unique<webfront::frontend::detail::DownloadStaging>(folder);
+    auto       staging  = std::make_unique<webfront::frontend::detail::DownloadStaging>(folder);
     std::ofstream(staging->path()) << "partial";
     const auto key                    = reinterpret_cast<id>(std::uintptr_t{4});
     session.downloadDestinations[key] = {std::move(staging), ordinary, true, false};
@@ -607,7 +623,7 @@ void replacedDownload() {
     require(!std::filesystem::exists(ordinary), "A failed ordinary download left an incomplete file");
     require(session.reservations.empty() && finished.size() == 1, "A failed download kept its reservation or reported success");
 
-    staging = std::make_unique<webfront::frontend::detail::DownloadStaging>(folder);
+    staging                           = std::make_unique<webfront::frontend::detail::DownloadStaging>(folder);
     session.downloadDestinations[key] = {std::move(staging), ordinary, false, false};
     std::ofstream(ordinary) << "created by another process";
     session.downloadEnded(key, false);
@@ -641,14 +657,15 @@ void navigationDiagnostic() {
 
 // The window is nearly transparent until the initial document has loaded; without that signal the delay shows it.
 void loadRevealPresentation(bool delayOnly) {
-    Object pool(send(type("NSAutoreleasePool"), "new"));
+    Object                                                                     pool(send(type("NSAutoreleasePool"), "new"));
     webfront::http::Server<webfront::NetProvider, webfront::fs::NativeDebugFS> server("127.0.0.1", "9002", std::filesystem::current_path());
-    std::jthread worker([&](std::stop_token stop) {
-        std::stop_callback cleanup(stop, [&] { server.stop(); });
+    std::jthread                                                               worker([&](std::stop_token stop) {
+        std::stop_callback cleanup(stop, [&] {
+            server.stop();
+        });
         server.run();
     });
-    Session session("http://127.0.0.1:9002/first-frame.html",
-                    {.window = {.background = "#123456"}, .visible = true});
+    Session session("http://127.0.0.1:9002/first-frame.html", {.window = {.background = "#123456"}, .visible = true});
     session.revealOnLoad = !delayOnly;
     session.presentDelay = delayOnly ? 1.0 : 60.0;  // the load, not the delay, must show the window
     session.create();
@@ -657,7 +674,7 @@ void loadRevealPresentation(bool delayOnly) {
         Object key(text("drawsBackground"));
         require(!send<BOOL>(send(session.view, "valueForKey:", key.get()), "boolValue"), "The view still paints its own background");
     }
-    double shownAlpha = 0;
+    double shownAlpha                = 0;
     session.presentation.windowShown = [&] {
         shownAlpha = send<double>(session.window, "alphaValue");
         session.close();
@@ -665,13 +682,16 @@ void loadRevealPresentation(bool delayOnly) {
     session.start();
     session.run();
     require(shownAlpha == 1.0, "The window was not made opaque");
-    require(session.presentation.byFrame != delayOnly, delayOnly ? "The load revealed the window although it was disabled" : "The window waited for the delay instead of the document load");
+    require(session.presentation.byFrame != delayOnly,
+            delayOnly ? "The load revealed the window although it was disabled" : "The window waited for the delay instead of the document load");
     // The displayed pixels are not read: cacheDisplayInRect renders neither the window's fill nor the web content (it reads black),
     // and capturing the screen needs a permission the CI does not have. The state that produces them is checked instead: the
     // window's colour, and the view no longer painting its own background (above).
     const auto color = send(send(session.window, "backgroundColor"), "colorUsingColorSpace:", send(type("NSColorSpace"), "sRGBColorSpace"));
     require(color != nullptr, "The window has no colour in the sRGB space");
-    const auto near = [](double value, double expected) { return value > expected - 0.01 && value < expected + 0.01; };
+    const auto near = [](double value, double expected) {
+        return value > expected - 0.01 && value < expected + 0.01;
+    };
     require(near(send<double>(color, "redComponent"), 0x12 / 255.0) && near(send<double>(color, "greenComponent"), 0x34 / 255.0)
                 && near(send<double>(color, "blueComponent"), 0x56 / 255.0),
             "The window does not have the configured background colour");
@@ -682,33 +702,38 @@ int main(int argc, char** argv) {
     try {
         checkWKWebViewHeader();
         const std::map<std::string_view, void (*)()> cases{
-            {        "repeated-show",         repeatedShow},
-            {          "main-thread",           mainThread},
-            {         "native-close",     nativeEarlyClose},
-            {                 "quit",                 quit},
-            {      "startup-timeout",       startupTimeout},
-            {      "redirect-policy",       redirectPolicy},
-            {             "settings",             settings},
-            {    "hidden-scheduling",     hiddenScheduling},
-            {     "hidden-secondary",      hiddenSecondary},
-            {"translucent-background", translucentBackground},
-            {"navigation-diagnostic", navigationDiagnostic},
-            {     "missing-response",      missingResponse},
-            { "committed-navigation",  committedNavigation},
-            {    "agent-application",     agentApplication},
-            {             "download",             download},
-            {          "choose-file",            chooseOne},
-            {        "cancel-choose",         chooseCancel},
-            {    "replaced-download",     replacedDownload},
-            {     "choose-in-blank",     chooseInBlankFrame},
-            {    "choose-in-srcdoc",    chooseInSrcdocFrame},
-            {   "close-with-open-panel",   closeWithOpenPanel},
-            {   "close-with-save-panel",   closeWithSavePanel},
-            {       "script-dialogs",       scriptDialogs},
-            { "close-with-script-dialog", closeWithScriptDialog},
+            {           "repeated-show",repeatedShow                                        },
+            {             "main-thread",            mainThread},
+            {            "native-close",      nativeEarlyClose},
+            {                    "quit",                  quit},
+            {         "startup-timeout",        startupTimeout},
+            {         "redirect-policy",        redirectPolicy},
+            {                "settings",              settings},
+            {       "hidden-scheduling",      hiddenScheduling},
+            {        "hidden-secondary",       hiddenSecondary},
+            {  "translucent-background", translucentBackground},
+            {   "navigation-diagnostic",  navigationDiagnostic},
+            {        "missing-response",       missingResponse},
+            {    "committed-navigation",   committedNavigation},
+            {       "agent-application",      agentApplication},
+            {                "download",              download},
+            {             "choose-file",             chooseOne},
+            {           "cancel-choose",          chooseCancel},
+            {       "replaced-download",      replacedDownload},
+            {         "choose-in-blank",    chooseInBlankFrame},
+            {        "choose-in-srcdoc",   chooseInSrcdocFrame},
+            {   "close-with-open-panel",    closeWithOpenPanel},
+            {   "close-with-save-panel",    closeWithSavePanel},
+            {          "script-dialogs",         scriptDialogs},
+            {"close-with-script-dialog", closeWithScriptDialog},
             { "sandboxed-script-dialog", sandboxedScriptDialog},
-            {          "load-reveal",          [] { loadRevealPresentation(false); }},
-            {        "present-timeout",        [] { loadRevealPresentation(true); }}
+            {             "load-reveal",
+             [] {
+             loadRevealPresentation(false);
+             }                                                },
+            {         "present-timeout",         [] {
+         loadRevealPresentation(true);
+         }            }
         };
         cases.at(argc == 2 ? argv[1] : "")();
         return 0;

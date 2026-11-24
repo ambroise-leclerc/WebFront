@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-16
+//
+// WebFront — examples
+// Role: Interface of the optional CUDA unit: device name, whole-image computation, copy back and release.
+// Thread: worker-safe | Alloc: zero-hot-path
+// LLM: functions return nullptr or the reason of a failure; see docs/HOST_LOOP_EXAMPLE.md
+
 #pragma once
 
 // The optional CUDA renderer of the Boing Ball (BoingCuda.cu). Its interface is plain C++ so that the unit nvcc
@@ -30,7 +39,7 @@ inline const char* cudaCompute(const Scene&) {
 inline const char* cudaCopy(std::uint32_t*, std::size_t) {
     return "this build has no CUDA renderer";
 }
-inline void cudaRelease() {}
+inline void cudaRelease() { }
 #endif
 
 }  // namespace boing

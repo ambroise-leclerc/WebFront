@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2025-08-16
+//
+// WebFront — system
+// Role: Windows header compatibility definitions included before any platform header.
+// Thread: worker-safe | Alloc: zero-hot-path
+// LLM: include-order shim; keep it minimal
+
 #pragma once
 
 // Windows compatibility header - centralizes Windows-specific macro definitions
@@ -5,31 +14,31 @@
 
 #ifdef _WIN32
 
-// Prevent Windows min/max macros from interfering with std::min/max
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
+    // Prevent Windows min/max macros from interfering with std::min/max
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
 
-// Reduce Windows header bloat and compilation time
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
+    // Reduce Windows header bloat and compilation time
+    #ifndef WIN32_LEAN_AND_MEAN
+        #define WIN32_LEAN_AND_MEAN
+    #endif
 
-// Define required macros to prevent header conflicts
-#ifndef STRICT
-#define STRICT
-#endif
+    // Define required macros to prevent header conflicts
+    #ifndef STRICT
+        #define STRICT
+    #endif
 
-#ifndef _WINSOCKAPI_
-#define _WINSOCKAPI_
-#endif
+    #ifndef _WINSOCKAPI_
+        #define _WINSOCKAPI_
+    #endif
 
-// Ensure WinSock2.h is included before any headers that might include WinSock.h
-// This prevents conflicts between WinSock and WinSock2 definitions
-#include <winsock2.h>
-#include <ws2tcpip.h>
+    // Ensure WinSock2.h is included before any headers that might include WinSock.h
+    // This prevents conflicts between WinSock and WinSock2 definitions
+    #include <winsock2.h>
+    #include <ws2tcpip.h>
 
-// Common Windows headers that benefit from the above macros
-#include <windows.h>
+    // Common Windows headers that benefit from the above macros
+    #include <windows.h>
 
-#endif // _WIN32
+#endif  // _WIN32
