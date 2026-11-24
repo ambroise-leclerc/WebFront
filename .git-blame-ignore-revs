@@ -1,3 +1,5 @@
 # Commits that only reformat or re-header files; `git config blame.ignoreRevsFile .git-blame-ignore-revs` makes git blame skip them.
 # Reformat the C++ sources with clang-format (#653)
 48eea66d540c4921c447bebab1811f40ed177cd5
+# Reformat with clang-format 23.1.5, the reference version (#653)
+32b8d55a732e6333de9537fa6b73b4bc30321a58

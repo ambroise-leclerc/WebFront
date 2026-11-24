@@ -22,7 +22,7 @@ jobs:
 
       # The version is pinned: clang-format changes its output from one release to the next.
       - name: Install clang-format
-        run: python3 -m pip install --user clang-format==21.1.8
+        run: python3 -m pip install --user clang-format==23.1.5
 
       - name: Check the tracked sources
         run: .github/scripts/check-clang-format.sh "$HOME/.local/bin/clang-format"
