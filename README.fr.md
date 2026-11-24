@@ -16,7 +16,7 @@ Créez une interface moderne pour votre application C++, puis distribuez le tout
 
 Avec `app.bootstrap("developer")`, l’application ouvre son propre environnement de développement. Dans cette fenêtre, `wf` compile l’interface, affiche un aperçu, vérifie les types et lance les tests Jasmine. Vous pouvez utiliser le terminal ou confier les mêmes opérations à un agent de programmation via MCP. Tout cela fonctionne sans Node.js ni npm.
 
-Une fois l’interface prête, embarquez ses ressources dans l’exécutable. Vous obtenez une application compacte et autonome, utilisable hors ligne avec le navigateur du système ou une vue web native compatible.
+Une fois l’interface prête, embarquez ses ressources dans l’exécutable. Vous obtenez une application compacte et autonome qui fonctionne hors ligne, dans une fenêtre native ou, sur les systèmes embarqués et sans écran, via un navigateur web.
 
 <a href="#jeu-de-la-vie--du-calcul-c-à-lapplication-native"><img src="docs/images/life-bootstrap.gif" width="100%" alt="Parcours du jeu de la vie : application C++, terminal wf, installation des dépendances et aperçu React"></a>
 
