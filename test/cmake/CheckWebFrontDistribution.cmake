@@ -2,7 +2,9 @@ cmake_minimum_required(VERSION 3.31)
 if(NOT ROOT OR NOT WORK)
     message(FATAL_ERROR "ROOT and WORK are required")
 endif()
-set(toolchain_arguments)
+# The consumer builds a few small translation units and uses no C++ modules: skip the dependency scan and the linked
+# compiler probes, which dominate its time on a loaded runner.
+set(toolchain_arguments -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY)
 if(CONSUMER_CXX_COMPILER)
     list(APPEND toolchain_arguments "-DCMAKE_CXX_COMPILER=${CONSUMER_CXX_COMPILER}")
 endif()
