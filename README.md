@@ -11,7 +11,7 @@
 
 [English](README.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
 
-Build a modern interface for your C++ application, then ship it as a single executable. WebFront is a header-only C++23 library that lets you keep your application logic in C++ and build a reactive UI with TypeScript, React and browser-compatible packages.
+WebFront is a C++ UI framework that produces modern, reactive interfaces. It is a header-only C++23 library: your application logic stays in C++, the UI is built with TypeScript, React and browser-compatible packages, and the finished application ships as a single executable.
 
 Your application can open its own development environment with `app.bootstrap("developer")`. In that window, `wf` builds and previews the UI, checks types and runs Jasmine tests. You can work in the terminal or let a coding agent drive the same workflow over MCP. Node.js and npm are unnecessary.
 
