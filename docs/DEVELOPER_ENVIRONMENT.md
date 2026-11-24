@@ -728,6 +728,8 @@ above). Rows before 0.9 were reconstructed from the header of each tag; 0.4.0 pr
 | Library | Environment | Minimum api |
 | --- | --- | --- |
 | unreleased | 1.2.0 | 1 |
+| 1.2.0 | 1.2.0 | 1 |
+| 1.1.1 | 1.0.1 | 1 |
 | 1.1.0 | 1.0.1 | 1 |
 | 1.0.0 | 1.0.0 | 1 |
 | 0.9.0 | 0.9.0 | 1 |

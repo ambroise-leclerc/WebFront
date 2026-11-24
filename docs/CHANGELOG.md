@@ -10,6 +10,13 @@ these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
+## [1.2.0] - 2026-11-24
+
+WebFront 1.2 ships with developer environment 1.2.0. The application itself becomes the MCP server that a coding agent drives
+(`enableAutomation`), and it can open a second native window, serve HTTPS and run beside other applications on a free port.
+It has breaking changes: `WebView2Options` becomes `ViewOptions`, `webfront-agent` is removed and the CEF profile moves; each
+entry below gives its migration.
+
 ### Breaking
 - `WebView2Options` is now `ViewOptions`, shared with WKWebView: `userDataFolder` moves after `launch`, so a positional initialization of `WebView2Options` stops compiling, and so does a designated one that writes `.userDataFolder` before `.contentPolicy`, `.window`, `.visible` or `.launch` (write it last) (#652, `docs/FRONTENDS.md`).
 - `webfront/automation/Enable.hpp` no longer compiles with `WEBFRONT_DISTRIBUTION`: gate `enableAutomation` out of the distribution build, as the guide already advised (#632, ADR-025).
@@ -27,11 +34,20 @@ these entries stays in the GitHub releases and the Git history.
 - Serve HTTPS and WSS with the optional header-only TLS 1.3 listener and reload its PEM identity after renewal (#631, `docs/TLS.md`).
 - Start an application with no port setting when `9002` is taken: an empty `WebFrontConfig::port` falls back to a free port, a chosen port is never replaced, and CEF and WebKitGTK give each live instance its own profile directory (#617, `docs/HOST_INTEGRATION.md`).
 - Start several applications side by side: the default port follows `WEBFRONT_PORT` (a number from 0 to 65535, `0` asks for a free port, `9002` remains the default), the examples take `--port`, the server announces the port really bound, and a failed bind names the address, the port and the cause (#617, `docs/HOST_INTEGRATION.md`).
-- Run the MSVC code analysis in a pull request into `develop` that changes Windows code, and list the reruns each job needed before going green with `FlakeReport.py --days` (#628, `docs/TEST_TIERS.md`, `docs/TEST_PERFORMANCE.md`).
 
 ### Fixed
 - Check the leftover STA of a WebView2 window only after a page that ran to its end, not after one that closes the window on a load failure: the runtime can keep a COM initialization of its own then, in about one `show()` in 500 under load, and the limit is documented with its measurements (#638, `docs/PROJECT_STATUS.md`).
 - Refuse every `Sec-Fetch-*` request header on the MCP listener, including `Sec-Fetch-Dest`, in both authenticated and unauthenticated modes (#637).
+
+## [1.1.1] - 2026-11-20
+
+WebFront 1.1.1 ships with developer environment 1.0.1. It repairs the desktop CI jobs that the 1.1.0 release exposed (a Windows
+code-analysis error in the PTY, a macOS socket option error) and removes the GCC 13 warnings. No breaking change.
+
+### Added
+- Run the MSVC code analysis in a pull request into `develop` that changes Windows code, and list the reruns each job needed before going green with `FlakeReport.py --days` (#628, `docs/TEST_TIERS.md`, `docs/TEST_PERFORMANCE.md`).
+
+### Fixed
 - Pass the compiler analysis on the Windows pseudoterminal when it cannot prove the attribute list non-null (C6387), stop a unit test from opening the developer's real browser (the directory of its replacement opener was removed before the shell found it), and keep an accepted connection whose `TCP_NODELAY` the system refuses, as macOS does after a reset (#628).
 
 ## [1.1.0] - 2026-11-20
@@ -287,7 +303,9 @@ Coroutines and the opt-in developer environment. One **breaking** change to the 
 
 - Fail decoding when a bridge integer is out of the requested C++ range, instead of invoking undefined behavior.
 
-[Unreleased]: https://github.com/ambroise-leclerc/WebFront/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/ambroise-leclerc/WebFront/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/ambroise-leclerc/WebFront/compare/v1.1.1...v1.2.0
+[1.1.1]: https://github.com/ambroise-leclerc/WebFront/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/ambroise-leclerc/WebFront/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ambroise-leclerc/WebFront/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/ambroise-leclerc/WebFront/compare/v0.8.0...v0.9.0
