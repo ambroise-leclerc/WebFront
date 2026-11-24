@@ -132,7 +132,7 @@ using webfront::system::detail::toWide;
 struct WindowsHandle {
     HANDLE handle   = nullptr;
     WindowsHandle() = default;
-    explicit WindowsHandle(HANDLE h) : handle(h == INVALID_HANDLE_VALUE ? nullptr : h) {}
+    explicit WindowsHandle(HANDLE h) : handle(h == INVALID_HANDLE_VALUE ? nullptr : h) { }
     WindowsHandle(const WindowsHandle&)            = delete;
     WindowsHandle& operator=(const WindowsHandle&) = delete;
     ~WindowsHandle() {
@@ -291,7 +291,7 @@ inline ProcessResult runProcessWindows(const ProcessSpec& spec, const std::atomi
                 if (!::ReadFile(pipe, buffer, sizeof buffer, &count, &overlapped)) {
                     if (::GetLastError() != ERROR_IO_PENDING)
                         break;  // The other end is closed: the end of the stream.
-                    while (::WaitForSingleObject(event.handle, 20) == WAIT_TIMEOUT && !stopReading) {}
+                    while (::WaitForSingleObject(event.handle, 20) == WAIT_TIMEOUT && !stopReading) { }
                     if (!HasOverlappedIoCompleted(&overlapped))
                         ::CancelIoEx(pipe, &overlapped);
                     if (!::GetOverlappedResult(pipe, &overlapped, &count, TRUE))
@@ -353,7 +353,7 @@ inline ProcessResult runProcessWindows(const ProcessSpec& spec, const std::atomi
 struct Descriptor {
     int fd       = -1;
     Descriptor() = default;
-    explicit Descriptor(int value) : fd(value) {}
+    explicit Descriptor(int value) : fd(value) { }
     Descriptor(const Descriptor&)            = delete;
     Descriptor& operator=(const Descriptor&) = delete;
     ~Descriptor() {

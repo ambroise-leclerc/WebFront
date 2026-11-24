@@ -172,7 +172,7 @@ Task greet(Context context) {
 Task waitUntilStopped(Context context, shared_ptr<bool> unwound) {
     Unwound guard{std::move(unwound)};
     context.write("waiting\n");
-    co_await testing::ManualSender([](auto) {});
+    co_await testing::ManualSender([](auto) { });
     context.write("never reached\n");
 }
 
@@ -233,7 +233,7 @@ const Scenario commandsRegister{
         });
         given("an application where only webfront.commands.cancel is taken", [&] {
             FakeApp app;
-            app.cppFunction<void, FakeUI, uint32_t>("webfront.commands.cancel", [](FakeUI, uint32_t) {});
+            app.cppFunction<void, FakeUI, uint32_t>("webfront.commands.cancel", [](FakeUI, uint32_t) { });
             then("Commands is refused and registers nothing", [&] {
                 checkThrows<logic_error>([&] {
                     Commands<FakeApp>{app};
@@ -415,7 +415,7 @@ const Scenario ctrlC{"Ctrl+C stops a running command and the next one runs at on
                              });
                              when("a command that returns once asked to stop is cancelled", [&] {
                                  fixture.commands.add("polite", "", [](Context context) -> Task {
-                                     co_await (testing::ManualSender([](auto) {}) | networking::ex::upon_stopped([] {
+                                     co_await (testing::ManualSender([](auto) { }) | networking::ex::upon_stopped([] {
                                                    return size_t{};
                                                }));
                                      context.exit(0);
@@ -596,7 +596,7 @@ const Scenario basicWFProvides{"BasicWF provides the application facilities of c
                                        RealApp app(WebFrontConfig{.port = "0"});
                                        then("browsers have identifiers and disconnections can be subscribed to", [&] {
                                            check(RealApp::UI(app, 5, 1).id() == 5);
-                                           auto subscription = app.subscribeUIClosed([](RealApp::UI) {});
+                                           auto subscription = app.subscribeUIClosed([](RealApp::UI) { });
                                            check(subscription.active());
                                        });
                                        then("a second Commands object is refused, and cppFunction tells a taken name", [&] {

@@ -100,7 +100,7 @@ public:
                   std::cerr << "Lifecycle timeout at stage: " << stageName(lifecycleStage.load()) << std::endl;
                   std::_Exit(EXIT_FAILURE);
               }
-          }) {}
+          }) { }
     ~LifecycleWatchdog() {
         {
             std::lock_guard lock{mutex};
@@ -218,7 +218,7 @@ struct ScheduledOperation {
     decltype(webfront::networking::ex::connect(std::declval<decltype(std::declval<webfront::frontend::UIExecutor>().schedule())>(),
                                                std::declval<OutcomeReceiver>())) operation;
     explicit ScheduledOperation(const webfront::frontend::UIExecutor& executor)
-        : operation(webfront::networking::ex::connect(executor.schedule(), OutcomeReceiver{&result, executor})) {}
+        : operation(webfront::networking::ex::connect(executor.schedule(), OutcomeReceiver{&result, executor})) { }
     std::future<std::pair<Outcome, bool>> start() {
         auto future = result.get_future();
         webfront::networking::ex::start(operation);
@@ -797,7 +797,7 @@ class OnInterfaceThread {
 
 public:
     OnInterfaceThread(const webfront::frontend::UIExecutor& executor, Function work)
-        : function(std::move(work)), operation(webfront::networking::ex::connect(executor.schedule(), Receiver{this})) {}
+        : function(std::move(work)), operation(webfront::networking::ex::connect(executor.schedule(), Receiver{this})) { }
     std::future<Outcome> outcome() {
         return done.get_future();
     }

@@ -75,7 +75,7 @@ void registerPtyPage(App& app, PtyOptions options, std::string name = "webfront.
             launch->generation = state->generation + 1;
             launch->terminal   = std::async(std::launch::async, [options = state->options]() mutable {
                                    return std::make_shared<Pty>(std::move(options));
-                               }).share();
+                                 }).share();
             state->launching   = std::move(launch);
         }
         auto launch = state->launching;

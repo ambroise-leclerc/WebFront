@@ -197,7 +197,7 @@ class DirectChannel : public std::enable_shared_from_this<DirectChannel> {
     }
 
 public:
-    DirectChannel(ComPtr<ICoreWebView2> browser, ComPtr<ICoreWebView2Environment> factory) : view(std::move(browser)), environment(std::move(factory)) {}
+    DirectChannel(ComPtr<ICoreWebView2> browser, ComPtr<ICoreWebView2Environment> factory) : view(std::move(browser)), environment(std::move(factory)) { }
     DirectChannel(const DirectChannel&)            = delete;
     DirectChannel& operator=(const DirectChannel&) = delete;
     ~DirectChannel() {

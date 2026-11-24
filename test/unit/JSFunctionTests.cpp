@@ -79,7 +79,7 @@ bool checkNumber(size_t index, double number) {
 
 template <typename WebFront>
 struct WebLinkMock {
-    WebLinkMock(WebLinkId id, WebFront& wf) : webLinkId(id), webFront(wf) {}
+    WebLinkMock(WebLinkId id, WebFront& wf) : webLinkId(id), webFront(wf) { }
     WebLinkId webLinkId;
     WebFront& webFront;
     void      sendFrame(websocket::Frame<typename WebFront::Net> frame) {

@@ -73,7 +73,7 @@ inline std::vector<std::string> contractStrings(std::string_view value) {
 }
 class OperationError : public std::runtime_error {
 public:
-    OperationError(std::string category, std::string message) : std::runtime_error(std::move(message)), code(std::move(category)) {}
+    OperationError(std::string category, std::string message) : std::runtime_error(std::move(message)), code(std::move(category)) { }
     const std::string code;
 };
 /// The channel to the native owner failed: the outcome of the request in flight is unknown.

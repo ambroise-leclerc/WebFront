@@ -84,12 +84,12 @@ public:
         state->stopped = true;
         state->changed.notify_all();
     }
-    void restart() {}
+    void restart() { }
 };
 
 struct ContractAcceptor : networking::SocketBaseMock {
-    explicit ContractAcceptor(const ContractIoContext&) {}
-    void open(auto) {}
+    explicit ContractAcceptor(const ContractIoContext&) { }
+    void open(auto) { }
     bool is_open() const {
         return true;
     }
@@ -105,7 +105,7 @@ enum class Failure { none, standard, nonStandard, beforeWindow };
 template <frontend::Action onReturn, Failure failure = Failure::none>
 struct ContractFrontend {
     static constexpr frontend::Action action = onReturn;
-    static void                       initialize() {}
+    static void                       initialize() { }
     static void                       open(std::string_view, std::string_view) {
         const auto       state = ContractIoContext::current;
         std::unique_lock lock(state->mutex);
@@ -274,8 +274,8 @@ namespace {
 struct WindowRecorder {
     static inline WindowOptions       received;
     static constexpr frontend::Action action = frontend::Action::keepServerRunning;
-    static void                       initialize() {}
-    static void                       open(std::string_view, std::string_view) {}
+    static void                       initialize() { }
+    static void                       open(std::string_view, std::string_view) { }
     static void                       open(std::string_view, std::string_view, std::string_view, const ContentPolicy&, const WindowOptions& window) {
         received = window;
     }
@@ -403,8 +403,8 @@ struct LaunchRecordingFrontend {
     static constexpr frontend::Action action = frontend::Action::keepServerRunning;
     static inline ViewLaunch          received{};
     static inline int                 opens = 0;
-    static void                       initialize() {}
-    static void                       open(std::string_view, std::string_view) {}
+    static void                       initialize() { }
+    static void                       open(std::string_view, std::string_view) { }
     static void open(std::string_view, std::string_view, std::string_view, const ContentPolicy&, const WindowOptions&, const ViewLaunch& launch) {
         received = launch;
         ++opens;
@@ -442,7 +442,7 @@ struct LaunchRecorder {
     static inline std::thread::id     thread;
     static inline bool                fail   = false;
     static constexpr frontend::Action action = frontend::Action::keepServerRunning;
-    static void                       initialize() {}
+    static void                       initialize() { }
     static void                       open(std::string_view, std::string_view) {
         throw std::logic_error("start() must not call open()");
     }
@@ -522,7 +522,7 @@ struct SharedWindowFrontend : ContractFrontend<frontend::Action::closeServerAfte
         }
         if constexpr (ownsExecutor) {
             auto& host = frontend::uiExecutorHostOf<SharedWindowFrontend>();
-            host.attach([] {});  // throws std::logic_error when another session runs
+            host.attach([] { });  // throws std::logic_error when another session runs
             struct Detach {
                 ~Detach() {
                     frontend::uiExecutorHostOf<SharedWindowFrontend>().close();
@@ -738,7 +738,7 @@ const Scenario uIThreadRuns{"UIThread runs an application on its own thread whil
                                 given("a window that is still opening when the host stops", [&] {
                                     using Late    = HostFrontend<Failure::none, true>;
                                     Late::refused = 0;
-                                    UIThread<HostApp<Late>> ui(WebFrontConfig{}, [](auto&) {});
+                                    UIThread<HostApp<Late>> ui(WebFrontConfig{}, [](auto&) { });
                                     const auto              state = ContractIoContext::current;
                                     when("stop is called at once", [&] {
                                         requireNothrow([&] {
@@ -772,13 +772,13 @@ const Scenario uIThreadReports{"UIThread reports start and opening failures to t
                                            using Hosted = UIThread<HostApp<UninitializableFrontend>>;
                                            requireThrows(
                                                [&] {
-                                                   Hosted(WebFrontConfig{}, [](auto&) {});
+                                                   Hosted(WebFrontConfig{}, [](auto&) { });
                                                },
                                                equals("no display"));
                                        });
                                    });
                                    given("a window that fails to open", [&] {
-                                       UIThread<HostApp<HostFrontend<Failure::beforeWindow>>> ui(WebFrontConfig{}, [](auto&) {});
+                                       UIThread<HostApp<HostFrontend<Failure::beforeWindow>>> ui(WebFrontConfig{}, [](auto&) { });
                                        const auto                                             state = ContractIoContext::current;
                                        when("the host waits for the session", [&] {
                                            require(ui.waitFor(coordinationTimeout));
@@ -838,7 +838,7 @@ const Scenario startCalled{"start() is called once and replaces show()", [] {
                                });
                                given("a frontend that was shown and can also launch", [&] {
                                    struct Both : LaunchRecorder {
-                                       static void open(std::string_view, std::string_view) {}
+                                       static void open(std::string_view, std::string_view) { }
                                    };
                                    LaunchRecorder::url.clear();
                                    HostApp<Both> app;
@@ -911,7 +911,7 @@ const Scenario uIThreadWaits{"UIThread waits for a window that takes longer than
                                      then("the destructor waits for it instead of reporting a stall and leaving its thread joinable (#567)", [&] {
                                          std::shared_ptr<LoopState> state;
                                          {
-                                             UIThread<HostApp<Slow>> ui(WebFrontConfig{}, [](auto&) {});
+                                             UIThread<HostApp<Slow>> ui(WebFrontConfig{}, [](auto&) { });
                                              state = ContractIoContext::current;
                                              requireEventually([&] {
                                                  return windowOpen(state);
@@ -929,7 +929,7 @@ const Scenario uIThreadJoins{"UIThread joins its thread when a close request thr
                                  given("a frontend whose first close requests throw", [&] {
                                      using Flaky     = SlowCloseFrontend<3, true>;
                                      Flaky::requests = 0;
-                                     UIThread<HostApp<Flaky>> ui(WebFrontConfig{}, [](auto&) {});
+                                     UIThread<HostApp<Flaky>> ui(WebFrontConfig{}, [](auto&) { });
                                      requireEventually([&] {
                                          return windowOpen(ContractIoContext::current);
                                      });
@@ -949,7 +949,7 @@ const Scenario uIThreadJoins{"UIThread joins its thread when a close request thr
                                      then("the destructor still joins", [&] {
                                          requireNothrow([&] {
                                              [&] {
-                                                 UIThread<HostApp<Flaky>> ui(WebFrontConfig{}, [](auto&) {});
+                                                 UIThread<HostApp<Flaky>> ui(WebFrontConfig{}, [](auto&) { });
                                                  requireEventually([&] {
                                                      return windowOpen(ContractIoContext::current);
                                                  });
@@ -1209,7 +1209,7 @@ struct SessionOnlyFrontend : ContractFrontend<frontend::Action::closeServerAfter
     }
     static void open(std::string_view port, std::string_view file) {
         auto& host = frontend::uiExecutorHostOf<SessionOnlyFrontend>();
-        host.attach([] {});
+        host.attach([] { });
         struct Detach {
             ~Detach() {
                 frontend::uiExecutorHostOf<SessionOnlyFrontend>().close();
@@ -1386,7 +1386,7 @@ const Scenario secondaryOwnership{"Only the owner can operate secondary windows"
                                                       refused = true;
                                                   }
                                                   success = closed && refused && !other.requestClose("one.html");
-                                              } catch (...) {}
+                                              } catch (...) { }
                                               ContractIoContext::current = state;
                                               done                       = true;
                                           };
@@ -1481,7 +1481,7 @@ struct NotReadyFrontend : ContractFrontend<frontend::Action::closeServerAfterOpe
     }
     static void open(std::string_view, std::string_view) {
         auto& host = frontend::uiExecutorHostOf<NotReadyFrontend>();
-        host.attach([] {});
+        host.attach([] { });
         struct Detach {
             ~Detach() {
                 frontend::uiExecutorHostOf<NotReadyFrontend>().close();
@@ -1603,7 +1603,7 @@ const Scenario secondWindowRefused{"A frontend without a second window refuses o
 
 namespace {
 // Native frontends that can show a second window; the second cannot initialize, so the system browser replaces it.
-struct SecondaryNative : NotReadyFrontend {};
+struct SecondaryNative : NotReadyFrontend { };
 struct UnavailableSecondaryNative : NotReadyFrontend {
     static void initialize() {
         throw std::runtime_error("no display");
@@ -1641,7 +1641,7 @@ const Scenario secondaryAvailability{
 
 const Scenario uIThreadStop{"UIThread::stop reports a window that does not close", [] {
                                 given("a window that ignores close requests", [&] {
-                                    UIThread<HostApp<DeafFrontend>> ui(WebFrontConfig{}, [](auto&) {});
+                                    UIThread<HostApp<DeafFrontend>> ui(WebFrontConfig{}, [](auto&) { });
                                     const auto                      state = ContractIoContext::current;
                                     requireEventually([&] {
                                         return windowOpen(state);
@@ -1677,7 +1677,7 @@ const Scenario closeRequest{"A close request made for one session never closes t
                                     const auto                 close        = [&](const frontend::NativeWindowHandle& window) {
                                         closed = *static_cast<int*>(window.pointer) + 1;
                                     };
-                                    host.attach([] {});
+                                    host.attach([] { });
                                     const auto first = host.executor().session();
                                     require(first);
                                     windowHost.publish({.kind = frontend::NativeWindowKind::gtk, .pointer = &firstWindow, .portalParent = {}});
@@ -1685,7 +1685,7 @@ const Scenario closeRequest{"A close request made for one session never closes t
                                     // window of its own. Everything is sequenced here: the request is made after the check of the first session passed.
                                     windowHost.retract();
                                     host.close();
-                                    host.attach([] {});
+                                    host.attach([] { });
                                     const auto second = host.executor().session();
                                     require(second);
                                     windowHost.publish({.kind = frontend::NativeWindowKind::gtk, .pointer = &secondWindow, .portalParent = {}});
@@ -1714,7 +1714,7 @@ const Scenario systemBrowserLoop{"The system browser's loop ignores a close requ
                                          using Browser = frontend::BrowserWithUILoopFrontend;
                                          // The loop's stop state is process-wide and a test before this one may have left a request pending: spend it.
                                          Browser::requestStop();
-                                         Browser::loop("127.0.0.1", "9002", "index.html", +[](const std::string&) {});
+                                         Browser::loop("127.0.0.1", "9002", "index.html", +[](const std::string&) { });
                                          std::optional<frontend::UISession> stale;
                                          {
                                              std::jthread client([&] {
@@ -1725,7 +1725,7 @@ const Scenario systemBrowserLoop{"The system browser's loop ignores a close requ
                                                  stale = executor.session();
                                                  Browser::requestStop();
                                              });
-                                             Browser::loop("127.0.0.1", "9002", "index.html", +[](const std::string&) {});
+                                             Browser::loop("127.0.0.1", "9002", "index.html", +[](const std::string&) { });
                                          }
                                          require(stale);
                                          then("a later loop is not ended by it, and its own session ends it", [&] {
@@ -1744,7 +1744,7 @@ const Scenario systemBrowserLoop{"The system browser's loop ignores a close requ
                                                  if (!ownAccepted)
                                                      Browser::requestStop();
                                              });
-                                             Browser::loop("127.0.0.1", "9002", "index.html", +[](const std::string&) {});
+                                             Browser::loop("127.0.0.1", "9002", "index.html", +[](const std::string&) { });
                                              client.join();
                                              check(!staleAccepted);
                                              check(ownAccepted);
@@ -1817,7 +1817,7 @@ const Scenario systemBrowserLoopUp{"The system browser's loop is up while its op
                                                ::setenv("PATH", path.c_str(), 1);
                                                using Browser = frontend::BrowserWithUILoopFrontend;
                                                Browser::requestStop();  // spend a request that an earlier test may have left pending
-                                               Browser::loop("127.0.0.1", "9002", "index.html", +[](const std::string&) {});
+                                               Browser::loop("127.0.0.1", "9002", "index.html", +[](const std::string&) { });
                                                std::atomic<bool> closed{false};
                                                std::jthread      host([&] {
                                                    // The host's own thread: the loop must be there to receive the request well before the opener ends.
@@ -1827,7 +1827,7 @@ const Scenario systemBrowserLoopUp{"The system browser's loop is up while its op
                                                    if (!closed)
                                                        Browser::requestStop();
                                                });
-                                               const auto start = std::chrono::steady_clock::now();
+                                               const auto        start = std::chrono::steady_clock::now();
                                                Browser::open("9002", "index.html");
                                                const auto elapsed = std::chrono::steady_clock::now() - start;
                                                host.join();
@@ -1908,7 +1908,7 @@ const Scenario windowCloseScenario{"A window close request is always released by
                                                });
                                            });
                                            when("the loop closes with the request pending", [&] {
-                                               host.attach([] {});
+                                               host.attach([] { });
                                                require(request());
                                                check(resource.use_count() == 2);
                                                host.close();
@@ -1918,7 +1918,7 @@ const Scenario windowCloseScenario{"A window close request is always released by
                                                });
                                            });
                                            when("the loop runs the request", [&] {
-                                               host.attach([] {});
+                                               host.attach([] { });
                                                andWhen("the window is published", [&] {
                                                    int window = 0;
                                                    windowHost.publish({.kind = frontend::NativeWindowKind::gtk, .pointer = &window, .portalParent = {}});

@@ -176,7 +176,7 @@ private:
     static void reportDeferredShutdown() noexcept {
         try {
             log::error("Task shutdown has not joined yet; waiting for suspended operations to finish");
-        } catch (...) {}  // Logging must not make the destructor path throw.
+        } catch (...) { }  // Logging must not make the destructor path throw.
     }
 };
 

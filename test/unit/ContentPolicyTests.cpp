@@ -175,7 +175,7 @@ const Scenario webSocketUpgrades{"WebSocket upgrades authorize Origin before ret
                                          const std::string input = "GET / HTTP/1.1\r\nHost: attacker.example\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                                                                    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
                                                                    + headers + "\r\n";
-                                         Request request;
+                                         Request           request;
                                          require(request.parseSomeData(input.begin(), input.end()));
                                          RequestHandler<Net, MockFileSystem<>> handler{
                                              ".",

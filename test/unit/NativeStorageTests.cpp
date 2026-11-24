@@ -1195,7 +1195,7 @@ const Scenario directoriesMade{"Directories made by the tests stay closed to gro
                                    // Restores the umask on every exit, a failing REQUIRE or an exception included: it is process-wide.
                                    struct UmaskScope {
                                        mode_t previous;
-                                       UmaskScope() : previous(::umask(0)) {}
+                                       UmaskScope() : previous(::umask(0)) { }
                                        UmaskScope(const UmaskScope&)            = delete;
                                        UmaskScope& operator=(const UmaskScope&) = delete;
                                        ~UmaskScope() {

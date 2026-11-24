@@ -77,7 +77,7 @@ class BasicUI {
     WebLinkGeneration generation;
 
 public:
-    BasicUI(WebFront& wf, WebLinkId id, WebLinkGeneration connectionGeneration) : webFront(&wf), webLinkId(id), generation(connectionGeneration) {}
+    BasicUI(WebFront& wf, WebLinkId id, WebLinkGeneration connectionGeneration) : webFront(&wf), webLinkId(id), generation(connectionGeneration) { }
 
     /// Identifies this browser's connection among those connected. The 16-bit identifier of a released connection
     /// is reused after 65,536 later connections; the value also carries the connection's generation, which is never
@@ -319,7 +319,7 @@ auto makeDeferredHandler(Function&& function) {
 // treats their absence as "inference unsupported", so unmatched T (generic lambdas, functors with
 // an overloaded or templated operator(), non-callables) fail detection instead of a specialization.
 template <typename T>
-struct callable_traits_impl {};
+struct callable_traits_impl { };
 
 template <typename R, typename... Args>
 struct callable_traits_impl<R (*)(Args...)> {
@@ -328,7 +328,7 @@ struct callable_traits_impl<R (*)(Args...)> {
     using RawArgs     = std::tuple<Args...>;
 };
 template <typename R, typename... Args>
-struct callable_traits_impl<R (*)(Args...) noexcept> : callable_traits_impl<R (*)(Args...)> {};
+struct callable_traits_impl<R (*)(Args...) noexcept> : callable_traits_impl<R (*)(Args...)> { };
 
 template <typename R, typename... Args>
 struct callable_traits_impl<std::function<R(Args...)>> {
@@ -344,31 +344,31 @@ struct callable_traits_impl<R (C::*)(Args...)> {
     using RawArgs     = std::tuple<Args...>;
 };
 template <typename C, typename R, typename... Args>
-struct callable_traits_impl<R (C::*)(Args...) const> : callable_traits_impl<R (C::*)(Args...)> {};
+struct callable_traits_impl<R (C::*)(Args...) const> : callable_traits_impl<R (C::*)(Args...)> { };
 template <typename C, typename R, typename... Args>
-struct callable_traits_impl<R (C::*)(Args...) noexcept> : callable_traits_impl<R (C::*)(Args...)> {};
+struct callable_traits_impl<R (C::*)(Args...) noexcept> : callable_traits_impl<R (C::*)(Args...)> { };
 template <typename C, typename R, typename... Args>
-struct callable_traits_impl<R (C::*)(Args...) const noexcept> : callable_traits_impl<R (C::*)(Args...)> {};
+struct callable_traits_impl<R (C::*)(Args...) const noexcept> : callable_traits_impl<R (C::*)(Args...)> { };
 
 // A generic lambda or a functor with an overloaded operator() has no single &T::operator() (taking
 // its address, or picking an overload, is ill-formed without explicit template arguments), so this
 // correctly evaluates to false for exactly the callables that need explicit cppFunction<R, Args...>.
 template <typename T, typename = void>
-struct has_call_operator : std::false_type {};
+struct has_call_operator : std::false_type { };
 template <typename T>
-struct has_call_operator<T, std::void_t<decltype(&T::operator())>> : std::true_type {};
+struct has_call_operator<T, std::void_t<decltype(&T::operator())>> : std::true_type { };
 
 // Function pointers and std::function have no operator() member, so their traits apply directly;
 // lambdas/functors route through their (single, non-overloaded, non-template) operator() member.
 template <typename T, bool = has_call_operator<T>::value>
-struct callable_traits : callable_traits_impl<T> {};
+struct callable_traits : callable_traits_impl<T> { };
 template <typename T>
-struct callable_traits<T, true> : callable_traits_impl<decltype(&T::operator())> {};
+struct callable_traits<T, true> : callable_traits_impl<decltype(&T::operator())> { };
 
 template <typename T, typename = void>
-struct has_callable_traits_impl : std::false_type {};
+struct has_callable_traits_impl : std::false_type { };
 template <typename T>
-struct has_callable_traits_impl<T, std::void_t<typename callable_traits<T>::Return, typename callable_traits<T>::DecayedArgs>> : std::true_type {};
+struct has_callable_traits_impl<T, std::void_t<typename callable_traits<T>::Return, typename callable_traits<T>::DecayedArgs>> : std::true_type { };
 
 template <typename T>
 concept has_callable_traits = has_callable_traits_impl<T>::value;
@@ -385,9 +385,9 @@ auto adaptCaller(Function&& function) {
 /// True when a callable's first parameter is the application's UI: the calling browser is then
 /// passed to it instead of being read from the call data.
 template <typename UI, typename... Args>
-struct takes_caller : std::false_type {};
+struct takes_caller : std::false_type { };
 template <typename UI, typename First, typename... Rest>
-struct takes_caller<UI, First, Rest...> : std::is_same<std::remove_cvref_t<First>, UI> {};
+struct takes_caller<UI, First, Rest...> : std::is_same<std::remove_cvref_t<First>, UI> { };
 
 /// The deduced parameters to register: the decayed ones, except a caller UI, which keeps its declared
 /// type so that adaptCaller can pass it as a mutable or rvalue reference.
@@ -733,12 +733,12 @@ public:
     using UI               = BasicUI<BasicWF<Net, Filesystem, Policy, Frontend>>;
 
     // Newcomer-friendly defaults: loopback address, port 9002 (a free one when it is taken), no local document root.
-    BasicWF() : BasicWF(WebFrontConfig{}) {}
+    BasicWF() : BasicWF(WebFrontConfig{}) { }
 
-    explicit BasicWF(WebFrontConfig config) : BasicWF(detail::checkedPtyPageConfig(std::move(config)), CheckedConfig{}) {}
+    explicit BasicWF(WebFrontConfig config) : BasicWF(detail::checkedPtyPageConfig(std::move(config)), CheckedConfig{}) { }
 
 private:
-    struct CheckedConfig {};
+    struct CheckedConfig { };
     BasicWF(WebFrontConfig config, CheckedConfig)
         : readBinding(detail::makeReadBinding(config, networking::secureTransport<Net>)),
           httpServer((detail::ensureFrontendInitialized<Frontend>(), detail::makeHttpServer<http::Server<Net, Filesystem, Policy>>(config))),
@@ -804,7 +804,7 @@ public:
     // Preserved for source compatibility; binds all interfaces like it always has, unlike the
     // loopback-by-default WebFrontConfig constructor above.
     explicit BasicWF(std::string_view port, std::filesystem::path docRoot = ".")
-        : BasicWF(WebFrontConfig{.address = "0.0.0.0", .port = std::string(port), .documentRoot = std::move(docRoot)}) {}
+        : BasicWF(WebFrontConfig{.address = "0.0.0.0", .port = std::string(port), .documentRoot = std::move(docRoot)}) { }
 
     // Each UI and the server callbacks hold the application's address: it never moves.
     BasicWF(const BasicWF&)            = delete;

@@ -59,14 +59,14 @@ namespace webfront::cef {
 // Exception types for CEF initialization
 class CEFInitializationError : public std::runtime_error {
 public:
-    explicit CEFInitializationError(const std::string& message) : std::runtime_error("CEF initialization failed: " + message) {}
+    explicit CEFInitializationError(const std::string& message) : std::runtime_error("CEF initialization failed: " + message) { }
 };
 
 class CEFSubprocessExit : public std::exception {
     int exit_code_;
 
 public:
-    explicit CEFSubprocessExit(int exit_code) : exit_code_(exit_code) {}
+    explicit CEFSubprocessExit(int exit_code) : exit_code_(exit_code) { }
 
     [[nodiscard]] const char* what() const noexcept override {
         return "CEF subprocess should exit";
@@ -366,7 +366,7 @@ inline void initialize() {
 
 class SimpleCEFWindowDelegate : public CefWindowDelegate {
 public:
-    explicit SimpleCEFWindowDelegate(WindowOptions options = frontend::detail::resolveWindow({})) : windowOptions(std::move(options)) {}
+    explicit SimpleCEFWindowDelegate(WindowOptions options = frontend::detail::resolveWindow({})) : windowOptions(std::move(options)) { }
 
     // CefWindowDelegate methods
     void OnWindowCreated(CefRefPtr<CefWindow> window) override {
@@ -436,7 +436,7 @@ private:
 
     class PresentTask : public CefTask {
     public:
-        PresentTask(CefRefPtr<SimpleCEFWindowDelegate> owner, CefRefPtr<CefWindow> target) : delegate(std::move(owner)), window(std::move(target)) {}
+        PresentTask(CefRefPtr<SimpleCEFWindowDelegate> owner, CefRefPtr<CefWindow> target) : delegate(std::move(owner)), window(std::move(target)) { }
         void Execute() override {
             delegate->present(window);
         }
@@ -499,7 +499,7 @@ struct CaptureJob {
 inline void answer(CaptureJob& job, CaptureResult result) noexcept {
     try {
         job.done.set_value(std::move(result));
-    } catch (...) {}
+    } catch (...) { }
 }
 
 /// The window is going away: no pending request waits for an answer that will never come.
@@ -527,7 +527,7 @@ inline CaptureResult pngOf(const void* json, std::size_t size) {
 // registration then; the job outlives a waiter that timed out.
 class CaptureObserver : public CefDevToolsMessageObserver {
 public:
-    explicit CaptureObserver(std::shared_ptr<CaptureJob> request) : job(std::move(request)) {}
+    explicit CaptureObserver(std::shared_ptr<CaptureJob> request) : job(std::move(request)) { }
 
     void start(CefRefPtr<CefBrowserHost> host) {
         registration = host->AddDevToolsMessageObserver(this);
@@ -571,7 +571,7 @@ private:
 
 class CaptureTask : public CefTask {
 public:
-    explicit CaptureTask(std::shared_ptr<CaptureJob> request) : job(std::move(request)) {}
+    explicit CaptureTask(std::shared_ptr<CaptureJob> request) : job(std::move(request)) { }
     void Execute() override {
         try {
             if (!job->target->browser) {
@@ -583,7 +583,7 @@ public:
         } catch (...) {
             try {
                 job->done.set_exception(std::current_exception());
-            } catch (...) {}
+            } catch (...) { }
         }
     }
 
@@ -631,7 +631,7 @@ class SimpleCEFClient : public CefClient,
                         public CefJSDialogHandler {
 public:
     explicit SimpleCEFClient(webfront::detail::BoundContentPolicy policy = webfront::detail::BoundContentPolicy{}, browser::Launcher launch = browser::launch)
-        : contentPolicy(std::move(policy)), popupLauncher(launch) {}
+        : contentPolicy(std::move(policy)), popupLauncher(launch) { }
 
     void setContentPolicy(webfront::detail::BoundContentPolicy policy) {
         contentPolicy = std::move(policy);
@@ -844,7 +844,7 @@ public:
         return this;
     }
 
-    virtual void OnTitleChange(CefRefPtr<CefBrowser> /*browser*/, const CefString& /*title*/) override {}
+    virtual void OnTitleChange(CefRefPtr<CefBrowser> /*browser*/, const CefString& /*title*/) override { }
     virtual void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
         // The application's window is the first browser; popups are cancelled and DevTools has its own client.
         if (!captureTarget->browser) {

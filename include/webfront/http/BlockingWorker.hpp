@@ -38,7 +38,7 @@ class BlockingWorker {
     };
 
 public:
-    explicit BlockingWorker(std::size_t maxThreads = 1) : limit(maxThreads == 0 ? 1 : maxThreads) {}
+    explicit BlockingWorker(std::size_t maxThreads = 1) : limit(maxThreads == 0 ? 1 : maxThreads) { }
     BlockingWorker(const BlockingWorker&)            = delete;
     BlockingWorker& operator=(const BlockingWorker&) = delete;
     ~BlockingWorker() {
@@ -94,7 +94,7 @@ public:
             Receiver              receiver;
             std::function<void()> work;
             Operation(BlockingWorker* owner, Receiver value, std::function<void()> function)
-                : worker(owner), receiver(std::move(value)), work(std::move(function)) {}
+                : worker(owner), receiver(std::move(value)), work(std::move(function)) { }
             Operation(const Operation&) = delete;
             Operation(Operation&&)      = delete;
 

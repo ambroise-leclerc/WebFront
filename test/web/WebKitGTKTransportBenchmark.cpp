@@ -156,7 +156,7 @@ class DirectChannel : public std::enable_shared_from_this<DirectChannel> {
         bool echoed = false;
         try {
             echoed = value && text(value) == payload;
-        } catch (...) {}
+        } catch (...) { }
         if (value)
             session.a.unref(value);
         if (error)
@@ -177,7 +177,7 @@ class DirectChannel : public std::enable_shared_from_this<DirectChannel> {
     }
 
 public:
-    explicit DirectChannel(gtk::Session& live) : session(live) {}
+    explicit DirectChannel(gtk::Session& live) : session(live) { }
     void attach() {
         listen("wfecho", onEcho);
         listen("wfrun", onRun);

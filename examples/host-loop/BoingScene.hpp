@@ -245,11 +245,11 @@ BOING_FN std::uint32_t pixel(const Scene& scene, int x, int y) {
                 const float toBall = hitBall(scene, camera, direction), toFloor = hitFloor(camera, direction);
                 const auto  ray = static_cast<unsigned>(x) * 1973U + static_cast<unsigned>(y) * 9277U + static_cast<unsigned>(sy * 2 + sx) * 26699U;
                 sum             = sum
-                      + beamsAlong(scene,
-                                   camera,
-                                   direction,
-                                   toBall > 0.F && (toFloor <= 0.F || toBall < toFloor) ? toBall : toFloor,
-                                   static_cast<float>(ray & 255U) / 256.F);
+                                  + beamsAlong(scene,
+                                               camera,
+                                               direction,
+                                               toBall > 0.F && (toFloor <= 0.F || toBall < toFloor) ? toBall : toFloor,
+                                               static_cast<float>(ray & 255U) / 256.F);
             }
         }
     const float scale = 1.F / static_cast<float>(scene.samples * scene.samples);

@@ -216,7 +216,7 @@ inline Sources& sources() {
 /// Serves the environment archive and the optional local registry under /driver/, from outside the project.
 class DriverFS {
 public:
-    explicit DriverFS(const std::filesystem::path&) {}
+    explicit DriverFS(const std::filesystem::path&) { }
 
     std::optional<webfront::fs::File> open(std::filesystem::path path) const {
         const auto relative = path.relative_path().generic_string();
@@ -233,7 +233,7 @@ public:
         if (sources().registry && relative.starts_with(prefix)) {
             try {
                 return read(webfront::developer::projectPath(*sources().registry, std::string_view(relative).substr(prefix.size())));
-            } catch (const std::exception&) {}
+            } catch (const std::exception&) { }
         }
         return {};
     }
@@ -400,13 +400,13 @@ inline void printOutput(const std::string& json) {
 /// An application that adds nothing to the driver: no page, no callback, the status of the command.
 struct PlainSetup {
     struct Pages {
-        explicit Pages(const std::filesystem::path&) {}
+        explicit Pages(const std::filesystem::path&) { }
         std::optional<webfront::fs::File> open(std::filesystem::path) const {
             return {};
         }
     };
     template <typename App>
-    void configure(App&) {}
+    void configure(App&) { }
     int  finish(int status) {
         return status;
     }

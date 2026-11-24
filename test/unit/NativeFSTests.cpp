@@ -158,9 +158,9 @@ const Scenario nativeDebugFSOpens{"NativeDebugFS opens an existing text file usi
 
 const Scenario nativeDebugFSOpensJSON{"NativeDebugFS opens a JSON configuration file", [] {
                                           TemporaryTestEnvironment testEnv;
-                                          auto                     configFilePath = testEnv.createTextFile("config.json",
-                                                                                       "{ \"name\": \"NativeFS\", \"version\": 1.0, \"isTest\": true }");
-                                          DebugFS                  debugFS(testEnv.getTestDir().string());
+                                          auto    configFilePath = testEnv.createTextFile("config.json",
+                                                                                          "{ \"name\": \"NativeFS\", \"version\": 1.0, \"isTest\": true }");
+                                          DebugFS debugFS(testEnv.getTestDir().string());
 
                                           when("The file config.json is opened", [&] {
                                               then("The file is opened and the JSON content is correct", [&] {

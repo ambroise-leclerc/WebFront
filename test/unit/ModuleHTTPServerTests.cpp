@@ -40,7 +40,7 @@ struct GzipModuleData {
 };
 
 struct GzipModuleFS {
-    explicit GzipModuleFS(std::filesystem::path) {}
+    explicit GzipModuleFS(std::filesystem::path) { }
 
     static std::optional<fs::File> open(std::filesystem::path file) {
         if (file.relative_path().generic_string() == "modules/answer.mjs")

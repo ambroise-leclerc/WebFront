@@ -35,7 +35,7 @@ webfront::Task finishedTask(bool& ran) {
 
 webfront::Task pendingTask(std::shared_ptr<int> lifetime) {
     static_cast<void>(lifetime);
-    co_await webfront::testing::ManualSender([](auto) {});
+    co_await webfront::testing::ManualSender([](auto) { });
 }
 
 struct ExternalSender {
@@ -235,7 +235,7 @@ struct SpawnOnExit {
 };
 webfront::Task spawnDuringCleanup(App& app, bool& ran, std::optional<webfront::TaskHandle>& handle) {
     SpawnOnExit guard{app, ran, handle};
-    co_await webfront::testing::ManualSender([](auto) {});
+    co_await webfront::testing::ManualSender([](auto) { });
 }
 }  // namespace
 

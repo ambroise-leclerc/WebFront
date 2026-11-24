@@ -57,7 +57,7 @@ public:
         return ::stdnet::ex::then(::stdnet::async_accept(acceptor), [](Socket socket) {
             try {
                 socket.set_option(::stdnet::ip::tcp_no_delay(true));
-            } catch (const std::system_error&) {}
+            } catch (const std::system_error&) { }
             return socket;
         });
     }

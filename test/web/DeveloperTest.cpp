@@ -43,7 +43,7 @@ std::string readFixtureText(const std::filesystem::path& path) {
 
 class FixturesFS {
 public:
-    explicit FixturesFS(std::filesystem::path projectRoot) : root(std::filesystem::canonical(projectRoot)) {}
+    explicit FixturesFS(std::filesystem::path projectRoot) : root(std::filesystem::canonical(projectRoot)) { }
     std::optional<webfront::fs::File> open(std::filesystem::path path) const {
         const auto relative = path.relative_path().generic_string();
         if (!relative.starts_with("fixtures/"))

@@ -163,7 +163,7 @@ const Scenario assertionsPass{
         requireThrows<int>([] {
             throw 3;
         });
-        requireNothrow([] {});
+        requireNothrow([] { });
         std::optional<int> value{1};
         require(value);
         auto scope = info("value ", *value);

@@ -197,7 +197,7 @@ public:
         if (state->browser) {
             try {
                 state->browser->addScript("window.close()");
-            } catch (const std::exception&) {}  // a native watchdog still supervises renderer termination
+            } catch (const std::exception&) { }  // a native watchdog still supervises renderer termination
         }
     }
 

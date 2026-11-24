@@ -153,8 +153,8 @@ struct ReadPresentation {
     // stylesheets, are announced as opaque bytes.
     const bool scripting = essence.contains("javascript") || essence.contains("ecmascript") || essence.contains("jscript") || essence.contains("livescript")
                            || essence.contains("vbscript") || essence == "text/css";
-    const bool isActive = scripting || std::ranges::find(active, essence) != std::end(active) || (essence.ends_with("+xml") && essence != "image/svg+xml")
-                          || essence.ends_with("+wasm");
+    const bool isActive  = scripting || std::ranges::find(active, essence) != std::end(active) || (essence.ends_with("+xml") && essence != "image/svg+xml")
+                           || essence.ends_with("+wasm");
     if (isActive)
         return {"application/octet-stream", false};
     static constexpr std::string_view raster[] =
@@ -242,7 +242,7 @@ public:
             [] {
                 return std::chrono::steady_clock::now();
             })
-        : ReadBinding(Options{.remote = declared}, std::move(clock)) {}
+        : ReadBinding(Options{.remote = declared}, std::move(clock)) { }
 
     explicit ReadBinding(
         std::same_as<Options> auto options,
@@ -253,7 +253,7 @@ public:
         : transport(options.remote),
           secureTransport(options.secure),
           now(std::move(clock)),
-          ownPrefix(std::string(cookiePrefix) + automation::channel::nonce().substr(0, 8) + "-") {}
+          ownPrefix(std::string(cookiePrefix) + automation::channel::nonce().substr(0, 8) + "-") { }
 
     /// Names the cookies after `name` (the port the server listens on) instead of a random word, so that a restart on the
     /// same port erases the cookies of its previous run. Call before the first `open`.
@@ -638,7 +638,7 @@ public:
     }
 
     ReadRoute(std::string id, std::string prefix, std::shared_ptr<ReadBinding> owner, http::RouteTable::Registration route)
-        : idValue(std::move(id)), prefixValue(std::move(prefix)), bound(std::move(owner)), registration(std::move(route)) {}
+        : idValue(std::move(id)), prefixValue(std::move(prefix)), bound(std::move(owner)), registration(std::move(route)) { }
     [[nodiscard]] const std::shared_ptr<ReadBinding>& binding() const {
         if (!bound)
             throw ReadRefused("The read route is empty");

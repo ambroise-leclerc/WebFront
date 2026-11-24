@@ -253,7 +253,7 @@ inline std::optional<std::string> sandboxLauncherFailure(const std::filesystem::
     if (!ended)
         kill(-child, SIGKILL);
     int status;
-    while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+    while (waitpid(child, &status, 0) < 0 && errno == EINTR) { }
     if (!ended)
         return "bubblewrap probe timed out or its diagnostic channel failed";
     constexpr std::string_view marker = "\nWEBFRONT_PROBE_STATUS=";
@@ -341,7 +341,7 @@ public:
     ScopedEnvironment()                                    = default;
     ScopedEnvironment(const ScopedEnvironment&)            = delete;
     ScopedEnvironment& operator=(const ScopedEnvironment&) = delete;
-    ScopedEnvironment(ScopedEnvironment&& other) noexcept : entries(std::exchange(other.entries, {})) {}
+    ScopedEnvironment(ScopedEnvironment&& other) noexcept : entries(std::exchange(other.entries, {})) { }
     void set(const char* name, const std::string& value) {
         Entry entry{name, std::nullopt};
         if (const auto* current = std::getenv(name))
@@ -365,7 +365,7 @@ public:
 }  // namespace webfront::frontend::detail::webkitgtk
 
 namespace webfront::frontend {
-struct WebKitGTKHost {};
+struct WebKitGTKHost { };
 template <detail::webkitgtk::SandboxMode Mode>
 struct BasicWebKitGTKFrontend;
 #if defined(WEBFRONT_DISTRIBUTION) && WEBFRONT_DISTRIBUTION

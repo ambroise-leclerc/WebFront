@@ -492,7 +492,7 @@ const Scenario failedAccept{"A failed accept does not stop the server from accep
 struct RecordingFS {
     static inline vector<string> opened;
 
-    explicit RecordingFS(filesystem::path) {}
+    explicit RecordingFS(filesystem::path) { }
 
     static optional<fs::File> open(filesystem::path file) {
         opened.push_back(file.generic_string());

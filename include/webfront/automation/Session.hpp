@@ -276,14 +276,14 @@ private:
             const auto operation = request.string("operation");
             if (!operation.empty() && operation.size() <= 64)
                 return operation;
-        } catch (const std::exception&) {}
+        } catch (const std::exception&) { }
         return "<unknown>";
     }
     void authorize(const Object& request) const {
         std::string claimed;
         try {
             claimed = request.string("session");
-        } catch (const std::exception&) {}
+        } catch (const std::exception&) { }
         if (!channel::sameToken(claimed, identity))
             throw OperationError("wrong_session", "Wrong automation session");
     }

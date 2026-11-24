@@ -221,7 +221,7 @@ inline std::shared_ptr<const Identity> loadIdentity(const std::filesystem::path&
 /// The PEM chain starts with the P-256 leaf. Reload publishes both files atomically or throws.
 class Credentials {
 public:
-    Credentials(const std::filesystem::path& chain, const std::filesystem::path& key) : identity(detail::loadIdentity(chain, key)) {}
+    Credentials(const std::filesystem::path& chain, const std::filesystem::path& key) : identity(detail::loadIdentity(chain, key)) { }
 
     void reload(const std::filesystem::path& chain, const std::filesystem::path& key) {
         auto             next = detail::loadIdentity(chain, key);

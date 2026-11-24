@@ -84,7 +84,7 @@ const Scenario subscriptionsMove{"Subscriptions are move-only handles", [] {
                                              require(moved.active());
                                          });
                                          when("a subscription is assigned over an active one", [&] {
-                                             moved = subscribers->subscribe([](FakeUI) {});
+                                             moved = subscribers->subscribe([](FakeUI) { });
                                              then("the overwritten handler is unsubscribed", [&] {
                                                  require(subscribers->size() == 1);
                                              });
@@ -95,7 +95,7 @@ const Scenario subscriptionsMove{"Subscriptions are move-only handles", [] {
 const Scenario subscriptionMay{"A subscription may outlive its application", [] {
                                    given("a subscription whose subscribers were destroyed", [&] {
                                        auto subscribers  = make_shared<Subscribers>();
-                                       auto subscription = subscribers->subscribe([](FakeUI) {});
+                                       auto subscription = subscribers->subscribe([](FakeUI) { });
                                        subscribers.reset();
 
                                        then("resetting it is harmless", [&] {
@@ -134,8 +134,8 @@ const Scenario handlersMay{"Handlers may change the subscriptions while being no
 const Scenario handlerMayOwn{"A handler may own another subscription to the same browsers", [] {
                                  given("a handler whose capture owns a second subscription", [&] {
                                      auto subscribers = make_shared<Subscribers>();
-                                     auto inner       = make_shared<UISubscription>(subscribers->subscribe([](FakeUI) {}));
-                                     auto outer       = subscribers->subscribe([inner](FakeUI) {});
+                                     auto inner       = make_shared<UISubscription>(subscribers->subscribe([](FakeUI) { }));
+                                     auto outer       = subscribers->subscribe([inner](FakeUI) { });
                                      inner.reset();  // the outer handler's capture is now the only owner of the inner subscription
 
                                      when("the outer subscription is reset", [&] {

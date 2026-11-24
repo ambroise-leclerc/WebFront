@@ -234,7 +234,7 @@ private:
 inline void answer(CaptureJob& job, CaptureResult result) noexcept {
     try {
         job.done.set_value(std::move(result));
-    } catch (...) {}
+    } catch (...) { }
 }
 
 // The PNG that CapturePreview wrote to its memory stream.
@@ -378,7 +378,7 @@ public:
             auto hook = std::exchange(closedHook, {});
             try {
                 hook();
-            } catch (...) {}
+            } catch (...) { }
         }
     }
 
@@ -444,17 +444,17 @@ public:
             throw std::runtime_error("WebView2: cannot register window class");
         registered = true;
         window     = CreateWindowExW(visible ? WS_EX_LAYERED : 0,
-                                 className.c_str(),
-                                 utf16(windowOptions.title).c_str(),
-                                 WS_OVERLAPPEDWINDOW,
-                                 CW_USEDEFAULT,
-                                 CW_USEDEFAULT,
-                                 windowOptions.width,
-                                 windowOptions.height,
-                                 nullptr,
-                                 nullptr,
-                                 windowClass.hInstance,
-                                 this);
+                                     className.c_str(),
+                                     utf16(windowOptions.title).c_str(),
+                                     WS_OVERLAPPEDWINDOW,
+                                     CW_USEDEFAULT,
+                                     CW_USEDEFAULT,
+                                     windowOptions.width,
+                                     windowOptions.height,
+                                     nullptr,
+                                     nullptr,
+                                     windowClass.hInstance,
+                                     this);
         if (!window)
             throw std::runtime_error("WebView2: cannot create window");
         // Bounds initialization errors and an unresponsive runtime must not leave an empty window forever.
@@ -714,7 +714,7 @@ private:
                               } catch (...) {
                                   try {
                                       job->done.set_exception(std::current_exception());
-                                  } catch (...) {}
+                                  } catch (...) { }
                               }
                               return S_OK;
                           }).Get()),
@@ -723,7 +723,7 @@ private:
                 captureQueue->finished(job);
                 try {
                     job->done.set_exception(std::current_exception());
-                } catch (...) {}
+                } catch (...) { }
             }
         }
     }
@@ -949,7 +949,7 @@ private:
             if (dialog.kind == ScriptDialog::Kind::prompt)
                 check(args->put_ResultText(utf16(reply.text).c_str()), "setting the prompt result");
             check(args->Accept(), "accepting the script dialog");
-        } catch (...) {}
+        } catch (...) { }
     }
 
     void configure() {
@@ -1027,7 +1027,7 @@ struct WindowHooks {
         if (windows.primary && windows.primary->window)
             PostMessageW(windows.primary->window, reapMessage, 0, 0);
     }
-    void cancelReap() {}  // nothing is pending that clear() must withdraw: a late reap() finds the registry empty
+    void cancelReap() { }  // nothing is pending that clear() must withdraw: a late reap() finds the registry empty
     void present(Session& session) {
         // A hidden window stays hidden and does not take the focus.
         if (const auto handle = session.window; handle && IsWindowVisible(handle)) {
@@ -1068,7 +1068,7 @@ inline void openSecondary(std::string_view address, std::string_view port, std::
             auto session                = std::make_shared<Session>(primary.startupTimeout());
             session->secondary          = true;
             session->contentPolicy      = webfront::detail::BoundContentPolicy{frontend::detail::applicationUrl(address, port, "", options.launch.origin),
-                                                                          options.contentPolicy};
+                                                                               options.contentPolicy};
             session->viewLaunch         = options.launch;
             session->url                = utf16(frontend::detail::applicationUrl(address, port, page, options.launch.origin));
             session->answerScriptDialog = primary.answerScriptDialog;
@@ -1146,7 +1146,7 @@ struct WebView2Native {
     using Host    = WebView2Frontend;  // the hosts are those of WebView2Frontend whichever options provider configures it
     using Options = WebView2Options;
     /// Nothing to initialize: the COM apartment belongs to each open(), so a build without the engine fails there.
-    static void initializeNative() {}
+    static void initializeNative() { }
 #if defined(WEBFRONT_EMBED_WEBVIEW2) && defined(_WIN32)
     static constexpr bool compiled = true;
     static void           openNative(std::string_view address, std::string_view port, std::string_view file, const Options& options) {
@@ -1167,7 +1167,7 @@ struct WebView2Native {
 };
 
 /** @brief Optional Windows embedded frontend. open() owns an STA and blocks until the window closes. */
-struct WebView2Frontend : WebView2Native, EmbeddedFrontend<WebView2Frontend> {};
+struct WebView2Frontend : WebView2Native, EmbeddedFrontend<WebView2Frontend> { };
 
 /** @brief Configured WebView2 frontend. OptionsProvider::get() returns per-opening WebView2Options. */
 template <typename OptionsProvider>

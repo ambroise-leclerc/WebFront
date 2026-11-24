@@ -41,7 +41,7 @@ struct FakeSession {
     std::exception_ptr                  failOnStart;
     static inline std::function<void()> destroyProbe;  // runs in every destructor: what a window's teardown can observe
 
-    explicit FakeSession(std::string name = {}) : page(std::move(name)) {}
+    explicit FakeSession(std::string name = {}) : page(std::move(name)) { }
     ~FakeSession() {
         events.push_back("destroy " + page);
         if (destroyProbe)
@@ -288,7 +288,7 @@ const Scenario interfaceSessionOrder{
                                                                          windowHost,
                                                                          windows,
                                                                          first,
-                                                                         [] {},
+                                                                         [] { },
                                                                          {.kind = NativeWindowKind::gtk, .pointer = &handle, .portalParent = {}});
                     then("the executor is available, the window published and the first window registered", [&] {
                         check(host.executor().available());
@@ -332,7 +332,7 @@ const Scenario interfaceSessionOrder{
         });
         given("a loop that is already attached", [&] {
             auto& host = uiExecutorHostOf<PublishTag>();
-            host.attach([] {});
+            host.attach([] { });
             Registry    windows;
             FakeSession first("first");
             int         handle = 0;
@@ -342,7 +342,7 @@ const Scenario interfaceSessionOrder{
                                                                          nativeWindowHostOf<PublishTag>(),
                                                                          windows,
                                                                          first,
-                                                                         [] {},
+                                                                         [] { },
                                                                          {.kind = NativeWindowKind::gtk, .pointer = &handle, .portalParent = {}});
                 });
                 check(host.executor().available());
@@ -371,7 +371,7 @@ struct FakeFrontend : EmbeddedFrontend<FakeFrontend> {
                          + (options.window.title.empty() ? "" : " " + options.window.title) + (options.launch.secret.empty() ? "" : " launched")
                          + (options.contentPolicy.devToolsEnabled ? "" : " nodevtools"));
     }
-    static void                            closeNative(const NativeWindowHandle&) {}
+    static void                            closeNative(const NativeWindowHandle&) { }
     static inline std::vector<std::string> openedSecondary;
     static void                            openSecondaryNative(std::string_view, std::string_view, std::string_view page, const Options& options) {
         openedSecondary.push_back(std::string(page) + (options.contentPolicy.devToolsEnabled ? "" : " nodevtools") + " " + options.window.title + " "
@@ -392,14 +392,14 @@ struct ConfiguredFrontend : EmbeddedFrontend<ConfiguredFrontend> {
     static inline std::vector<std::string> opened;
     static ViewOptions                     defaultOptions() {
         return {
-                                .window = {.title = "configured"},
-                                .launch = {"configured-secret", "configured-origin"}
+            .window = {.title = "configured"},
+            .launch = {"configured-secret", "configured-origin"}
         };
     }
     static void openNative(std::string_view, std::string_view, std::string_view file, const Options& options) {
         opened.push_back(std::string(file) + " " + options.window.title + " " + options.launch.secret);
     }
-    static void closeNative(const NativeWindowHandle&) {}
+    static void closeNative(const NativeWindowHandle&) { }
 };
 
 // A configured frontend with secondary windows (WebView2FrontendWithOptions): a secondary window does not ask the provider.
@@ -415,8 +415,8 @@ struct ConfiguredSecondaryFrontend : EmbeddedFrontend<ConfiguredSecondaryFronten
         ++providerCalls;
         throw std::runtime_error("the provider failed");
     }
-    static void openNative(std::string_view, std::string_view, std::string_view, const Options&) {}
-    static void closeNative(const NativeWindowHandle&) {}
+    static void openNative(std::string_view, std::string_view, std::string_view, const Options&) { }
+    static void closeNative(const NativeWindowHandle&) { }
     static void openSecondaryNative(std::string_view, std::string_view, std::string_view page, const Options& options) {
         openedSecondary.push_back(std::string(page) + " " + options.window.title + " " + options.launch.secret);
     }
@@ -440,8 +440,8 @@ struct SingleWindowFrontend : EmbeddedFrontend<SingleWindowFrontend> {
     static constexpr std::string_view name             = "SingleWindowFrontend";
     using Host                                         = SingleWindowFrontend;
     using Options                                      = ViewOptions;
-    static void openNative(std::string_view, std::string_view, std::string_view, const Options&) {}
-    static void closeNative(const NativeWindowHandle&) {}
+    static void openNative(std::string_view, std::string_view, std::string_view, const Options&) { }
+    static void closeNative(const NativeWindowHandle&) { }
 };
 
 template <typename Frontend>
@@ -503,7 +503,7 @@ const Scenario embeddedFrontendFacade{
         });
         given("a configured frontend with a window open", [&] {
             auto& host = uiExecutorHostOf<ConfiguredSecondaryFrontend>();
-            host.attach([] {});  // this thread is the interface thread: the calls run on it
+            host.attach([] { });  // this thread is the interface thread: the calls run on it
             ConfiguredSecondaryFrontend::providerCalls = 0;
             ConfiguredSecondaryFrontend::openedSecondary.clear();
             FakeFrontend::openedSecondary.clear();
@@ -523,7 +523,7 @@ const Scenario embeddedFrontendFacade{
         });
         given("a frontend with a window open and a policy of its own", [&] {
             auto& host = uiExecutorHostOf<FakeHost>();
-            host.attach([] {});
+            host.attach([] { });
             FakeFrontend::openedSecondary.clear();
             FakeFrontend::openSecondaryWindow("127.0.0.1",
                                               "9000",

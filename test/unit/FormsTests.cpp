@@ -489,7 +489,7 @@ const Scenario formBuilt{
             bool        refused = false;
             std::thread worker([&] {
                 try {
-                    form.onChange([](std::string_view) {});
+                    form.onChange([](std::string_view) { });
                 } catch (const std::logic_error&) {
                     refused = true;
                 }

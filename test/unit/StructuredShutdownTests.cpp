@@ -76,7 +76,7 @@ struct ShutdownSocket : webfront::networking::SocketMock {
     ShutdownSocket() : trace(ShutdownContext::current->trace) {
         ++trace->liveSockets;
     }
-    ShutdownSocket(ShutdownSocket&& other) noexcept : trace(std::move(other.trace)) {}
+    ShutdownSocket(ShutdownSocket&& other) noexcept : trace(std::move(other.trace)) { }
     ~ShutdownSocket() {
         if (trace)
             --trace->liveSockets;
@@ -107,7 +107,7 @@ struct ShutdownSender {
         Receiver                                                receiver;
         bool                                                    produce;
         std::optional<ex::stop_callback_for_t<StopToken, Stop>> callback;
-        Operation(Receiver value, bool emit) : receiver(std::move(value)), produce(emit) {}
+        Operation(Receiver value, bool emit) : receiver(std::move(value)), produce(emit) { }
         void start() noexcept {
             if (produce) {
                 ex::set_value(std::move(receiver), T{});
@@ -124,8 +124,8 @@ struct ShutdownSender {
 
 struct ShutdownAcceptor : webfront::networking::SocketBaseMock {
     bool accepted = false;
-    explicit ShutdownAcceptor(ShutdownContext&) {}
-    void open(auto) {}
+    explicit ShutdownAcceptor(ShutdownContext&) { }
+    void open(auto) { }
     bool is_open() const {
         return true;
     }

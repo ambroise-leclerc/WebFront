@@ -711,10 +711,10 @@ const Scenario largeBody{"A large body is streamed without being held", [] {
                              auto                                     route        = server.addRoute("/webfront/services/files/", [&](const RouteRequest&) {
                                  RouteReply reply;
                                  reply.contentLength = size;
-                                 reply.body = [&largestChunk, produced = std::uint64_t{0}](std::span<char> out) mutable {
-                                     largestChunk = std::max(largestChunk, out.size());
+                                 reply.body          = [&largestChunk, produced = std::uint64_t{0}](std::span<char> out) mutable {
+                                     largestChunk     = std::max(largestChunk, out.size());
                                      const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(out.size(), size - produced));
-                                     produced += count;
+                                     produced        += count;
                                      return count;
                                  };
                                  return reply;
@@ -810,7 +810,7 @@ struct ProvidedFile {
     static inline std::filesystem::path      native;
 };
 struct ProvidedFS {
-    explicit ProvidedFS(std::filesystem::path) {}
+    explicit ProvidedFS(std::filesystem::path) { }
     std::optional<fs::File> open(std::filesystem::path) {
         if (!ProvidedFile::native.empty())
             return fs::File(std::ifstream(ProvidedFile::native, std::ios::binary));
@@ -963,8 +963,8 @@ const Scenario blockedJob{"A blocked job does not delay the others of a worker w
                                   blocked = true;
                                   shared.wait();
                               }),
-                                                                  Completes{&blockedDone});
-                              auto               fast         = networking::ex::connect(worker.run([] {}), Completes{&quickDone});
+                                                                                        Completes{&blockedDone});
+                              auto               fast         = networking::ex::connect(worker.run([] { }), Completes{&quickDone});
                               // The blocked job is released whatever happens: the worker's destructor waits for it.
                               struct Release {
                                   std::promise<void>& promise;
@@ -1006,11 +1006,11 @@ const Scenario singleThread{"A single-thread worker keeps the jobs in order", []
                                 auto               first  = networking::ex::connect(worker.run([&] {
                                     order += 'a';
                                 }),
-                                                                     Completes{&firstDone});
+                                                                                    Completes{&firstDone});
                                 auto               second = networking::ex::connect(worker.run([&] {
                                     order += 'b';
                                 }),
-                                                                      Completes{&secondDone});
+                                                                                    Completes{&secondDone});
                                 networking::ex::start(first);
                                 networking::ex::start(second);
                                 firstDone.get_future().wait();

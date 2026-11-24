@@ -26,7 +26,7 @@ namespace detail {
 /// Listed first in DefaultFS so a configured document root can never shadow it.
 class ProtectedWebFrontJsFS {
 public:
-    explicit ProtectedWebFrontJsFS(std::filesystem::path /*docRoot*/) {}
+    explicit ProtectedWebFrontJsFS(std::filesystem::path /*docRoot*/) { }
 
     static std::optional<File> open(std::filesystem::path file) {
         if (file.relative_path().string() == "WebFront.js")
@@ -41,7 +41,7 @@ public:
 /// "no document root configured"), open() always returns nullopt without touching the filesystem.
 class OptionalDevRootFS {
 public:
-    explicit OptionalDevRootFS(std::filesystem::path docRoot) : root(std::move(docRoot)) {}
+    explicit OptionalDevRootFS(std::filesystem::path docRoot) : root(std::move(docRoot)) { }
 
     std::optional<File> open(std::filesystem::path file) const {
         if (root.empty())

@@ -184,7 +184,7 @@ const Scenario fallbackLoggerRegistration{"Fallback logger registration and deli
                                               std::thread first(emit), second(emit);
                                               std::thread registrations([] {
                                                   for (unsigned i = 0; i < each; ++i) {
-                                                      const auto temporary = log::addSinks([](std::string_view) {});
+                                                      const auto temporary = log::addSinks([](std::string_view) { });
                                                       log::set(log::Warn, (i & 1) != 0);
                                                       log::removeSinks(temporary);
                                                   }
@@ -246,10 +246,10 @@ const Scenario sinkSlots{"Fallback sinks reuse their slots and a stale id cannot
                                  log::removeSinks(live);
                              });
                              given("a hundred thousand transient sinks", [&] {
-                                 const auto  before  = log::addSinks([](std::string_view) {});
+                                 const auto  before  = log::addSinks([](std::string_view) { });
                                  std::size_t highest = 0;
                                  for (int i = 0; i < 100000; ++i) {
-                                     const auto id = log::addSinks([](std::string_view) {});
+                                     const auto id = log::addSinks([](std::string_view) { });
                                      highest       = std::max(highest, id.index);
                                      log::removeSinks(id);
                                  }

@@ -42,7 +42,7 @@ const Scenario typeErasedFunctions{"TypeErasedFunctions", [] {
 
                                            class Test {
                                            public:
-                                               Test(size_t& testC, std::string& testS) : tC(testC), tS(testS) {}
+                                               Test(size_t& testC, std::string& testS) : tC(testC), tS(testS) { }
                                                void function3(int value, std::string_view text) {
                                                    tC += static_cast<size_t>(value);
                                                    tS += text;

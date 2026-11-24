@@ -90,7 +90,7 @@ const Scenario hostLoopCapture{
             Host host{{.quality = 0}};
             require(!host.iterate(0.04, true));
             require(host.sceneSeconds() == 0.);
-            host.request(1, [](const Frame&) {});
+            host.request(1, [](const Frame&) { });
             require(host.iterate(0.04, true));
             require(host.sceneSeconds() == 0.04);
             require(!host.iterate(20., true));
@@ -252,8 +252,8 @@ const Scenario hostLoopCpuImage{"Host loop: the CPU image is deterministic and s
                                         // The point of the floor on the line from the light through the centre of the ball, and one well outside the shadow.
                                         const float scale = scene.light.y / (scene.light.y - scene.ball.y);
                                         const Vec   shadow{scene.light.x + (scene.ball.x - scene.light.x) * scale,
-                                                         0.F,
-                                                         scene.light.z + (scene.ball.z - scene.light.z) * scale};
+                                                           0.F,
+                                                           scene.light.z + (scene.ball.z - scene.light.z) * scale};
                                         const Vec   lit{shadow.x + 2.5F, 0.F, shadow.z};
                                         // Half a square away from the grid lines.
                                         const auto between = [](float value) {
@@ -562,7 +562,7 @@ const Scenario hostLoopStopToken{"Host loop: the application's stop token ends t
                                      });
                                      loop.request_stop();
                                      loop.join();
-                                     host.request(1, [held](const Frame&) {});
+                                     host.request(1, [held](const Frame&) { });
                                      require(held.use_count() == 1);
                                  }};
 

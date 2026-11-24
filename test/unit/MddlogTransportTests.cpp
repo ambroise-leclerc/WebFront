@@ -123,7 +123,7 @@ private:
 
 /** @brief Opens the gate on every exit path; declare after the TransportScope so its flush cannot hang. */
 struct OpenOnExit {
-    explicit OpenOnExit(shared_ptr<Gate> value) : gate(std::move(value)) {}
+    explicit OpenOnExit(shared_ptr<Gate> value) : gate(std::move(value)) { }
     OpenOnExit(const OpenOnExit&)            = delete;
     OpenOnExit& operator=(const OpenOnExit&) = delete;
     OpenOnExit(OpenOnExit&&)                 = delete;
@@ -207,7 +207,7 @@ public:
     LinkedBrowser() {
         InjectableSocket::reset();
         log::setLogLevel(log::Info);
-        link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{21}, [](WebLinkEvent) {}, scope);
+        link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{21}, [](WebLinkEvent) { }, scope);
         handshake();
         log::info("delivered to the browser");
         require(log::flushTransports());

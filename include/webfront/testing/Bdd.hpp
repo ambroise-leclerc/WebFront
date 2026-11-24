@@ -55,11 +55,11 @@ namespace webfront::bdd {
 
 /// Thrown by a fatal failure. It does not derive from std::exception, so the `catch (const std::exception&)` of a test does
 /// not swallow it.
-struct AssertionFailure {};
+struct AssertionFailure { };
 /// Thrown by skip().
-struct Skipped {};
+struct Skipped { };
 /// The type requireThrows() accepts when it is not given one: any exception.
-struct AnyException {};
+struct AnyException { };
 
 /// A predicate on a string with a description of what it expects.
 template <typename M>
@@ -341,7 +341,7 @@ struct Body {
     Body() = default;
     template <typename F>
         requires(std::invocable<F&> && !std::same_as<std::remove_cvref_t<F>, Body>)
-    Body(F&& callable) : object{const_cast<void*>(static_cast<const void*>(std::addressof(callable)))}, call{&invoke<std::remove_reference_t<F>>} {}
+    Body(F&& callable) : object{const_cast<void*>(static_cast<const void*>(std::addressof(callable)))}, call{&invoke<std::remove_reference_t<F>>} { }
     void operator()() const {
         call(object);
     }
@@ -404,7 +404,7 @@ struct NamePart {
     std::source_location location;
     template <typename T>
         requires std::convertible_to<const T&, std::string_view>
-    NamePart(const T& part, std::source_location where = std::source_location::current()) : text{part}, location{where} {}
+    NamePart(const T& part, std::source_location where = std::source_location::current()) : text{part}, location{where} { }
 };
 
 /// A section whose name is made of several parts: given("q=", value, [&] { ... }).
@@ -437,7 +437,7 @@ concept ComposedSection = sizeof...(Args) >= 2 && std::invocable<std::remove_ref
 class Scenario {
 public:
     template <std::convertible_to<void (*)()> F>
-    Scenario(std::string_view title, F body, std::source_location location = std::source_location::current()) : Scenario(title, {}, body, location) {}
+    Scenario(std::string_view title, F body, std::source_location location = std::source_location::current()) : Scenario(title, {}, body, location) { }
 
     template <std::convertible_to<void (*)()> F>
     Scenario(std::string_view title, std::initializer_list<std::string_view> tags, F body, std::source_location location = std::source_location::current()) {
@@ -664,7 +664,7 @@ struct Condition {
     explicit Condition(F& predicate)
         : object{std::addressof(predicate)}, call{[](void* target) {
               return static_cast<bool>((*static_cast<F*>(target))());
-          }} {}
+          }} { }
     bool operator()() const {
         return call(object);
     }
@@ -858,7 +858,7 @@ struct Located {
     std::source_location location;
     template <typename T>
         requires std::convertible_to<const T&, std::string_view>
-    Located(const T& message, std::source_location where = std::source_location::current()) : text{message}, location{where} {}
+    Located(const T& message, std::source_location where = std::source_location::current()) : text{message}, location{where} { }
 };
 
 /// Records a failure and goes on; the message is the concatenation of the arguments.

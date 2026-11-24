@@ -45,7 +45,7 @@ struct WebLinkEvent {
     enum class Code { linked, closed, cppFunctionCalled };
 
     WebLinkEvent(Code eventCode, WebLinkId id, std::string message = {}, std::span<const std::byte> dataView = {}, msg::CallId correlationId = 0)
-        : code(eventCode), webLinkId(id), text(std::move(message)), data(dataView), callId(correlationId) {}
+        : code(eventCode), webLinkId(id), text(std::move(message)), data(dataView), callId(correlationId) { }
     Code                       code;
     WebLinkId                  webLinkId;
     std::string                text;
@@ -57,7 +57,7 @@ struct WebLinkEvent {
 class DecimalId {
 public:
     explicit DecimalId(std::uint64_t value)
-        : size(static_cast<std::size_t>(std::to_chars(digits.data(), digits.data() + digits.size(), value).ptr - digits.data())) {}
+        : size(static_cast<std::size_t>(std::to_chars(digits.data(), digits.data() + digits.size(), value).ptr - digits.data())) { }
     [[nodiscard]] std::string_view view() const {
         return {digits.data(), size};
     }
@@ -81,7 +81,7 @@ public:
             ++inFlight;
         }
         struct Exit {
-            explicit Exit(HandlerGuard& value) : guard(value) {}
+            explicit Exit(HandlerGuard& value) : guard(value) { }
             HandlerGuard& guard;
             Exit(const Exit&)            = delete;
             Exit& operator=(const Exit&) = delete;
@@ -505,7 +505,7 @@ public:
     using sender_concept        = networking::ex::sender_t;
     using completion_signatures = networking::ex::completion_signatures<networking::ex::set_value_t(), networking::ex::set_stopped_t()>;
 
-    WritesAtMost(std::weak_ptr<Link> waited, std::size_t pending) : link(std::move(waited)), limit(pending) {}
+    WritesAtMost(std::weak_ptr<Link> waited, std::size_t pending) : link(std::move(waited)), limit(pending) { }
 
     template <typename Receiver>
     class Operation {
@@ -583,7 +583,7 @@ public:
                         operation->stopCallback.reset();  // waits for a stop callback running on another thread
                         networking::ex::set_value(std::move(operation->receiver));
                     });
-                } catch (...) {}  // registering failed: there is nothing to wait for
+                } catch (...) { }  // registering failed: there is nothing to wait for
             }
             shared->waiter = waiter;
             Completion completion;

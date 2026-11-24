@@ -158,10 +158,10 @@ const Scenario ptyShell{"PTY exchanges bytes with an interactive shell and resiz
 #ifdef _WIN32
                                     // The console control event can also affect cmd itself. Exercise it with a directly hosted probe.
                                     Pty        foreground({
-                                               .argv        = {probe(), "interrupt"},
-                                               .directory   = {},
-                                               .environment = {},
-                                               .size        = {}
+                                        .argv        = {probe(), "interrupt"},
+                                        .directory   = {},
+                                        .environment = {},
+                                        .size        = {}
                                     });
                                     Transcript interrupted;
                                     interrupted.until(foreground, "INTERRUPT_READY");
@@ -228,10 +228,10 @@ const Scenario ptyHangUp{"PTY refuses oversized input promptly and terminates a 
 
 const Scenario ptyInterruptRead{"PTY blocking reads observe a stop request", [] {
                                     Pty        terminal({
-                                               .argv        = {probe(), "stall"},
-                                               .directory   = {},
-                                               .environment = {},
-                                               .size        = {}
+                                        .argv        = {probe(), "stall"},
+                                        .directory   = {},
+                                        .environment = {},
+                                        .size        = {}
                                     });
                                     Transcript output;
                                     output.until(terminal, ":END");
@@ -254,10 +254,10 @@ const Scenario ptyInterruptRead{"PTY blocking reads observe a stop request", [] 
 #ifdef _WIN32
 const Scenario ptyDescendantOutput{"ConPTY drains a descendant's output after the leader exits", [] {
                                        Pty        terminal({
-                                                  .argv        = {probe(), "leave-child"},
-                                                  .directory   = {},
-                                                  .environment = {},
-                                                  .size        = {}
+                                           .argv        = {probe(), "leave-child"},
+                                           .directory   = {},
+                                           .environment = {},
+                                           .size        = {}
                                        });
                                        Transcript output;
                                        output.until(terminal, "DESCENDANT_OUTPUT");
@@ -274,10 +274,10 @@ const Scenario ptyBatchShim{"PTY resolves Windows npm-style batch shims from the
                                 }
                                 const auto path = root.u8string();
                                 Pty        terminal({
-                                           .argv        = {"pty test", "a & b"},
-                                           .directory   = root,
-                                           .environment = {{"Path", {reinterpret_cast<const char*>(path.data()), path.size()}}},
-                                           .size        = {}
+                                    .argv        = {"pty test", "a & b"},
+                                    .directory   = root,
+                                    .environment = {{"Path", {reinterpret_cast<const char*>(path.data()), path.size()}}},
+                                    .size        = {}
                                 });
                                 Transcript output;
                                 output.until(terminal, "[\"a & b\"]");
@@ -320,10 +320,10 @@ const Scenario ptyReplay{"PTY resolves PATH in the child directory and bounds it
 
 const Scenario ptyReopen{"PTY resumes output when the live child reopens its slave", [] {
                              Pty        terminal({
-                                        .argv        = {probe(), "reopen"},
-                                        .directory   = {},
-                                        .environment = {},
-                                        .size        = {}
+                                 .argv        = {probe(), "reopen"},
+                                 .directory   = {},
+                                 .environment = {},
+                                 .size        = {}
                              });
                              Transcript output;
                              output.until(terminal, "REOPENED");
@@ -333,10 +333,10 @@ const Scenario ptyReopen{"PTY resumes output when the live child reopens its sla
 
 const Scenario ptyOrphan{"PTY cleans up a foreground group that ignores SIGHUP after the session leader exits", [] {
                              Pty        terminal({
-                                        .argv        = {probe(), "orphan"},
-                                        .directory   = {},
-                                        .environment = {},
-                                        .size        = {}
+                                 .argv        = {probe(), "orphan"},
+                                 .directory   = {},
+                                 .environment = {},
+                                 .size        = {}
                              });
                              Transcript output;
                              output.until(terminal, ":END");
@@ -358,10 +358,10 @@ const Scenario ptyDescriptors{"PTY child does not inherit an application descrip
                                   require(descriptor.get() >= 3);
                                   require(::fcntl(descriptor.get(), F_GETFD) == 0);
                                   Pty        terminal({
-                                             .argv        = {probe(), "fd", std::to_string(descriptor.get())},
-                                             .directory   = {},
-                                             .environment = {},
-                                             .size        = {}
+                                      .argv        = {probe(), "fd", std::to_string(descriptor.get())},
+                                      .directory   = {},
+                                      .environment = {},
+                                      .size        = {}
                                   });
                                   Transcript output;
                                   output.until(terminal, "");

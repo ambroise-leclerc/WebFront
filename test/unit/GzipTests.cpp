@@ -357,7 +357,7 @@ const Scenario validatedGzipCachePermits{"Validated gzip cache permits empty str
                                              const std::string                    empty("\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03"
                                                                                         "\x01\x00\x00\xff\xff"
                                                                                         "\x00\x00\x00\x00\x00\x00\x00\x00",
-                                                                     23);
+                                                                                        23);
                                              webfront::http::gzip::ValidatedCache cache(1000);
                                              given("GET then HEAD of a valid empty asset", [&] {
                                                  for (const bool head : {false, true}) {

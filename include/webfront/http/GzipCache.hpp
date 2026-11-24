@@ -36,8 +36,8 @@ public:
         std::size_t retainedBytes{};
     };
 
-    explicit ValidatedCache(std::size_t cacheBudget) : budget(cacheBudget) {}
-    ValidatedCache(const ValidatedCache& other) : budget(other.budget) {}
+    explicit ValidatedCache(std::size_t cacheBudget) : budget(cacheBudget) { }
+    ValidatedCache(const ValidatedCache& other) : budget(other.budget) { }
     ValidatedCache& operator=(const ValidatedCache& other) {
         if (this != &other) {
             entries.clear();
@@ -46,7 +46,7 @@ public:
         }
         return *this;
     }
-    ValidatedCache(ValidatedCache&& other) noexcept : budget(other.budget), entries(std::move(other.entries)), stats(std::exchange(other.stats, {})) {}
+    ValidatedCache(ValidatedCache&& other) noexcept : budget(other.budget), entries(std::move(other.entries)), stats(std::exchange(other.stats, {})) { }
     ValidatedCache& operator=(ValidatedCache&& other) noexcept {
         if (this != &other) {
             entries = std::move(other.entries);

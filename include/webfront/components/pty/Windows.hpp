@@ -283,13 +283,13 @@ private:
     void createInputPipe(PtyHandle& reader) {
         const auto name = L"\\\\.\\pipe\\webfront-pty-" + system::detail::toWide(automation::channel::nonce());
         input.value     = ::CreateNamedPipeW(name.c_str(),
-                                         PIPE_ACCESS_OUTBOUND | FILE_FLAG_FIRST_PIPE_INSTANCE | FILE_FLAG_OVERLAPPED,
-                                         PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
-                                         1,
-                                         4096,
-                                         0,
-                                         0,
-                                         nullptr);
+                                             PIPE_ACCESS_OUTBOUND | FILE_FLAG_FIRST_PIPE_INSTANCE | FILE_FLAG_OVERLAPPED,
+                                             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+                                             1,
+                                             4096,
+                                             0,
+                                             0,
+                                             nullptr);
         if (!input)
             fail("create ConPTY input pipe");
         reader.value = ::CreateFileW(name.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, nullptr);
@@ -372,7 +372,7 @@ private:
         auto       program   = resolve(options);
         const auto extension = program.extension().native();
         const bool batch     = ::CompareStringOrdinal(extension.c_str(), -1, L".cmd", -1, TRUE) == CSTR_EQUAL
-                           || ::CompareStringOrdinal(extension.c_str(), -1, L".bat", -1, TRUE) == CSTR_EQUAL;
+                               || ::CompareStringOrdinal(extension.c_str(), -1, L".bat", -1, TRUE) == CSTR_EQUAL;
         if (batch) {
             // cmd.exe expands percent references even inside quotes. Keep its arguments in a literal subset.
             const auto literal = [](const std::wstring& argument) {

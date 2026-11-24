@@ -114,7 +114,7 @@ public:
                 }
                 error.clear();
             }
-        } catch (...) {}
+        } catch (...) { }
     }
 
 private:

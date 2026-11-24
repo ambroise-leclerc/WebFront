@@ -101,7 +101,7 @@ struct WindowCloseRequest {
     ex::connect_result_t<decltype(std::declval<UIExecutor&>().schedule()), Receiver> operation;
 
     WindowCloseRequest(const UIExecutor& loop, NativeWindow target, Close function, std::optional<UISession> owner)
-        : executor(loop), window(std::move(target)), close(std::move(function)), session(owner), operation(ex::connect(loop.schedule(), Receiver{this})) {}
+        : executor(loop), window(std::move(target)), close(std::move(function)), session(owner), operation(ex::connect(loop.schedule(), Receiver{this})) { }
 };
 
 /// Runs `close(const NativeWindowHandle&)` on the interface thread with the published window. Returns false, having

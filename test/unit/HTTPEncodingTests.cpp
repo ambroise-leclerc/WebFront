@@ -36,7 +36,7 @@ struct LegacyPolicy {
     static constexpr std::size_t functionCallBufferSize = 32768;
 };
 struct EncodedAssetFS {
-    explicit EncodedAssetFS(std::filesystem::path) {}
+    explicit EncodedAssetFS(std::filesystem::path) { }
     std::vector<std::uint64_t> words;
 
     std::optional<fs::File> open(std::filesystem::path path) {
@@ -408,7 +408,7 @@ namespace {
 struct ActiveAssetBudget : DefaultBuffersPolicy {
     static inline thread_local std::size_t maxDecodedAssetSize = defaultMaxDecodedAssetSize;
 
-    explicit ActiveAssetBudget(std::size_t limit) : previous(std::exchange(maxDecodedAssetSize, limit)) {}
+    explicit ActiveAssetBudget(std::size_t limit) : previous(std::exchange(maxDecodedAssetSize, limit)) { }
     ~ActiveAssetBudget() {
         maxDecodedAssetSize = previous;
     }

@@ -17,8 +17,8 @@ struct MimeType {
     enum Type { plain, html, css, js, jpg, png, gif, json, pdf, ttf, ico, svg, webp, csv, wasm };
     Type type;
 
-    constexpr MimeType(Type mimeType) : type(mimeType) {}
-    constexpr MimeType(std::string_view extension) : type(fromExtension(extension).type) {}
+    constexpr MimeType(Type mimeType) : type(mimeType) { }
+    constexpr MimeType(std::string_view extension) : type(fromExtension(extension).type) { }
 
     [[nodiscard]] static constexpr MimeType fromExtension(std::string_view e) {
         struct Mapping {

@@ -123,7 +123,7 @@ class NativeWindow {
 
 public:
     NativeWindow() = default;
-    NativeWindow(std::weak_ptr<detail::NativeWindowShared> value, UIExecutor uiExecutor) : shared(std::move(value)), executor(std::move(uiExecutor)) {}
+    NativeWindow(std::weak_ptr<detail::NativeWindowShared> value, UIExecutor uiExecutor) : shared(std::move(value)), executor(std::move(uiExecutor)) { }
 
     /// The window, or why it is not given (see the file comment). Never blocks and never throws.
     [[nodiscard]] NativeWindowResult get() const {
@@ -140,7 +140,7 @@ class NativeWindowHost {
     UIExecutor                                  executor;
 
 public:
-    explicit NativeWindowHost(UIExecutor uiExecutor) : executor(std::move(uiExecutor)) {}
+    explicit NativeWindowHost(UIExecutor uiExecutor) : executor(std::move(uiExecutor)) { }
 
     [[nodiscard]] NativeWindow window() const {
         return NativeWindow{shared, executor};

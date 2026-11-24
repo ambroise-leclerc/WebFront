@@ -39,7 +39,7 @@ inline const char* cudaCompute(const Scene&) {
 inline const char* cudaCopy(std::uint32_t*, std::size_t) {
     return "this build has no CUDA renderer";
 }
-inline void cudaRelease() {}
+inline void cudaRelease() { }
 #endif
 
 }  // namespace boing

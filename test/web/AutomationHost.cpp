@@ -39,7 +39,7 @@
 
 namespace {
 struct Pages {
-    explicit Pages(const std::filesystem::path&) {}
+    explicit Pages(const std::filesystem::path&) { }
     std::optional<webfront::fs::File> open(std::filesystem::path) const {
         return {};
     }

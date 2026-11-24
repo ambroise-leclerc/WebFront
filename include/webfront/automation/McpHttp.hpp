@@ -247,7 +247,7 @@ inline Screening screen(const http::Request& request, unsigned short port, std::
 template <typename Backend>
 class Endpoint {
 public:
-    explicit Endpoint(Backend& controller) : backend(controller) {}
+    explicit Endpoint(Backend& controller) : backend(controller) { }
 
     /// Handles a request that `screen` accepted, with its whole body.
     Answer handle(const http::Request& request, std::string_view body) {
@@ -349,7 +349,7 @@ public:
 
 private:
     struct Conversation {
-        explicit Conversation(Backend& backend) : mcp(backend) {}
+        explicit Conversation(Backend& backend) : mcp(backend) { }
         std::mutex                            mutex;
         Mcp<Backend>                          mcp;
         std::chrono::steady_clock::time_point used = std::chrono::steady_clock::now();
@@ -395,7 +395,7 @@ inline void validateTokenOptions(const std::optional<std::string>& fixed, bool a
 /// A failure to bind or listen on the requested MCP port; retains the native error code.
 class BindError : public std::system_error {
 public:
-    BindError(std::error_code cause, unsigned short port) : std::system_error(cause, "WebFront cannot listen for MCP on 127.0.0.1:" + std::to_string(port)) {}
+    BindError(std::error_code cause, unsigned short port) : std::system_error(cause, "WebFront cannot listen for MCP on 127.0.0.1:" + std::to_string(port)) { }
     /// Whether the native error reports that the requested port is already in use.
     [[nodiscard]] bool addressInUse() const noexcept {
 #ifdef _WIN32
@@ -672,7 +672,7 @@ private:
                 if (count == 0 || (count < 0 && !channel::retryableSocketError(channel::socketError())))
                     break;
             }
-        } catch (const std::exception&) {}
+        } catch (const std::exception&) { }
     }
 };
 }  // namespace webfront::automation::mcphttp

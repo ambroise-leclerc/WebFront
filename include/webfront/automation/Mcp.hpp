@@ -16,7 +16,7 @@ namespace webfront::automation {
 template <typename Backend>
 class Mcp {
 public:
-    explicit Mcp(Backend& controller) : session(controller) {}
+    explicit Mcp(Backend& controller) : session(controller) { }
 
     std::optional<std::string> receive(std::string_view line) {
         std::string id           = "null";

@@ -113,7 +113,7 @@ struct source_location {
     static source_location current() noexcept {
         return {};
     }
-    constexpr source_location() noexcept {}
+    constexpr source_location() noexcept { }
 
     constexpr uint_least32_t line() const noexcept {
         return l;

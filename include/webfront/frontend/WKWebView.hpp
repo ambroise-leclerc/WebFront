@@ -88,7 +88,7 @@ inline id type(const char* name) {
 
 class Object {
 public:
-    explicit Object(id value = nullptr) : value(value) {}
+    explicit Object(id value = nullptr) : value(value) { }
     Object(const Object&)            = delete;
     Object& operator=(const Object&) = delete;
     ~Object() {
@@ -206,7 +206,7 @@ struct CaptureJob {
 inline void answer(CaptureJob& job, CaptureResult result) noexcept {
     try {
         job.done.set_value(std::move(result));
-    } catch (...) {}  // Already answered: a closing window may have answered before the engine did.
+    } catch (...) { }  // Already answered: a closing window may have answered before the engine did.
 }
 
 /// The window is going away: no pending request waits for an answer that will never come.
@@ -254,7 +254,7 @@ inline void startCapture(void* data) noexcept {
             } catch (...) {
                 try {
                     job->done.set_exception(std::current_exception());
-                } catch (...) {}
+                } catch (...) { }
             }
         };
         // A nil configuration snapshots the visible bounds of the view.
@@ -271,7 +271,7 @@ inline void startCapture(void* data) noexcept {
     } catch (...) {
         try {
             job->done.set_exception(std::current_exception());
-        } catch (...) {}
+        } catch (...) { }
     }
 }
 
@@ -293,7 +293,7 @@ inline CaptureProvider captureProvider(std::shared_ptr<CaptureTarget> target) {
 
 struct Session {
     explicit Session(std::string url, WKWebViewOptions options = {})
-        : url(std::move(url)), options(std::move(options)), contentPolicy(this->url, this->options.contentPolicy) {}
+        : url(std::move(url)), options(std::move(options)), contentPolicy(this->url, this->options.contentPolicy) { }
 
     std::string                          url;
     WKWebViewOptions                     options;
@@ -422,7 +422,7 @@ struct Session {
             if (closedHook) {
                 try {
                     closedHook();
-                } catch (...) {}
+                } catch (...) { }
             }
             return;
         }
@@ -1175,7 +1175,7 @@ struct WindowHooks {
                 reapSecondaryWindows();
             });
     }
-    void cancelReap() {}  // nothing is pending that clear() must withdraw: a late reap() finds the registry empty
+    void cancelReap() { }  // nothing is pending that clear() must withdraw: a late reap() finds the registry empty
     void present(Session& session) {
         // A hidden window stays hidden: ordering it to the front would show it.
         if (session.options.visible)

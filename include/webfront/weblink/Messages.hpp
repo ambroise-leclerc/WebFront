@@ -118,28 +118,28 @@ inline std::string_view toString(CodedType t) {
 }
 
 template <typename _Tp, typename dummy = void>
-struct is_printable : std::false_type {};
+struct is_printable : std::false_type { };
 
 template <typename T>
-struct is_printable<T, std::void_t<decltype(std::cout << std::declval<T>())>> : std::true_type {};
+struct is_printable<T, std::void_t<decltype(std::cout << std::declval<T>())>> : std::true_type { };
 
 template <typename T, typename U>
 inline constexpr bool is_printable_v = is_printable<T, U>::value;
 
 template <typename>
-struct is_tuple : std::false_type {};
+struct is_tuple : std::false_type { };
 
 template <typename... T>
-struct is_tuple<std::tuple<T...>> : std::true_type {};
+struct is_tuple<std::tuple<T...>> : std::true_type { };
 
 template <typename T>
 inline constexpr bool is_tuple_v = is_tuple<T>::value;
 
 template <typename T>
-struct is_bitset : std::false_type {};
+struct is_bitset : std::false_type { };
 
 template <std::size_t N>
-struct is_bitset<std::bitset<N>> : std::true_type {};
+struct is_bitset<std::bitset<N>> : std::true_type { };
 
 template <typename T>
 inline constexpr bool is_bitset_v = is_bitset<std::remove_cvref_t<T>>::value;
@@ -184,19 +184,19 @@ template <typename T>
 using numeric_array_element_t = typename numeric_array_traits<std::remove_cvref_t<T>>::element_type;
 
 template <typename T>
-struct is_vector : std::false_type {};
+struct is_vector : std::false_type { };
 
 template <typename T, typename Allocator>
-struct is_vector<std::vector<T, Allocator>> : std::true_type {};
+struct is_vector<std::vector<T, Allocator>> : std::true_type { };
 
 template <typename T>
 inline constexpr bool is_vector_v = is_vector<std::remove_cvref_t<T>>::value;
 
 template <typename T>
-struct is_std_array : std::false_type {};
+struct is_std_array : std::false_type { };
 
 template <typename T, std::size_t Size>
-struct is_std_array<std::array<T, Size>> : std::true_type {};
+struct is_std_array<std::array<T, Size>> : std::true_type { };
 
 template <typename T>
 inline constexpr bool is_std_array_v = is_std_array<std::remove_cvref_t<T>>::value;
@@ -205,7 +205,7 @@ template <typename T>
 inline constexpr bool is_string_like_v = std::is_same_v<std::remove_cvref_t<T>, std::string> || std::is_same_v<std::remove_cvref_t<T>, std::string_view>;
 
 template <typename T>
-struct is_list : std::false_type {};
+struct is_list : std::false_type { };
 
 /// A list is a std::vector whose elements are not scalars (a vector of numbers is a typed array): strings, tuples, typed
 /// arrays and bitsets. Lists do not nest, neither directly nor inside a tuple that is an element.
@@ -213,9 +213,9 @@ template <typename T>
 inline constexpr bool is_list_v = is_list<std::remove_cvref_t<T>>::value;
 
 template <typename T>
-struct contains_list : std::bool_constant<is_list_v<T>> {};
+struct contains_list : std::bool_constant<is_list_v<T>> { };
 template <typename... T>
-struct contains_list<std::tuple<T...>> : std::bool_constant<(contains_list<std::remove_cvref_t<T>>::value || ...)> {};
+struct contains_list<std::tuple<T...>> : std::bool_constant<(contains_list<std::remove_cvref_t<T>>::value || ...)> { };
 template <typename T>
 inline constexpr bool contains_list_v = contains_list<std::remove_cvref_t<T>>::value;
 
@@ -224,19 +224,19 @@ inline constexpr bool contains_list_v = contains_list<std::remove_cvref_t<T>>::v
 inline constexpr std::size_t maxListTupleDepth = 32;
 
 template <typename T>
-struct tuple_depth : std::integral_constant<std::size_t, 0> {};
+struct tuple_depth : std::integral_constant<std::size_t, 0> { };
 template <typename... T>
-struct tuple_depth<std::tuple<T...>> : std::integral_constant<std::size_t, 1 + std::max({std::size_t{0}, tuple_depth<std::remove_cvref_t<T>>::value...})> {};
+struct tuple_depth<std::tuple<T...>> : std::integral_constant<std::size_t, 1 + std::max({std::size_t{0}, tuple_depth<std::remove_cvref_t<T>>::value...})> { };
 template <typename T>
 inline constexpr std::size_t tuple_depth_v = tuple_depth<std::remove_cvref_t<T>>::value;
 
 template <typename T>
-struct is_list_element : std::bool_constant<is_string_like_v<T> || is_tuple_v<T> || is_bitset_v<T> || is_numeric_array_v<T>> {};
+struct is_list_element : std::bool_constant<is_string_like_v<T> || is_tuple_v<T> || is_bitset_v<T> || is_numeric_array_v<T>> { };
 template <typename T>
 inline constexpr bool is_list_element_v = is_list_element<std::remove_cvref_t<T>>::value;
 
 template <typename E, typename Allocator>
-struct is_list<std::vector<E, Allocator>> : std::bool_constant<is_list_element_v<E> && !std::is_same_v<E, bool>> {};
+struct is_list<std::vector<E, Allocator>> : std::bool_constant<is_list_element_v<E> && !std::is_same_v<E, bool>> { };
 
 /// The numeric array opcodes form one contiguous run, so membership is a range test rather than a
 /// case per element type. The asserts below pin the two ends against an accidental reordering.
@@ -339,7 +339,7 @@ class TextCommand : public MessageBase<TextCommand> {
 public:
     TextCommand(TxtOpcode opcode, std::string_view text)
         : head{.opcode = opcode, .lengthHi = static_cast<uint8_t>(text.size() >> 8), .lengthLo = static_cast<uint8_t>(text.size())},
-          payloadSpan{reinterpret_cast<const std::byte*>(text.data()), text.size()} {}
+          payloadSpan{reinterpret_cast<const std::byte*>(text.data()), text.size()} { }
 
     [[nodiscard]] std::span<const std::byte> payload() const {
         return payloadSpan;

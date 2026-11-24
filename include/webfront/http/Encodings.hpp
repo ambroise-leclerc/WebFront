@@ -99,7 +99,7 @@ struct URI {
           fragment(next(string)),
           userinfo(next(authority)),
           host(next(authority)),
-          port(next(authority)) {}
+          port(next(authority)) { }
 
     const std::string      string;
     const std::string_view scheme, authority, path, query, fragment, userinfo, host, port;

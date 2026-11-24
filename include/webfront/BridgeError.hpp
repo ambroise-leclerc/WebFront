@@ -81,8 +81,8 @@ public:
 
 private:
     friend BridgeError detail::makeBridgeError(std::string_view, const std::string&);
-    struct Bridge {};
-    BridgeError(Bridge, std::string errorCode, const std::string& message) : std::runtime_error(message), codeText(std::move(errorCode)) {}
+    struct Bridge { };
+    BridgeError(Bridge, std::string errorCode, const std::string& message) : std::runtime_error(message), codeText(std::move(errorCode)) { }
 
     std::string codeText;
 };

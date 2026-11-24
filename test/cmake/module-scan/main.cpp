@@ -7,4 +7,4 @@
 // Thread: ui-loop | Alloc: zero-hot-path
 // LLM: fixture; keep it empty
 
-int main() {}
+int main() { }

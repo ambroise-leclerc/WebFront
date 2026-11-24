@@ -91,7 +91,7 @@ struct TestState {
 // The pages the specs fetch or embed (origin probes, a path containing a plus), served from the project directory.
 class TestPages {
 public:
-    explicit TestPages(const filesystem::path& project) : root(project / "pages") {}
+    explicit TestPages(const filesystem::path& project) : root(project / "pages") { }
 
     optional<fs::File> open(filesystem::path file) const {
         if (file.relative_path() == "embedded-fallback.html")
@@ -103,7 +103,7 @@ public:
             ifstream   stream(path, ios::binary);
             if (stream && filesystem::is_regular_file(path))
                 return fs::File{std::move(stream)};
-        } catch (const exception&) {}
+        } catch (const exception&) { }
         return {};
     }
 
@@ -211,12 +211,12 @@ public:
             try {
                 store.set({0, "after shutdown"});
                 return 1;
-            } catch (const std::runtime_error&) {}
+            } catch (const std::runtime_error&) { }
         }
         try {
             shutdownDocument->text("after shutdown");
             return 1;
-        } catch (const std::runtime_error&) {}
+        } catch (const std::runtime_error&) { }
         return result();
     }
 
@@ -463,7 +463,7 @@ private:
                 "cursor"
             };
         });
-        webFront->cppFunction("heterogeneousList", [](const vector<string>&) {});
+        webFront->cppFunction("heterogeneousList", [](const vector<string>&) { });
     }
 
     /// "<code>|<message>" of the BridgeError that the browser function `name` raises, called with `argument` if any, or

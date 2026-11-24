@@ -35,17 +35,17 @@ namespace {
 struct QuietFrontend {
     static constexpr frontend::Action action{frontend::Action::keepServerRunning};
 
-    static void initialize() {}
+    static void initialize() { }
 
-    static void open(std::string_view, std::string_view) {}
+    static void open(std::string_view, std::string_view) { }
 };
 
 struct ClosingQuietFrontend {
     static constexpr frontend::Action action{frontend::Action::closeServerAfterOpen};
 
-    static void initialize() {}
+    static void initialize() { }
 
-    static void open(std::string_view, std::string_view) {}
+    static void open(std::string_view, std::string_view) { }
 };
 
 std::vector<std::uint8_t> bytes(std::string_view text) {

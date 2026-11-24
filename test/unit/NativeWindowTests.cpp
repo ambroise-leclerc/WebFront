@@ -46,7 +46,7 @@ struct Session {
     UIExecutorHost&   executor = uiExecutorHostOf<Tag>();
     NativeWindowHost& window   = nativeWindowHostOf<Tag>();
     Session() {
-        executor.attach([] {});
+        executor.attach([] { });
     }
     std::uint64_t publish(std::string portalParent = {}) {
         return window.publish({.kind = NativeWindowKind::gtk, .pointer = &windowObject, .portalParent = std::move(portalParent)});
@@ -71,7 +71,7 @@ struct WindowFrontend : DefaultBrowserFrontend {
         return nativeWindowHostOf<WindowFrontend>().window();
     }
 };
-struct NoWindowFrontend : DefaultBrowserFrontend {};
+struct NoWindowFrontend : DefaultBrowserFrontend { };
 
 const std::string upgradeRequest = "GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                                    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";

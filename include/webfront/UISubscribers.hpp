@@ -24,8 +24,8 @@ namespace webfront {
 class UISubscription {
 public:
     UISubscription() = default;
-    explicit UISubscription(std::function<void()> unsubscribe) : cancel(std::move(unsubscribe)) {}
-    UISubscription(UISubscription&& other) noexcept : cancel(std::exchange(other.cancel, {})) {}
+    explicit UISubscription(std::function<void()> unsubscribe) : cancel(std::move(unsubscribe)) { }
+    UISubscription(UISubscription&& other) noexcept : cancel(std::exchange(other.cancel, {})) { }
     UISubscription& operator=(UISubscription&& other) noexcept {
         if (this != &other) {
             reset();

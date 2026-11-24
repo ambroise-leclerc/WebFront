@@ -91,7 +91,7 @@ struct DefaultBrowserFrontend {
     static constexpr Action action{Action::keepServerRunning};
     static constexpr bool   requiresMainThread = false;
 
-    static void initialize() {}
+    static void initialize() { }
 
     /// Opens the page in the system browser and returns at once, without the console wait of open() and without waiting
     /// for the opener command to end (BasicWF::start()).
@@ -146,7 +146,7 @@ struct BrowserWithUILoopFrontend {
     static constexpr bool requiresMainThread = false;
 #endif
 
-    static void initialize() {}
+    static void initialize() { }
 
     /// Ends the loop of a running open(), as the user closing the window would end the others; the browser's window is
     /// not ours to close, the loop is. False, and nothing remembered, when no loop runs: unlike requestStop(), a request

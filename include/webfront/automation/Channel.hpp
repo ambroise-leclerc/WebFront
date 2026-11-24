@@ -71,7 +71,7 @@ inline constexpr Handle invalid = -1;
 inline void             close(Handle socket) {
     ::close(socket);
 }
-struct Runtime {};
+struct Runtime { };
 inline bool wait(Handle socket, short events, int milliseconds) {
     pollfd item{socket, events, 0};
     return ::poll(&item, 1, milliseconds) > 0;
@@ -253,7 +253,7 @@ struct Descriptor {
             ::close(value);
     }
     Descriptor(const Descriptor&) = delete;
-    explicit Descriptor(int descriptor) : value(descriptor) {}
+    explicit Descriptor(int descriptor) : value(descriptor) { }
 };
 inline std::string readEndpointFile(int directory, const char* name = "endpoint.json") {
     Descriptor  file{::openat(directory, name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)};
@@ -289,12 +289,12 @@ inline std::string readEndpoint(const std::filesystem::path& directory, const ch
     };
     // Deny directory rename/deletion while resolving and reading its endpoint.
     FileHandle                 parent{CreateFileW(directory.c_str(),
-                                  FILE_READ_ATTRIBUTES,
-                                  FILE_SHARE_READ | FILE_SHARE_WRITE,
-                                  nullptr,
-                                  OPEN_EXISTING,
-                                  FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
-                                  nullptr)};
+                                                  FILE_READ_ATTRIBUTES,
+                                                  FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                                  nullptr,
+                                                  OPEN_EXISTING,
+                                                  FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                                                  nullptr)};
     BY_HANDLE_FILE_INFORMATION parentInfo{};
     if (parent.value == INVALID_HANDLE_VALUE || !GetFileInformationByHandle(parent.value, &parentInfo)
         || !(parentInfo.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || (parentInfo.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))

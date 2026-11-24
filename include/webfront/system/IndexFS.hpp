@@ -22,7 +22,7 @@ namespace webfront::fs {
 
 class IndexFS {
 public:
-    IndexFS(std::filesystem::path /*docRoot*/) {}
+    IndexFS(std::filesystem::path /*docRoot*/) { }
     IndexFS()                          = delete;
     IndexFS(const IndexFS&)            = default;
     IndexFS(IndexFS&&)                 = default;

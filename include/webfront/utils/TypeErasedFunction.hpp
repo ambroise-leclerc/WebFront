@@ -19,7 +19,7 @@
 namespace webfront::utils {
 
 template <typename R>
-struct function_traits : public function_traits<decltype(&R::operator())> {};
+struct function_traits : public function_traits<decltype(&R::operator())> { };
 
 template <typename R, typename... Args>
 struct function_traits<R (*)(Args...)> {
@@ -109,13 +109,13 @@ template <typename T>
 class TypeErasedFunction {
 private:
     struct TypeErased {
-        TypeErased() {}
-        virtual ~TypeErased() {}
+        TypeErased() { }
+        virtual ~TypeErased() { }
     };
 
     template <typename T>
     struct FunctionPointer : TypeErased {
-        FunctionPointer(T arg) : functionPointer(arg) {}
+        FunctionPointer(T arg) : functionPointer(arg) { }
 
         template <typename... Args>
         void call(Args&&... args) {

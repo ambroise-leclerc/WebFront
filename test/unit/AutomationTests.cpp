@@ -147,7 +147,7 @@ const Scenario automationAuthorization{
     [] {
         webfront::test::TemporaryDirectory directory;
         Session                            session{
-                                       {directory.path(), {"build", "test", "inspect"}}
+            {directory.path(), {"build", "test", "inspect"}}
         };
         Session other{
             {directory.path(), {"build"}}
@@ -197,7 +197,7 @@ const Scenario automationAuthorization{
 const Scenario automationEntries{"Automation entries accept manifest labels while refusing unsafe paths", [] {
                                      webfront::test::TemporaryDirectory directory;
                                      Session                            session{
-                                                                    {directory.path(), {"build", "preview"}}
+                                         {directory.path(), {"build", "preview"}}
                                      };
                                      session.poll();
                                      given("entry labels and relative paths accepted by wf", [&] {
@@ -229,7 +229,7 @@ const Scenario automationEntries{"Automation entries accept manifest labels whil
 const Scenario projectSetup{"Project setup operations need their own grants and plain arguments", [] {
                                 webfront::test::TemporaryDirectory directory;
                                 Session                            denied{
-                                                               {directory.path(), {"build"}}
+                                    {directory.path(), {"build"}}
                                 };
                                 Session session{
                                     {directory.path(), {"init", "create", "install", "restore", "embed"}}
@@ -307,7 +307,7 @@ const Scenario projectSetup{"Project setup operations need their own grants and 
 const Scenario authorizationPrecedes{"Authorization precedes operation and argument validation", [] {
                                          webfront::test::TemporaryDirectory directory;
                                          Session                            session{
-                                                                        {directory.path(), {"build"}}
+                                             {directory.path(), {"build"}}
                                          };
                                          const auto identity = Object(session.describe()).string("session");
                                          require(identity.size() == 64);
@@ -342,7 +342,7 @@ const Scenario authorizationPrecedes{"Authorization precedes operation and argum
 const Scenario exitCode130{"Exit code 130 needs an actual cancellation request", [] {
                                webfront::test::TemporaryDirectory directory;
                                Session                            session{
-                                                              {directory.path(), {"build"}}
+                                   {directory.path(), {"build"}}
                                };
                                session.poll();
                                const auto first = Object(session.start(command(session, "build"))).string("runId");
@@ -358,7 +358,7 @@ const Scenario exitCode130{"Exit code 130 needs an actual cancellation request",
 const Scenario automationCancellation{"Automation cancellation and native deadlines cannot reuse a stalled renderer", [] {
                                           webfront::test::TemporaryDirectory directory;
                                           Session                            session{
-                                                                         {directory.path(), {"build"}, std::chrono::seconds{1}}
+                                              {directory.path(), {"build"}, std::chrono::seconds{1}}
                                           };
                                           session.poll();
                                           const auto id = Object(session.start(command(session, "build"))).string("runId");
@@ -394,7 +394,7 @@ const Scenario automationCancellation{"Automation cancellation and native deadli
 const Scenario automationStartup{"Automation startup expiry respects readiness at the deadline", [] {
                                      webfront::test::TemporaryDirectory directory;
                                      Session                            session{
-                                                                    {directory.path(), {"build"}}
+                                         {directory.path(), {"build"}}
                                      };
                                      const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
                                      require(!session.expireStartup(deadline, deadline - std::chrono::milliseconds{1}));
@@ -418,7 +418,7 @@ const Scenario mCPInitialization{
     [] {
         webfront::test::TemporaryDirectory directory;
         Session                            session{
-                                       {directory.path(), {}}
+            {directory.path(), {}}
         };
         Mcp mcp{session};
         require(Object(*mcp.receive(R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})")).has("error"));
@@ -453,7 +453,7 @@ const Scenario mCPInitialization{
 const Scenario automationAudit{"Automation audit retains authorization decisions through busy and malformed retries", [] {
                                    webfront::test::TemporaryDirectory directory;
                                    Session                            session{
-                                                                  {directory.path(), {"build"}}
+                                       {directory.path(), {"build"}}
                                    };
                                    requireThrows([&] {
                                        session.start(command(session, "build"));
@@ -529,7 +529,7 @@ const Scenario versionedOperation{"The versioned operation schema projects the s
 const Scenario completedAutomation{"A completed automation snapshot replaces progress with the final bounded output", [] {
                                        webfront::test::TemporaryDirectory directory;
                                        Session                            session{
-                                                                      {directory.path(), {"build"}}
+                                           {directory.path(), {"build"}}
                                        };
                                        session.poll();
                                        const auto id = Object(session.start(command(session, "build"))).string("runId");
@@ -556,7 +556,7 @@ const Scenario completedAutomation{"A completed automation snapshot replaces pro
 const Scenario completionNative{"A completion the native side cannot validate fails its run instead of wedging the session", [] {
                                     webfront::test::TemporaryDirectory directory;
                                     Session                            session{
-                                                                   {directory.path(), {"build"}}
+                                        {directory.path(), {"build"}}
                                     };
                                     session.poll();
                                     given("a running operation", [&] {
@@ -659,7 +659,7 @@ const Scenario applicationCallback{
     [] {
         webfront::test::TemporaryDirectory directory;
         Session                            session{
-                                       {.project = directory.path(), .allow = {"call"}, .callbacks = {"app.render", "app.count"}}
+            {.project = directory.path(), .allow = {"call"}, .callbacks = {"app.render", "app.count"}}
         };
         Session withoutList{
             {directory.path(), {"call"}}

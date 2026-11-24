@@ -122,7 +122,7 @@ inline std::string quote(std::string_view text) {
 /// skipped. Errors throw std::runtime_error with the offset of the problem.
 class Reader {
 public:
-    explicit Reader(std::string_view json) : text(json) {}
+    explicit Reader(std::string_view json) : text(json) { }
 
     /// Reads an object, calling onMember(key) for each member; onMember must consume the value.
     void object(const std::function<void(const std::string&)>& onMember) {

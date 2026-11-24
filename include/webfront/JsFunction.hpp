@@ -27,14 +27,14 @@
 namespace webfront {
 
 namespace detail {
-struct IgnoreJsResult {};
+struct IgnoreJsResult { };
 }  // namespace detail
 
 template <typename WebFront, typename Result = detail::IgnoreJsResult>
 class JsFunction {
 public:
     JsFunction(std::string_view functionName, WebFront& wf, WebLinkId linkId, WebLinkGeneration connectionGeneration)
-        : name(functionName), webFront(wf), webLinkId(linkId), generation(connectionGeneration) {}
+        : name(functionName), webFront(wf), webLinkId(linkId), generation(connectionGeneration) { }
 
     auto operator()(auto&&... ts) {
         msg::FunctionCall<typename WebFront::BufferPolicy> command;

@@ -238,7 +238,7 @@ const Scenario captureStoreRecords{"A capture store records numbered images at a
                                        CaptureStore     store{directory.path, [&](std::chrono::milliseconds) -> CaptureResult {
                                                               ++calls;
                                                               return std::vector<std::uint8_t>{1, 2, 3};
-                                                          }};
+                                                              }};
                                        given("a recording at 20 images per second", [&] {
                                            store.startRecording("run", 20);
                                            then("a second recording is refused while it runs", [&] {
@@ -283,7 +283,7 @@ const Scenario recordingLoses{"A recording that loses its window reports the fai
                                                          if (++calls > 2)
                                                              return std::unexpected("the window is closed");
                                                          return std::vector<std::uint8_t>{1};
-                                                     }};
+                                                         }};
                                   store.startRecording("lost", 30);
                                   requireEventually([&] {
                                       return calls > 2;
@@ -316,7 +316,7 @@ const Scenario captureStoreTakes{"A capture store takes a screenshot without mak
                                                             while (!release)
                                                                 std::this_thread::sleep_for(std::chrono::milliseconds{1});
                                                             return std::vector<std::uint8_t>{1, 2, 3};
-                                                        }};
+                                                             }};
                                      given("a window that has not answered yet", [&] {
                                          store.beginScreenshot("slow");  // returns at once
                                          then("it is pending, a second one is refused, and the result arrives later", [&] {
@@ -348,7 +348,7 @@ const Scenario asynchronousScreenshot{"An asynchronous screenshot reports a capt
                                           CaptureDirectory directory{"asyncfail"};
                                           CaptureStore     store{directory.path, [](std::chrono::milliseconds) -> CaptureResult {
                                                                  return std::unexpected("no window");
-                                                             }};
+                                                                 }};
                                           store.beginScreenshot("x");
                                           std::optional<std::size_t> size;
                                           requireThrows(
@@ -699,7 +699,7 @@ const Scenario twoRecording{"Two recording names that differ only by case are on
                             }};
 
 namespace {
-struct FakeCapture {};
+struct FakeCapture { };
 }  // namespace
 
 const Scenario windowCloses{"A window that closes answers the captures it never got to run", [] {

@@ -630,7 +630,7 @@ struct NoFiles {
 
 /// A file provider whose failure quotes the path it was asked for.
 struct ThrowingFileSystem {
-    ThrowingFileSystem(std::filesystem::path) {}
+    ThrowingFileSystem(std::filesystem::path) { }
     std::optional<webfront::fs::File> open(std::filesystem::path file) {
         throw std::runtime_error("cannot open " + file.string());
     }

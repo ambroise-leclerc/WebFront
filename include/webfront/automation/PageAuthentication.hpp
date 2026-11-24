@@ -43,7 +43,7 @@ inline std::string payload(std::string_view sequence, std::string_view method, s
 }
 class PageAuthentication {
 public:
-    explicit PageAuthentication(std::string secret = channel::nonce()) : key(std::move(secret)) {}
+    explicit PageAuthentication(std::string secret = channel::nonce()) : key(std::move(secret)) { }
     const std::string& secret() const {
         return key;
     }

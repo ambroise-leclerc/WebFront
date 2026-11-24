@@ -111,7 +111,7 @@ void nativeClose(bool quit) {
 }
 
 struct TestSocket {
-    explicit TestSocket(int descriptor) : descriptor(descriptor) {}
+    explicit TestSocket(int descriptor) : descriptor(descriptor) { }
     TestSocket(const TestSocket&)            = delete;
     TestSocket& operator=(const TestSocket&) = delete;
     ~TestSocket() {
@@ -591,7 +591,7 @@ void replacedDownload() {
     std::vector<std::string> finished;
     Session                  session("http://127.0.0.1:0/", {.visible = false, .downloadFinished = [&](const std::string& path) {
                                                 finished.push_back(path);
-                                            }});
+                                                             }});
     const auto               start = [&](std::uintptr_t key, std::string_view oldContent, std::string_view downloaded) {
         std::ofstream(target) << oldContent;
         auto staging = std::make_unique<webfront::frontend::detail::DownloadStaging>(folder);

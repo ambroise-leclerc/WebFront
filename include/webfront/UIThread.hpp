@@ -34,7 +34,7 @@ namespace webfront {
 /// @brief UIThread::stop() gave up: the window did not close in the time allowed, and its thread still runs show().
 class UIThreadStalled : public std::runtime_error {
 public:
-    UIThreadStalled() : std::runtime_error("webfront::UIThread::stop(): the interface did not close when asked; its thread is still running") {}
+    UIThreadStalled() : std::runtime_error("webfront::UIThread::stop(): the interface did not close when asked; its thread is still running") { }
 };
 
 /**

@@ -66,12 +66,12 @@ protected:
     static std::string getErrorText(int error, bool prependErrorId = true) {
         LPVOID lpMsgBuf{};
         auto   bufLen = FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-                                    nullptr,
-                                    error,
-                                    0,
-                                    reinterpret_cast<LPTSTR>(&lpMsgBuf),
-                                    0,
-                                    nullptr);
+                                      nullptr,
+                                      error,
+                                      0,
+                                      reinterpret_cast<LPTSTR>(&lpMsgBuf),
+                                      0,
+                                      nullptr);
         if (bufLen) {
             auto        lpMsgStr = reinterpret_cast<LPCSTR>(lpMsgBuf);
             std::string result(lpMsgStr, lpMsgStr + bufLen);
@@ -92,7 +92,7 @@ protected:
     static bool initializeLib() noexcept {
         return true;
     }
-    static void cleanupLib() noexcept {}
+    static void cleanupLib() noexcept { }
 
     static std::string getErrorText(bool prependErrorId = true) {
         return getErrorText(getLastError(), prependErrorId);

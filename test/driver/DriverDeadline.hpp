@@ -21,7 +21,7 @@ namespace webfront::testdriver {
 // blocks JavaScript so that no JS timer can report an expired command.
 class DriverDeadline {
 public:
-    explicit DriverDeadline(std::chrono::steady_clock::duration total) : overall(std::chrono::steady_clock::now() + total), current(overall) {}
+    explicit DriverDeadline(std::chrono::steady_clock::duration total) : overall(std::chrono::steady_clock::now() + total), current(overall) { }
     void beginCase(std::chrono::steady_clock::duration timeout) {
         std::scoped_lock lock{mutex};
         current = std::min(overall, std::chrono::steady_clock::now() + timeout);

@@ -31,7 +31,7 @@ const Scenario text{"A [bracketed; title] stays whole", [] {
                         });
                     }};
 
-const Scenario third{"Third", [] {}};
+const Scenario third{"Third", [] { }};
 
 int main(int argc, char** argv) {
     return run(argc, argv);

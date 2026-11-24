@@ -92,14 +92,14 @@ int runWithWindow(boing::Host& host, const Options& options) {
     std::mutex             uiMutex;
     std::optional<App::UI> captureUI;
     App                    app{webfront::WebFrontConfig{
-                           .window = {.title = "WebFront host loop", .width = options.captureDemo ? 640 : 800, .height = options.captureDemo ? 480 : 600}}};
+        .window = {.title = "WebFront host loop", .width = options.captureDemo ? 640 : 800, .height = options.captureDemo ? 480 : 600}}};
     boing::install(app, host);
     app.onUIStarted([&](App::UI ui) {
         const std::scoped_lock lock{uiMutex};
-        captureUI               = ui;
-        const std::string mode  = options.captureFrames > 1
-                                      ? (options.settings.glass ? "globalThis.hostLoopCapture = {glass: true};" : "globalThis.hostLoopCapture = {glass: false};")
-                                      : "";
+        captureUI              = ui;
+        const std::string mode = options.captureFrames > 1
+                                     ? (options.settings.glass ? "globalThis.hostLoopCapture = {glass: true};" : "globalThis.hostLoopCapture = {glass: false};")
+                                     : "";
         const std::string style = options.captureDemo ? "document.querySelector('#host-loop .stats').remove();" : "";
         ui.addScript(mode + ownPage + style);
     });

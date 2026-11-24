@@ -41,8 +41,8 @@ inline constexpr bool secureTransport = []() -> bool {
 namespace buffers {
 class MutableBuffer {
 public:
-    MutableBuffer() noexcept : bufData(0), bufSize(0) {}
-    MutableBuffer(void* data, std::size_t size) noexcept : bufData(data), bufSize(size) {}
+    MutableBuffer() noexcept : bufData(0), bufSize(0) { }
+    MutableBuffer(void* data, std::size_t size) noexcept : bufData(data), bufSize(size) { }
     void* data() const noexcept {
         return bufData;
     }
@@ -63,9 +63,9 @@ private:
 
 class ConstBuffer {
 public:
-    ConstBuffer() noexcept : bufData(0), bufSize(0) {}
-    ConstBuffer(const void* data, std::size_t size) noexcept : bufData(data), bufSize(size) {}
-    ConstBuffer(const MutableBuffer& b) : bufData(b.data()), bufSize(b.size()) {}
+    ConstBuffer() noexcept : bufData(0), bufSize(0) { }
+    ConstBuffer(const void* data, std::size_t size) noexcept : bufData(data), bufSize(size) { }
+    ConstBuffer(const MutableBuffer& b) : bufData(b.data()), bufSize(b.size()) { }
     const void* data() const noexcept {
         return bufData;
     }

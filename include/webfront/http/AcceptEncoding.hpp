@@ -90,7 +90,7 @@ inline bool parametersAccept(std::string_view parameters) {
  */
 class Preferences {
 public:
-    explicit Preferences(std::string_view requestedEncoding) : coding(canonicalCoding(requestedEncoding)) {}
+    explicit Preferences(std::string_view requestedEncoding) : coding(canonicalCoding(requestedEncoding)) { }
 
     void add(std::string_view field) {
         while (!field.empty())

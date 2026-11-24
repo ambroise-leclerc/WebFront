@@ -24,7 +24,7 @@
 
 namespace {
 struct BundleFS {
-    explicit BundleFS(std::filesystem::path) {}
+    explicit BundleFS(std::filesystem::path) { }
     static inline std::vector<std::uint64_t> words;
     static inline std::size_t                size{};
     static void                              load(std::string_view bytes) {

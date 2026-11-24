@@ -205,7 +205,7 @@ const Scenario webKitGTKDevelopment{"WebKitGTK development opens without a sandb
                                             try {
                                                 DevelopmentSandboxEnvironment scope(SandboxMode::development);
                                                 throw std::runtime_error("display failure");
-                                            } catch (const std::runtime_error&) {}
+                                            } catch (const std::runtime_error&) { }
                                             check(std::getenv(sandboxOptOut) == nullptr);
                                         });
                                     }};
@@ -296,7 +296,7 @@ const Scenario webKitGTKProbeLifecycle{"WebKitGTK probes tolerate host child man
                                                    +[](int) {
                                                        const int savedError = errno;
                                                        int       status;
-                                                       while (waitpid(-1, &status, WNOHANG) > 0) {}
+                                                       while (waitpid(-1, &status, WNOHANG) > 0) { }
                                                        errno = savedError;
                                                    });
                                                const auto failure = sandboxLauncherFailure(working);

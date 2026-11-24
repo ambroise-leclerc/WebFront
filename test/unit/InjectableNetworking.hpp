@@ -45,7 +45,7 @@ public:
     using completion_signatures = networking::ex::
         completion_signatures<networking::ex::set_value_t(std::size_t), networking::ex::set_error_t(std::error_code), networking::ex::set_stopped_t()>;
 
-    explicit ManualSender(std::function<void(Completion)> start) : onStart(std::move(start)) {}
+    explicit ManualSender(std::function<void(Completion)> start) : onStart(std::move(start)) { }
 
     // Completed by the test, or stopped by the stop request of the awaiting task, whichever comes first.
     template <typename Receiver>
@@ -65,7 +65,7 @@ public:
         std::shared_ptr<bool>                                                 finished = std::make_shared<bool>(false);  // outlives the operation
         std::optional<networking::ex::stop_callback_for_t<StopToken, OnStop>> stopCallback;
 
-        Operation(Receiver r, std::function<void(Completion)> start) : receiver(std::move(r)), onStart(std::move(start)) {}
+        Operation(Receiver r, std::function<void(Completion)> start) : receiver(std::move(r)), onStart(std::move(start)) { }
 
         void start() noexcept {
             auto token = networking::ex::get_stop_token(networking::ex::get_env(receiver));
@@ -133,7 +133,7 @@ public:
         return input.size();
     }
 
-    void close() {}
+    void close() { }
     void shutdown(shutdown_type) {
         ++shutdowns;
     }

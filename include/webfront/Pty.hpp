@@ -31,7 +31,7 @@ namespace webfront::pty::detail {
 
 class ByteRing {
 public:
-    explicit ByteRing(std::size_t capacity) : storage(capacity) {}
+    explicit ByteRing(std::size_t capacity) : storage(capacity) { }
 
     std::size_t size() const {
         return used;
@@ -86,7 +86,7 @@ public:
     explicit Pty(PtyOptions options)
         : native(pty::detail::prepare(std::move(options))), worker([this] {
               run();
-          }) {}
+          }) { }
 
     ~Pty() {
         hangUp();

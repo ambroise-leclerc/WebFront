@@ -94,7 +94,7 @@ struct Served {
 };
 
 struct ServedFS {
-    explicit ServedFS(std::filesystem::path) {}
+    explicit ServedFS(std::filesystem::path) { }
     std::optional<fs::File> open(std::filesystem::path) {
         if (!Served::native.empty()) {
             fs::File file{std::ifstream(Served::native, std::ios::binary)};
@@ -235,7 +235,7 @@ const Scenario rangeHeader{"A Range header selects one part of a representation"
                                    const std::optional<std::string> tag{"\"1000-42\""};
                                    auto                             conditioned = [](std::string condition) {
                                        return Fields{
-                                                                       {{"Range", "bytes=10-19"}, {"If-Range", std::move(condition)}}
+                                           {{"Range", "bytes=10-19"}, {"If-Range", std::move(condition)}}
                                        };
                                    };
                                    then("the range applies when it is the strong tag of the representation", [&] {
@@ -547,11 +547,11 @@ const Scenario routeServing{"A route serving a stored encoding keeps it and nego
                                     std::vector<std::uint64_t>       words((content.size() + 7) / 8, 0);
                                     for (std::size_t index = 0; index < content.size(); ++index)
                                         words[index / 8] |= static_cast<std::uint64_t>(static_cast<unsigned char>(content[index])) << ((7 - index % 8) * 8);
-                                    auto              route = server.addRoute("/webfront/services/files/", [&](const RouteRequest& routed) {
+                                    auto                   route = server.addRoute("/webfront/services/files/", [&](const RouteRequest& routed) {
                                         return fileReply(routed.request, fs::File(words, content.size(), "gzip"), "text/html");
                                     });
-                                    const std::string text  = "GET /webfront/services/files/page.html HTTP/1.1\r\nHost: localhost\r\nAccept-Encoding: "
-                                                             + std::string(acceptEncoding) + "\r\nRange: bytes=0-3\r\n\r\n";
+                                    const std::string      text  = "GET /webfront/services/files/page.html HTTP/1.1\r\nHost: localhost\r\nAccept-Encoding: "
+                                                                   + std::string(acceptEncoding) + "\r\nRange: bytes=0-3\r\n\r\n";
                                     std::vector<std::byte> bytes;
                                     for (const char c : text)
                                         bytes.push_back(static_cast<std::byte>(c));

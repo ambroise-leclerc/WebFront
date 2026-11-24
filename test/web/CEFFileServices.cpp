@@ -101,7 +101,7 @@ public:
     }
     // The window may not take input right away: click again until the chooser was requested.
     struct Click : CefTask {
-        Click(Client* owner, int left) : client(owner), remaining(left) {}
+        Click(Client* owner, int left) : client(owner), remaining(left) { }
         void Execute() override {
             if (scenario.asked || remaining == 0)
                 return;
@@ -113,7 +113,7 @@ public:
         IMPLEMENT_REFCOUNTING(Click);
     };
     struct Deadline : CefTask {
-        explicit Deadline(Client* owner) : client(owner) {}
+        explicit Deadline(Client* owner) : client(owner) { }
         void Execute() override {
             client->close();
         }

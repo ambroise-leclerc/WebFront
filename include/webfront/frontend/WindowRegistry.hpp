@@ -70,7 +70,7 @@ public:
                              Hooks::name.data(),
                              page.c_str(),
                              error.what());
-            } catch (...) {}
+            } catch (...) { }
         }
         finished.push_back(std::move(found->second));
         secondary.erase(found);

@@ -261,7 +261,7 @@ inline void rollForward(const std::filesystem::path&     root,
 struct IncompletePublication : std::runtime_error {
     explicit IncompletePublication(const std::string& reason)
         : std::runtime_error("A committed publication of the project is not applied yet (" + reason
-                             + "); fix the cause and run the command again to complete it") {}
+                             + "); fix the cause and run the command again to complete it") { }
 };
 
 /// Completes the journals that reached their commit point and abandons the others. A journal is

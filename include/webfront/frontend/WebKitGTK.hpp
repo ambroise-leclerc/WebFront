@@ -253,7 +253,7 @@ struct CaptureJob {
 inline void answer(CaptureJob& job, CaptureResult result) noexcept {
     try {
         job.done.set_value(std::move(result));
-    } catch (...) {}  // Already answered: a closing window may have answered before the engine did.
+    } catch (...) { }  // Already answered: a closing window may have answered before the engine did.
 }
 
 /// The window is going away: no pending request waits for an answer that will never come.
@@ -293,7 +293,7 @@ inline void finishCapture(Api::Object view, Api::Object result, void* owner) noe
     } catch (...) {
         try {
             (*job)->done.set_exception(std::current_exception());
-        } catch (...) {}
+        } catch (...) { }
     }
 }
 
@@ -399,7 +399,7 @@ struct Session : FailureState {
 
 
     explicit Session(webfront::detail::BoundContentPolicy rules, WindowOptions settings = {})
-        : policy(std::move(rules)), windowOptions(resolveWindow(std::move(settings))) {}
+        : policy(std::move(rules)), windowOptions(resolveWindow(std::move(settings))) { }
     Session(const Session&)            = delete;
     Session& operator=(const Session&) = delete;
     ~Session() {
@@ -469,7 +469,7 @@ struct Session : FailureState {
         if (first && closedHook) {
             try {
                 closedHook();
-            } catch (...) {}
+            } catch (...) { }
         }
     }
     void failAndClose(std::string_view message) noexcept {

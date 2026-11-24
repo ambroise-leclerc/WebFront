@@ -49,7 +49,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
                     break;
             }
         }
-    } catch (const std::runtime_error&) {}
+    } catch (const std::runtime_error&) { }
     // Try every owning result family, including mismatches; no recursive untrusted types.
     decode<bool>(bytes);
     decode<std::int8_t>(bytes);

@@ -431,11 +431,11 @@ public:
     }
     void signal() const noexcept {
         const std::uint64_t one = 1;
-        while (::write(descriptor, &one, sizeof(one)) < 0 && errno == EINTR) {}
+        while (::write(descriptor, &one, sizeof(one)) < 0 && errno == EINTR) { }
     }
     std::uint64_t consume() const noexcept {
         std::uint64_t count = 0;
-        while (::read(descriptor, &count, sizeof(count)) < 0 && errno == EINTR) {}
+        while (::read(descriptor, &count, sizeof(count)) < 0 && errno == EINTR) { }
         return count;
     }
 };

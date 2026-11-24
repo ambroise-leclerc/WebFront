@@ -107,7 +107,7 @@ private:
     // Contract: never remove a sink while holding a lock that the sink's callback takes (the removal would wait for a
     // callback that waits for that lock). WebLink removes its transport after releasing transportMutex.
     struct Entry : std::enable_shared_from_this<Entry> {
-        explicit Entry(std::function<void(std::string_view)> function) : callback(std::move(function)) {}
+        explicit Entry(std::function<void(std::string_view)> function) : callback(std::move(function)) { }
         void invoke(std::string_view line) {
             {
                 const std::lock_guard lock(mutex);
@@ -349,7 +349,7 @@ struct Context {
     string_view   callId;
 };
 struct ContextScope {
-    explicit ContextScope(Context) noexcept {}
+    explicit ContextScope(Context) noexcept { }
     ContextScope(const ContextScope&)            = delete;
     ContextScope& operator=(const ContextScope&) = delete;
 };
@@ -372,6 +372,6 @@ inline void removeTransport(TransportHandle handle) {
 inline void reportTransportFailure(TransportHandle handle) {
     removeTransport(handle);
 }
-inline void reportTransportOverflow() noexcept {}
+inline void reportTransportOverflow() noexcept { }
 }  // namespace webfront::log
 #endif

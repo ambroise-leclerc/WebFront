@@ -77,7 +77,7 @@ namespace webfront::frontend::detail {
                 uptime >> seconds;
                 return static_cast<long long>((seconds - std::stod(field) / static_cast<double>(sysconf(_SC_CLK_TCK))) * 1000.0);
             }
-    } catch (...) {}
+    } catch (...) { }
     return -1;
 #else
     return -1;

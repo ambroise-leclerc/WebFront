@@ -394,16 +394,16 @@ const Scenario windowIgnores{"A window that ignores the deadline's close request
                                      return std::make_unique<Automation<ConsumerApp, SupervisorClock>>(
                                          app,
                                          AutomationOptions{.grants         = {"check"},
-                                                                 .directory      = root.path() / ("endpoint" + std::to_string(grace.count())),
-                                                                 .discovery      = sessions,
-                                                                 .timeout        = std::chrono::seconds{1},
-                                                                 .startupTimeout = startup,
-                                                                 .closeGrace     = grace,
-                                                                 .onUnresponsive =
+                                                           .directory      = root.path() / ("endpoint" + std::to_string(grace.count())),
+                                                           .discovery      = sessions,
+                                                           .timeout        = std::chrono::seconds{1},
+                                                           .startupTimeout = startup,
+                                                           .closeGrace     = grace,
+                                                           .onUnresponsive =
                                                                [&] {
                                                                    ++unresponsive;
                                                                },
-                                                                 .announce = false});
+                                                           .announce = false});
                                  };
                                  given("an operation that never completes and a window that never closes", [&] {
                                      auto automation = enable(std::chrono::milliseconds{100});
@@ -527,7 +527,7 @@ const Scenario defaultAutomation{"The default automation clock supervises a rend
                                                                                       .onUnresponsive =
                                                                                           [&] {
                                                                                  unresponsive = true;
-                                                                             },
+                                                                                          },
                                                                                       .announce = false});
                                      requireEventually([&] {
                                          return unresponsive.load();
@@ -588,15 +588,15 @@ const Scenario unboundedDelaysKeepTheSession{
         std::atomic<int> unresponsive{0};
         const auto       options = [&](std::chrono::seconds startup, std::chrono::milliseconds grace) {
             return AutomationOptions{.grants         = {"check"},
-                                           .directory      = root.path() / "endpoint",
-                                           .discovery      = root.path() / "sessions",
-                                           .startupTimeout = startup,
-                                           .closeGrace     = grace,
-                                           .onUnresponsive =
+                                     .directory      = root.path() / "endpoint",
+                                     .discovery      = root.path() / "sessions",
+                                     .startupTimeout = startup,
+                                     .closeGrace     = grace,
+                                     .onUnresponsive =
                                          [&] {
                                              ++unresponsive;
                                          },
-                                           .announce = false};
+                                     .announce = false};
         };
         given("a startup timeout of seconds::max()", [&] {
             Automation<ConsumerApp, SupervisorClock> automation{app, options(std::chrono::seconds::max(), std::chrono::milliseconds{100})};

@@ -45,7 +45,7 @@ public:
     FileLock()                           = default;
     FileLock(const FileLock&)            = delete;
     FileLock& operator=(const FileLock&) = delete;
-    FileLock(FileLock&& other) noexcept : fd(std::exchange(other.fd, -1)) {}
+    FileLock(FileLock&& other) noexcept : fd(std::exchange(other.fd, -1)) { }
     ~FileLock() {
         if (fd >= 0)
             ::close(fd);
@@ -105,7 +105,7 @@ struct LeaseHolder {
                 const auto      registry = FileLock::wait(lease.remove.parent_path() / registryFile);
                 std::error_code ignored;
                 std::filesystem::remove_all(lease.remove, ignored);
-            } catch (...) {}
+            } catch (...) { }
         }
     }
 };

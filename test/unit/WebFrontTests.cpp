@@ -126,21 +126,21 @@ struct ResultLinkMock {
 class WebFrontIoContextMock {
 public:
     static inline std::atomic<int> stopCalls{0};
-    void                           run() {}
+    void                           run() { }
     std::size_t                    run_one() {
         return 0;
     }
     void stop() {
         ++stopCalls;
     }
-    void restart() {}
+    void restart() { }
 };
 
 class WebFrontAcceptorMock : public networking::SocketBaseMock {
     bool openState = false;
 
 public:
-    explicit WebFrontAcceptorMock(WebFrontIoContextMock) {}
+    explicit WebFrontAcceptorMock(WebFrontIoContextMock) { }
 
     void open(auto protocol) {
         log::debug("WebFrontAcceptorMock::open({})", protocol);
@@ -170,7 +170,7 @@ struct InitializingFrontend {
         ++initializeCalls;
     }
 
-    static void open(std::string_view, std::string_view) {}
+    static void open(std::string_view, std::string_view) { }
 };
 
 struct RetryingFrontend {
@@ -182,7 +182,7 @@ struct RetryingFrontend {
             throw std::runtime_error("frontend initialization failed");
     }
 
-    static void open(std::string_view, std::string_view) {}
+    static void open(std::string_view, std::string_view) { }
 };
 
 struct OpeningFrontend {
@@ -223,7 +223,7 @@ struct ClosingFrontend {
 
 struct FailingFrontend {
     static constexpr frontend::Action action{frontend::Action::closeServerAfterOpen};
-    static void                       initialize() {}
+    static void                       initialize() { }
     static void                       open(std::string_view, std::string_view) {
         throw std::runtime_error("frontend startup failed");
     }
@@ -232,7 +232,7 @@ struct FailingFrontend {
 struct ThreadRecordingFrontend {
     static inline std::thread::id     openThread;
     static constexpr frontend::Action action{frontend::Action::closeServerAfterOpen};
-    static void                       initialize() {}
+    static void                       initialize() { }
     static void                       open(std::string_view, std::string_view) {
         openThread = std::this_thread::get_id();
     }
@@ -240,7 +240,7 @@ struct ThreadRecordingFrontend {
 
 struct FailingNonBlockingFrontend {
     static constexpr frontend::Action action{frontend::Action::keepServerRunning};
-    static void                       initialize() {}
+    static void                       initialize() { }
     static void                       open(std::string_view, std::string_view) {
         throw std::runtime_error("launcher failed");
     }
@@ -251,8 +251,8 @@ struct AddressFrontend {
     static inline std::string         lastAddress;
     static inline std::string         lastPort;
     static inline std::string         lastFile;
-    static void                       initialize() {}
-    static void                       open(std::string_view, std::string_view) {}
+    static void                       initialize() { }
+    static void                       open(std::string_view, std::string_view) { }
     static void                       open(std::string_view address, std::string_view port, std::string_view file) {
         lastAddress = address;
         lastPort    = port;
@@ -667,7 +667,7 @@ const Scenario registeredC{"Registered C++ function handlers own and invoke thei
                                    int decodedValue = 0;
                                    using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
                                    FrontendWF webFront("9100");
-                                   auto       registeredFunction = [] {};
+                                   auto       registeredFunction = [] { };
                                    webFront.cppFunction<void>("temporary", registeredFunction);
                                    registeredFunction();
 
@@ -770,7 +770,7 @@ const Scenario cppFunctionDeduces{
     "cppFunction deduces a callable's signature from itself",
     [] {
         then("callable_traits resolves the return type and decayed, owning parameter types", [&] {
-            auto voidLambda = [](int) {};
+            auto voidLambda = [](int) { };
             require(std::is_same_v<detail::callable_traits<decltype(voidLambda)>::Return, void>);
             require(std::is_same_v<detail::callable_traits<decltype(voidLambda)>::DecayedArgs, std::tuple<int>>);
 
@@ -789,7 +789,7 @@ const Scenario cppFunctionDeduces{
             require(std::is_same_v<detail::callable_traits<decltype(&freeFunctionForDeductionTest)>::Return, int>);
             require(std::is_same_v<detail::callable_traits<decltype(&freeFunctionForDeductionTest)>::DecayedArgs, std::tuple<double>>);
 
-            std::function<void(std::string)> stdFunction = [](std::string) {};
+            std::function<void(std::string)> stdFunction = [](std::string) { };
             require(std::is_same_v<detail::callable_traits<decltype(stdFunction)>::Return, void>);
             require(std::is_same_v<detail::callable_traits<decltype(stdFunction)>::DecayedArgs, std::tuple<std::string>>);
         });
@@ -819,7 +819,7 @@ const Scenario deducedCppFunction{"Deduced cppFunction registration accepts comm
 
                                               webFront.cppFunction("onFreeFunction", &freeFunctionForDeductionTest);
 
-                                              std::function<void(std::string)> stdFunction = [](std::string) {};
+                                              std::function<void(std::string)> stdFunction = [](std::string) { };
                                               webFront.cppFunction("onStdFunction", stdFunction);
 
                                               then("registration compiles and the original callables remain usable", [&] {
@@ -990,7 +990,7 @@ const Scenario callbackFailure{"A callback failure is sent with its code", [] {
                                    });
                                    given("a callback whose argument cannot be decoded", [&] {
                                        ResultLinkMock link;
-                                       auto handler = detail::makeCppFunctionHandler<http::DefaultBuffersPolicy, void, std::string>([](std::string) {});
+                                       auto handler = detail::makeCppFunctionHandler<http::DefaultBuffersPolicy, void, std::string>([](std::string) { });
                                        const std::array<std::byte, 1> boolean{std::byte{static_cast<std::uint8_t>(msg::CodedType::booleanTrue)}};
                                        then("the failure has the malformed code", [&] {
                                            try {
@@ -1099,23 +1099,23 @@ const Scenario uIFirst{"A UI first parameter selects the caller form of cppFunct
                                FrontendWF webFront("9161");
                                then("the caller may be taken by value or by const reference", [&] {
                                    requireNothrow([&] {
-                                       webFront.cppFunction("byValue", [](AppUI) {});
+                                       webFront.cppFunction("byValue", [](AppUI) { });
                                    });
                                    requireNothrow([&] {
-                                       webFront.cppFunction("byConstReference", [](const AppUI&) {});
+                                       webFront.cppFunction("byConstReference", [](const AppUI&) { });
                                    });
                                });
                                then("the caller may be taken by mutable or rvalue reference", [&] {
                                    requireNothrow([&] {
-                                       webFront.cppFunction("byReference", [](AppUI&) {});
+                                       webFront.cppFunction("byReference", [](AppUI&) { });
                                    });
                                    requireNothrow([&] {
-                                       webFront.cppFunction("byRvalueReference", [](AppUI&&) {});
+                                       webFront.cppFunction("byRvalueReference", [](AppUI&&) { });
                                    });
                                });
                                then("caller callbacks register through deduction and explicit types", [&] {
                                    requireNothrow([&] {
-                                       webFront.cppFunction("deduced", [](AppUI, std::string) {});
+                                       webFront.cppFunction("deduced", [](AppUI, std::string) { });
                                    });
                                    requireNothrow([&] {
                                        webFront.template cppFunction<int, const AppUI&, double>("explicit", [](const AppUI&, double) {
@@ -1127,7 +1127,7 @@ const Scenario uIFirst{"A UI first parameter selects the caller form of cppFunct
                                    UISubscription subscription;
                                    {
                                        FrontendWF scoped("9162");
-                                       subscription = scoped.subscribeUIStarted([](AppUI) {});
+                                       subscription = scoped.subscribeUIStarted([](AppUI) { });
                                        require(subscription.active());
                                    }
                                    requireNothrow([&] {
@@ -1173,7 +1173,7 @@ const Scenario basicWFDoes{"BasicWF does not require onUIStarted to be set", [] 
                                            requireNothrow([&] {
                                                [] {
                                                    FrontendWF webFront("9160");
-                                                   webFront.cppFunction<void>("noop", [] {});
+                                                   webFront.cppFunction<void>("noop", [] { });
                                                }();
                                            });
                                        });
@@ -1189,7 +1189,7 @@ struct PolicyFrontend {
     static constexpr frontend::Action action{frontend::Action::keepServerRunning};
     static inline ContentPolicy       received;
     static inline std::string         receivedAddress;
-    static void                       initialize() {}
+    static void                       initialize() { }
     static void                       open(std::string_view, std::string_view) {
         throw std::runtime_error("Legacy overload selected");
     }

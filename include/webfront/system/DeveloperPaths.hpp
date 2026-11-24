@@ -23,18 +23,18 @@ inline constexpr std::size_t extendedPathThreshold = 200;
 
 #ifdef _WIN32
 // Spelled with \x5c (a backslash): the prefixes are \?\ and \?\UNC\ for a network share, which is \ in its ordinary form.
-inline constexpr std::wstring_view networkPrefix = L"\x5c"
-                                                   L"\x5c";
+inline constexpr std::wstring_view networkPrefix  = L"\x5c"
+                                                    L"\x5c";
 inline constexpr std::wstring_view extendedPrefix = L"\x5c"
                                                     L"\x5c"
                                                     L"?"
                                                     L"\x5c";
-inline constexpr std::wstring_view uncPrefix = L"\x5c"
-                                               L"\x5c"
-                                               L"?"
-                                               L"\x5c"
-                                               L"UNC"
-                                               L"\x5c";
+inline constexpr std::wstring_view uncPrefix      = L"\x5c"
+                                                    L"\x5c"
+                                                    L"?"
+                                                    L"\x5c"
+                                                    L"UNC"
+                                                    L"\x5c";
 #endif
 
 /// The form of an absolute path that the Windows file APIs accept beyond MAX_PATH; other platforms keep the path as is.

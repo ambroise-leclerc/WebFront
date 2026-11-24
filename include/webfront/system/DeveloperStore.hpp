@@ -113,7 +113,7 @@ public:
             const auto      path = projectPath(root, directory.empty() ? name : directory + "/" + name);
             std::error_code error;
             const auto      size = isDirectory ? std::uintmax_t{} : std::filesystem::file_size(path, error);
-            text                += (text.size() > 1 ? "," : "") + ("{\"name\":" + json::quote(name)) + ",\"type\":\"" + (isDirectory ? "directory" : "file")
+            text += (text.size() > 1 ? "," : "") + ("{\"name\":" + json::quote(name)) + ",\"type\":\"" + (isDirectory ? "directory" : "file")
                     + "\",\"size\":" + std::to_string(error ? std::uintmax_t{} : size) + ",\"modified\":" + std::to_string(modifiedMilliseconds(path)) + "}";
         }
         text += "]";

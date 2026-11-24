@@ -144,7 +144,7 @@ struct HttpConsumerApp {
         int id() const {
             return value;
         }
-        void        addScript(std::string) const {}
+        void        addScript(std::string) const { }
         friend bool operator==(const UI& a, const UI& b) {
             return a.value == b.value;
         }

@@ -139,7 +139,7 @@ const Scenario webSocketKeeps{"A WebSocket keeps only the latest frame of a key 
                                           require(intermediate.use_count() == 1);
                                       });
                                       when("the network completes the writes", [&] {
-                                          while (InjectableSocket::completeDeferredWrites() != 0) {}
+                                          while (InjectableSocket::completeDeferredWrites() != 0) { }
                                           then("the first and latest frames are written in order, not the intermediate one", [&] {
                                               require(InjectableSocket::wrote("other-frame"));
                                               require(InjectableSocket::wrote("state-1"));
@@ -157,7 +157,7 @@ const Scenario webSocketKeeps{"A WebSocket keeps only the latest frame of a key 
                                       require(held.use_count() == 2);
 
                                       when("the write fails", [&] {
-                                          while (InjectableSocket::completeDeferredWrites() != 0) {}
+                                          while (InjectableSocket::completeDeferredWrites() != 0) { }
                                           then("the held frame is released with the queue", [&] {
                                               require(held.use_count() == 1);
                                               require(ws->pendingWrites() == 0);
@@ -165,7 +165,7 @@ const Scenario webSocketKeeps{"A WebSocket keeps only the latest frame of a key 
                                       });
                                   });
                                   InjectableSocket::deferWrites(false);
-                                  while (InjectableSocket::completeDeferredWrites() != 0) {}
+                                  while (InjectableSocket::completeDeferredWrites() != 0) { }
                                   ws->stop();
                                   InjectableSocket::reset();
                               }};
@@ -321,7 +321,7 @@ const Scenario webSocketRejects{"A WebSocket rejects a frame announcing gigabyte
                                     optional<uint16_t>                 closeCode;
                                     webfront::testing::InlineTaskScope scope;
                                     auto                               ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{}, scope);
-                                    ws->onMessage([](span<const byte>) {});
+                                    ws->onMessage([](span<const byte>) { });
                                     ws->onClose([&](websocket::CloseEvent event) {
                                         closeCode = event.status;
                                     });
@@ -460,19 +460,19 @@ const Scenario webSocketFrames{"WebSocket frames can own payloads for asynchrono
 const Scenario webSocketDecoder{"WebSocket decoder", [] {
                                     given("Some frame data and a decoder", [&] {
                                         array<uint8_t, 22>      frame{0x1,
-                                                                 0b10000000 | 8,
-                                                                 0x10,
-                                                                 0x11,
-                                                                 0x12,
-                                                                 0x13,
-                                                                 uint8_t{'H' ^ 0x10},
-                                                                 uint8_t{'e' ^ 0x11},
-                                                                 uint8_t{'l' ^ 0x12},
-                                                                 uint8_t{'l' ^ 0x13},
-                                                                 uint8_t{'o' ^ 0x10},
-                                                                 uint8_t{' ' ^ 0x11},
-                                                                 uint8_t{'W' ^ 0x12},
-                                                                 uint8_t{'S' ^ 0x13}};
+                                                                      0b10000000 | 8,
+                                                                      0x10,
+                                                                      0x11,
+                                                                      0x12,
+                                                                      0x13,
+                                                                      uint8_t{'H' ^ 0x10},
+                                                                      uint8_t{'e' ^ 0x11},
+                                                                      uint8_t{'l' ^ 0x12},
+                                                                      uint8_t{'l' ^ 0x13},
+                                                                      uint8_t{'o' ^ 0x10},
+                                                                      uint8_t{' ' ^ 0x11},
+                                                                      uint8_t{'W' ^ 0x12},
+                                                                      uint8_t{'S' ^ 0x13}};
                                         websocket::FrameDecoder decoder;
                                         when("All data is received in one unique chunk", [&] {
                                             require(decoder.parse(std::span(reinterpret_cast<const std::byte*>(frame.data()), frame.size())));

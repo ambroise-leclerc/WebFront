@@ -51,7 +51,7 @@ class MemoryStorage {
     // The bytes a File reads: shared with the node, so a later replacement does not change an opened file.
     class Content : public ByteSource {
     public:
-        explicit Content(std::shared_ptr<const std::string> shared) : bytes(std::move(shared)) {}
+        explicit Content(std::shared_ptr<const std::string> shared) : bytes(std::move(shared)) { }
         std::size_t read(std::span<char> buffer) override {
             const auto count = std::min(buffer.size(), bytes->size() - position);
             std::copy_n(bytes->data() + position, count, buffer.data());
@@ -72,7 +72,7 @@ class MemoryStorage {
     };
 
 public:
-    MemoryStorage() : state(std::make_shared<State>()) {}
+    MemoryStorage() : state(std::make_shared<State>()) { }
 
     /// A write in progress, buffered in memory until commit().
     class Writer {
@@ -107,7 +107,7 @@ public:
     private:
         friend class MemoryStorage;
         Writer(std::shared_ptr<State> storageState, std::vector<std::string> path, WriteMode writeMode)
-            : state(std::move(storageState)), components(std::move(path)), mode(writeMode) {}
+            : state(std::move(storageState)), components(std::move(path)), mode(writeMode) { }
 
         std::shared_ptr<State>   state;
         std::vector<std::string> components;

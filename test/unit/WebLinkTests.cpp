@@ -88,7 +88,7 @@ vector<byte> returnMessage(msg::CallId callId, Configure configure) {
 const Scenario webLinkSettles{"WebLink settles correlated asynchronous results", [] {
                                   InjectableSocket::reset();
                                   InlineTaskScope               scope;
-                                  WebLink<InjectableNetworking> link{InjectableSocket{}, 7, [](WebLinkEvent) {}, scope};
+                                  WebLink<InjectableNetworking> link{InjectableSocket{}, 7, [](WebLinkEvent) { }, scope};
 
                                   given("a pending string result", [&] {
                                       auto [callId, result] = link.expectResult<string>();
@@ -124,7 +124,7 @@ const Scenario webLinkSettles{"WebLink settles correlated asynchronous results",
                                       auto [callId, result] = link.expectResult<void>();
 
                                       when("the browser returns no value", [&] {
-                                          auto response = returnMessage(callId, [](auto&, auto&) {});
+                                          auto response = returnMessage(callId, [](auto&, auto&) { });
                                           InjectableSocket::receive(response);
 
                                           then("the future completes", [&] {
@@ -154,7 +154,7 @@ pair<string, string> futureFailure(future<Result>& result) {
 const Scenario browserRejection{"A browser rejection reaches C++ with its code", [] {
                                     InjectableSocket::reset();
                                     InlineTaskScope               scope;
-                                    WebLink<InjectableNetworking> link{InjectableSocket{}, 7, [](WebLinkEvent) {}, scope};
+                                    WebLink<InjectableNetworking> link{InjectableSocket{}, 7, [](WebLinkEvent) { }, scope};
 
                                     given("a pending call the browser rejects with an application code", [&] {
                                         auto [callId, result] = link.expectResult<string>();
@@ -215,7 +215,7 @@ const Scenario browserRejection{"A browser rejection reaches C++ with its code",
 const Scenario webLinkRejects{"WebLink rejects incomplete asynchronous results", [] {
                                   InjectableSocket::reset();
                                   InlineTaskScope               scope;
-                                  WebLink<InjectableNetworking> link{InjectableSocket{}, 8, [](WebLinkEvent) {}, scope};
+                                  WebLink<InjectableNetworking> link{InjectableSocket{}, 8, [](WebLinkEvent) { }, scope};
 
                                   given("a pending value whose return is malformed", [&] {
                                       auto [callId, result] = link.expectResult<string>();
@@ -366,7 +366,7 @@ const Scenario webLinkDispatchesEvery{"WebLink dispatches every WebSocket frame 
                                           given("A handshake and function call delivered together", [&] {
                                               msg::Handshake handshake;
                                               const auto     handshakePayload = span(reinterpret_cast<const byte*>(handshake.header().data()),
-                                                                                 handshake.header().size());
+                                                                                     handshake.header().size());
                                               auto           received         = clientFrame(handshakePayload);
 
                                               msg::FunctionCall<>                    call;
@@ -393,7 +393,7 @@ const Scenario webLinkForwards{"WebLink forwards logs to the browser until a wri
                                    InjectableSocket::reset();
                                    log::setLogLevel(log::Info);
                                    InlineTaskScope               scope;
-                                   WebLink<InjectableNetworking> link{InjectableSocket{}, 41, [](WebLinkEvent) {}, scope};
+                                   WebLink<InjectableNetworking> link{InjectableSocket{}, 41, [](WebLinkEvent) { }, scope};
                                    browserHandshake();
                                    log::info("forwarded to the browser");
                                    drainBrowserLogs();
@@ -416,7 +416,7 @@ const Scenario writeFailing{"A write failing after its WebLink is destroyed does
                                 InjectableSocket::reset();
                                 log::setLogLevel(log::Info);
                                 InlineTaskScope scope;
-                                auto link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{31}, [](WebLinkEvent) {}, scope);
+                                auto link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{31}, [](WebLinkEvent) { }, scope);
                                 browserHandshake();
                                 // The old link's write completes only after the link is gone, keeping its WebSocket alive.
                                 InjectableSocket::deferWrites();
@@ -428,7 +428,7 @@ const Scenario writeFailing{"A write failing after its WebLink is destroyed does
                                 InjectableSocket::deferWrites(false);
 
                                 // A new link, possibly at the same address, attaches its own transport.
-                                link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{32}, [](WebLinkEvent) {}, scope);
+                                link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{32}, [](WebLinkEvent) { }, scope);
                                 browserHandshake();
                                 require(InjectableSocket::completeDeferredWrites() == 1);
                                 log::info("delivered by the new link");
@@ -443,7 +443,7 @@ const Scenario browserStops{"A browser that stops reading bounds the diagnostic 
                                 InjectableSocket::reset();
                                 log::setLogLevel(log::Info);
                                 InlineTaskScope               scope;
-                                WebLink<InjectableNetworking> link{InjectableSocket{}, 51, [](WebLinkEvent) {}, scope};
+                                WebLink<InjectableNetworking> link{InjectableSocket{}, 51, [](WebLinkEvent) { }, scope};
                                 browserHandshake();
                                 // Only the first write reaches the network, and it does not complete.
                                 InjectableSocket::deferWrites();
@@ -489,7 +489,7 @@ networking::Task waitWritesSeeing(Writes writes, const vector<WebLinkEvent::Code
 const Scenario linkWakes{"A link wakes a writer once its write queue drains", [] {
                              InjectableSocket::reset();
                              InlineTaskScope scope;
-                             auto            link = make_shared<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{12}, [](WebLinkEvent) {}, scope);
+                             auto            link = make_shared<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{12}, [](WebLinkEvent) { }, scope);
                              InjectableSocket::deferWrites();
                              for (msg::CallId call = 1; call <= 3; ++call)
                                  link->sendError(call, "queued");
@@ -511,7 +511,7 @@ const Scenario linkWakes{"A link wakes a writer once its write queue drains", []
                                  networking::Spawn(scope, networking::ex::inline_scheduler{}, stop.get_token(), waitWrites(Writes{link, 0}, woken));
                                  stop.request_stop();
                                  then("it unwinds, and the drained queue does not call it", [&] {
-                                     while (InjectableSocket::completeDeferredWrites() > 0) {}
+                                     while (InjectableSocket::completeDeferredWrites() > 0) { }
                                      check(!woken);
                                      check(link->pendingWrites() == 0);
                                  });
@@ -531,7 +531,7 @@ const Scenario linkWakes{"A link wakes a writer once its write queue drains", []
                                  });
                              });
                              InjectableSocket::deferWrites(false);
-                             while (InjectableSocket::completeDeferredWrites() > 0) {}
+                             while (InjectableSocket::completeDeferredWrites() > 0) { }
                          }};
 
 const Scenario writerResumes{"A writer resumes after a failed write reported the closure", [] {
@@ -566,7 +566,7 @@ const Scenario writerResumes{"A writer resumes after a failed write reported the
 const Scenario webLinkNever{"WebLink never logs the payload of an incoming message", [] {
                                 InjectableSocket::reset();
                                 InlineTaskScope               scope;
-                                WebLink<InjectableNetworking> link{InjectableSocket{}, 7, [](WebLinkEvent) {}, scope};
+                                WebLink<InjectableNetworking> link{InjectableSocket{}, 7, [](WebLinkEvent) { }, scope};
                                 auto [callId, result] = link.expectResult<string>();
 
                                 log::setLogLevel(log::Info);
@@ -636,7 +636,7 @@ const Scenario securePeerCloseResumesWriters{
             then("the terminal frame drains the queue and wakes a late waiter", [&] {
                 require(!last);
                 require(SecureCloseTestNetwork::alerts == 0);
-                while (InjectableSocket::completeDeferredWrites() != 0) {}
+                while (InjectableSocket::completeDeferredWrites() != 0) { }
                 require(last);
                 require(link->pendingWrites() == 0);
                 require(SecureCloseTestNetwork::alerts == 1);

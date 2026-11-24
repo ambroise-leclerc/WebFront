@@ -95,7 +95,7 @@ public:
     }
     CaptureRegistration(const CaptureRegistration&)            = delete;
     CaptureRegistration& operator=(const CaptureRegistration&) = delete;
-    CaptureRegistration(CaptureRegistration&& other) noexcept : owned(std::exchange(other.owned, nullptr)) {}
+    CaptureRegistration(CaptureRegistration&& other) noexcept : owned(std::exchange(other.owned, nullptr)) { }
     CaptureRegistration& operator=(CaptureRegistration&& other) noexcept {
         if (this != &other) {
             reset();

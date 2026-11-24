@@ -90,7 +90,7 @@ void stringReply(msg::CallId id, std::string value) {
 const Scenario typedBrowser{"Typed browser senders are lazy and own their arguments", [] {
                                 InjectableSocket::reset();
                                 InlineTaskScope               scope;
-                                WebLink<InjectableNetworking> link{InjectableSocket{}, 1, [](WebLinkEvent) {}, scope};
+                                WebLink<InjectableNetworking> link{InjectableSocket{}, 1, [](WebLinkEvent) { }, scope};
                                 SenderApp                     app{link};
                                 BasicUI<SenderApp>            ui{app, 1, 1};
                                 ex::inplace_stop_source       stop;
@@ -118,7 +118,7 @@ const Scenario typedBrowser{"Typed browser senders are lazy and own their argume
                                 given("a void sender", [&] {
                                     auto operation = ex::connect(ui.jsFunctionSender("finish")(), Receiver{observed, stop.get_token()});
                                     ex::start(operation);
-                                    reply(1, [](auto&, auto&) {});
+                                    reply(1, [](auto&, auto&) { });
                                     then("an empty return completes successfully", [&] {
                                         check(observed.completions == 1);
                                         check(observed.error.empty());
@@ -131,7 +131,7 @@ const Scenario typedBrowserSenders{
     [] {
         InjectableSocket::reset();
         InlineTaskScope         scope;
-        auto                    link = std::make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{1}, [](WebLinkEvent) {}, scope);
+        auto                    link = std::make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{1}, [](WebLinkEvent) { }, scope);
         SenderApp               app{*link};
         BasicUI<SenderApp>      ui{app, 1, 1};
         SenderObserved          observed;
@@ -186,7 +186,7 @@ const Scenario typedBrowserSenders{
 const Scenario typedBrowserCalls{"Typed browser calls propagate receiver cancellation", [] {
                                      InjectableSocket::reset();
                                      InlineTaskScope               scope;
-                                     WebLink<InjectableNetworking> link{InjectableSocket{}, 1, [](WebLinkEvent) {}, scope};
+                                     WebLink<InjectableNetworking> link{InjectableSocket{}, 1, [](WebLinkEvent) { }, scope};
                                      SenderApp                     app{link};
                                      BasicUI<SenderApp>            ui{app, 1, 1};
                                      ex::inplace_stop_source       stop;
@@ -246,7 +246,7 @@ const Scenario browserResult{"Browser result and cancellation can race", [] {
                                              for (int iteration = 0; iteration != 40; ++iteration) {
                                                  InjectableSocket::reset();
                                                  InlineTaskScope               scope;
-                                                 WebLink<InjectableNetworking> link{InjectableSocket{}, 1, [](WebLinkEvent) {}, scope};
+                                                 WebLink<InjectableNetworking> link{InjectableSocket{}, 1, [](WebLinkEvent) { }, scope};
                                                  SenderApp                     app{link};
                                                  BasicUI<SenderApp>            ui{app, 1, 1};
                                                  ex::inplace_stop_source       stop;
@@ -276,7 +276,7 @@ networking::Task awaitBrowser(BasicUI<SenderApp> ui, SenderObserved& observed, s
 const Scenario typedBrowserSendersCan{"Typed browser senders can be awaited in a tracked task", [] {
                                           InjectableSocket::reset();
                                           InlineTaskScope               transport;
-                                          WebLink<InjectableNetworking> link{InjectableSocket{}, 1, [](WebLinkEvent) {}, transport};
+                                          WebLink<InjectableNetworking> link{InjectableSocket{}, 1, [](WebLinkEvent) { }, transport};
                                           SenderApp                     app{link};
                                           SenderObserved                observed;
                                           InlineTaskScope               calls;
@@ -312,19 +312,19 @@ const Scenario cancelledCorrelation{"Cancelled correlation IDs cannot be reused 
                                             webfront::detail::PendingCalls<CorrelationPolicy> calls;
                                             auto                                              retained = std::make_shared<int>(42);
                                             std::weak_ptr<int>                                released = retained;
-                                            const auto cancelled = calls.add({[retained](const auto&) {}, [retained](auto) {}});
+                                            const auto cancelled = calls.add({[retained](const auto&) { }, [retained](auto) { }});
                                             retained.reset();
                                             calls.cancel(cancelled);
                                             check(released.expired());
                                             when("the correlation counter wraps", [&] {
                                                 for (std::size_t i = 1; i < std::numeric_limits<msg::CallId>::max(); ++i) {
-                                                    const auto id = calls.add({[](const auto&) {}, [](auto) {}});
+                                                    const auto id = calls.add({[](const auto&) { }, [](auto) { }});
                                                     require(id != cancelled);
                                                     msg::FunctionReturn<CorrelationPolicy> result;
                                                     result.setCallId(id);
                                                     require(calls.complete(result));
                                                 }
-                                                const auto next = calls.add({[](const auto&) {}, [](auto) {}});
+                                                const auto next = calls.add({[](const auto&) { }, [](auto) { }});
                                                 then("the reserved ID is skipped until its response is consumed", [&] {
                                                     check(next != cancelled);
                                                     msg::FunctionReturn<CorrelationPolicy> late;
@@ -359,7 +359,7 @@ const Scenario serverScope{"A server scope can release the final owner of a WebS
 const Scenario browserSenders{"Browser senders reject inconsistent return envelopes", [] {
                                   InjectableSocket::reset();
                                   InlineTaskScope               scope;
-                                  WebLink<InjectableNetworking> link{InjectableSocket{}, 1, [](WebLinkEvent) {}, scope};
+                                  WebLink<InjectableNetworking> link{InjectableSocket{}, 1, [](WebLinkEvent) { }, scope};
                                   SenderApp                     app{link};
                                   BasicUI<SenderApp>            ui{app, 1, 1};
                                   ex::inplace_stop_source       stop;
@@ -368,7 +368,7 @@ const Scenario browserSenders{"Browser senders reject inconsistent return envelo
                                       auto operation = ex::connect(ui.jsFunctionSender<std::string>("result")(), Receiver{observed, stop.get_token()});
                                       ex::start(operation);
                                       when("a return contains no result", [&] {
-                                          reply(1, [](auto&, auto&) {});
+                                          reply(1, [](auto&, auto&) { });
                                           then("its arity error reaches the receiver", [&] {
                                               check(observed.error == "Malformed function return message");
                                           });
@@ -472,7 +472,7 @@ const Scenario obsoleteRegistration{"An obsolete registration cannot cancel a re
                                             webfront::detail::PendingCalls<CorrelationPolicy> calls;
                                             int                                               originalOwner{};
                                             int                                               replacementOwner{};
-                                            const auto old = calls.add({.complete = [](const auto&) {}, .reject = {}, .owner = &originalOwner});
+                                            const auto old = calls.add({.complete = [](const auto&) { }, .reject = {}, .owner = &originalOwner});
                                             msg::FunctionReturn<CorrelationPolicy> result;
                                             result.setCallId(old);
                                             require(calls.complete(result));

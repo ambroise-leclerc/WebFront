@@ -315,7 +315,7 @@ RingClaim::~RingClaim() {
 
 /** @brief Stops the consumer during static destruction, before the text adapter it may use. */
 struct LaneShutdown {
-    explicit LaneShutdown(TransportLane& value) : lane(&value) {}
+    explicit LaneShutdown(TransportLane& value) : lane(&value) { }
     LaneShutdown(const LaneShutdown&)            = delete;
     LaneShutdown& operator=(const LaneShutdown&) = delete;
     LaneShutdown(LaneShutdown&&)                 = delete;
@@ -511,15 +511,15 @@ TransportHandle addTransport(std::function<void(const TransportRecord&)> write) 
         const auto text = renderTransportText(record);
         try {
             write({.level            = facadeLevel(record.level),
-                      .timeAvailable    = record.timeAvailable,
-                      .time             = std::chrono::time_point_cast<std::chrono::nanoseconds>(record.timestamp),
-                      .location         = record.location,
-                      .message          = record.message,
-                      .messageTruncated = record.messageTruncated,
-                      .component        = record.category,
-                      .operationId      = record.operationId,
-                      .correlationId    = record.correlationId,
-                      .text             = text});
+                   .timeAvailable    = record.timeAvailable,
+                   .time             = std::chrono::time_point_cast<std::chrono::nanoseconds>(record.timestamp),
+                   .location         = record.location,
+                   .message          = record.message,
+                   .messageTruncated = record.messageTruncated,
+                   .component        = record.category,
+                   .operationId      = record.operationId,
+                   .correlationId    = record.correlationId,
+                   .text             = text});
         } catch (...) {
             // TransportConsumer detaches this transport and counts the failure.
             static_cast<void>(lane.detach(*attached));

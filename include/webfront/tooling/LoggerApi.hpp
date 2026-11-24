@@ -29,7 +29,7 @@ public:
 private:
     struct Registration;
     /** @brief Wrap one independent callback registration. */
-    explicit SinkHandle(std::shared_ptr<Registration> registration) : value(std::move(registration)) {}
+    explicit SinkHandle(std::shared_ptr<Registration> registration) : value(std::move(registration)) { }
     std::shared_ptr<Registration> value;
     friend SinkHandle             addSink(std::function<void(std::string_view)> callback);
     friend void                   removeSink(const SinkHandle& handle);
@@ -154,7 +154,7 @@ public:
 private:
     struct Registration;
     /** @brief Wrap one transport registration. */
-    explicit TransportHandle(std::shared_ptr<Registration> registration) : value(std::move(registration)) {}
+    explicit TransportHandle(std::shared_ptr<Registration> registration) : value(std::move(registration)) { }
     std::shared_ptr<Registration> value;
     friend TransportHandle        addTransport(std::function<void(const TransportRecord&)> write);
     friend void                   removeTransport(const TransportHandle& handle);

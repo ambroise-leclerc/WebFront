@@ -13,7 +13,7 @@
 namespace webfront::tls::detail {
 inline constexpr std::size_t maxCredentialBytes = 256 * 1024;
 struct Error : std::runtime_error {
-    Error(std::string_view message, Byte code = 50) : std::runtime_error("TLS: " + std::string(message)), alert(code) {}
+    Error(std::string_view message, Byte code = 50) : std::runtime_error("TLS: " + std::string(message)), alert(code) { }
     Byte alert;
 };
 

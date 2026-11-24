@@ -286,7 +286,7 @@ public:
     static constexpr std::size_t chunkSize = jasmineChunkSize;
 
     JasmineSession(std::vector<std::string> contents, std::filesystem::path reportPath, std::shared_ptr<CaptureStore> captureStore = nullptr)
-        : files(std::move(contents)), report(std::move(reportPath)), store(std::move(captureStore)) {}
+        : files(std::move(contents)), report(std::move(reportPath)), store(std::move(captureStore)) { }
 
     /// The newest page is the one under test (a reload replaces the previous connection). Returns false once finished.
     bool attach(const Caller& caller) {
@@ -533,7 +533,7 @@ inline namespace jasmine_inert {
 template <typename App>
 class JasmineTest {
 public:
-    explicit JasmineTest(App&) {}
+    explicit JasmineTest(App&) { }
     [[nodiscard]] int exitCode() const {
         return 0;
     }

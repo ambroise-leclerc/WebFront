@@ -97,7 +97,7 @@ const Scenario broadcastKeeps{"A broadcast keeps only the latest call for a brow
                                               require(!Socket::wrote("state-3"));
                                           });
                                           andWhen("the network completes the writes", [&] {
-                                              while (Socket::completeDeferredWrites() != 0) {}
+                                              while (Socket::completeDeferredWrites() != 0) { }
                                               then("the latest state follows and the intermediate one was skipped", [&] {
                                                   require(Socket::wrote("state-3"));
                                                   require(!Socket::wrote("state-2"));
@@ -112,7 +112,7 @@ const Scenario broadcastKeeps{"A broadcast keeps only the latest call for a brow
                                           app.broadcast("onState", {.maxPendingWrites = 1})(std::string{"temporary-1"});
                                           app.broadcast("onState", {.maxPendingWrites = 1})(std::string{"temporary-2"});
                                           app.broadcast("onState", {.maxPendingWrites = 1})(std::string{"temporary-3"});
-                                          while (Socket::completeDeferredWrites() != 0) {}
+                                          while (Socket::completeDeferredWrites() != 0) { }
                                           then("they share the browser's held call: the intermediate one was skipped", [&] {
                                               require(Socket::wrote("temporary-1"));
                                               require(Socket::wrote("temporary-3"));
@@ -124,7 +124,7 @@ const Scenario broadcastKeeps{"A broadcast keeps only the latest call for a brow
                                           latest(std::string{"state-1"});
                                           latest(std::string{"state-2"});
                                           latest(std::string{"state-3"});
-                                          while (Socket::completeDeferredWrites() != 0) {}
+                                          while (Socket::completeDeferredWrites() != 0) { }
                                           then("the event does not count toward the limit of the states", [&] {
                                               require(Socket::wrote("event-0"));
                                               require(Socket::wrote("state-1"));
@@ -136,7 +136,7 @@ const Scenario broadcastKeeps{"A broadcast keeps only the latest call for a brow
                                           every(std::string{"event-1"});
                                           every(std::string{"event-2"});
                                           every(std::string{"event-3"});
-                                          while (Socket::completeDeferredWrites() != 0) {}
+                                          while (Socket::completeDeferredWrites() != 0) { }
                                           then("every one is written", [&] {
                                               require(Socket::wrote("event-1"));
                                               require(Socket::wrote("event-2"));
@@ -144,7 +144,7 @@ const Scenario broadcastKeeps{"A broadcast keeps only the latest call for a brow
                                           });
                                       });
                                       Socket::deferWrites(false);
-                                      while (Socket::completeDeferredWrites() != 0) {}
+                                      while (Socket::completeDeferredWrites() != 0) { }
                                   });
                                   app.shutdown();
                                   Socket::reset();
@@ -238,13 +238,13 @@ const Scenario browserWhose{
             Socket::receive(testing::clientFrame(std::span(reinterpret_cast<const std::byte*>(handshake.header().data()), handshake.header().size())));
             Socket::deferWrites();
             Socket::completeDeferredWrites();  // the handshake acknowledgement
-            while (Socket::completeDeferredWrites() != 0) {}
+            while (Socket::completeDeferredWrites() != 0) { }
             pair(std::string{"pair-1"});
             pair(std::string{"pair-2"});
             latest(std::string{"single-3"});
             latest(std::string{"single-4"});
             pair(std::string{"pair-5"});
-            while (Socket::completeDeferredWrites() != 0) {}
+            while (Socket::completeDeferredWrites() != 0) { }
             then("each call applies its own limit within the browser's queue of that function", [&] {
                 require(Socket::wrote("pair-1"));
                 require(Socket::wrote("pair-2"));
@@ -254,7 +254,7 @@ const Scenario browserWhose{
                 require(Socket::writtenAt("pair-2") < Socket::writtenAt("pair-5"));
             });
             Socket::deferWrites(false);
-            while (Socket::completeDeferredWrites() != 0) {}
+            while (Socket::completeDeferredWrites() != 0) { }
         });
         app.shutdown();
         Socket::reset();
@@ -278,13 +278,13 @@ const Scenario heldBroadcast{"A held broadcast reaches the browser after a later
                                      latest(std::string{"state-1"});
                                      latest(std::string{"state-2"});
                                      every(std::string{"reset-after-state-2"});
-                                     while (Socket::completeDeferredWrites() != 0) {}
+                                     while (Socket::completeDeferredWrites() != 0) { }
                                      then("the other function's call is written before the held state, as documented", [&] {
                                          require(Socket::writtenAt("reset-after-state-2") < Socket::writtenAt("state-2"));
                                      });
                                  });
                                  Socket::deferWrites(false);
-                                 while (Socket::completeDeferredWrites() != 0) {}
+                                 while (Socket::completeDeferredWrites() != 0) { }
                                  app.shutdown();
                                  Socket::reset();
                              }};
@@ -358,7 +358,7 @@ struct Observed {
 
     void record() {
         const auto now = ++running;
-        for (auto max = maxRunning.load(); now > max && !maxRunning.compare_exchange_weak(max, now);) {}
+        for (auto max = maxRunning.load(); now > max && !maxRunning.compare_exchange_weak(max, now);) { }
         std::this_thread::sleep_for(1ms);  // overlap with a callback another thread might be running
         {
             std::scoped_lock lock{mutex};
@@ -424,7 +424,7 @@ const Scenario callbacksRun{"Callbacks run one at a time on the server thread, a
                                         try {
                                             static_cast<void>(ui.document());
                                             documentRefused = false;
-                                        } catch (const std::logic_error&) {}
+                                        } catch (const std::logic_error&) { }
                                     });
                                     then("each started browser is visited once and receives its call, but its document needs the server thread", [&] {
                                         require(visited.size() == 2);

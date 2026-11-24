@@ -32,7 +32,7 @@ namespace webfront::forms {
 /// The label of a member. A string literal is not a structural value: the text is copied into static storage.
 struct Label {
     const char* text;
-    consteval Label(const char* value) : text(std::define_static_string(std::string_view(value))) {}
+    consteval Label(const char* value) : text(std::define_static_string(std::string_view(value))) { }
 };
 
 /// The inclusive bounds of a numeric member.

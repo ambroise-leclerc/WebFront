@@ -94,7 +94,7 @@ const Scenario dOMDocuments{"DOM documents batch writes and preserve node identi
 const Scenario dOMEvents{"DOM events and island revocation release callbacks", {"dom"}, [] {
                              auto state   = std::make_shared<dom::detail::State>();
                              state->ready = true;
-                             state->send  = [](const auto&) {};
+                             state->send  = [](const auto&) { };
                              dom::Document doc{Browser{state}};
                              auto          root   = doc.island("panel");
                              auto          other  = doc.island("other");
@@ -198,7 +198,7 @@ struct ReadBrowser : Browser {
 const Scenario dOMGrouped{"DOM grouped read results are bounded and structurally exact", {"dom"}, [] {
                               auto state   = std::make_shared<dom::detail::State>();
                               state->ready = true;
-                              state->send  = [](const auto&) {};
+                              state->send  = [](const auto&) { };
                               ReadBrowser browser{
                                   {state},
                                   {3, 0, 0, 0, 'o', 'n', 'e', 0, 0, 0, 0}
@@ -254,7 +254,7 @@ const Scenario dOMRejectsElement{"DOM rejects element-only operations before cha
                                              node.property("value", "value");
                                          });
                                          requireThrows<std::invalid_argument>([&] {
-                                             node.listen("click", [](std::string) {});
+                                             node.listen("click", [](std::string) { });
                                          });
                                          requireThrows<std::invalid_argument>([&] {
                                              node.unlisten("click");
@@ -366,7 +366,7 @@ const Scenario dOMRejectsEmpty{"DOM rejects empty event callbacks without changi
 const Scenario islandUnmount{"An island unmount with pending writes closes the entire document once", {"dom"}, [] {
                                  auto state   = std::make_shared<dom::detail::State>();
                                  state->ready = true;
-                                 state->send  = [](const auto&) {};
+                                 state->send  = [](const auto&) { };
                                  dom::Document doc{Browser{state}};
                                  auto          first = doc.island("first"), second = doc.island("second");
                                  auto          text = doc.text("second island");
@@ -458,7 +458,7 @@ struct ReadyDocument {
     dom::Document<Browser>              doc{Browser{state}};
     ReadyDocument() {
         state->ready = true;
-        state->send  = [](const auto&) {};
+        state->send  = [](const auto&) { };
     }
 };
 }  // namespace
@@ -600,7 +600,7 @@ const Scenario awaitedDOMEventCancelled{"An awaited DOM event is cancelled throu
                                                     ex::start(next);
                                                     state->event(button.id(), name, "");
                                                     require(again.value == "");
-                                                    button.listen("click", [](std::string) {});
+                                                    button.listen("click", [](std::string) { });
                                                     then("the obsolete wait does not conflict", [&] {
                                                         require(again.completions == 1);
                                                         require(state->listeners.size() == 1);
@@ -636,7 +636,7 @@ const Scenario awaitedDOMEventRejects{"An awaited DOM event rejects conflicting 
                                           });
                                           when("a callback subscribes the awaited event", [&] {
                                               requireThrows<std::logic_error>([&] {
-                                                  button.listen("click", [](std::string) {});
+                                                  button.listen("click", [](std::string) { });
                                               });
                                               then("the wait still receives it", [&] {
                                                   require(state->pending.data().size() == size);
@@ -645,7 +645,7 @@ const Scenario awaitedDOMEventRejects{"An awaited DOM event rejects conflicting 
                                               });
                                           });
                                           when("a wait starts for an event with a callback", [&] {
-                                              button.listen("keydown", [](std::string) {});
+                                              button.listen("keydown", [](std::string) { });
                                               Awaited second;
                                               auto    other = ex::connect(button.next("keydown"), EventReceiver{&second, {}});
                                               ex::start(other);
@@ -727,7 +727,7 @@ void fillBatch(dom::detail::State& state, std::uint32_t node) {
     try {
         for (;;)
             state.add({msg::DomOp::unlisten, node, 0});
-    } catch (const std::length_error&) {}
+    } catch (const std::length_error&) { }
 }
 }  // namespace
 
@@ -738,7 +738,7 @@ const Scenario cancelledDOM{"A cancelled DOM event wait releases its browser sub
                                 ex::inplace_stop_source source;
                                 Awaited                 awaited;
                                 auto                    operation = ex::connect(button.next("click", {.preventDefault = true, .stopPropagation = true}),
-                                                             EventReceiver{&awaited, source.get_token()});
+                                                                                EventReceiver{&awaited, source.get_token()});
                                 ex::start(operation);
                                 const auto name = state->names.at("click");
                                 document.doc.flush();
@@ -824,7 +824,7 @@ const Scenario dOMUnsubscription{"A DOM unsubscription that does not fit a full 
                                      ex::inplace_stop_source source;
                                      Awaited                 awaited;
                                      auto                    operation = ex::connect(button.next("click", {.preventDefault = true, .stopPropagation = false}),
-                                                                  EventReceiver{&awaited, source.get_token()});
+                                                                                     EventReceiver{&awaited, source.get_token()});
                                      ex::start(operation);
                                      const auto name = state->names.at("click");
                                      document.doc.flush();

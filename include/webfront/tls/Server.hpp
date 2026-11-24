@@ -58,7 +58,7 @@ public:
     };
 
     struct Socket : TCP::Socket {
-        explicit Socket(TCP::Socket&& accepted) : TCP::Socket(std::move(accepted)) {}
+        explicit Socket(TCP::Socket&& accepted) : TCP::Socket(std::move(accepted)) { }
 
     private:
         friend class Server;
@@ -189,7 +189,7 @@ private:
         try {
             const std::array<Byte, 2> alert{2, failure->alert};
             co_await writeRecord(socket, detail::alert, alert);
-        } catch (const std::system_error&) {}
+        } catch (const std::system_error&) { }
         throw std::system_error(std::make_error_code(std::errc::protocol_error), failure->what());
     }
 

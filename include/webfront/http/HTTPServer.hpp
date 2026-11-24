@@ -59,7 +59,7 @@ namespace webfront::http {
 class Headers {
     struct Header {
         Header() = default;
-        Header(std::string_view n, std::string_view v) : name(std::move(n)), value(std::move(v)) {}
+        Header(std::string_view n, std::string_view v) : name(std::move(n)), value(std::move(v)) { }
         std::string name;
         std::string value;
     };
@@ -117,7 +117,7 @@ private:
 };
 
 struct BadRequestException : public std::runtime_error {
-    BadRequestException() : std::runtime_error("Bad HTTP request") {}
+    BadRequestException() : std::runtime_error("Bad HTTP request") { }
 };
 
 struct Request : Headers {
@@ -418,7 +418,7 @@ public:
         Registration()                               = default;
         Registration(const Registration&)            = delete;
         Registration& operator=(const Registration&) = delete;
-        Registration(Registration&& other) noexcept : state(std::move(other.state)), entry(std::move(other.entry)) {}
+        Registration(Registration&& other) noexcept : state(std::move(other.state)), entry(std::move(other.entry)) { }
         Registration& operator=(Registration&& other) noexcept {
             if (this != &other) {
                 reset();
@@ -445,7 +445,7 @@ public:
 
     private:
         friend class RouteTable;
-        Registration(std::weak_ptr<State> owner, std::shared_ptr<Entry> route) : state(std::move(owner)), entry(std::move(route)) {}
+        Registration(std::weak_ptr<State> owner, std::shared_ptr<Entry> route) : state(std::move(owner)), entry(std::move(route)) { }
         std::weak_ptr<State>   state;
         std::shared_ptr<Entry> entry;
     };
@@ -737,7 +737,7 @@ template <networking::Features Net, fs::Provider FS, BuffersPolicyType Policy = 
 class RequestHandler {
 public:
     explicit RequestHandler(std::filesystem::path root, detail::BoundContentPolicy policy = detail::BoundContentPolicy{})
-        : fs(root), contentPolicy(std::move(policy)) {}
+        : fs(root), contentPolicy(std::move(policy)) { }
     ~RequestHandler()                                = default;
     RequestHandler(const RequestHandler&)            = default;
     RequestHandler(RequestHandler&&)                 = default;
@@ -879,9 +879,9 @@ private:
         auto file = fs.open(requestPath);
         if (!file)
             return Response::getStatusResponse(Response::notFound);
-        auto&      response = prepared.response;
-        const bool fallback = file->isEncoded() && encoding::isGzip(file->getEncoding()) && !request.acceptsEncoding(file->getEncoding())
-                              && request.acceptsEncoding("identity");
+        auto&      response       = prepared.response;
+        const bool fallback       = file->isEncoded() && encoding::isGzip(file->getEncoding()) && !request.acceptsEncoding(file->getEncoding())
+                                    && request.acceptsEncoding("identity");
         prepared.identityFallback = fallback;
         if (asynchronous && !file->isEncoded()) {
             if (const auto size = file->knownSize()) {

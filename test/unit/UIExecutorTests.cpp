@@ -62,7 +62,7 @@ struct Receiver {
             std::rethrow_exception(e);
         } catch (const UIExecutorUnavailable&) {
             observed.unavailable = true;
-        } catch (...) {}
+        } catch (...) { }
         observed.done();
     }
 };
@@ -129,7 +129,7 @@ template <typename Sender>
 struct Connected {
     using Op = decltype(ex::connect(std::declval<Sender>(), std::declval<Receiver>()));
     Op op;
-    Connected(Sender sender, Receiver receiver) : op(ex::connect(std::move(sender), std::move(receiver))) {}
+    Connected(Sender sender, Receiver receiver) : op(ex::connect(std::move(sender), std::move(receiver))) { }
     void start() noexcept {
         ex::start(op);
     }
@@ -194,7 +194,7 @@ const Scenario interfaceThread{"The interface thread runs scheduled operations",
 const Scenario operationStopped{"An operation is stopped by its token before it runs", [] {
                                     given("an attached loop that is not draining", [&] {
                                         UIExecutorHost host;
-                                        host.attach([] {});
+                                        host.attach([] { });
                                         auto                    executor = host.executor();
                                         Observed                observed;
                                         ex::inplace_stop_source stop;
@@ -214,7 +214,7 @@ const Scenario operationStopped{"An operation is stopped by its token before it 
                                     });
                                     given("a token already stopped", [&] {
                                         UIExecutorHost host;
-                                        host.attach([] {});
+                                        host.attach([] { });
                                         Observed                observed;
                                         ex::inplace_stop_source stop;
                                         stop.request_stop();
@@ -233,7 +233,7 @@ const Scenario operationStopped{"An operation is stopped by its token before it 
 const Scenario closingLoop{"Closing the loop abandons pending operations", [] {
                                given("an operation pending in a loop that does not drain", [&] {
                                    UIExecutorHost host;
-                                   host.attach([] {});
+                                   host.attach([] { });
                                    auto                    executor = host.executor();
                                    Observed                observed;
                                    ex::inplace_stop_source stop;
@@ -277,7 +277,7 @@ const Scenario executorWithout{"An executor without a running loop is unavailabl
                                    });
                                    given("a host closed", [&] {
                                        UIExecutorHost host;
-                                       host.attach([] {});
+                                       host.attach([] { });
                                        host.close();
                                        auto op = ex::connect(host.executor().schedule(), Receiver{observed, stop.get_token()});
                                        ex::start(op);
@@ -290,7 +290,7 @@ const Scenario executorWithout{"An executor without a running loop is unavailabl
                                        UIExecutor executor;
                                        {
                                            UIExecutorHost host;
-                                           host.attach([] {});
+                                           host.attach([] { });
                                            executor = host.executor();
                                        }
                                        check(!executor.available());
@@ -305,9 +305,9 @@ const Scenario executorWithout{"An executor without a running loop is unavailabl
 const Scenario loopCannot{"The loop cannot be attached twice and a failing wake fails the operation", [] {
                               given("an attached host", [&] {
                                   UIExecutorHost host;
-                                  host.attach([] {});
+                                  host.attach([] { });
                                   checkThrows<std::logic_error>([&] {
-                                      host.attach([] {});
+                                      host.attach([] { });
                                   });
                                   host.close();
                               });
@@ -362,7 +362,7 @@ namespace {
 struct FragileWake {
     static inline std::atomic<bool> failCopy{false};
     std::size_t*                    wakes;
-    explicit FragileWake(std::size_t* count) : wakes(count) {}
+    explicit FragileWake(std::size_t* count) : wakes(count) { }
     FragileWake(const FragileWake& other) : wakes(other.wakes) {
         if (failCopy)
             throw std::bad_alloc();
@@ -575,7 +575,7 @@ const Scenario systemBrowserCan{"The system browser can run an interface-thread 
                                                 // A function-local receiver type keeps the helper simple: schedule one operation and wait for it.
                                                 struct Holder {
                                                     decltype(ex::connect(std::declval<decltype(executor.schedule())>(), std::declval<LoopReceiver>())) op;
-                                                    Holder(const UIExecutor& e, LoopOutcome& o) : op(ex::connect(e.schedule(), LoopReceiver{o})) {}
+                                                    Holder(const UIExecutor& e, LoopOutcome& o) : op(ex::connect(e.schedule(), LoopReceiver{o})) { }
                                                 } holder(executor, outcome);
                                                 ex::start(holder.op);
                                                 clientOk = waitUntil([&] {
@@ -651,7 +651,7 @@ const Scenario systemBrowserCan{"The system browser can run an interface-thread 
                                                 struct Holder {
                                                     decltype(ex::connect(std::declval<decltype(Browser::uiExecutor().schedule())>(),
                                                                          std::declval<LoopReceiver>())) op;
-                                                    Holder(const UIExecutor& e, LoopOutcome& o) : op(ex::connect(e.schedule(), LoopReceiver{o})) {}
+                                                    Holder(const UIExecutor& e, LoopOutcome& o) : op(ex::connect(e.schedule(), LoopReceiver{o})) { }
                                                 } holder(executor, outcome);
                                                 ex::start(holder.op);
                                                 Browser::requestStop();  // the loop may run the job first or close with it still queued
@@ -699,7 +699,7 @@ const Scenario systemBrowserCan{"The system browser can run an interface-thread 
                                             bool threw{false};
                                             std::thread([&] {
                                                 try {
-                                                    Browser::loop("127.0.0.1", "9002", "index.html", [](const std::string&) {});
+                                                    Browser::loop("127.0.0.1", "9002", "index.html", [](const std::string&) { });
                                                 } catch (const std::runtime_error&) {
                                                     threw = true;
                                                 }
@@ -848,12 +848,12 @@ struct ChainReceiver {
         if (chain->completed < chain->limit)
             chain->next();
     }
-    void set_stopped() && noexcept {}
-    void set_error(std::exception_ptr) && noexcept {}
+    void set_stopped() && noexcept { }
+    void set_error(std::exception_ptr) && noexcept { }
 };
 struct Chain::Link {
     decltype(ex::connect(std::declval<decltype(std::declval<UIExecutor>().schedule())>(), std::declval<ChainReceiver>())) op;
-    Link(UIExecutor e, Chain* c) : op(ex::connect(e.schedule(), ChainReceiver{c})) {}
+    Link(UIExecutor e, Chain* c) : op(ex::connect(e.schedule(), ChainReceiver{c})) { }
 };
 void Chain::next() {
     links.push_back(std::make_unique<Link>(executor, this));
@@ -934,7 +934,7 @@ const Scenario invokeBlocking{"invokeOnUIThread runs a function on the interface
                                           loop.stop();
                                           then("the call reports the missing interface thread", [&] {
                                               requireThrows<UIExecutorUnavailable>([&] {
-                                                  invokeOnUIThread(executor, [] {});
+                                                  invokeOnUIThread(executor, [] { });
                                               });
                                           });
                                       });

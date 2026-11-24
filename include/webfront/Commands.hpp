@@ -111,7 +111,7 @@ struct Run {
     ex::inplace_stop_source stop;
     std::atomic<bool>       disconnected{false};
 
-    Run(UI caller, std::uint32_t commandId, std::vector<std::string> args) : ui(std::move(caller)), id(commandId), arguments(std::move(args)) {}
+    Run(UI caller, std::uint32_t commandId, std::vector<std::string> args) : ui(std::move(caller)), id(commandId), arguments(std::move(args)) { }
 
     /// Calls a browser function of the terminal, unless the browser disconnected (Registry::closed): its connection
     /// is gone, and a later browser may get its identifier. Returns false when the call was not made.
@@ -130,7 +130,7 @@ struct Run {
 template <typename UI>
 class Context {
 public:
-    explicit Context(std::shared_ptr<detail::Run<UI>> command) : run(std::move(command)) {}
+    explicit Context(std::shared_ptr<detail::Run<UI>> command) : run(std::move(command)) { }
 
     /// The words after the command name, split like a shell line by the terminal.
     [[nodiscard]] const std::vector<std::string>& args() const noexcept {
@@ -352,7 +352,7 @@ private:
         const int code = stopped || run->stop.stop_requested() ? interruptedExitCode : !error.empty() ? 1 : run->exitCode;
         try {
             run->send("webfront.commands.exit", code, error.empty() ? std::string_view{} : chunks(error).front());
-        } catch (...) {}  // nothing is left to report it to
+        } catch (...) { }  // nothing is left to report it to
     }
 };
 

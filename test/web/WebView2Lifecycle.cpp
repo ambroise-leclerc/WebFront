@@ -502,7 +502,7 @@ class SlowPageFS {
 public:
     static inline std::atomic<bool>          waiting{false};
     static inline std::counting_semaphore<2> release{0};
-    explicit SlowPageFS(std::filesystem::path root) : source(std::move(root)) {}
+    explicit SlowPageFS(std::filesystem::path root) : source(std::move(root)) { }
     std::optional<webfront::fs::File> open(std::filesystem::path file) {
         if (file.relative_path() == "slow-resource.js") {
             waiting = true;

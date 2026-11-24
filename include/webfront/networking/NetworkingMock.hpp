@@ -42,19 +42,19 @@ struct StoppedSender {
 
 class IoContextMock {
 public:
-    void        run() {}
+    void        run() { }
     std::size_t run_one() {
         return 0;
     }
-    void stop() {}
-    void restart() {}
+    void stop() { }
+    void restart() { }
 };
 
 class EndpointMock {
     std::string originalAddress, originalPort;
 
 public:
-    EndpointMock(std::string_view address, std::string_view port) : originalAddress(address), originalPort(port) {}
+    EndpointMock(std::string_view address, std::string_view port) : originalAddress(address), originalPort(port) { }
     auto protocol() const {
         return originalPort;
     }
@@ -66,7 +66,7 @@ public:
     struct reuse_address {
         bool isSet;
 
-        explicit reuse_address(bool reuse) : isSet(reuse) {}
+        explicit reuse_address(bool reuse) : isSet(reuse) { }
 
         bool value() const {
             return isSet;
@@ -117,7 +117,7 @@ class AcceptorMock : public SocketBaseMock {
     bool isOpen = false;
 
 public:
-    AcceptorMock(IoContextMock) {};
+    AcceptorMock(IoContextMock) { };
     void open(auto protocol) {
         log::debug("AcceptorMock::open({})", protocol);
         isOpen = true;

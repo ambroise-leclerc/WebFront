@@ -50,7 +50,7 @@ namespace webfront::pty::detail {
 
 class PtyFd {
 public:
-    explicit PtyFd(int descriptor = -1) : fd(descriptor) {}
+    explicit PtyFd(int descriptor = -1) : fd(descriptor) { }
     ~PtyFd() {
         reset();
     }
@@ -168,11 +168,11 @@ public:
     bool atEnd() const {
         return eof;
     }
-    void beginDrain() const {}
+    void beginDrain() const { }
 
     void wake() const {
         const char byte = 0;
-        while (::write(wakeWrite.get(), &byte, 1) < 0 && errno == EINTR) {}
+        while (::write(wakeWrite.get(), &byte, 1) < 0 && errno == EINTR) { }
     }
 
     // The owner excludes concurrent wake() calls before retiring these descriptors.

@@ -245,7 +245,7 @@ struct ScenarioFrontend : Frontend {
 using ScenarioApp = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, ScenarioFrontend>;
 
 void pollFailure() {
-    ScenarioFrontend::configure = [](gtk::Session&) {};
+    ScenarioFrontend::configure = [](gtk::Session&) { };
     ScenarioFrontend::finished  = [](gtk::Session&) -> bool {
         throw std::runtime_error("poll failure");
     };

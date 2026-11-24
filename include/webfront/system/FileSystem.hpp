@@ -60,10 +60,10 @@ class File {
     enum class FileType { nativeFStream, staticData, byteSource };
 
 public:
-    File(EncodedData auto t) : File(decltype(t)::data, decltype(t)::dataSize, decltype(t)::encoding) {}
-    File(RawData auto t) : File(decltype(t)::data, decltype(t)::dataSize) {}
+    File(EncodedData auto t) : File(decltype(t)::data, decltype(t)::dataSize, decltype(t)::encoding) { }
+    File(RawData auto t) : File(decltype(t)::data, decltype(t)::dataSize) { }
     File(std::span<const uint64_t> input, size_t fileSize, std::string_view contentEncoding = "")
-        : fileType{FileType::staticData}, data(input), size(fileSize), eofBit(fileSize == 0), encoding(contentEncoding) {}
+        : fileType{FileType::staticData}, data(input), size(fileSize), eofBit(fileSize == 0), encoding(contentEncoding) { }
     File(std::ifstream ifstream) : fileType{FileType::nativeFStream}, fstream{std::move(ifstream)} {
         measureStream();
     }
@@ -204,7 +204,7 @@ concept Provider = requires(T t, std::filesystem::path filename) {
 template <Provider... FSs>
 class Multi : FSs... {
 public:
-    Multi(std::filesystem::path docRoot) : FSs(docRoot)... {}
+    Multi(std::filesystem::path docRoot) : FSs(docRoot)... { }
     std::optional<File> open(std::filesystem::path filename) {
         return openFile<FSs...>(filename);
     }
