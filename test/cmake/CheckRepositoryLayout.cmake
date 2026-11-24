@@ -13,7 +13,7 @@ endif()
 
 set(expected
     .gitattributes .git-blame-ignore-revs .github .gitignore
-    AGENTS.md CMakeLists.txt LICENSE README.md README.fr.md
+    AGENTS.md CMakeLists.txt LICENSE README.md README.fr.md README.zh-CN.md
     cmake docs examples include js test)
 
 set(actual "")
@@ -53,7 +53,7 @@ if(NOT from_git)
     endforeach()
 endif()
 # Include public documents during local validation before they have been added to Git.
-foreach(document LICENSE README.fr.md)
+foreach(document LICENSE README.fr.md README.zh-CN.md)
     if(EXISTS "${ROOT}/${document}")
         list(APPEND actual "${document}")
     endif()
