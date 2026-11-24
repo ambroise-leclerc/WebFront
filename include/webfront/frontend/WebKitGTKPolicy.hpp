@@ -165,16 +165,19 @@ inline bool inheritedSnapToolkitPaths() {
     return false;
 }
 
-/// `value` without its Snap entries; `separators` must not be empty.
+/// `value` without its Snap entries; `separators` must not be empty. Other entries are kept as they are, empty ones
+/// included: an empty element of LD_LIBRARY_PATH names the current directory.
 inline std::string withoutSnapPaths(std::string_view value, std::string_view separators) {
     std::string kept;
-    while (!value.empty()) {
+    bool        first = true;
+    for (;;) {
         const auto end  = value.find_first_of(separators);
         const auto part = value.substr(0, end);
-        if (!part.empty() && !containsSnapPath(part)) {
-            if (!kept.empty())
+        if (!containsSnapPath(part)) {
+            if (!first)
                 kept += separators.front();
             kept += part;
+            first = false;
         }
         if (end == std::string_view::npos)
             break;

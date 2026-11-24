@@ -47,26 +47,39 @@ const Scenario webKitGTKSnapPaths{"WebKitGTK detects inherited Snap toolkit path
                                   }};
 
 namespace {
-// Runs `body` with every Snap-sensitive variable (and its saved original) removed, then restores the test process.
-template<typename Body>
-void withSnapEnvironment(Body&& body) {
+// Removes every Snap-sensitive variable (and its saved original) for its lifetime, then restores the test process, also
+// when a scenario leaves by an exception.
+class SnapEnvironmentGuard {
     std::vector<std::pair<std::string, std::optional<std::string>>> saved;
-    const auto remember = [&](const std::string& name) {
+    void                                                            remember(const std::string& name) {
         const auto* value = std::getenv(name.c_str());
         saved.emplace_back(name, value ? std::optional<std::string>(value) : std::nullopt);
         unsetenv(name.c_str());
-    };
-    for (const auto& variable : snapSensitiveVariables) {
-        remember(variable.name);
-        remember(std::string(variable.name) + "_VSCODE_SNAP_ORIG");
     }
+
+public:
+    SnapEnvironmentGuard() {
+        for (const auto& variable : snapSensitiveVariables) {
+            remember(variable.name);
+            remember(std::string(variable.name) + "_VSCODE_SNAP_ORIG");
+        }
+    }
+    SnapEnvironmentGuard(const SnapEnvironmentGuard&)            = delete;
+    SnapEnvironmentGuard& operator=(const SnapEnvironmentGuard&) = delete;
+    ~SnapEnvironmentGuard() {
+        for (const auto& [name, value] : saved) {
+            if (value)
+                setenv(name.c_str(), value->c_str(), 1);
+            else
+                unsetenv(name.c_str());
+        }
+    }
+};
+
+template<typename Body>
+void withSnapEnvironment(Body&& body) {
+    const SnapEnvironmentGuard guard;
     body();
-    for (const auto& [name, value] : saved) {
-        if (value)
-            setenv(name.c_str(), value->c_str(), 1);
-        else
-            unsetenv(name.c_str());
-    }
 }
 
 std::string current(const char* name) {
@@ -105,6 +118,9 @@ const Scenario webKitGTKScrubsSnap{
                 setenv("LD_LIBRARY_PATH", "/opt/lib:/snap/core20/current/lib:/home/user/snap/app:/var/lib/snapd/snap/core/1/lib", 1);
                 scrubInheritedSnapEnvironment();
                 check(current("LD_LIBRARY_PATH") == "/opt/lib:/home/user/snap/app");
+                setenv("LD_LIBRARY_PATH", ":/snap/core20/current/lib:/opt/host/lib:", 1);
+                scrubInheritedSnapEnvironment();
+                check(current("LD_LIBRARY_PATH") == ":/opt/host/lib:");
                 setenv("XDG_CONFIG_DIRS", "/snap/codium/495/etc", 1);
                 scrubInheritedSnapEnvironment();
                 check(current("XDG_CONFIG_DIRS") == "<unset>");

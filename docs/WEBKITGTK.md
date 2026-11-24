@@ -84,8 +84,13 @@ silent until the application enables a level and registers a sink):
   (an empty one means the variable is unset);
 - otherwise the Snap entries are removed from a list, or a single Snap path is unset.
 
-Values that name no Snap path, including `/home/<user>/snap/...`, are left alone, and
-nothing changes inside a verified Snap confinement. Other variables are not yet
+A variable is also repaired without any Snap path when its value differs from the
+`<NAME>_VSCODE_SNAP_ORIG` the editor saved, which catches per-user directories such
+as `~/snap/codium/common/.cache/gio-modules` (their files link into the Snap). A value
+with no Snap path and no differing saved original, including `/home/<user>/snap/...`,
+is left alone. Removing Snap entries keeps the others unchanged, empty entries
+included (an empty element of `LD_LIBRARY_PATH` names the current directory). Nothing
+changes inside a verified Snap confinement. Other variables are not yet
 covered; report a failure with its variable. A launcher that needs a Snap value
 there must set it again after `show()` or `start()` returns.
 
