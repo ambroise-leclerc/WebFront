@@ -12,10 +12,15 @@
 #include <webfront/testing/Bdd.hpp>
 
 #include <array>
+#include <atomic>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
+#include <thread>
+#include <utility>
+#include <vector>
 
 #if defined(__linux__)
     #include <unistd.h>
@@ -42,6 +47,253 @@ const Scenario webKitGTKSnapPaths{"WebKitGTK detects inherited Snap toolkit path
                                           check(!containsSnapPath(""));
                                       });
                                   }};
+
+namespace {
+// Removes every Snap-sensitive variable (and its saved original) for its lifetime, then restores the test process, also
+// when a scenario leaves by an exception.
+class SnapEnvironmentGuard {
+    std::vector<std::pair<std::string, std::optional<std::string>>> saved;
+    void                                                            remember(const std::string& name) {
+        const auto* value = std::getenv(name.c_str());
+        saved.emplace_back(name, value ? std::optional<std::string>(value) : std::nullopt);
+        unsetenv(name.c_str());
+    }
+
+public:
+    SnapEnvironmentGuard() {
+        for (const auto& variable : snapSensitiveVariables) {
+            remember(variable.name);
+            remember(std::string(variable.name) + "_VSCODE_SNAP_ORIG");
+        }
+    }
+    SnapEnvironmentGuard(const SnapEnvironmentGuard&)            = delete;
+    SnapEnvironmentGuard& operator=(const SnapEnvironmentGuard&) = delete;
+    ~SnapEnvironmentGuard() {
+        for (const auto& [name, value] : saved) {
+            if (value)
+                setenv(name.c_str(), value->c_str(), 1);
+            else
+                unsetenv(name.c_str());
+        }
+    }
+};
+
+template<typename Body>
+void withSnapEnvironment(Body&& body) {
+    const SnapEnvironmentGuard guard;
+    body();
+}
+
+std::string current(const char* name) {
+    const auto* value = std::getenv(name);
+    return value ? value : "<unset>";
+}
+}  // namespace
+
+const Scenario webKitGTKScrubsSnap{
+    "WebKitGTK repairs an environment inherited from a Snap-hosted terminal", [] {
+        then("leaves a Snap path alone when no editor marked the variable", [] {
+            withSnapEnvironment([] {
+                setenv("XDG_DATA_DIRS", "/opt/share:/snap/pkg/current/share", 1);
+                setenv("GIO_MODULE_DIR", "/home/user/snap/codium/common/.cache/gio-modules", 1);
+                check(!inheritedSnapToolkitPaths());
+                check(scrubInheritedSnapEnvironment().empty());
+                check(current("XDG_DATA_DIRS") == "/opt/share:/snap/pkg/current/share");
+                check(current("GIO_MODULE_DIR") == "/home/user/snap/codium/common/.cache/gio-modules");
+                check(snapPathsWithoutEditorMark() == std::vector<std::string>{"XDG_DATA_DIRS"});
+            });
+        });
+        then("still reports an unmarked Snap path after repairing a marked variable", [] {
+            withSnapEnvironment([] {
+                setenv("GTK_EXE_PREFIX", "/snap/codium/495/usr", 1);
+                setenv("GTK_EXE_PREFIX_VSCODE_SNAP_ORIG", "", 1);
+                setenv("GIO_MODULE_DIR", "/snap/codium/495/usr/lib/gio", 1);
+                check(inheritedSnapToolkitPaths());
+                check(scrubInheritedSnapEnvironment() == std::vector<std::string>{"GTK_EXE_PREFIX"});
+                const auto unmarked = snapPathsWithoutEditorMark();
+                check(unmarked == std::vector<std::string>{"GIO_MODULE_DIR"});
+                check(current("GIO_MODULE_DIR") == "/snap/codium/495/usr/lib/gio");
+                const auto message = snapUnmarkedMessage(unmarked);
+                check(message.find("GIO_MODULE_DIR") != std::string::npos && message.find("left unchanged") != std::string::npos);
+                check(message.find('\n') == message.size() - 1);
+            });
+        });
+        then("unsets a Snap path the editor marked, and leaves an unmarked variable alone", [] {
+            withSnapEnvironment([] {
+                setenv("GIO_MODULE_DIR", "/home/user/snap/codium/common/.cache/gio-modules", 1);
+                setenv("GTK_EXE_PREFIX", "/snap/codium/495/usr", 1);
+                setenv("GTK_EXE_PREFIX_VSCODE_SNAP_ORIG", "", 1);
+                check(inheritedSnapToolkitPaths());
+                const auto changed = scrubInheritedSnapEnvironment();
+                check(changed == std::vector<std::string>{"GTK_EXE_PREFIX"});
+                check(current("GIO_MODULE_DIR") == "/home/user/snap/codium/common/.cache/gio-modules");
+                check(current("GTK_EXE_PREFIX") == "<unset>");
+                check(!inheritedSnapToolkitPaths());
+            });
+        });
+        then("restores the original value saved by the editor, empty meaning unset", [] {
+            withSnapEnvironment([] {
+                setenv("GIO_MODULE_DIR", "/snap/codium/495/usr/lib/gio", 1);
+                setenv("GIO_MODULE_DIR_VSCODE_SNAP_ORIG", "", 1);
+                setenv("XDG_DATA_DIRS", "/snap/codium/495/usr/share:/usr/share", 1);
+                setenv("XDG_DATA_DIRS_VSCODE_SNAP_ORIG", "/usr/local/share:/usr/share", 1);
+                scrubInheritedSnapEnvironment();
+                check(current("GIO_MODULE_DIR") == "<unset>");
+                check(current("XDG_DATA_DIRS") == "/usr/local/share:/usr/share");
+            });
+        });
+        then("drops only the Snap entries of the saved original of a list", [] {
+            withSnapEnvironment([] {
+                const auto repair = [](const char* original) {
+                    setenv("LD_LIBRARY_PATH", "/snap/core20/current/lib", 1);
+                    setenv("LD_LIBRARY_PATH_VSCODE_SNAP_ORIG", original, 1);
+                    scrubInheritedSnapEnvironment();
+                };
+                repair("/opt/lib:/snap/core20/current/lib:/home/user/snap/app:/var/lib/snapd/snap/core/1/lib");
+                check(current("LD_LIBRARY_PATH") == "/opt/lib:/home/user/snap/app");
+                repair(":/snap/core20/current/lib:/opt/host/lib:");
+                check(current("LD_LIBRARY_PATH") == ":/opt/host/lib:");
+                repair(":/snap/core20/current/lib");
+                check(current("LD_LIBRARY_PATH") == ".");
+                setenv("XDG_CONFIG_DIRS", "/foo", 1);
+                setenv("XDG_CONFIG_DIRS_VSCODE_SNAP_ORIG", "/snap/codium/495/etc", 1);
+                scrubInheritedSnapEnvironment();
+                check(current("XDG_CONFIG_DIRS") == "<unset>");
+            });
+        });
+        then("repairs a per-user directory the editor overrode, found through its saved original", [] {
+            withSnapEnvironment([] {
+                setenv("GIO_MODULE_DIR", "/home/user/snap/codium/common/.cache/gio-modules", 1);
+                setenv("GIO_MODULE_DIR_VSCODE_SNAP_ORIG", "", 1);
+                check(inheritedSnapToolkitPaths());
+                check(scrubInheritedSnapEnvironment() == std::vector<std::string>{"GIO_MODULE_DIR"});
+                check(current("GIO_MODULE_DIR") == "<unset>");
+            });
+        });
+        then("repairs the image loaders the editor points at its own cache and modules", [] {
+            withSnapEnvironment([] {
+                setenv("GDK_PIXBUF_MODULE_FILE", "/home/user/snap/codium/common/.cache/gdk-pixbuf-loaders.cache", 1);
+                setenv("GDK_PIXBUF_MODULE_FILE_VSCODE_SNAP_ORIG", "/usr/lib/loaders.cache", 1);
+                setenv("GDK_PIXBUF_MODULEDIR", "/snap/codium/495/usr/lib/gdk-pixbuf-2.0/loaders", 1);
+                setenv("GDK_PIXBUF_MODULEDIR_VSCODE_SNAP_ORIG", "", 1);
+                check(inheritedSnapToolkitPaths());
+                check(scrubInheritedSnapEnvironment() == std::vector<std::string>{"GDK_PIXBUF_MODULE_FILE", "GDK_PIXBUF_MODULEDIR"});
+                check(current("GDK_PIXBUF_MODULE_FILE") == "/usr/lib/loaders.cache");
+                check(current("GDK_PIXBUF_MODULEDIR") == "<unset>");
+            });
+        });
+        then("never turns an empty LD_PRELOAD entry into a preloaded current directory", [] {
+            withSnapEnvironment([] {
+                setenv("LD_PRELOAD", "/snap/pkg/lib.so", 1);
+                setenv("LD_PRELOAD_VSCODE_SNAP_ORIG", ":/snap/pkg/lib.so", 1);
+                scrubInheritedSnapEnvironment();
+                check(current("LD_PRELOAD") == "<unset>");
+                setenv("LD_PRELOAD", "/snap/pkg/lib.so", 1);
+                setenv("LD_PRELOAD_VSCODE_SNAP_ORIG", ":/snap/pkg/lib.so:/opt/lib.so", 1);
+                scrubInheritedSnapEnvironment();
+                check(current("LD_PRELOAD") == ":/opt/lib.so");
+            });
+        });
+        then("leaves a variable the editor saved unchanged", [] {
+            withSnapEnvironment([] {
+                setenv("GTK_PATH", "/usr/lib/gtk-3.0", 1);
+                setenv("GTK_PATH_VSCODE_SNAP_ORIG", "/usr/lib/gtk-3.0", 1);
+                check(!inheritedSnapToolkitPaths());
+                check(scrubInheritedSnapEnvironment().empty());
+            });
+        });
+        then("names the repaired variables in a one-line message for stderr", [] {
+            const auto message = snapRepairMessage({"GIO_MODULE_DIR", "XDG_DATA_DIRS"});
+            check(message.find("GIO_MODULE_DIR, XDG_DATA_DIRS") != std::string::npos);
+            check(message.ends_with("\n"));
+            check(message.find('\n') == message.size() - 1);
+        });
+        then("drops a Snap path that the saved original carries, and is idempotent", [] {
+            withSnapEnvironment([] {
+                setenv("GIO_MODULE_DIR", "/home/user/snap/codium/common/.cache/gio-modules", 1);
+                setenv("GIO_MODULE_DIR_VSCODE_SNAP_ORIG", "/snap/codium/495/usr/lib/gio", 1);
+                setenv("XDG_DATA_DIRS", "/snap/codium/495/usr/share:/usr/share", 1);
+                setenv("XDG_DATA_DIRS_VSCODE_SNAP_ORIG", "/snap/codium/495/usr/share:/usr/local/share:/usr/share", 1);
+                const auto changed = scrubInheritedSnapEnvironment();
+                check(changed == std::vector<std::string>{"GIO_MODULE_DIR", "XDG_DATA_DIRS"});
+                check(current("GIO_MODULE_DIR") == "<unset>");
+                check(current("XDG_DATA_DIRS") == "/usr/local/share:/usr/share");
+                check(!inheritedSnapToolkitPaths());
+                check(scrubInheritedSnapEnvironment().empty());
+                check(current("XDG_DATA_DIRS") == "/usr/local/share:/usr/share");
+            });
+        });
+        then("unsets a list whose saved original is empty instead of setting the current directory", [] {
+            withSnapEnvironment([] {
+                setenv("LD_LIBRARY_PATH", "/snap/core20/current/lib", 1);
+                setenv("LD_LIBRARY_PATH_VSCODE_SNAP_ORIG", "", 1);
+                setenv("XDG_DATA_DIRS", "/snap/codium/495/usr/share", 1);
+                setenv("XDG_DATA_DIRS_VSCODE_SNAP_ORIG", "", 1);
+                scrubInheritedSnapEnvironment();
+                check(current("LD_LIBRARY_PATH") == "<unset>");
+                check(current("XDG_DATA_DIRS") == "<unset>");
+                check(scrubInheritedSnapEnvironment().empty());
+            });
+        });
+        then("reports the names to repair without touching the environment, and counts threads", [] {
+            withSnapEnvironment([] {
+                setenv("GTK_EXE_PREFIX", "/snap/codium/495/usr", 1);
+                setenv("GTK_EXE_PREFIX_VSCODE_SNAP_ORIG", "", 1);
+                check(snapOverriddenNames() == std::vector<std::string>{"GTK_EXE_PREFIX"});
+                check(current("GTK_EXE_PREFIX") == "/snap/codium/495/usr");
+            });
+            const auto before = processThreadCount();
+            require(before.has_value());
+            std::atomic<bool> stop{false};
+            std::thread       worker([&] {
+                while (!stop)
+                    std::this_thread::yield();
+            });
+            check(processThreadCount() > before);
+            stop = true;
+            worker.join();
+            const auto message = snapRepairSkippedMessage({"GIO_MODULE_DIR"}, 3);
+            check(message.find("GIO_MODULE_DIR") != std::string::npos && message.find("3 threads") != std::string::npos);
+            check(message.find('\n') == message.size() - 1);
+            const auto unknown = snapRepairSkippedMessage({"GIO_MODULE_DIR"}, std::nullopt);
+            check(unknown.find("cannot tell how many threads") != std::string::npos);
+            check(unknown.find("already runs") == std::string::npos);
+        });
+        then("says that the loader variables only reach processes started afterwards", [] {
+            check(snapRepairMessage({"GIO_MODULE_DIR"}).find("already loaded") == std::string::npos);
+            check(snapRepairMessage({"GIO_MODULE_DIR", "LD_LIBRARY_PATH"}).find("already loaded") != std::string::npos);
+            check(snapRepairMessage({"LD_PRELOAD"}).find("already loaded") != std::string::npos);
+        });
+        then("lets only the first initialization claim the repair", [] {
+            std::atomic<bool> flag{false};
+            check(claimOnce(flag));
+            check(!claimOnce(flag));
+            check(!claimOnce(flag));
+        });
+        then("honors the opt-out variable", [] {
+            withSnapEnvironment([] {
+                const auto* previous = std::getenv("WEBFRONT_KEEP_SNAP_ENVIRONMENT");
+                const auto  saved    = previous ? std::optional<std::string>(previous) : std::nullopt;
+                unsetenv("WEBFRONT_KEEP_SNAP_ENVIRONMENT");
+                check(!keepSnapEnvironmentRequested());
+                setenv("WEBFRONT_KEEP_SNAP_ENVIRONMENT", "0", 1);
+                check(!keepSnapEnvironmentRequested());
+                setenv("WEBFRONT_KEEP_SNAP_ENVIRONMENT", "1", 1);
+                check(keepSnapEnvironmentRequested());
+                if (saved)
+                    setenv("WEBFRONT_KEEP_SNAP_ENVIRONMENT", saved->c_str(), 1);
+                else
+                    unsetenv("WEBFRONT_KEEP_SNAP_ENVIRONMENT");
+            });
+        });
+        then("leaves a clean environment untouched", [] {
+            withSnapEnvironment([] {
+                setenv("GTK_PATH", "/usr/lib/x86_64-linux-gnu/gtk-3.0", 1);
+                check(scrubInheritedSnapEnvironment().empty());
+                check(current("GTK_PATH") == "/usr/lib/x86_64-linux-gnu/gtk-3.0");
+            });
+        });
+    }};
 #endif
 
 const Scenario webKitGTKApplies{"WebKitGTK applies navigation policy without toolkit objects", [] {

@@ -63,31 +63,73 @@ uses X11/Xvfb. No WSL-specific library environment changes are applied.
 
 ### Snap-hosted editor terminals
 
-A terminal inherited from a Snap-packaged editor can expose Snap library or GTK
-module paths to a host application. This has been observed with VSCodium: the
-system WebKit network process loaded Snap's `libpthread.so.0` and failed with a
-`GLIBC_PRIVATE` symbol error. The particular variable responsible has not been
-isolated; other Snap-hosted editors, including VS Code, may pass similar paths,
-but have not been verified. WebFront warns when the common variables below contain
-`/snap/` or `/var/lib/snapd/snap/` paths outside verified Snap confinement. This
-heuristic does not prove a failure or cover every possible path and does not alter
-the environment. The warning uses the WebFront logger and can be filtered by the
-application.
+A terminal inherited from a Snap-packaged editor exposes Snap library and GTK
+module paths. This is a normal way to start an application, so WebFront repairs it.
+The cause is isolated: `GIO_MODULE_DIR` alone is enough. With VSCodium the Snap's
+GIO modules (`libgiognutls.so`, `libgiolibproxy.so`) carry an RPATH to
+`/snap/core20/current/lib`; the system `WebKitNetworkProcess` loads them and then
+Snap's `libpthread.so.0`, which fails with a `GLIBC_PRIVATE` symbol error
+(`undefined symbol: __libc_pthread_init`). Any GIO program does the same, not only
+WebFront.
 
-If this failure occurs, start the host application with a clean environment for
-these variables, replacing the executable path as needed:
+VS Code and VSCodium overwrite a set of variables in their terminals and keep each
+original value in `<NAME>_VSCODE_SNAP_ORIG`. That mark is the evidence WebFront
+relies on: when `LD_LIBRARY_PATH`, `LD_PRELOAD`, `GIO_MODULE_DIR`, `GTK_PATH`,
+`GTK_EXE_PREFIX`, `GTK_IM_MODULE_FILE`, `GDK_PIXBUF_MODULE_FILE`,
+`GDK_PIXBUF_MODULEDIR`, `GSETTINGS_SCHEMA_DIR`, `LOCPATH`, `XDG_DATA_DIRS` or
+`XDG_CONFIG_DIRS` has such a mark and a value that differs from
+it, outside a verified Snap confinement, the frontend repairs the variable before the
+toolkit starts and prints the names it changed on `stderr`. It does not use the
+WebFront logger, which is silent until the application enables a level and registers
+a sink.
 
-```bash
-env -u LD_LIBRARY_PATH -u LD_PRELOAD \
-    -u GIO_MODULE_DIR -u GTK_PATH -u GTK_EXE_PREFIX \
-    -u GTK_IM_MODULE_FILE -u GSETTINGS_SCHEMA_DIR -u LOCPATH \
-    ./examples/WebFrontLifeDeveloper
-```
+- The saved original is the starting point (an empty one means the variable is unset,
+  for a list too).
+- From it, the Snap entries are removed from a list, or a single Snap path is unset.
+  A Snap path inside the saved original is dropped too, and the saved original is
+  rewritten to the repaired value, so nothing is repaired twice.
+- Removing Snap entries keeps the others unchanged, empty entries included. A lone
+  empty entry left in `LD_LIBRARY_PATH`, where it names the current directory, becomes
+  `.`; in any other list, `LD_PRELOAD` included, nothing left means the variable is unset.
 
-This removes all values of those variables for the application and its children,
-including legitimate custom configuration. Adjust the launcher if it needs any of
-them. WebFront cannot safely remove them globally: the host application and other
-threads may depend on them, and WebKit may launch child processes later.
+A Snap path alone is not repaired. An application may configure one on purpose, for
+example `XDG_DATA_DIRS=/opt/share:/snap/pkg/current/share`, and a `/snap/` or
+`/var/lib/snapd/snap/` value without the editor's mark is left unchanged, as is a
+value equal to its saved original. The frontend names those variables, for the case where
+WebKit then fails, whether or not it repaired others: on `stderr` when it also
+repaired or skipped a repair (one unmarked `GIO_MODULE_DIR` can break WebKit alone),
+otherwise as a `warn` that stays silent unless the application enables logging. The price of the mark is that a value you set yourself in an editor terminal,
+such as `export XDG_DATA_DIRS=$XDG_DATA_DIRS:/foo`, is replaced by the saved original.
+Snap-packaged editors other than VS Code and VSCodium are not covered unless they
+use the same mark. Nothing changes inside a verified Snap confinement.
+
+This revises an earlier position: WebFront used to leave these variables alone,
+because the host application and its other threads may depend on them. It now changes
+the application's own environment, with `setenv`/`unsetenv`, which is not safe
+against a concurrent `getenv` in another thread. The change is therefore made only
+when it cannot race: in the frontend's first initialization of the process (the
+second one, when `show()` opens the page, never changes the environment), on the main
+thread, before the toolkit starts, and only if `/proc/self/task` proves a single
+thread. If the application already runs other threads, or if `/proc/self/task` cannot
+be read so that the count is unknown, nothing is changed and `stderr` says which of the
+two applies and names the variables that would break WebKit and the two ways out: construct
+the frontend before starting threads, or start the application with those variables
+cleaned.
+
+`LD_LIBRARY_PATH` and `LD_PRELOAD` have a limit that no repair can lift: the dynamic
+loader read them when the process started, so changing them in the running process
+does not unload what `LD_PRELOAD` already loaded and does not change the search paths
+the process uses for its own later `dlopen`. They only reach the processes started
+afterwards, such as WebKit's. If the host process itself loads a Snap library through
+them, start it from a cleaned environment; the message printed on `stderr` says so
+when one of the two was repaired.
+
+The repair applies to the processes WebKit launches, which inherit the environment at
+that moment, so restoring a value after `show()` or `start()` is too late for them.
+To keep the inherited environment, start the application with
+`WEBFRONT_KEEP_SNAP_ENVIRONMENT=1`: nothing is repaired or printed, and the failure
+above comes back unless the launcher fixed the variables itself. Other variables are
+not yet covered; report a failure with its variable.
 
 Persistent data lives in `$XDG_DATA_HOME/webfront/<executable>-<path-hash>` and caches
 in `$XDG_CACHE_HOME/webfront/<executable>-<path-hash>`. Absolute XDG paths are honored;

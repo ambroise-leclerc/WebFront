@@ -3,16 +3,18 @@
 // Created: 2026-10-19
 //
 // WebFront — frontend
-// Role: Navigation, new-window and response decisions of the WebKitGTK frontend, applying the bound content policy.
+// Role: Navigation, new-window and response decisions of the WebKitGTK frontend, applying the bound content policy, and the repair of an inherited Snap environment.
 // Thread: ui-loop | Alloc: heap-init
-// LLM: decision logic kept free of GTK calls so unit tests can reach it
+// LLM: decision logic kept free of GTK calls so unit tests can reach it; scrubInheritedSnapEnvironment() mutates the process environment, so it runs on the main thread before the toolkit starts and before other threads read the environment
 
 #pragma once
 
 #include "../ContentPolicy.hpp"
 
 #include <array>
+#include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -125,25 +127,191 @@ inline bool containsSnapPath(std::string_view value, std::string_view separators
     return false;
 }
 
+struct SnapSensitiveVariable {
+    const char*      name;
+    std::string_view separators;
+};
+
+// Variables a Snap-packaged host (an IDE terminal) can leave pointing at its own runtime; only those the editor marks with
+// `<NAME>_VSCODE_SNAP_ORIG` are repaired. GIO_MODULE_DIR alone is enough
+// to break WebKit's network process: the Snap's GIO modules carry an RPATH to /snap/core20, which loads its libpthread.
+inline constexpr std::array snapSensitiveVariables = {
+    SnapSensitiveVariable{     "LD_LIBRARY_PATH", ":;"},
+    SnapSensitiveVariable{          "LD_PRELOAD", ": "},
+    SnapSensitiveVariable{      "GIO_MODULE_DIR",   ""},
+    SnapSensitiveVariable{            "GTK_PATH",  ":"},
+    SnapSensitiveVariable{      "GTK_EXE_PREFIX",   ""},
+    SnapSensitiveVariable{  "GTK_IM_MODULE_FILE",   ""},
+    SnapSensitiveVariable{"GSETTINGS_SCHEMA_DIR",   ""},
+    SnapSensitiveVariable{             "LOCPATH",  ":"},
+    SnapSensitiveVariable{"GDK_PIXBUF_MODULE_FILE",   ""},
+    SnapSensitiveVariable{"GDK_PIXBUF_MODULEDIR",     ""},
+    SnapSensitiveVariable{       "XDG_DATA_DIRS",  ":"},
+    SnapSensitiveVariable{     "XDG_CONFIG_DIRS",  ":"}
+};
+
+inline const char* savedSnapOriginal(const SnapSensitiveVariable& variable) {
+    return std::getenv((std::string(variable.name) + "_VSCODE_SNAP_ORIG").c_str());
+}
+
+/// True when a Snap-packaged editor overrode `name` and the variable still holds its value: the editor saved the
+/// original in `<NAME>_VSCODE_SNAP_ORIG`, and the current value differs from it. That mark is the only evidence that a
+/// Snap value was inherited from an editor terminal. A Snap path alone is not: an application may configure one on
+/// purpose (`XDG_DATA_DIRS=/opt/share:/snap/pkg/current/share`), and it is left alone. The mark also catches a per-user
+/// directory such as `~/snap/codium/common/.cache/gio-modules`, whose files link into the Snap.
+inline bool snapOverridden(const SnapSensitiveVariable& variable) {
+    const auto* value = std::getenv(variable.name);
+    const auto* saved = savedSnapOriginal(variable);
+    return value && saved && std::string_view(saved) != value;
+}
+
+/// Names holding a Snap path with no editor mark: reported, never changed.
+inline std::vector<std::string> snapPathsWithoutEditorMark() {
+    std::vector<std::string> names;
+    for (const auto& variable : snapSensitiveVariables) {
+        const auto* value = std::getenv(variable.name);
+        if (value && !savedSnapOriginal(variable) && containsSnapPath(value, variable.separators))
+            names.emplace_back(variable.name);
+    }
+    return names;
+}
+
 inline bool inheritedSnapToolkitPaths() {
-    struct Variable {
-        const char*      name;
-        std::string_view separators;
-    };
-    constexpr std::array variables = {
-        Variable{     "LD_LIBRARY_PATH", ":;"},
-        Variable{          "LD_PRELOAD", ": "},
-        Variable{      "GIO_MODULE_DIR",   ""},
-        Variable{            "GTK_PATH",  ":"},
-        Variable{      "GTK_EXE_PREFIX",   ""},
-        Variable{  "GTK_IM_MODULE_FILE",   ""},
-        Variable{"GSETTINGS_SCHEMA_DIR",   ""},
-        Variable{             "LOCPATH",  ":"}
-    };
-    for (const auto& [name, separators] : variables)
-        if (const auto* value = std::getenv(name); value && containsSnapPath(value, separators))
+    for (const auto& variable : snapSensitiveVariables)
+        if (snapOverridden(variable))
             return true;
     return false;
+}
+
+/// `value` without its Snap entries; `separators` must not be empty. Other entries are kept as they are, empty ones
+/// included: an empty element of LD_LIBRARY_PATH names the current directory.
+inline std::string withoutSnapPaths(std::string_view value, std::string_view separators, bool emptyIsCurrentDirectory = false) {
+    std::string kept;
+    bool        first = true, keptEmpty = false;
+    for (;;) {
+        const auto end  = value.find_first_of(separators);
+        const auto part = value.substr(0, end);
+        if (!containsSnapPath(part)) {
+            if (!first)
+                kept += separators.front();
+            kept += part;
+            first     = false;
+            keptEmpty = keptEmpty || part.empty();
+        }
+        if (end == std::string_view::npos)
+            break;
+        value.remove_prefix(end + 1);
+    }
+    // Only in a library search path does an empty entry stand for the current directory, and a lone one would read as "no
+    // path" once joined: spell it. In LD_PRELOAD "." would be a library to preload, so there the variable is unset.
+    return kept.empty() && keptEmpty && emptyIsCurrentDirectory ? "." : kept;
+}
+
+/// The line printed on stderr when `names` were repaired, independent of the logger, which is silent until enabled.
+inline std::string snapRepairMessage(const std::vector<std::string>& names) {
+    std::string list;
+    bool        loader = false;
+    for (const auto& name : names) {
+        list += (list.empty() ? "" : ", ") + name;
+        loader = loader || name == "LD_LIBRARY_PATH" || name == "LD_PRELOAD";
+    }
+    // The dynamic loader read these two at startup: changing them cannot unload or redirect what this process has.
+    return "WebFront: inherited Snap environment would break WebKit's processes; repaired " + list
+         + " for this process and the processes it starts"
+         + (loader ? " (LD_LIBRARY_PATH and LD_PRELOAD do not change the libraries this process already loaded or searches "
+                     "with dlopen; start it from a cleaned environment if it still fails)"
+                   : "")
+         + " (see docs/WEBKITGTK.md, \"Snap-hosted editor terminals\")\n";
+}
+
+/// Names `scrubInheritedSnapEnvironment()` would change, without changing anything.
+inline std::vector<std::string> snapOverriddenNames() {
+    std::vector<std::string> names;
+    for (const auto& variable : snapSensitiveVariables)
+        if (snapOverridden(variable))
+            names.emplace_back(variable.name);
+    return names;
+}
+
+/// Threads of this process, from /proc/self/task; empty when that cannot be read (no /proc, a restricted one, an
+/// iteration error): the count is then unknown, never assumed to be one.
+inline std::optional<std::size_t> processThreadCount() {
+    std::error_code error;
+    std::size_t     count = 0;
+    for (std::filesystem::directory_iterator it("/proc/self/task", error), end; !error && it != end; it.increment(error))
+        ++count;
+    if (error || count == 0)
+        return std::nullopt;
+    return count;
+}
+
+inline bool keepSnapEnvironmentRequested() {
+    const auto* value = std::getenv("WEBFRONT_KEEP_SNAP_ENVIRONMENT");
+    return value && std::string_view(value) != "0";
+}
+
+/// The stderr line when the repair is not applied because other threads already run: setenv is not safe against a
+/// concurrent getenv in them, so the process is left as it is and the cause stays visible.
+inline std::string snapRepairSkippedMessage(const std::vector<std::string>& names, std::optional<std::size_t> threads) {
+    std::string list;
+    for (const auto& name : names)
+        list += (list.empty() ? "" : ", ") + name;
+    const auto why = threads ? "this process already runs " + std::to_string(*threads) + " threads"
+                             : std::string("this process cannot tell how many threads it runs (/proc/self/task is unreadable)");
+    return "WebFront: inherited Snap environment would break WebKit's processes (" + list + "), but " + why
+         + " and changing the environment is only safe with one, so nothing was repaired; construct the WebKitGTK "
+           "frontend before starting threads, or start the application with those variables cleaned (see "
+           "docs/WEBKITGTK.md, \"Snap-hosted editor terminals\")\n";
+}
+
+/// The note for Snap paths no editor marked: left unchanged, but they can still break WebKit on their own.
+inline std::string snapUnmarkedMessage(const std::vector<std::string>& names) {
+    std::string list;
+    for (const auto& name : names)
+        list += (list.empty() ? "" : ", ") + name;
+    return "WebFront: " + list
+         + " hold Snap paths that no editor marked as inherited and were left unchanged; if WebKit still fails to start, "
+           "clean them (see docs/WEBKITGTK.md, \"Snap-hosted editor terminals\")\n";
+}
+
+/// Repairs the variables that name Snap paths, for the application and the processes WebKit launches. A Snap-packaged
+/// VS Code or VSCodium terminal keeps the original value in `<NAME>_VSCODE_SNAP_ORIG`: that value is the starting
+/// point (an empty one means unset), and a Snap path inside it is dropped like any other, since the editor's own
+/// environment may have carried one. Without a saved original the starting point is the current value. From it, drop the
+/// Snap entries of a list, or unset a single Snap path. The saved original is rewritten to the repaired value, so a
+/// second call finds nothing to do. Returns the names changed. The caller runs it once, on the main thread before the
+/// toolkit starts and before other threads read the environment (setenv is not safe against a concurrent getenv), and
+/// never inside a verified Snap confinement.
+inline std::vector<std::string> scrubInheritedSnapEnvironment() {
+    std::vector<std::string> changed;
+    for (const auto& [name, separators] : snapSensitiveVariables) {
+        if (!snapOverridden({name, separators}))
+            continue;
+        const std::string original = std::string(name) + "_VSCODE_SNAP_ORIG";
+        const auto*       saved    = std::getenv(original.c_str());
+        const std::string start    = saved ? saved : std::getenv(name);
+        std::string       replacement;
+        if (start.empty())
+            ;  // the editor saved "absent": nothing to filter, and the filter's "." would add the current directory
+        else if (!separators.empty())
+            replacement = withoutSnapPaths(start, separators, std::string_view(name) == "LD_LIBRARY_PATH");
+        else if (!containsSnapPath(start))
+            replacement = start;
+        if (!replacement.empty())
+            setenv(name, replacement.c_str(), 1);
+        else
+            unsetenv(name);
+        if (saved)
+            setenv(original.c_str(), replacement.c_str(), 1);
+        changed.emplace_back(name);
+    }
+    return changed;
+}
+
+/// True for the first caller of `flag` only: the repair belongs to one early initialization phase, never to a later call
+/// that could find the server and other threads already running.
+inline bool claimOnce(std::atomic<bool>& flag) {
+    return !flag.exchange(true);
 }
 
 // Development is the default, independently of optimization level. A distribution binary requires the sandbox;
