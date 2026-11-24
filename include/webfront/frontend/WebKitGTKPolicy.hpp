@@ -132,7 +132,8 @@ struct SnapSensitiveVariable {
     std::string_view separators;
 };
 
-// Variables a Snap-packaged host (an IDE terminal) can leave pointing at its own runtime. GIO_MODULE_DIR alone is enough
+// Variables a Snap-packaged host (an IDE terminal) can leave pointing at its own runtime; only those the editor marks with
+// `<NAME>_VSCODE_SNAP_ORIG` are repaired. GIO_MODULE_DIR alone is enough
 // to break WebKit's network process: the Snap's GIO modules carry an RPATH to /snap/core20, which loads its libpthread.
 inline constexpr std::array snapSensitiveVariables = {
     SnapSensitiveVariable{     "LD_LIBRARY_PATH", ":;"},
@@ -147,17 +148,30 @@ inline constexpr std::array snapSensitiveVariables = {
     SnapSensitiveVariable{     "XDG_CONFIG_DIRS",  ":"}
 };
 
-/// True when `name` still holds what a Snap-packaged editor put there: a Snap path, or any value that differs from the one
-/// the editor saved in `<NAME>_VSCODE_SNAP_ORIG` (the editor's own mark that it overrode the variable). The second case
-/// catches a per-user directory such as `~/snap/codium/common/.cache/gio-modules`, whose files link into the Snap.
+inline const char* savedSnapOriginal(const SnapSensitiveVariable& variable) {
+    return std::getenv((std::string(variable.name) + "_VSCODE_SNAP_ORIG").c_str());
+}
+
+/// True when a Snap-packaged editor overrode `name` and the variable still holds its value: the editor saved the
+/// original in `<NAME>_VSCODE_SNAP_ORIG`, and the current value differs from it. That mark is the only evidence that a
+/// Snap value was inherited from an editor terminal. A Snap path alone is not: an application may configure one on
+/// purpose (`XDG_DATA_DIRS=/opt/share:/snap/pkg/current/share`), and it is left alone. The mark also catches a per-user
+/// directory such as `~/snap/codium/common/.cache/gio-modules`, whose files link into the Snap.
 inline bool snapOverridden(const SnapSensitiveVariable& variable) {
     const auto* value = std::getenv(variable.name);
-    if (!value)
-        return false;
-    if (containsSnapPath(value, variable.separators))
-        return true;
-    const auto* saved = std::getenv((std::string(variable.name) + "_VSCODE_SNAP_ORIG").c_str());
-    return saved && std::string_view(saved) != value;
+    const auto* saved = savedSnapOriginal(variable);
+    return value && saved && std::string_view(saved) != value;
+}
+
+/// Names holding a Snap path with no editor mark: reported, never changed.
+inline std::vector<std::string> snapPathsWithoutEditorMark() {
+    std::vector<std::string> names;
+    for (const auto& variable : snapSensitiveVariables) {
+        const auto* value = std::getenv(variable.name);
+        if (value && !savedSnapOriginal(variable) && containsSnapPath(value, variable.separators))
+            names.emplace_back(variable.name);
+    }
+    return names;
 }
 
 inline bool inheritedSnapToolkitPaths() {

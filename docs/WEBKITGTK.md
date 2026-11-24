@@ -72,31 +72,33 @@ Snap's `libpthread.so.0`, which fails with a `GLIBC_PRIVATE` symbol error
 (`undefined symbol: __libc_pthread_init`). Any GIO program does the same, not only
 WebFront.
 
-When `/snap/` or `/var/lib/snapd/snap/` paths appear outside a verified Snap
-confinement in `LD_LIBRARY_PATH`, `LD_PRELOAD`, `GIO_MODULE_DIR`, `GTK_PATH`,
+VS Code and VSCodium overwrite a set of variables in their terminals and keep each
+original value in `<NAME>_VSCODE_SNAP_ORIG`. That mark is the evidence WebFront
+relies on: when `LD_LIBRARY_PATH`, `LD_PRELOAD`, `GIO_MODULE_DIR`, `GTK_PATH`,
 `GTK_EXE_PREFIX`, `GTK_IM_MODULE_FILE`, `GSETTINGS_SCHEMA_DIR`, `LOCPATH`,
-`XDG_DATA_DIRS` or `XDG_CONFIG_DIRS`, the frontend repairs them before the toolkit
-starts and prints the names it changed on `stderr`. It does not use the WebFront
-logger, which is silent until the application enables a level and registers a sink.
+`XDG_DATA_DIRS` or `XDG_CONFIG_DIRS` has such a mark and a value that differs from
+it, outside a verified Snap confinement, the frontend repairs the variable before the
+toolkit starts and prints the names it changed on `stderr`. It does not use the
+WebFront logger, which is silent until the application enables a level and registers
+a sink.
 
-- The value saved by VS Code and VSCodium in `<NAME>_VSCODE_SNAP_ORIG` is the starting
-  point (an empty one means the variable is unset, for a list too); without it, the current
-  value is.
-- From that value, the Snap entries are removed from a list, or a single Snap path is
-  unset. A Snap path inside the saved original is dropped too, and the saved original
-  is rewritten to the repaired value, so nothing is repaired twice.
+- The saved original is the starting point (an empty one means the variable is unset,
+  for a list too).
+- From it, the Snap entries are removed from a list, or a single Snap path is unset.
+  A Snap path inside the saved original is dropped too, and the saved original is
+  rewritten to the repaired value, so nothing is repaired twice.
+- Removing Snap entries keeps the others unchanged, empty entries included (an empty
+  element of `LD_LIBRARY_PATH` names the current directory).
 
-A variable is also repaired without any Snap path when its value differs from the
-`<NAME>_VSCODE_SNAP_ORIG` the editor saved, which catches per-user directories such
-as `~/snap/codium/common/.cache/gio-modules` (their files link into the Snap). The
-price is that a value you set yourself in that terminal, such as
-`export XDG_DATA_DIRS=$XDG_DATA_DIRS:/foo`, is replaced by the saved original. A value
-with no Snap path and no differing saved original, including `/home/<user>/snap/...`,
-is left alone. Removing Snap entries keeps the others unchanged, empty entries
-included (an empty element of `LD_LIBRARY_PATH` names the current directory). A
-legitimate `/var/lib/snapd/snap/...` entry in `XDG_DATA_DIRS` or `XDG_CONFIG_DIRS`
-outside a Snap editor is removed as well, which is not a failure fix: use the opt-out
-below. Nothing changes inside a verified Snap confinement.
+A Snap path alone is not repaired. An application may configure one on purpose, for
+example `XDG_DATA_DIRS=/opt/share:/snap/pkg/current/share`, and a `/snap/` or
+`/var/lib/snapd/snap/` value without the editor's mark is left unchanged, as is a
+value equal to its saved original. The frontend only logs a `warn` (silent unless the
+application enables logging) naming those variables, for the case where WebKit then
+fails. The price of the mark is that a value you set yourself in an editor terminal,
+such as `export XDG_DATA_DIRS=$XDG_DATA_DIRS:/foo`, is replaced by the saved original.
+Snap-packaged editors other than VS Code and VSCodium are not covered unless they
+use the same mark. Nothing changes inside a verified Snap confinement.
 
 This revises an earlier position: WebFront used to leave these variables alone,
 because the host application and its other threads may depend on them. It now changes
