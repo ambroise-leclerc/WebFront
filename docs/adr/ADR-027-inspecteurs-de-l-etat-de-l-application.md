@@ -186,6 +186,16 @@ instantané désigné par un identifiant.
 - L'instantané est plafonné à 16 Mio : au-delà, la valeur est coupée et `plafonnée` est vrai, ce que l'inspecteur
   affiche. Une connexion a au plus un instantané, libéré à la déconnexion.
 
+**Formatage borné.** Aucune valeur n'est formatée en entier puis tronquée. Toute valeur, celle d'un nœud (256 octets)
+comme celle d'un instantané (16 Mio), s'écrit dans un **récepteur borné** : une chaîne n'est copiée que jusqu'à la
+borne, et un type formatable passe par `std::format_to_n` vers un tampon de la taille de la borne, qui compte la taille
+qu'aurait la sortie complète sans la stocker. La troncature est détectée par cette taille, et le drapeau « valeur
+tronquée » ou `plafonnée` la signale. La mémoire d'une valeur est donc bornée par la borne plus une constante, quelle que
+soit la sortie du formateur. Le temps, lui, ne l'est pas : `std::format_to_n` appelle le formateur jusqu'au bout, et un
+formateur qui produirait des gigaoctets les produirait sous le verrou de l'application. La documentation le dit ;
+l'application qui observe un tel type le décrit (`forms::Description`) ou le pagine (`PagedSource`) plutôt que de
+compter sur `std::formatter`.
+
 **Mémoire par connexion.** C++ garde, pour chaque connexion et chaque observateur, la valeur affichée des nœuds envoyés,
 comme le fait `forms::inspector`, et la révision de cette mémoire. Elle compte 10 000 nœuds au plus : au-delà,
 `children` échoue avec `webfront.inspector.limit` et l'inspecteur propose de replier des nœuds. Elle est libérée à la
@@ -199,8 +209,8 @@ l'adopte.
 **Différences paginées.** Une passe de `changes` commence au curseur 0, avec la révision R que l'inspecteur détient :
 
 1. si R est la révision de la mémoire, C++ compare la mémoire à l'état observé, en une seule lecture (section 5), et
-   range l'ensemble des différences : nœuds modifiés et nœuds retirés. La mémoire prend la nouvelle valeur, sous une
-   révision R′, et la première page de l'ensemble est rendue avec R′ ;
+   range l'ensemble des différences : nœuds modifiés et nœuds retirés, **chacun avec sa valeur d'avant la passe**. La
+   mémoire prend la nouvelle valeur, sous une révision R′, et la première page de l'ensemble est rendue avec R′ ;
 2. l'inspecteur demande les pages suivantes avec (R′, curseur) jusqu'à un `suivant` nul. Elles sont lues dans
    l'ensemble rangé, pas dans l'état courant : la passe est cohérente même si l'objet change entre deux pages. Après la
    dernière, l'inspecteur détient R′ ;
@@ -217,13 +227,24 @@ cette remise à zéro lui-même avec `webfront.inspector.reset(observateur)`, qu
 
 L'ensemble rangé est borné par la mémoire (10 000 nœuds) et libéré au début de la passe suivante ou à la déconnexion.
 
-**Entrelacement avec les autres appels.** Un appel qui modifie la mémoire pendant une passe (`children` qui déplie,
-`fold` qui replie, `write`) **termine la passe** : l'ensemble rangé est libéré, et la page suivante de la passe
-interrompue est une page vide avec `resynchroniser` vrai. Les pages restantes ne peuvent donc jamais décrire une vue que
-l'inspecteur n'a plus. Pour éviter ces resynchronisations, l'inspecteur met en file ses dépliements, replis et
-écritures jusqu'à la fin d'une passe en cours ; une passe compte au plus 50 pages de 200 nœuds. Une resynchronisation
-vide la mémoire et relit les nœuds dépliés : son coût est borné par la mémoire, et elle reste correcte si la file n'est
-pas respectée (onglets multiples d'une même page, client modifié).
+**Durée d'une passe.** Le nombre de pages d'une passe n'est pas borné par une constante : il dépend du nombre de
+différences (10 000 au plus) et de la taille des nœuds rapportée à `responseBudget`. Avec le budget minimal, une page ne
+porte parfois qu'un nœud, et une passe peut demander des milliers d'allers-retours. Rien n'attend donc la fin d'une
+passe : toute passe peut être **interrompue** à tout moment, sans resynchronisation.
+
+**Interruption.** Une passe en cours est interrompue par un appel qui modifie la mémoire (`children` qui déplie, `fold`
+qui replie, `write`), ou par un nouvel appel `changes` au curseur 0 avec la révision de la passe en cours, que
+l'inspecteur fait quand il veut repartir de l'état courant. Avant d'exécuter cet appel, C++ rend aux entrées des pages
+**non encore servies** leur valeur d'avant la passe, gardée dans l'ensemble rangé : un nœud modifié reprend son ancienne
+valeur dans la mémoire, et un nœud retiré y revient. La mémoire décrit alors exactement ce que l'inspecteur a reçu, ni
+plus ni moins, sous une nouvelle révision rendue par l'appel. Puis l'appel s'exécute : un `children` qui relit un nœud
+de la partie non servie y met sa valeur fraîche, et un `fold` retire aussi les entrées restaurées sous le nœud replié.
+Les différences non servies ne sont pas perdues : la passe suivante les retrouve en comparant la mémoire restaurée à
+l'objet.
+
+L'inspecteur n'a donc rien à mettre en file : un dépliement, un repli ou une écriture partent aussitôt, et la passe
+interrompue reprend à la période suivante. La resynchronisation (mémoire vidée) ne sert plus qu'aux incohérences
+réelles : une révision ou un curseur qui ne correspondent à rien de ce que C++ a servi.
 
 L'inspecteur interroge à une période choisie, 250 ms par défaut, et peut se mettre en pause. C'est une lecture à
 l'initiative du navigateur (pull) : C++ n'envoie rien sans demande, et un inspecteur fermé ne coûte rien.
@@ -324,9 +345,21 @@ existent, selon ce que la source capture.
   vit encore, et son résultat est abandonné. Détruire la poignée sous le verrou de la source est alors sans danger.
   C'est la forme à choisir quand l'application ne peut pas garantir l'ordre de destruction.
 
-Dans les deux contrats, une destruction sur le thread qui exécute l'opération (depuis la source ou le visiteur)
-n'attend pas : l'opération se termine et son résultat est abandonné. Un appel qui vise un observateur retiré échoue avec
-`webfront.inspector.unknown`.
+**Destruction depuis l'opération elle-même** (dans la source, le visiteur ou le mutateur, sur le thread qui exécute
+l'opération) :
+
+- **source propriétaire : permise.** L'opération garde le `shared_ptr` de l'état jusqu'à sa fin : l'objet et son mutex
+  vivent encore quand elle reprend, même si la poignée était leur dernier autre propriétaire. L'opération se termine et
+  son résultat est abandonné ;
+- **source à références : interdite.** Attendre l'opération serait s'attendre soi-même, et ne pas attendre la laisserait
+  reprendre sur des objets que l'application peut détruire juste après la poignée. Le destructeur reconnaît ce cas (il
+  compare son thread à celui de l'opération en cours, enregistré au début de celle-ci), écrit un diagnostic qui nomme
+  l'observateur et le fichier et la ligne de son `watch`, puis appelle `std::terminate`. C'est une erreur de
+  programmation qui ne peut pas être rendue sûre ; l'arrêt immédiat, dans une construction de développement, vaut mieux
+  qu'une corruption silencieuse. Une application qui doit retirer un observateur depuis sa source utilise une source
+  propriétaire, ou poste la destruction sur un autre thread.
+
+Un appel qui vise un observateur retiré échoue avec `webfront.inspector.unknown`.
 
 Comme l'interblocage du premier contrat est silencieux, une destruction qui attend plus de cinq secondes écrit un
 diagnostic (ADR-011) qui nomme l'observateur et le fichier et la ligne de son `watch` (section 7), puis continue
@@ -462,6 +495,9 @@ demanderait un grant et une décision propres.
 | Identifiant d'instantané implicite pour `value` | Deux lectures entrelacées aux mêmes décalages liraient silencieusement l'une dans l'autre. |
 | Destruction qui n'attend jamais, quelle que soit la source | Une opération en cours toucherait un objet ou un mutex déjà détruits ; la source propriétaire obtient ce comportement sans ce risque. |
 | Destruction qui abandonne l'attente après un délai | Laisserait l'opération continuer sur des références pendantes ; le délai ne fait qu'écrire un diagnostic. |
+| Terminer une passe interrompue par une resynchronisation, ou faire attendre les dépliements | Une passe peut compter des milliers de pages : l'attente bloquerait l'utilisateur, la resynchronisation relirait tout l'arbre à chaque dépliement. |
+| Formater la valeur entière puis la tronquer | Un formateur ou une chaîne énormes alloueraient sans limite avant la troncature. |
+| Laisser finir une opération après la destruction de sa poignée depuis la source à références | L'opération reprendrait sur des objets que l'application peut détruire juste après la poignée. |
 | Modification libre de toute valeur | Changerait des invariants de l'application à son insu ; l'écriture reste un choix de l'application. |
 
 ## Conséquences
@@ -472,6 +508,10 @@ demanderait un grant et une décision propres.
 - **Coût accepté :** avec le frontend par défaut (navigateur système), les inspecteurs sont refusés tant que
   l'application ne choisit pas un frontend intégré ou `trustLoopbackClients`. Le menu le dit.
 - **Coût accepté :** la signature publique de `cppFunction` gagne un paramètre par défaut.
+- **Coût accepté :** le formatage d'une valeur a une mémoire bornée mais pas un temps borné ; un formateur très
+  bavard s'exécute en entier sous le verrou de l'application.
+- **Coût accepté :** détruire la poignée d'une source à références depuis cette source termine le processus, avec un
+  diagnostic ; la source propriétaire est la forme qui le permet.
 - **Coût accepté :** l'identité d'un nœud n'est pas stable quand un conteneur change ; l'inspecteur peut montrer un
   élément voisin à la place d'un élément retiré jusqu'à la lecture suivante.
 - **Coût accepté :** une page tardive d'un conteneur sans accès aléatoire coûte un parcours linéaire, sous le verrou
@@ -486,23 +526,30 @@ demanderait un grant et une décision propres.
 
 - Tests BDD : métadonnées des fonctions et `std::source_location` ; observateurs (pagination, réduction au tampon,
   différences par connexion, passe de `changes` sur plusieurs pages pendant que l'objet change, resynchronisation
-  après une page perdue, limite de la mémoire, `children`, `fold` et `write` entrelacés avec une passe (la passe se
-  termine et la page suivante demande la resynchronisation), appels concurrents traités dans l'ordre, nœud de
-  profondeur atteinte, `value` d'une chaîne plus grande que `maxMessageSize` par fragments (coupure UTF-8, plafond,
-  décalage périmé, deux lectures entrelacées dont la suite de la première est refusée), réponses à la taille exacte de
-  `responseBudget` avec `maxMessageSize` inférieur au tampon, écriture refusée comme périmée après une insertion avant
-  la cible, un remplacement de la cible ou une révision ancienne, écriture par clé d'une `PagedSource`, suppression
-  annoncée seulement dans une page perdue (absente après la resynchronisation et hors de la mémoire), `reset`, requête
-  d'écriture à la taille exacte de `requestBudget` avec tous ses arguments au maximum, texte d'un octet de trop refusé
-  par la page puis par C++, segment très long (nom de champ long, clé de `PagedSource` de plus de 128 octets), 64ᵉ
-  niveau et chemin proche de 1 024 octets, opération entière sous le verrou du visiteur, `PagedSource`, chaque genre
-  de la section 4, exécuteur, poignée détruite pendant une lecture et depuis l'accès, destruction d'une source
-  propriétaire sous le verrou de la source pendant qu'une opération l'attend (sans interblocage, résultat abandonné,
-  état encore vivant), destruction d'une source à références hors du verrou pendant qu'une opération l'attend (attente
-  puis fin), diagnostic d'une destruction qui attend plus que le délai, `containers` d'une page non admise avec un
-  frontend capable (`secondaryWindow` faux, aucun conteneur), écriture acceptée, refusée par l'analyse, refusée par le
-  mutateur et non permise) ; refus à une connexion non prouvée sans `trustLoopbackClients` ; `containers` pour chaque
-  frontend et chaque réglage de confiance ; absence des fonctions hors environnement et en distribution.
+  après une page perdue, limite de la mémoire, révision ou curseur qui ne correspondent à rien de servi
+  (resynchronisation), appels concurrents traités dans l'ordre, nœud de profondeur atteinte, `value` d'une chaîne plus
+  grande que `maxMessageSize` par fragments (coupure UTF-8, plafond, décalage périmé, deux lectures entrelacées dont
+  la suite de la première est refusée), réponses à la taille exacte de `responseBudget` avec `maxMessageSize`
+  inférieur au tampon, écriture refusée comme périmée après une insertion avant la cible, un remplacement de la cible
+  ou une révision ancienne, écriture par clé d'une `PagedSource`, suppression annoncée seulement dans une page perdue
+  (absente après la resynchronisation et hors de la mémoire), `reset`, requête d'écriture à la taille exacte de
+  `requestBudget` avec tous ses arguments au maximum, texte d'un octet de trop refusé par la page puis par C++,
+  segment très long (nom de champ long, clé de `PagedSource` de plus de 128 octets), 64ᵉ niveau et chemin proche de 1
+  024 octets, opération entière sous le verrou du visiteur, `PagedSource`, chaque genre de la section 4, exécuteur,
+  poignée détruite pendant une lecture, destruction depuis l'opération d'une source propriétaire (état encore vivant à
+  la reprise, même quand la poignée en était le dernier autre propriétaire), formatage borné (chaîne de 100 Mio copiée
+  jusqu'au plafond seulement, formateur dont la sortie dépasse 1 Gio sans allocation au-delà de la borne, troncature
+  détectée), passe de milliers de pages avec le budget minimal interrompue par `children`, `fold`, `write` et un
+  nouveau curseur 0 (entrées non servies restaurées, différences retrouvées à la passe suivante, aucune
+  resynchronisation), destruction d'une source propriétaire sous le verrou de la source pendant qu'une opération
+  l'attend (sans interblocage, résultat abandonné, état encore vivant), destruction d'une source à références hors du
+  verrou pendant qu'une opération l'attend (attente puis fin), diagnostic d'une destruction qui attend plus que le
+  délai, `containers` d'une page non admise avec un frontend capable (`secondaryWindow` faux, aucun conteneur),
+  écriture acceptée, refusée par l'analyse, refusée par le mutateur et non permise) ; refus à une connexion non
+  prouvée sans `trustLoopbackClients` ; `containers` pour chaque frontend et chaque réglage de confiance ; absence des
+  fonctions hors environnement et en distribution.
+- Test de processus : destruction de la poignée d'une source à références depuis son visiteur, qui écrit le diagnostic
+  puis termine le processus.
 - Test de compilation refusée, comme `FormsReflectionRejects` : une politique de tampons dont `responseBudget` est
   plus petit que `minPageBytes`, ou dont `maxWriteTextBytes` est plus petit que 1 Kio, ne compile pas avec
   l'environnement développeur, y compris quand seul `maxMessageSize` est trop petit.
