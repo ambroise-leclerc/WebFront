@@ -11,11 +11,15 @@ these entries stays in the GitHub releases and the Git history.
 ## Unreleased
 
 ### Added
+- Serve several independent users from one process with application spaces: `app.spaces("/s/", resolver)` gives each `/s/<id>/` its own `cppFunction`s, page handlers, broadcasts and relative routes (`WebFront::Space`), serves the files under the prefix, lets the resolver refuse a space with its own reply, and tells the application when a space's last page closes (#671, `docs/SPACES.md`).
 - Compile test files faster: include `<webfront/testing/bdd/Core.hpp>`, free of `<chrono>`, `<thread>` and `<fstream>`, and only the parts a file uses (`bdd/Matchers.hpp`, `bdd/Approx.hpp`, `bdd/Eventually.hpp`, `bdd/Runner.hpp` for `main()`); `Bdd.hpp` still includes them all (#669, `docs/BDD.md`).
 - See both operands of a failed comparison with `checkEqual(a, b)`/`requireEqual(a, b)`, and write your own types in reports by specializing `webfront::bdd::Printer` (#669, `docs/BDD.md`).
 - Compare floating-point values within a tolerance with `approx(v)`, `.epsilon()` and `.margin()`, Catch2's `Approx` semantics, with the expected value and tolerances in the failure (#669, `docs/BDD.md`).
 - Run code after the last scenario with the third, optional `runEnding` function of `webfront::bdd::Listener`, called before the summary and the JUnit report whatever the outcome, even when a run- or scenario-starting listener threw; an exception of a run listener fails the run and appears in the JUnit report (#669, `docs/BDD.md`).
 - The test helpers, `webfront_add_jasmine_test` included, export the real `XDG_DATA_HOME` and `XDG_CACHE_HOME` as `WEBFRONT_TEST_REAL_XDG_DATA_HOME` and `WEBFRONT_TEST_REAL_XDG_CACHE_HOME`, so an application under test can keep the throwaway WebKitGTK profile away from the programs it starts ([#664](https://github.com/ambroise-leclerc/WebFront/issues/664), `docs/CONSUMER_TESTING.md`).
+
+### Changed
+- `WebFront.js` opens its WebSocket on the directory of the page (`ws://host/dir/` instead of `ws://host`), which tells the server a page's space; the server still ignores that path outside the spaces (#671).
 
 ### Fixed
 - `DeveloperBrowserIntegration-workspace` gives the relaunched bootstrap page the same 60 s to start as the first one, instead of 10 s, which a loaded runner exceeded while the page verified its cached environment (#660).

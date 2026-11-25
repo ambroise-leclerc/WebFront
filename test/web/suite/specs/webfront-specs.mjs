@@ -778,10 +778,14 @@ describe('Bound HTTP reads', () => {
         expect(seen[0].init.redirect).toBe('error');
     });
 
-    it('derives the WebSocket address from the protocol of the page', () => {
+    it('derives the WebSocket address from the protocol and the directory of the page', () => {
         expect(WebFrontBridge.defaultUrl({protocol: 'http:', host: 'localhost:9002'})).toBe('ws://localhost:9002');
         expect(WebFrontBridge.defaultUrl({protocol: 'https:', host: 'app.example:443'})).toBe('wss://app.example:443');
-        expect(WebFrontBridge.defaultUrl()).toBe(`${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`);
+        expect(WebFrontBridge.defaultUrl({protocol: 'http:', host: 'localhost:9002', pathname: '/index.html'})).toBe('ws://localhost:9002/');
+        expect(WebFrontBridge.defaultUrl({protocol: 'http:', host: 'localhost:9002', pathname: '/s/abc/'})).toBe('ws://localhost:9002/s/abc/');
+        expect(WebFrontBridge.defaultUrl({protocol: 'https:', host: 'app.example', pathname: '/s/abc/sub/page.html'})).toBe('wss://app.example/s/abc/sub/');
+        const directory = window.location.pathname.slice(0, window.location.pathname.lastIndexOf('/') + 1);
+        expect(WebFrontBridge.defaultUrl()).toBe(`${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}${directory}`);
     });
 
     it('rejects bound when the initial connection fails', async () => {

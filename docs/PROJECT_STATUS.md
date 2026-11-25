@@ -30,6 +30,9 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   A second native window of the same application (`app.openSecondaryWindow()`, #616) exists on WebKitGTK, WKWebView and WebView2; CEF
   and the system browser refuse it with `std::logic_error` (`app.canShowSecondaryWindow()` tells it beforehand, also after `NativeOrBrowserFrontend` fell back to the browser), and the position of the window is left to the toolkit. The call waits
   for the interface thread: a `cppFunction` callback runs it on `app.uiExecutor()` rather than hold the server's thread.
+- **Application spaces.** One process serves several independent users, each under `prefix/<segment>/` with its own
+  functions, page handlers, broadcasts and routes (`app.spaces()`, `WebFront::Space`, #671); the application owns the
+  spaces and ends them. A space isolates dispatch, not users of one process from each other. See [spaces](SPACES.md).
 - **Native pseudoterminals (opt-in).** `webfront::Pty` uses a Unix PTY on Linux and macOS or ConPTY on Windows 10 version 1809 and later. The page adapter requires a loopback bind and the application’s own browser origin. See the [PTY guide and standalone example](PTY.md).
 - **Developer environment.** `NativeApp::bootstrap("developer")` loads the verified, pinned
   environment selected by `DeveloperReleaseData.hpp`. Its terminal provides `wf init`, `create`,
