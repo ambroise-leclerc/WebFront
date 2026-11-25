@@ -325,3 +325,5 @@ Voir [DOM.md](../DOM.md) pour les règles d’identité et d’exécution.
 - Tests : [MessagesTests](../../test/unit/MessagesTests.cpp), [WebSocketTests](../../test/unit/WebSocketTests.cpp),
   [spécifications navigateur](../../test/web/suite/specs/webfront-specs.mjs).
 - Voir [ADR-004](ADR-004-appels-asynchrones-et-erreurs.md) et [ADR-012](ADR-012-preuves-et-tests.md).
+- [ADR-027](ADR-027-inspecteurs-de-l-etat-de-l-application.md) transporte les nœuds d'arbre des inspecteurs en listes de
+  tuples, sous l'exception ci-dessus : sans nouveau code de type ni modification du format binaire.

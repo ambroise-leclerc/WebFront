@@ -190,3 +190,5 @@ développeur ni outillage. L'outillage de construction n'est jamais embarqué da
   [ADR-014](ADR-014-construction-javascript-dans-le-browser.md),
   [ADR-015](ADR-015-ressources-generees-par-application.md),
   [Environnement développeur](../DEVELOPER_ENVIRONMENT.md).
+- [ADR-027](ADR-027-inspecteurs-de-l-etat-de-l-application.md) : les inspecteurs de l'état de l'application
+  (`inspector.html`, menu de l'onglet) sont livrés par l'archive de l'environnement ; la liste normative du cœur ne change pas.
