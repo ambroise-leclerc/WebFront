@@ -15,7 +15,7 @@ these entries stays in the GitHub releases and the Git history.
 - See both operands of a failed comparison with `checkEqual(a, b)`/`requireEqual(a, b)`, and write your own types in reports by specializing `webfront::bdd::Printer` (#669, `docs/BDD.md`).
 - Compare floating-point values within a tolerance with `approx(v)`, `.epsilon()` and `.margin()`, Catch2's `Approx` semantics, with the expected value and tolerances in the failure (#669, `docs/BDD.md`).
 - Run code after the last scenario with the third, optional `runEnding` function of `webfront::bdd::Listener`, called before the summary and the JUnit report whatever the outcome, even when a run- or scenario-starting listener threw; an exception of a run listener fails the run and appears in the JUnit report (#669, `docs/BDD.md`).
-- The test helpers export the real `XDG_DATA_HOME` and `XDG_CACHE_HOME` as `WEBFRONT_TEST_REAL_XDG_DATA_HOME` and `WEBFRONT_TEST_REAL_XDG_CACHE_HOME`, so an application under test can keep the throwaway WebKitGTK profile away from the programs it starts ([#664](https://github.com/ambroise-leclerc/WebFront/issues/664)).
+- The test helpers, `webfront_add_jasmine_test` included, export the real `XDG_DATA_HOME` and `XDG_CACHE_HOME` as `WEBFRONT_TEST_REAL_XDG_DATA_HOME` and `WEBFRONT_TEST_REAL_XDG_CACHE_HOME`, so an application under test can keep the throwaway WebKitGTK profile away from the programs it starts ([#664](https://github.com/ambroise-leclerc/WebFront/issues/664), `docs/CONSUMER_TESTING.md`).
 
 ### Fixed
 - Applications started from the terminal of a Snap-packaged editor (VSCodium) now run on WebKitGTK without cleaning the environment by hand; `WEBFRONT_KEEP_SNAP_ENVIRONMENT=1` opts out (#662, `docs/WEBKITGTK.md`).

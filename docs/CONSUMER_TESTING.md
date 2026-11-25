@@ -48,6 +48,16 @@ session. The system browser is unsuitable for these automated tests. If using th
 frontend wrappers, they consume the isolated profile paths supplied by the runner. Other
 applications must configure their frontend's persistent profile explicitly if it has one.
 
+The runner isolates the WebKitGTK profile by replacing `XDG_DATA_HOME` and `XDG_CACHE_HOME`
+with directories under the test's profile. These variables are process-wide: every program the
+application starts (a terminal's shell, a client installing itself under `$XDG_DATA_HOME`)
+inherits the throwaway profile too, and what it writes there disappears with the build tree. The
+runner therefore exports the values it was started with as `WEBFRONT_TEST_REAL_XDG_DATA_HOME` and
+`WEBFRONT_TEST_REAL_XDG_CACHE_HOME`, absent when the variable was unset or empty. Before starting
+such a program, restore `XDG_DATA_HOME` and `XDG_CACHE_HOME` from them, or remove the variable
+when its real counterpart is absent. `docs/WEBKITGTK.md` describes when the values are captured
+and `WEBFRONT_TEST_XDG_CAPTURED`, which keeps the first capture.
+
 `ARGS` are passed literally as individual arguments, without a shell: empty strings, semicolons
 and `$<` reach the application unchanged; an argument containing `]==]` is refused.
 `TIMEOUT` defaults to 60 seconds (1–3600). The runner enforces it outside the application; CTest

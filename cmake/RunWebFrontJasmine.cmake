@@ -30,16 +30,7 @@ endif()
 # Windows has no process group here: only the direct child is stopped, and a renderer may need manual cleanup.
 # The throwaway XDG roots below reach every program the application starts: keep the real values for it first, unless
 # ctest already did when it started (WEBFRONT_TEST_REAL_XDG_DATA_HOME and _CACHE_HOME, absent when unset or empty).
-if(NOT DEFINED ENV{WEBFRONT_TEST_XDG_CAPTURED})
-    foreach(kind DATA CACHE)
-        if(DEFINED ENV{XDG_${kind}_HOME})
-            set(ENV{WEBFRONT_TEST_REAL_XDG_${kind}_HOME} "$ENV{XDG_${kind}_HOME}")
-        else()
-            unset(ENV{WEBFRONT_TEST_REAL_XDG_${kind}_HOME})
-        endif()
-    endforeach()
-    set(ENV{WEBFRONT_TEST_XDG_CAPTURED} 1)
-endif()
+include("${CMAKE_CURRENT_LIST_DIR}/CaptureRealXdg.cmake")
 math(EXPR backstop "${LIMIT} + 5")
 set(wrapper "")
 if(NOT CMAKE_HOST_WIN32)

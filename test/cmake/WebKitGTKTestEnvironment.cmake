@@ -1,12 +1,13 @@
 include_guard(GLOBAL)
 
 # The XDG roots a test replaces with its throwaway profile reach every program its application starts. Capturing them
-# in a test property would freeze the configure-time environment; ctest instead includes CaptureRealXdg.cmake when it
-# starts, which records the roots of the environment that launches the tests. Once per directory that has such tests.
+# in a test property would freeze the configure-time environment; ctest instead includes cmake/CaptureRealXdg.cmake when
+# it starts, which records the roots of the environment that launches the tests. Once per directory that has such tests.
 function(webfront_export_real_xdg)
     get_property(registered DIRECTORY PROPERTY WEBFRONT_REAL_XDG_REGISTERED)
     if(NOT registered)
-        set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/CaptureRealXdg.cmake")
+        cmake_path(SET capture NORMALIZE "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../../cmake/CaptureRealXdg.cmake")
+        set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES "${capture}")
         set_property(DIRECTORY PROPERTY WEBFRONT_REAL_XDG_REGISTERED TRUE)
     endif()
 endfunction()

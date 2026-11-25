@@ -114,10 +114,11 @@ if(UNIX)
         "-DDIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/jasmine-runner-check" -P "${PROJECT_SOURCE_DIR}/test/cmake/CheckJasmineRunner.cmake")
     set_tests_properties(JasmineRunnerArgumentsAndDeadline PROPERTIES TIMEOUT 60)
 
-    # The throwaway XDG roots of a test never hide the real ones from the programs its application starts (#664).
+    # The throwaway XDG roots of a test never hide the real ones from the programs its application starts (#664), with
+    # ctest, the consumers' Jasmine runner, the wf driver and the start-up measurement (stand-in program, under a second).
     add_test(NAME RealXdgRootsReachTests COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
         "-DDIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/real-xdg-check" -P "${PROJECT_SOURCE_DIR}/test/cmake/CheckRealXdg.cmake")
-    set_tests_properties(RealXdgRootsReachTests PROPERTIES TIMEOUT 60 LABELS fast)
+    set_tests_properties(RealXdgRootsReachTests PROPERTIES TIMEOUT 20 LABELS fast)
 endif()
 
 # The publication script that archives the files in a release refuses a missing or invalid manifest (needs bash and jq).

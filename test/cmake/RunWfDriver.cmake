@@ -13,7 +13,7 @@
 # FORGE replaces ENVIRONMENT with an archive whose environment.json declares the given protocol and API versions.
 if(PROFILE)
     # The roots set below reach every program the application starts: keep the real ones first (docs/WEBKITGTK.md).
-    include("${CMAKE_CURRENT_LIST_DIR}/CaptureRealXdg.cmake")
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/CaptureRealXdg.cmake")
     file(REMOVE_RECURSE "${PROFILE}")
     set(ENV{WEBFRONT_TEST_CEF_PROFILE} "${PROFILE}/cef")
     set(ENV{XDG_DATA_HOME} "${PROFILE}/data")
