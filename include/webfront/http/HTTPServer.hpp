@@ -1196,8 +1196,9 @@ private:
     /// A request under a mount: the reply that answers it instead (refusal, redirection), or what it is served as.
     struct Mounted {
         std::optional<RouteReply>         reply;
-        std::string                       space;  ///< The path of the mount and segment, "/s/abc/".
-        std::string                       uri;    ///< The target within the space, encoded again: "/rest?query".
+        std::string                       space;   ///< The path of the mount and segment, "/s/abc/".
+        std::string                       logged;  ///< What the logs show of it: the segment, a session's secret, masked ("/s/*").
+        std::string                       uri;     ///< The target within the space, encoded again: "/rest?query".
         std::shared_ptr<const RouteTable> routes;
     };
 
@@ -1256,8 +1257,9 @@ private:
         MountAnswer answer;
         try {
             answer = (*resolver)(segment);
-        } catch (const std::exception& error) {
-            log::warn("The resolver of the mount {} failed: {}", prefix, error.what());
+        } catch (const std::exception&) {
+            // The message may quote the segment, which can be a session's secret.
+            log::warn("The resolver of the mount {} failed (the error is not logged: it may quote the segment)", prefix);
             answer.refusal = textReply(Response::internalServerError, "Internal Server Error\n");
         } catch (...) {
             log::warn("The resolver of the mount {} failed with an exception which is not a std::exception", prefix);
@@ -1268,6 +1270,7 @@ private:
             return mounted;
         }
         mounted.space  = prefix + segment + "/";
+        mounted.logged = prefix + "*";
         mounted.uri    = rest + (query.empty() ? "" : "?" + query);
         mounted.routes = std::move(answer.routes);
         return mounted;
@@ -1294,7 +1297,7 @@ private:
             response.content.clear();
         co_await Net::Send(socket, response.toBuffers<Net>());
         if (!head && reply.body)
-            co_await streamBody(routeWorker, socket, std::move(reply.body), reply.contentLength, "Mount reply");
+            co_await streamBody(routeWorker, socket, std::move(reply.body), reply.contentLength, "Mount reply", true);
         co_await closeResponse(socket);
     }
 
@@ -1604,6 +1607,7 @@ private:
                     rest = std::string_view(stop, end);
             }
             std::shared_ptr<const RouteTable> spaceRoutes;
+            std::string                       within;  // the space of a request under a mount, as the logs show it
             if (auto mounted = resolveMount(request)) {
                 if (mounted->reply) {
                     log::info("Received request {} under a mount: answered by its resolver ({})",
@@ -1613,11 +1617,11 @@ private:
                     co_return;
                 }
                 space       = std::move(mounted->space);
+                within      = std::move(mounted->logged);
                 spaceRoutes = std::move(mounted->routes);
                 request.uri = std::move(mounted->uri);
             }
-            const std::string_view within = space.empty() ? std::string_view{} : std::string_view(space).substr(0, space.size() - 1);
-            auto                   match  = matchRoute(request, spaceRoutes.get());
+            auto match = matchRoute(request, spaceRoutes.get());
             if (match && match->route->secretPath)
                 log::info("Received request {} on {}{}...", request.getMethodName(), within, match->route->prefix);  // the rest is a secret
             else if (routing::mentionsServices(request.uri))

@@ -94,5 +94,7 @@ callback), or at a time when none of its callbacks can run; destroy the spaces b
 - A space isolates what WebFront dispatches. It is not a security boundary between users of one process: the session
   identifier in the URL is the only thing that selects a space, so an application that must keep sessions private
   chooses unguessable identifiers or checks the user in its resolver and its callbacks.
+  WebFront's logs show a space's segment masked (`/s/*/index.html`), and never a resolver's error message, which may
+  quote it; the application's own logs are its business.
 - `onLastUIClosed` counts connected pages: a space that no page ever reached is not reported, and the application ends
   it with its own timeout.

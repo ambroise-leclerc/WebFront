@@ -672,3 +672,57 @@ const Scenario destroyedBy{"A space destroyed by one of its handlers calls none 
                                    });
                                });
                            }};
+
+const Scenario logsMask{"The logs never show the segment of a space, which can be a session's secret", {"spaces"}, [] {
+                            constexpr std::string_view secret = "s3cr3t-session-1d";
+                            std::mutex                 logMutex;
+                            std::string                logged;
+                            log::setLogLevel(log::Debug);
+                            const auto sink = log::addSinks([&](std::string_view line) {
+                                std::scoped_lock lock{logMutex};
+                                logged.append(line).push_back('\n');
+                            });
+                            {
+                                App                                                app{WebFrontConfig{.port = "0"}};
+                                std::map<std::string, std::unique_ptr<App::Space>> spaces;
+                                std::vector<http::RouteTable::Registration>        routes;
+                                app.spaces("/s/", [&](std::string_view segment) -> std::optional<http::RouteReply> {
+                                    if (segment.starts_with("throwing"))
+                                        throw std::runtime_error("no session " + std::string(segment));
+                                    if (segment.starts_with("refused"))
+                                        return http::textReply(http::Response::notFound, "Unknown session");
+                                    auto space = std::make_unique<App::Space>(app, "/s/", segment);
+                                    space->cppFunction("ping", [] {
+                                        return std::string{"pong"};
+                                    });
+                                    routes.push_back(space->addRoute("/data/", [](const http::RouteRequest&) {
+                                        return http::textReply(http::Response::ok, "space-data");
+                                    }));
+                                    spaces.emplace(segment, std::move(space));
+                                    return std::nullopt;
+                                });
+                                Running    running{app};
+                                const auto session = std::string(secret);
+                                require(httpGet(app.port(), "/s/" + session + "/WebFront.js").starts_with("HTTP/1.1 200"));
+                                require(httpGet(app.port(), "/s/" + session + "/data/x").find("space-data") != std::string::npos);
+                                require(httpGet(app.port(), "/s/" + session + "?q=1").starts_with("HTTP/1.1 301"));
+                                require(httpGet(app.port(), "/s/throwing-" + session + "/").starts_with("HTTP/1.1 500"));
+                                require(httpGet(app.port(), "/s/refused-" + session + "/").starts_with("HTTP/1.1 404"));
+                                Page page{app.port(), "/s/" + session + "/"};
+                                require(page.upgraded);
+                                page.call("ping", 1);
+                                require(page.receiveUntil("pong"));
+                            }
+                            log::removeSinks(sink);
+                            log::setLogLevel(log::Error);
+                            std::scoped_lock lock{logMutex};
+                            then("the requests are logged with the segment masked", [&] {
+                                require(logged.find("on /s/*/data/x") != std::string::npos);
+                                require(logged.find("on /s/*/WebFront.js") != std::string::npos);
+                            });
+                            then("no line quotes the segment, not even a resolver's error", [&] {
+                                const auto found = logged.find(secret);
+                                auto       scope = info(found == std::string::npos ? std::string{} : logged.substr(found < 120 ? 0 : found - 120, 240));
+                                require(found == std::string::npos);
+                            });
+                        }};
