@@ -58,7 +58,7 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-013](ADR-013-bootstrap-developpeur-a-la-demande.md) | Bootstrapping a downloaded developer environment | Accepted | 2026-10-20 | 1.0 — 2026-10-24 |
 | [ADR-014](ADR-014-construction-javascript-dans-le-browser.md) | Resolving npm dependencies and building inside the browser | Accepted | 2026-10-20 | 1.0 — 2026-10-24 |
 | [ADR-015](ADR-015-ressources-generees-par-application.md) | Generating application-owned embedded resources | Accepted | 2026-10-20 | 1.0 — 2026-10-24 |
-| [ADR-016](ADR-016-bootstrap-comme-socle.md) | The bootstrap environment as WebFront's foundation | Accepted | 2026-10-22 | 1.6 — 2026-10-26 |
+| [ADR-016](ADR-016-bootstrap-comme-socle.md) | The bootstrap environment as WebFront's foundation | Accepted through 1.6; 1.7 proposed (ADR-027) | 2026-10-22 | 1.7 — 2026-11-25 |
 | [ADR-017](ADR-017-acces-direct-aux-frontends.md) | Direct access to embedded frontends, with HTML kept normative | Proposed | 2026-10-24 | 1.1 — 2026-10-25 |
 | [ADR-018](ADR-018-acces-au-dom.md) | DOM access from C++ through a bounded mutation stream, without contesting the DOM of UI libraries | Proposed, partially superseded, partially delivered | 2026-10-26 | 1.5 — 2026-10-30 |
 | [ADR-019](ADR-019-developpement-automatisable-et-agents.md) | Automating the developer environment through shared operations and an optional local MCP adapter | Accepted (1.2); amendment 1.5 by ADR-025 proposed | 2026-10-28 | 1.5 — 2026-11-21 |

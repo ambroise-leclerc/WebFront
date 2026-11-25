@@ -10,9 +10,11 @@
 
 **Proposée le 2026-11-25.** Elle précède tout code de l'épique #677 (#679 à #686), dont elle fixe les contrats. Elle
 ne modifie pas le format binaire du pont ([ADR-003](ADR-003-protocole-binaire-et-bornes.md)), ni la liste des
-ressources embarquées du cœur ([ADR-016](ADR-016-bootstrap-comme-socle.md)), ni le contrôle d'origine du pont
-([ADR-008](ADR-008-contenu-de-confiance-et-origines.md)). Elle reprend la règle d'association des vues de
-l'[ADR-020](ADR-020-services-systeme.md) (règle 3) sans l'étendre.
+ressources embarquées du cœur ([ADR-016](ADR-016-bootstrap-comme-socle.md)), dont elle amende seulement la portée des
+permissions (version 1.7 : écritures de l'environnement gardées quand une vue est prouvée, section 2), ni le
+contrôle d'origine du pont ([ADR-008](ADR-008-contenu-de-confiance-et-origines.md)). Elle reprend tel quel le prédicat
+d'association des vues de l'[ADR-020](ADR-020-services-systeme.md) (règle 3), et l'applique aux inspecteurs et aux
+écritures de l'environnement.
 
 Ce n'est pas un bac à sable : un inspecteur montre et, si l'application le permet, modifie l'état d'un processus de
 développement. Il ne protège pas cet état contre un script admis dans la page (ADR-008).
@@ -82,10 +84,33 @@ entrées, mais elles disent pourquoi l'inspecteur est indisponible et comment l'
 exemple un code à usage unique dans l'URL, demanderait une décision de sécurité distincte (course avec un autre
 processus local qui lit la ligne de commande, historique, extensions).
 
-Cette règle est plus stricte que celle des callbacks `webfront.developer.*`, qui ne demandent que le contrôle
-d'origine. L'écart est voulu : les observateurs montrent des données de l'application, qui peuvent être personnelles
-ou secrètes, et non les fichiers du projet, que le développeur a sous les yeux. Aligner `webfront.developer.*` sur
-cette règle est une autre question, hors de cette décision.
+**Frontière cohérente avec l'environnement développeur.** Exiger la preuve pour lire l'état ne protège rien si un
+client non prouvé peut changer ce que la vue prouvée exécute. Or les callbacks `webfront.developer.*` qui écrivent
+dans le projet ne demandaient que le contrôle d'origine, qu'un processus local falsifie (ADR-008) : un autre
+utilisateur de la machine pouvait réécrire un script du projet, attendre que la vue le charge, puis lire les
+inspecteurs et utiliser les services natifs de l'ADR-020 par la connexion de cette vue.
+
+Cette décision ferme cette voie. **Quand le frontend actif transmet la preuve de vue** (WebKitGTK, WKWebView, WebView2,
+CEF, et `NativeOrBrowserFrontend` tant qu'il n'est pas replié sur le navigateur système), les callbacks de
+l'environnement qui modifient ce que la vue exécute ou ce que le serveur sert exigent le même prédicat que les
+inspecteurs (`isLocalClient`), sinon `webfront.inspector.denied` :
+
+- `webfront.developer.begin`, `beginNew`, `write`, `commit`, `commitGroup` et `abort`, c'est-à-dire toute écriture
+  dans le projet, dont les sources, le manifeste, le lock, les paquets installés et les publications de
+  `.webfront/developer/` (environnement, aperçu, tests) ;
+- tout callback ajouté plus tard qui écrit dans le projet ou change ce que le serveur sert.
+
+Les lectures du projet (`webfront.developer.read`, `list`, `entries`, `digests`, `state`, `config`) gardent le contrôle
+d'origine : elles ne changent rien à ce que la vue exécute. Le terminal et wf tournent dans la vue prouvée, ou dans une
+fenêtre secondaire ou un iframe qui en tient l'accès (section 8), et le pilote de test `webfront-wf` ouvre une vue
+prouvée (`TestFrontend` transmet `ViewLaunch`) : le parcours normal n'est pas touché. L'automatisation MCP (ADR-025)
+garde sa propre autorité, le jeton Bearer de session, et ne passe pas par ces callbacks.
+
+**Avec le navigateur système**, aucune vue n'est prouvée : rien ne change pour les callbacks de l'environnement, qui
+restent ouverts à toute connexion admise par l'origine, et les inspecteurs restent refusés par défaut (ci-dessus). Un
+client local non prouvé peut donc encore y modifier le projet ; c'est la limite connue de ce frontend, qui ne protège
+aucune vue, et `trustLoopbackClients` la rend explicite. Cette garde amende la portée des permissions de
+l'[ADR-016](ADR-016-bootstrap-comme-socle.md) (version 1.7).
 
 ### 3. Protocole : nœuds d'arbre sur les types existants
 
@@ -166,7 +191,10 @@ appels sont :
 - `webfront.inspector.changes(observateur, révision, curseur, nombre)` : une page des différences (ci-dessous).
 - `webfront.inspector.value(observateur, chemin, instantané, décalage)` : un fragment de la valeur complète d'un
   nœud tronqué (ci-dessous) ;
-- `webfront.inspector.fold(observateur, chemin)` : retire de la mémoire un nœud replié et ses descendants ;
+- `webfront.inspector.fold(observateur, chemin, révision)` : retire de la mémoire un nœud replié et ses descendants,
+  et rend la nouvelle révision. Comme tout appel qui modifie la mémoire, il porte la révision que l'inspecteur détient,
+  validée avant toute interruption de passe : une révision plus ancienne fait répondre une page vide avec
+  `resynchroniser` vrai, sans rien replier ni interrompre ;
 - `webfront.inspector.reset(observateur)` : vide la mémoire de l'observateur pour cette connexion (ci-dessous) ;
 - `webfront.inspector.limits()` : les bornes de cette section, dont `maxWriteTextBytes`.
 
@@ -548,6 +576,8 @@ demanderait un grant et une décision propres.
 | --- | --- |
 | Accès au navigateur système par défaut, comme `webfront.developer.*` | Il n'y a pas de preuve : tout pair de la boucle locale (autre utilisateur, tunnel, proxy) lirait l'état de l'application. |
 | Code à usage unique dans l'URL du navigateur système | Il faudrait une décision de sécurité propre (course avec un autre processus, historique, extensions) ; écarté de ce périmètre. |
+| Laisser les écritures de l'environnement au seul contrôle d'origine | Un client non prouvé réécrirait un script que la vue prouvée charge, et lirait les inspecteurs par elle. |
+| Garder les écritures de l'environnement avec tous les frontends | Avec le navigateur système, qui ne prouve rien, `wf install` ou `wf build` seraient refusés sans `trustLoopbackClients` : le parcours par défaut serait cassé pour un gain nul. |
 | Option d'accès propre aux inspecteurs | Elle répéterait `trustLoopbackClients` sur un autre périmètre. |
 | Nouveau code de type pour les nœuds ou les arbres | Rompt les deux codecs et l'environnement publié pour un besoin que les listes de tuples couvrent. |
 | Arbre complet envoyé en une fois, ou poussé par C++ | Copie les grands conteneurs, coûte même quand personne ne regarde, et dépasse le tampon de la politique. |
@@ -577,6 +607,9 @@ demanderait un grant et une décision propres.
 - **Coût accepté :** avec le frontend par défaut (navigateur système), les inspecteurs sont refusés tant que
   l'application ne choisit pas un frontend intégré ou `trustLoopbackClients`. Le menu le dit.
 - **Coût accepté :** la signature publique de `cppFunction` gagne un paramètre par défaut.
+- **Coût accepté :** avec un frontend qui prouve ses vues, un client local non prouvé (script, outil externe) ne peut
+  plus écrire dans le projet par `webfront.developer.*` sans `trustLoopbackClients` ; avec le navigateur système, ces
+  écritures restent ouvertes, ce qui est la limite connue de ce frontend.
 - **Coût accepté :** WebFront borne ce qu'il alloue pour une valeur, pas ce qu'alloue un `std::formatter` de
   l'application, ni son temps ; un formateur coûteux s'exécute en entier sous le verrou de l'application.
 - **Coût accepté :** l'unicité et la stabilité des clés d'une `PagedSource` sont un contrat de l'application, vérifié
@@ -602,31 +635,36 @@ demanderait un grant et une décision propres.
   grande que `maxMessageSize` par fragments (coupure UTF-8, plafond, décalage périmé, deux lectures entrelacées dont
   la suite de la première est refusée), réponses à la taille exacte de `responseBudget` avec `maxMessageSize`
   inférieur au tampon, écriture refusée comme périmée après une insertion avant la cible, un remplacement de la cible
-  ou une révision ancienne, écriture par clé d'une `PagedSource`, écriture qui interrompt une passe avec la révision
-  de la passe (acceptée si l'état affiché tient, périmée sinon, y compris pour une cible d'une page non servie) et
-  avec une révision plus ancienne (refusée sans interrompre), liste `[a, b, c, d]` lue en deux pages avec une
-  insertion en tête entre elles (liste recommencée, `d` lu), même cas avec une `PagedSource` à clés et une insertion
-  qui garde le nombre d'enfants (clé du dernier enfant déplacée), passe qui détecte un réordonnancement des clés d'un
-  parent déplié (« enfants modifiés », positions relues), premier nœud d'une page égal au parent, clé contenant `/`,
-  `%` et des octets non ASCII (encodage réversible), chemin mal formé refusé, clé dont l'encodage dépasse 128 octets
-  (position, non modifiable), clé dupliquée dans une page (position, non modifiable, diagnostic unique), clé que
-  `find` résout vers un élément dont `key` diffère (nœud retiré), clé dupliquée entre deux pages (précondition sur
-  l'état affiché), suppression annoncée seulement dans une page perdue (absente après la resynchronisation et hors de
-  la mémoire), `reset`, requête d'écriture à la taille exacte de `requestBudget` avec tous ses arguments au maximum,
-  texte d'un octet de trop refusé par la page puis par C++, segment très long (nom de champ long, désigné par son
-  rang), 64ᵉ niveau et chemin proche de 1 024 octets, opération entière sous le verrou du visiteur, `PagedSource`,
-  chaque genre de la section 4, exécuteur, poignée détruite pendant une lecture, destruction depuis l'opération d'une
-  source propriétaire (état encore vivant à la reprise, même quand la poignée en était le dernier autre propriétaire),
-  formatage borné (chaîne de 100 Mio copiée jusqu'au plafond seulement, formateur qui écrit plus de 1 Gio directement
-  dans l'itérateur de sortie sans allocation de WebFront au-delà de la borne, troncature détectée), passe de milliers
-  de pages avec le budget minimal interrompue par `children`, `fold`, `write` et un nouveau curseur 0 (entrées non
-  servies restaurées, différences retrouvées à la passe suivante, aucune resynchronisation), destruction d'une source
-  propriétaire sous le verrou de la source pendant qu'une opération l'attend (sans interblocage, résultat abandonné,
-  état encore vivant), destruction d'une source à références hors du verrou pendant qu'une opération l'attend (attente
-  puis fin), diagnostic d'une destruction qui attend plus que le délai, `containers` d'une page non admise avec un
-  frontend capable (`secondaryWindow` faux, aucun conteneur), écriture acceptée, refusée par l'analyse, refusée par le
-  mutateur et non permise) ; refus à une connexion non prouvée sans `trustLoopbackClients` ; `containers` pour chaque
-  frontend et chaque réglage de confiance ; absence des fonctions hors environnement et en distribution.
+  ou une révision ancienne, écriture par clé d'une `PagedSource`, `fold` avec la révision courante (nœud et
+  descendants retirés, nouvelle révision), avec la révision d'une passe en cours (passe interrompue puis repli) et
+  avec une révision ancienne (resynchronisation, rien replié ni interrompu), écriture qui interrompt une passe avec la
+  révision de la passe (acceptée si l'état affiché tient, périmée sinon, y compris pour une cible d'une page non
+  servie) et avec une révision plus ancienne (refusée sans interrompre), liste `[a, b, c, d]` lue en deux pages avec
+  une insertion en tête entre elles (liste recommencée, `d` lu), même cas avec une `PagedSource` à clés et une
+  insertion qui garde le nombre d'enfants (clé du dernier enfant déplacée), passe qui détecte un réordonnancement des
+  clés d'un parent déplié (« enfants modifiés », positions relues), premier nœud d'une page égal au parent, clé
+  contenant `/`, `%` et des octets non ASCII (encodage réversible), chemin mal formé refusé, clé dont l'encodage
+  dépasse 128 octets (position, non modifiable), clé dupliquée dans une page (position, non modifiable, diagnostic
+  unique), clé que `find` résout vers un élément dont `key` diffère (nœud retiré), clé dupliquée entre deux pages
+  (précondition sur l'état affiché), suppression annoncée seulement dans une page perdue (absente après la
+  resynchronisation et hors de la mémoire), `reset`, requête d'écriture à la taille exacte de `requestBudget` avec
+  tous ses arguments au maximum, texte d'un octet de trop refusé par la page puis par C++, segment très long (nom de
+  champ long, désigné par son rang), 64ᵉ niveau et chemin proche de 1 024 octets, opération entière sous le verrou du
+  visiteur, `PagedSource`, chaque genre de la section 4, exécuteur, poignée détruite pendant une lecture, destruction
+  depuis l'opération d'une source propriétaire (état encore vivant à la reprise, même quand la poignée en était le
+  dernier autre propriétaire), formatage borné (chaîne de 100 Mio copiée jusqu'au plafond seulement, formateur qui
+  écrit plus de 1 Gio directement dans l'itérateur de sortie sans allocation de WebFront au-delà de la borne,
+  troncature détectée), passe de milliers de pages avec le budget minimal interrompue par `children`, `fold`, `write`
+  et un nouveau curseur 0 (entrées non servies restaurées, différences retrouvées à la passe suivante, aucune
+  resynchronisation), destruction d'une source propriétaire sous le verrou de la source pendant qu'une opération
+  l'attend (sans interblocage, résultat abandonné, état encore vivant), destruction d'une source à références hors du
+  verrou pendant qu'une opération l'attend (attente puis fin), diagnostic d'une destruction qui attend plus que le
+  délai, `containers` d'une page non admise avec un frontend capable (`secondaryWindow` faux, aucun conteneur),
+  écriture acceptée, refusée par l'analyse, refusée par le mutateur et non permise) ; refus à une connexion non
+  prouvée sans `trustLoopbackClients` ; écritures `webfront.developer.*` refusées à une connexion non prouvée quand le
+  frontend transmet la preuve, acceptées depuis la vue, la fenêtre secondaire et le pilote `webfront-wf`, inchangées
+  avec le navigateur système ; lectures du projet inchangées ; `containers` pour chaque frontend et chaque réglage de
+  confiance ; absence des fonctions hors environnement et en distribution.
 - Test de processus : destruction de la poignée d'une source à références depuis son visiteur, qui écrit le diagnostic
   puis termine le processus.
 - Test de compilation refusée, comme `FormsReflectionRejects` : une politique de tampons dont `responseBudget` est

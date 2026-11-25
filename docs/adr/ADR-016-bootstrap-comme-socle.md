@@ -11,6 +11,7 @@
 | 1.4 | 2026-10-24 | Acceptée | Ambroise Leclerc | Qualification du parcours (#316) : ADR-013, ADR-014 et ADR-015 passent à « Acceptée ». | [#348](https://github.com/ambroise-leclerc/WebFront/pull/348) |
 | 1.5 | 2026-10-24 | Acceptée | Ambroise Leclerc | Documentation consolidée (#317) : la formulation courante décrit directement l'environnement et ses commandes (`wf init`, `install`, `dev`, `check`, `test`, `embed`), sans comparaison avec d'autres outils ; les versions et décisions antérieures de ce tableau et de l'historique Git restent l'historique de la décision. | [#317](https://github.com/ambroise-leclerc/WebFront/issues/317) |
 | 1.6 | 2026-10-26 | Acceptée | Ambroise Leclerc | Ajout du module DOM optionnel `DomInterpreterData`, commande bornée de l’ADR-003 (#380) ; budget inchangé. | — |
+| 1.7 | 2026-11-25 | Proposée | Ambroise Leclerc | Portée des permissions : quand le frontend transmet la preuve de vue, les callbacks `webfront.developer.*` qui écrivent dans le projet exigent une connexion prouvée (`isLocalClient`), par [ADR-027](ADR-027-inspecteurs-de-l-etat-de-l-application.md) (#678). | À renseigner après intégration. |
 
 ## Statut et date
 
@@ -78,6 +79,13 @@ listées. Elles ne restreignent pas les capacités propres du Worker (`fetch` gl
 l'[ADR-008](ADR-008-contenu-de-confiance-et-origines.md) : le code téléchargé et les scripts
 autorisés ont l'autorité du bridge et du projet désigné. Un durcissement ultérieur (CSP
 `connect-src` servie avec le script du Worker) reste possible mais n'est pas promis.
+
+Proposé en 1.7 par l'[ADR-027](ADR-027-inspecteurs-de-l-etat-de-l-application.md) : quand le frontend actif transmet la
+preuve de vue (`ViewLaunch`), les callbacks `webfront.developer.*` qui écrivent dans le projet (`begin`, `beginNew`,
+`write`, `commit`, `commitGroup`, `abort`) exigent une connexion prouvée, ou un pair de boucle locale avec
+`trustLoopbackClients` (`isLocalClient`). Un client non prouvé ne peut ainsi plus réécrire ce que la vue prouvée
+exécute. Les lectures gardent le contrôle d'origine, et rien ne change avec le navigateur système, qui ne prouve
+aucune vue.
 
 ### Indépendance vis-à-vis de l'environnement
 
