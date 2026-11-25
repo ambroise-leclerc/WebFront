@@ -693,8 +693,9 @@ inline std::optional<std::pair<std::string, std::string>> splitTarget(const std:
 }
 
 /// The segments of a path as it came, each percent-decoded on its own, without the empty and "." ones (as collapseSegments
-/// drops them): "/s/a%2Fb/./c" gives "s", "a/b" and "c", where decoding the whole path first would give four segments.
-inline std::vector<std::string> decodedSegments(std::string_view raw) {
+/// drops them) unless `keepAll`: "/s/a%2Fb/./c" gives "s", "a/b" and "c", where decoding the whole path first would give
+/// four segments; with `keepAll`, "", "s", "a/b", "." and "c".
+inline std::vector<std::string> decodedSegments(std::string_view raw, bool keepAll = false) {
     std::vector<std::string> segments;
     for (std::size_t start = 0; start <= raw.size();) {
 #ifdef _WIN32
@@ -703,7 +704,7 @@ inline std::vector<std::string> decodedSegments(std::string_view raw) {
         const auto end = std::min(raw.find('/', start), raw.size());
 #endif
         auto decoded = uri::decode(raw.substr(start, end - start), false);
-        if (!decoded.empty() && decoded != ".")
+        if (keepAll || (!decoded.empty() && decoded != "."))
             segments.push_back(std::move(decoded));
         start = end + 1;
     }
@@ -1244,16 +1245,30 @@ private:
         const auto split = routing::splitTarget(request.uri);
         if (!split)
             return notFound();  // not a safe path (a control character, "..")
-        const auto& query          = split->second;
+        const auto& query = split->second;
+        // The prefix is read as the root reads a path (its empty and "." segments dropped), but the segment is the very piece
+        // that follows it: an empty or "." one names no space, where normalizing would let the next piece take its place.
         const auto  prefixSegments = routing::decodedSegments(prefix);
-        const auto  depth          = prefixSegments.size();
-        if (segments.size() <= depth || !std::equal(prefixSegments.begin(), prefixSegments.end(), segments.begin()))
-            return notFound();  // the prefix alone, or under it once decoded but not segment by segment
-        const auto& segment = segments[depth];
+        const auto  pieces         = routing::decodedSegments(raw, true);
+        std::size_t index = 0, matched = 0;
+        for (; index < pieces.size() && matched < prefixSegments.size(); ++index) {
+            if (pieces[index].empty() || pieces[index] == ".")
+                continue;
+            if (pieces[index] != prefixSegments[matched])
+                return notFound();  // under the prefix once decoded, but not segment by segment
+            ++matched;
+        }
+        if (matched < prefixSegments.size() || index >= pieces.size())
+            return notFound();  // the prefix alone
+        const auto& segment = pieces[index];
         if (!routing::validSegment(segment))
             return notFound();
+        std::vector<std::string_view> within;  // the segments after the space's, normalized as at the root
+        for (auto next = index + 1; next < pieces.size(); ++next)
+            if (!pieces[next].empty() && pieces[next] != ".")
+                within.push_back(pieces[next]);
         const bool trailingSlash = raw.ends_with('/');
-        if (segments.size() == depth + 1 && !trailingSlash) {
+        if (index + 1 == pieces.size()) {
             // The relative URLs of a page resolve against its directory: "/s/abc" must become "/s/abc/".
             if (request.isUpgradeRequest("websocket"))
                 return notFound();
@@ -1262,8 +1277,8 @@ private:
             return mounted;
         }
         std::string rest = "/";
-        for (auto index = depth + 1; index < segments.size(); ++index)
-            rest += uri::encode(segments[index]) + (index + 1 < segments.size() || trailingSlash ? "/" : "");
+        for (std::size_t part = 0; part < within.size(); ++part)
+            rest += uri::encode(within[part]) + (part + 1 < within.size() || trailingSlash ? "/" : "");
         MountAnswer answer;
         try {
             answer = (*resolver)(segment);

@@ -558,60 +558,70 @@ const Scenario withoutSpaces{"An application without spaces behaves as before th
                                  });
                              }};
 
-const Scenario encodedSeparator{"An encoded separator never selects a space other than the one its segment names", {"spaces"}, [] {
-                                    SpaceApp                                                app{WebFrontConfig{.port = "0"}};
-                                    std::map<std::string, std::unique_ptr<SpaceApp::Space>> spaces;
-                                    std::vector<http::RouteTable::Registration>             routes;
-                                    std::mutex                                              seenMutex;
-                                    std::vector<std::string>                                seen;
-                                    app.spaces("/s/", [&](std::string_view segment) -> std::optional<http::RouteReply> {
-                                        {
-                                            std::scoped_lock lock{seenMutex};
-                                            seen.emplace_back(segment);
-                                        }
-                                        auto space = std::make_unique<SpaceApp::Space>(app, "/s/", segment);
-                                        routes.push_back(space->addRoute("/data/", [name = std::string(segment)](const http::RouteRequest& request) {
-                                            return http::textReply(http::Response::ok, name + "-data " + std::string(request.path));
-                                        }));
-                                        spaces.emplace(segment, std::move(space));
-                                        return std::nullopt;
-                                    });
-                                    Running running{app};
-                                    require(httpGet(app.port(), "/s/alpha/data/x").find("alpha-data /data/x") != std::string::npos);
+const Scenario encodedSeparator{
+    "An encoded separator never selects a space other than the one its segment names",
+    {"spaces"},
+    [] {
+        SpaceApp                                                app{WebFrontConfig{.port = "0"}};
+        std::map<std::string, std::unique_ptr<SpaceApp::Space>> spaces;
+        std::vector<http::RouteTable::Registration>             routes;
+        std::mutex                                              seenMutex;
+        std::vector<std::string>                                seen;
+        app.spaces("/s/", [&](std::string_view segment) -> std::optional<http::RouteReply> {
+            {
+                std::scoped_lock lock{seenMutex};
+                seen.emplace_back(segment);
+            }
+            auto space = std::make_unique<SpaceApp::Space>(app, "/s/", segment);
+            routes.push_back(space->addRoute("/data/", [name = std::string(segment)](const http::RouteRequest& request) {
+                return http::textReply(http::Response::ok, name + "-data " + std::string(request.path));
+            }));
+            spaces.emplace(segment, std::move(space));
+            return std::nullopt;
+        });
+        Running running{app};
+        require(httpGet(app.port(), "/s/alpha/data/x").find("alpha-data /data/x") != std::string::npos);
 
-                                    then("a segment holding an encoded '/' is not found, and never reaches the resolver", [&] {
-                                        const auto answer = httpGet(app.port(), "/s/alpha%2Fdata/x");
-                                        require(answer.starts_with("HTTP/1.1 404"));
-                                        require(answer.find("alpha-data") == std::string::npos);
-                                        Page page{app.port(), "/s/alpha%2Fdata/"};
-                                        require(!page.upgraded);
-                                        std::scoped_lock lock{seenMutex};
-                                        require(seen == std::vector<std::string>{"alpha"});
-                                    });
-                                    then("a WebSocket under the prefix whose target is not a safe path is refused, not given to the application", [&] {
-                                        for (const auto* target : {"/s/%00/", "/s/al%00pha/", "/s/alpha/%00/", "/s/a..b/", "/s/", "/s/%2E/"}) {
-                                            Page page{app.port(), target};
-                                            auto scope = info(target);
-                                            require(!page.upgraded);
-                                            require(page.received().starts_with("HTTP/1.1 404"));
-                                        }
-                                        require(app.connectedBrowsers() == 0);
-                                        std::scoped_lock lock{seenMutex};
-                                        require(seen == std::vector<std::string>{"alpha"});
-                                    });
-                                    then("a space of any name its creation accepts is reachable", [&] {
-                                        require(httpGet(app.port(), "/s/a%20b%25c+d.e/data/x").find("a b%c+d.e-data /data/x") != std::string::npos);
-                                        Page page{app.port(), "/s/a%20b%25c+d.e/"};
-                                        require(page.upgraded);
-                                    });
-                                    then("the encoded prefix separator does not reach a space either", [&] {
-                                        require(httpGet(app.port(), "/s%2Falpha/data/x").starts_with("HTTP/1.1 404"));
-                                    });
-                                    then("other encoded characters of the segment and the rest are decoded as at the root", [&] {
-                                        require(httpGet(app.port(), "/s/%61lpha/data/x").find("alpha-data /data/x") != std::string::npos);
-                                        require(httpGet(app.port(), "/s/alpha/data/a%2Fb").find("alpha-data /data/a/b") != std::string::npos);
-                                    });
-                                }};
+        then("a segment holding an encoded '/' is not found, and never reaches the resolver", [&] {
+            const auto answer = httpGet(app.port(), "/s/alpha%2Fdata/x");
+            require(answer.starts_with("HTTP/1.1 404"));
+            require(answer.find("alpha-data") == std::string::npos);
+            Page page{app.port(), "/s/alpha%2Fdata/"};
+            require(!page.upgraded);
+            std::scoped_lock lock{seenMutex};
+            require(seen == std::vector<std::string>{"alpha"});
+        });
+        then("a WebSocket under the prefix whose target is not a safe path is refused, not given to the application", [&] {
+            for (const auto* target :
+                 {"/s/%00/", "/s/al%00pha/", "/s/alpha/%00/", "/s/a..b/", "/s/", "/s/%2E/", "/s/./alpha/", "/s//alpha/", "/s/%2E/alpha/"}) {
+                Page page{app.port(), target};
+                auto scope = info(target);
+                require(!page.upgraded);
+                require(page.received().starts_with("HTTP/1.1 404"));
+            }
+            require(app.connectedBrowsers() == 0);
+            std::scoped_lock lock{seenMutex};
+            require(seen == std::vector<std::string>{"alpha"});
+        });
+        then("a space of any name its creation accepts is reachable", [&] {
+            require(httpGet(app.port(), "/s/a%20b%25c+d.e/data/x").find("a b%c+d.e-data /data/x") != std::string::npos);
+            Page page{app.port(), "/s/a%20b%25c+d.e/"};
+            require(page.upgraded);
+        });
+        then("the encoded prefix separator does not reach a space either", [&] {
+            require(httpGet(app.port(), "/s%2Falpha/data/x").starts_with("HTTP/1.1 404"));
+        });
+        then("an empty or \".\" segment names no space, where the rest of the path is normalized as at the root", [&] {
+            require(httpGet(app.port(), "/s/./alpha/data/x").starts_with("HTTP/1.1 404"));
+            require(httpGet(app.port(), "/s//alpha/data/x").starts_with("HTTP/1.1 404"));
+            require(httpGet(app.port(), "/s/alpha//data/./x").find("alpha-data /data/x") != std::string::npos);
+            require(httpGet(app.port(), "//s/alpha/data/x").find("alpha-data /data/x") != std::string::npos);
+        });
+        then("other encoded characters of the segment and the rest are decoded as at the root", [&] {
+            require(httpGet(app.port(), "/s/%61lpha/data/x").find("alpha-data /data/x") != std::string::npos);
+            require(httpGet(app.port(), "/s/alpha/data/a%2Fb").find("alpha-data /data/a/b") != std::string::npos);
+        });
+    }};
 
 const Scenario destroyedBy{"A space destroyed by one of its handlers calls none of the handlers that follow", {"spaces"}, [] {
                                SpaceApp                         app{WebFrontConfig{.port = "0"}};
@@ -849,3 +859,90 @@ const Scenario upgradeJoins{"A WebSocket joins the space resolved for its reques
                                 resolved.reset();
                                 Socket::reset();
                             }};
+
+namespace {
+using GraceSessions = std::map<std::string, std::unique_ptr<SpaceApp::Space>, std::less<>>;
+using GraceTimers   = std::map<std::string, TaskHandle, std::less<>>;
+
+// The grace delay of docs/SPACES.md, with a delay a test can wait for.
+Task endAfterGrace(SpaceApp& app, GraceSessions& sessions, GraceTimers& timers, std::string id, std::chrono::milliseconds grace, std::atomic<bool>& ended) {
+    co_await app.resumeAfter(grace);
+    timers.erase(id);
+    if (auto found = sessions.find(id); found != sessions.end() && found->second->connectedBrowsers() == 0) {
+        sessions.erase(found);
+        ended = true;
+    }
+}
+
+std::chrono::steady_clock::time_point graceNow() {
+    return std::chrono::steady_clock::now();
+}
+}  // namespace
+
+const Scenario graceDelay{"The documented grace delay counts from the last closure, not from the first", {"spaces"}, [] {
+                              constexpr auto                                     grace = 1000ms;
+                              SpaceApp                                           app{WebFrontConfig{.port = "0"}};
+                              GraceSessions                                      sessions;
+                              GraceTimers                                        timers;
+                              std::atomic<bool>                                  ended{false};
+                              std::atomic<int>                                   started{0}, emptied{0};
+                              std::mutex                                         timesMutex;
+                              std::vector<std::chrono::steady_clock::time_point> emptiedAt;
+                              app.spaces("/s/", [](std::string_view) -> std::optional<http::RouteReply> {
+                                  return http::textReply(http::Response::notFound, "Unknown session");
+                              });
+                              auto space = std::make_unique<SpaceApp::Space>(app, "/s/", "alpha");
+                              space->onUIStarted([&](SpaceApp::UI) {
+                                  ++started;
+                              });
+                              space->onLastUIClosed([&] {
+                                  {
+                                      std::scoped_lock lock{timesMutex};
+                                      emptiedAt.push_back(graceNow());
+                                  }
+                                  if (auto previous = timers.find("alpha"); previous != timers.end())
+                                      previous->second.requestStop();
+                                  timers["alpha"] = app.spawn(endAfterGrace(app, sessions, timers, "alpha", grace, ended));
+                                  ++emptied;
+                              });
+                              sessions.emplace("alpha", std::move(space));
+                              Running running{app};
+
+                              when("the page closes, comes back before the delay, and closes again", [&] {
+                                  auto page = std::make_unique<Page>(app.port(), "/s/alpha/");
+                                  require(spaceWaitUntil([&] {
+                                      return started == 1;
+                                  }));
+                                  page.reset();
+                                  require(spaceWaitUntil([&] {
+                                      return emptied == 1;
+                                  }));
+                                  std::this_thread::sleep_for(400ms);
+                                  page = std::make_unique<Page>(app.port(), "/s/alpha/");
+                                  require(spaceWaitUntil([&] {
+                                      return started == 2;
+                                  }));
+                                  page.reset();
+                                  require(spaceWaitUntil([&] {
+                                      return emptied == 2;
+                                  }));
+                                  std::chrono::steady_clock::time_point first, second;
+                                  {
+                                      std::scoped_lock lock{timesMutex};
+                                      first  = emptiedAt.at(0);
+                                      second = emptiedAt.at(1);
+                                  }
+                                  std::this_thread::sleep_until(first + grace + 200ms);
+                                  const bool beforeSecondExpiry = graceNow() < second + grace;
+                                  then("the space outlives the first delay, and ends a full delay after the last closure", [&] {
+                                      // Only a run that reached this point before the second delay expired can tell.
+                                      if (beforeSecondExpiry)
+                                          require(!ended);
+                                      else
+                                          warn("the machine was too slow to observe the space between the two delays");
+                                      require(spaceWaitUntil([&] {
+                                          return ended.load();
+                                      }));
+                                  });
+                              });
+                          }};

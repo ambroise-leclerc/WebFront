@@ -70,15 +70,26 @@ unchanged.
 ## Lifetime
 
 The application decides when a space ends. `onLastUIClosed` tells it that the last page closed (a reload closes the page
-and opens it again a moment later), so the usual pattern keeps the space through a grace delay:
+and opens it again a moment later), so the usual pattern keeps the space through a grace delay. Each emptying stops the
+previous timer before it starts a new one: the delay always counts from the last closure, and a page that came back and
+left again gets the full delay.
 
 ```cpp
+using Sessions = std::map<std::string, std::unique_ptr<webfront::WebFront::Space>, std::less<>>;
+using Timers   = std::map<std::string, webfront::TaskHandle, std::less<>>;
+Timers graceTimers;  // used on the server thread, like `sessions`
+
+webfront::Task endAfterGrace(webfront::WebFront& app, Sessions& sessions, Timers& timers, std::string id) {
+    co_await app.resumeAfter(std::chrono::seconds(30));  // a stopped timer ends here: the rest never runs
+    timers.erase(id);
+    if (auto found = sessions.find(id); found != sessions.end() && found->second->connectedBrowsers() == 0)
+        sessions.erase(found);  // destroys the space, on the server thread
+}
+
 space->onLastUIClosed([&app, &sessions, id = std::string(id)] {
-    static_cast<void>(app.spawn([](auto& app, auto& sessions, std::string id) -> webfront::Task {
-        co_await app.resumeAfter(std::chrono::seconds(30));
-        if (auto found = sessions.find(id); found != sessions.end() && found->second->connectedBrowsers() == 0)
-            sessions.erase(found);
-    }(app, sessions, id)));
+    if (auto previous = graceTimers.find(id); previous != graceTimers.end())
+        previous->second.requestStop();
+    graceTimers[id] = app.spawn(endAfterGrace(app, sessions, graceTimers, id));
 });
 ```
 
