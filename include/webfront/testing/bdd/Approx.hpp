@@ -14,8 +14,8 @@
 // checkEqual(reading, approx(5.0).epsilon(1e-3));   // reports both operands when it fails
 // @endcode
 // A value is accepted when it is within either tolerance: |value - expected| <= margin, or
-// |value - expected| <= epsilon * |expected| (0 for an infinite expected value). A failed check() names the value, the
-// expected value, both tolerances and the difference.
+// |value - expected| <= epsilon * |expected|. An infinity equals only itself, so infinity == approx(DBL_MAX) is false. A
+// failed check() names the value, the expected value, both tolerances and the difference.
 
 #pragma once
 
@@ -56,14 +56,14 @@ public:
         return absoluteTolerance;
     }
 
-    /// Whether a value is within either tolerance of the expected value. NaN is never.
+    /// Whether a value is within either tolerance of the expected value. An infinity equals only itself, whatever the
+    /// tolerances, so that a computation that overflowed is not taken for a large finite value; NaN is never equal.
     bool matches(double other) const {
         constexpr double infinity = std::numeric_limits<double>::infinity();
-        auto             within   = [&](double tolerance) {
-            return other + tolerance >= expected && expected + tolerance >= other;
-        };
-        bool infinite = expected == infinity || expected == -infinity;
-        return within(absoluteTolerance) || within(relativeTolerance * (infinite ? 0.0 : (expected < 0 ? -expected : expected)));
+        if (other == infinity || other == -infinity || expected == infinity || expected == -infinity)
+            return other == expected;
+        double difference = other < expected ? expected - other : other - expected;  // infinite when it overflows
+        return difference <= absoluteTolerance || difference <= relativeTolerance * (expected < 0 ? -expected : expected);
     }
 
 private:

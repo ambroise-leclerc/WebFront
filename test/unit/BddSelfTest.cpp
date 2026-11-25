@@ -317,6 +317,15 @@ const Scenario approxHolds{"approx holds", [] {
                                require(3 == approx(3.0));
                                require(std::numeric_limits<double>::infinity() == approx(std::numeric_limits<double>::infinity()));
                                require(!(std::numeric_limits<double>::quiet_NaN() == approx(std::numeric_limits<double>::quiet_NaN())));
+                               // An overflow is not taken for the largest finite value, in either direction.
+                               constexpr double largest = std::numeric_limits<double>::max(), infinite = std::numeric_limits<double>::infinity();
+                               require(infinite != approx(largest));
+                               require(-infinite != approx(-largest));
+                               require(largest != approx(infinite));
+                               require(infinite != approx(largest).margin(infinite));
+                               require(infinite != approx(-infinite));
+                               require(largest == approx(largest));
+                               require(largest != approx(-largest));
                                require(Approx::defaultEpsilon > 1.1e-5 && Approx::defaultEpsilon < 1.2e-5);
                                requireEqual(5.0 + 1e-6, approx(5.0));
                                requireThrows<std::invalid_argument>([] {
@@ -343,6 +352,10 @@ const Scenario equalHolds{"checkEqual holds", [] {
                               require(!webfront::bdd::impl::equal(-1, 4294967295u));  // compared by value, not converted
                               char text[] = "abc";
                               requireEqual(static_cast<const char*>(text), "abc");    // by characters, not as pointers
+                              const char* none = nullptr;
+                              require(!webfront::bdd::impl::equal(none, "x"));
+                              require(!webfront::bdd::impl::equal(std::string{"x"}, none));
+                              requireEqual(none, static_cast<const char*>(nullptr));
                               trace.push_back("equal");
                           }};
 
@@ -351,6 +364,7 @@ const Scenario equalFails{"checkEqual reports its operands", [] {
                               checkEqual(Color::red, Color::blue);
                               checkEqual(Opaque{1}, Opaque{2});
                               checkEqual(std::string{"left text"}, "right text");
+                              checkEqual(static_cast<const char*>(nullptr), "x");
                               trace.push_back("after check");
                               requireEqual(2, 3);
                               trace.push_back("not reached");
@@ -492,6 +506,7 @@ int main() {
                                       "left:  red\n  right: blue",
                                       "left:  {?}\n  right: {?}",
                                       "left:  left text\n  right: right text",
+                                      "left:  nullptr\n  right: x",
                                       "left:  2\n  right: 3"})
             if (xml.find(part) == std::string::npos) {
                 ++failures;

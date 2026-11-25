@@ -99,7 +99,8 @@ tests/Meter.cpp:42: FAILED
 They write strings, characters, booleans, numbers, enumerations (as their value) and ranges of these (`{a, b, c}`); a type
 they cannot write appears as `{?}`, and the comparison still works. Two integers are compared by value whatever their
 signedness, so `checkEqual(items.size(), 3)` neither warns nor equates `-1` with `4294967295u`, and two strings by their
-characters (two `const char*` are not compared as pointers); any other pair uses `left == right`.
+characters (two `const char*` are not compared as pointers; a null one equals only another null one and is written
+`nullptr`); any other pair uses `left == right`.
 
 To write a project type, in these reports and in `info()`, `fail()` and composed section names, specialize
 `webfront::bdd::Printer`:
@@ -124,8 +125,9 @@ check(current == approx(0.0).margin(1e-9));          // absolute margin, 0 by de
 requireEqual(frequency, approx(50.0).epsilon(1e-3)); // the report shows both operands
 ```
 
-A value is accepted within either tolerance: `|value - expected| <= margin`, or `|value - expected| <= epsilon * |expected|`
-(`0` when `expected` is infinite). NaN is never equal. The default epsilon is `Approx::defaultEpsilon`, a hundred times the
+A value is accepted within either tolerance: `|value - expected| <= margin`, or `|value - expected| <= epsilon * |expected|`.
+An infinity equals only itself whatever the tolerances, so a computation that overflowed is not accepted as
+`approx(DBL_MAX)`. NaN is never equal. The default epsilon is `Approx::defaultEpsilon`, a hundred times the
 epsilon of a `float` (about 1.19e-5), as in Catch2. A negative or NaN tolerance throws `std::invalid_argument`.
 The comparison returns an object that converts to `bool` and explains a failed `check()` or `require()`:
 

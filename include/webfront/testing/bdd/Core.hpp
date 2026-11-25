@@ -126,14 +126,23 @@ inline constexpr bool printable = [] {
 template <typename T>
 concept Printable = printable<T>;
 
-/// Appends the text of a value: what Printer<T> writes, a string, a character, a boolean, a number, an enumeration or a
-/// range of these.
+/// Whether a value is a null C string, which std::string_view cannot take.
+template <typename T>
+bool nullString(const T& value) {
+    if constexpr (std::is_pointer_v<T>)
+        return value == nullptr;
+    else
+        return false;
+}
+
+/// Appends the text of a value: what Printer<T> writes, a string (nullptr for a null C string), a character, a boolean,
+/// a number, an enumeration or a range of these.
 template <typename T>
 void append(std::string& text, const T& value) {
     if constexpr (Customized<T>)
         Printer<T>::append(text, value);
     else if constexpr (std::is_convertible_v<const T&, std::string_view>)
-        text += std::string_view{value};
+        text += nullString(value) ? std::string_view{"nullptr"} : std::string_view{value};
     else if constexpr (std::is_same_v<T, bool>)
         text += value ? "true" : "false";
     else if constexpr (std::is_same_v<T, char>)
@@ -490,14 +499,16 @@ concept PlainInteger = std::is_integral_v<T> && !std::is_same_v<std::remove_cv_t
 
 /// Whether two values are equal: two integers are compared by value whatever their signedness, so that
 /// checkEqual(items.size(), 3) neither warns nor converts -1 to a large unsigned number, and two strings by their
-/// characters, so that two `const char*` are not compared as pointers.
+/// characters, so that two `const char*` are not compared as pointers. A null C string equals only another one.
 template <typename L, typename R>
 bool equal(const L& left, const R& right) {
     if constexpr (PlainInteger<L> && PlainInteger<R>)
         return std::cmp_equal(left, right);
-    else if constexpr (std::is_convertible_v<const L&, std::string_view> && std::is_convertible_v<const R&, std::string_view>)
+    else if constexpr (std::is_convertible_v<const L&, std::string_view> && std::is_convertible_v<const R&, std::string_view>) {
+        if (nullString(left) || nullString(right))
+            return nullString(left) && nullString(right);
         return std::string_view{left} == std::string_view{right};
-    else
+    } else
         return static_cast<bool>(left == right);
 }
 
