@@ -352,3 +352,19 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
     view.webfrontInspectorHost = host;
     return host;
 }
+
+/**
+ * The inspectors of a page that holds the tab: `open(panel)` shows a panel, creating the host on first use. The host is also
+ * created as soon as `access` says that this page reaches the inspectors, without waiting for a panel to be opened: a panel
+ * detached before this page was reloaded carries the page's identifier, and its request to be attached again must find the
+ * host listening. `host()` is the promise of the host, null until it is created. `create` replaces createInspectorHost (tests).
+ */
+export function prepareInspectors({create = createInspectorHost, ...options}) {
+    let made = null;
+    const host = () => made ??= create(options);
+    Promise.resolve(options.access).then(access => { if (access?.containers?.host) host().catch(() => {}); }, () => {});
+    return {
+        open: panel => host().then(created => created.open(panel)),
+        host: () => made,
+    };
+}

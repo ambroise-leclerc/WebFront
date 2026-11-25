@@ -105,9 +105,10 @@ export function reconcile(known, listed) {
  * Follows the watches of the application: asks the revision of the registry every `period` with a count of 0, reads the
  * list again when it changed, and calls `onChange({added, removed, watches})`. `forget(id)` removes a watch that a call
  * found gone (a refusal `webfront.inspector.unknown`). `pause()` and `resume()` stop and restart the reads; `stop()` ends them.
- * `onError(error)` receives a failed read; the discovery keeps trying at the next period.
+ * `onError(error)` receives a failed read; the discovery keeps trying at the next period. `onRead(watches)` follows every read
+ * that succeeds, changed or not, so that an error shown earlier can be cleared once the reads work again.
  */
-export function createWatchDiscovery({bridge, onChange, onError = () => {}, period = defaultPeriod, timers = globalThis}) {
+export function createWatchDiscovery({bridge, onChange, onError = () => {}, onRead = () => {}, period = defaultPeriod, timers = globalThis}) {
     const known = new Map();
     let revision = 0, timer = null, paused = false, stopped = false, running = null;
     const apply = listed => {
@@ -118,10 +119,12 @@ export function createWatchDiscovery({bridge, onChange, onError = () => {}, peri
     };
     async function poll() {
         const {changed, revision: current} = readPage(await bridge.cppFunction(watchesFunction)(revision, 0, 0));
-        if (!changed && current === revision) return;
-        const listed = await listWatches(bridge, current);
-        revision = listed.revision;
-        apply(listed.watches);
+        if (changed || current !== revision) {
+            const listed = await listWatches(bridge, current);
+            revision = listed.revision;
+            apply(listed.watches);
+        }
+        onRead([...known.values()]);
     }
     function schedule() {
         if (stopped || paused || timer !== null) return;
@@ -288,10 +291,9 @@ export async function main(view = window) {
     };
     const discovery = createWatchDiscovery({
         bridge,
-        onChange: ({watches}) => {
-            renderWatches(list, watches);
-            describe(watches);
-        },
+        onChange: ({watches}) => renderWatches(list, watches),
+        // Every read that succeeds says so, also after an error and when nothing changed.
+        onRead: describe,
         onError: error => {
             status.classList.add('error');
             status.textContent = error?.code === 'webfront.inspector.denied'
@@ -306,7 +308,6 @@ export async function main(view = window) {
     });
     view.addEventListener('pagehide', () => discovery.stop());
     await discovery.start();
-    if (!discovery.watches.length && !status.classList.contains('error')) describe([]);
     return {bridge, discovery, list};
 }
 

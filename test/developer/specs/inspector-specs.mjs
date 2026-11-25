@@ -2,7 +2,7 @@
 // project, the floating window, detaching and attaching, and the discovery of the watches. The page in a real window, tab
 // or frame is checked in test/web/developer-specs.mjs.
 import {detachedContainer, containerFor, hostReasons, parsePreferences, formatPreferences, readPreferences, preferencesPath,
-    createInspectorHost, defaultInspectorRect, panelTitle, hostIdentifier, hostKey} from '../../../js/developer/environment/inspector-host.mjs';
+    createInspectorHost, defaultInspectorRect, panelTitle, hostIdentifier, hostKey, prepareInspectors} from '../../../js/developer/environment/inspector-host.mjs';
 import {readDescriptor, readPage, listWatches, listingAttempts, reconcile, createWatchDiscovery, renderWatches, pageBridge, attachAgain,
     watchesFunction} from '../../../js/developer/environment/inspector.mjs';
 import {inspectorChannel, inspectorPanels} from '../../../js/developer/environment/menu.mjs';
@@ -262,6 +262,41 @@ describe('The inspectors', () => {
             expect(hostIdentifier(view)).not.toBe('bad/value');
         });
 
+        it('listens for its detached panels as soon as the page reaches the inspectors, before any panel is opened', async () => {
+            // The page was reloaded: a window detached before the reload carries its identifier and asks to be attached.
+            const {bridge} = memoryBridge();
+            const fullBridge = {cppFunction: name => name === 'webfront.inspector.embedded' ? async () => true : bridge.cppFunction(name)};
+            const options = {bridge: fullBridge, page: document, inspectorUrl: '/webfront/developer/environment/inspector.html',
+                access: Promise.resolve({containers: admitted(true), reason: ''}), hostId: 'reloaded', windowOpen: () => ({})};
+            const inspectors = prepareInspectors(options);
+            const host = await new Promise(resolve => {
+                const wait = () => inspectors.host() ? resolve(inspectors.host()) : setTimeout(wait);
+                wait();
+            });
+            hosts.push(host);
+            const inspector = new BroadcastChannel(inspectorChannel);
+            try {
+                const answered = new Promise(resolve => inspector.addEventListener('message', ({data}) => {
+                    if (data?.type === 'attached') resolve(data.id);
+                }));
+                inspector.postMessage({type: 'attach', panel: 'cpp.watches', host: 'reloaded', id: 'after-reload'});
+                expect(await answered).toBe('after-reload');
+                expect(host.shownPanel).toBe('cpp.watches');
+            } finally { inspector.close(); }
+        });
+
+        it('makes no host for a page that does not reach the inspectors until a panel is asked for', async () => {
+            const made = [];
+            const inspectors = prepareInspectors({access: Promise.resolve({containers: null, reason: 'no'}), create: options => {
+                made.push(options);
+                return Promise.resolve({open: panel => panel});
+            }});
+            await new Promise(resolve => setTimeout(resolve));
+            expect(inspectors.host()).toBeNull();
+            expect(await inspectors.open('cpp.watches')).toBe('cpp.watches');
+            expect(made.length).toBe(1);
+        });
+
         it('opens at a default place inside a small viewport', () => {
             const rect = defaultInspectorRect({width: 400, height: 300});
             expect(rect.x + rect.width).toBeLessThanOrEqual(400);
@@ -429,6 +464,33 @@ describe('The inspectors', () => {
                 jasmine.clock().tick(250);
                 await discovery.settled();
                 expect(discovery.watches.map(watch => watch.name)).toEqual(['grid']);
+                discovery.stop();
+            } finally { jasmine.clock().uninstall(); }
+        });
+
+        it('report every successful read, so that an error is cleared once the reads work again', async () => {
+            jasmine.clock().install();
+            try {
+                const registry = memoryWatches();
+                registry.add('grid');
+                let fail = false;
+                const events = [];
+                const bridge = {cppFunction: () => async (...args) => {
+                    if (fail) throw new Error('lost');
+                    return registry.answer(...args);
+                }};
+                const discovery = createWatchDiscovery({bridge, onChange: () => events.push('change'), onError: () => events.push('error'),
+                    onRead: watches => events.push(`read ${watches.length}`), period: 250});
+                await discovery.start();
+                expect(events).toEqual(['change', 'read 1']);
+                fail = true;
+                jasmine.clock().tick(250);
+                await discovery.settled();
+                fail = false;
+                // The registry has not changed: the read finds nothing new, and still says that it succeeded.
+                jasmine.clock().tick(250);
+                await discovery.settled();
+                expect(events).toEqual(['change', 'read 1', 'error', 'read 1']);
                 discovery.stop();
             } finally { jasmine.clock().uninstall(); }
         });
