@@ -317,14 +317,21 @@ describe('The developer page layout', () => {
                 key(items(1)[0], {key: 'ArrowLeft'});
                 expect(menu.panels.length).toBe(1);
                 expect(document.activeElement).toBe(cpp);
-                key(cpp, {key: 'Enter'});
-                expect(menu.panels.length).toBe(2);
-                key(items(1)[0], {key: 'Escape'});
-                expect(menu.panels.length).toBe(1);
                 key(cpp, {key: 'Escape'});
                 expect(menu.isOpen).toBeFalse();
                 expect(document.activeElement).toBe(button);
-                expect(document.querySelector('.webfront-menu')).toBeNull();
+                // From a submenu, at any entry, Escape closes every level at once and gives the focus back to the tab.
+                for (const group of [1, 2]) {
+                    key(button, {key: 'ContextMenu'});
+                    key(items(0)[group], {key: 'Enter'});
+                    expect(menu.panels.length).toBe(2);
+                    const last = items(1).at(-1);
+                    key(last, {key: 'End'});
+                    key(last, {key: 'Escape'});
+                    expect(menu.isOpen).withContext(`group ${group}`).toBeFalse();
+                    expect(document.querySelector('.webfront-menu')).toBeNull();
+                    expect(document.activeElement).toBe(button);
+                }
             });
 
             it('greys an unavailable entry with its reason, and does nothing when it is chosen', () => {

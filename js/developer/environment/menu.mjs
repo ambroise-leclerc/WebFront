@@ -300,11 +300,7 @@ export function createTabMenu({button, entries, activate}) {
             }
             break;
         case 'Escape':
-            if (depth > 0) {
-                const parent = levels[depth].parent;
-                closeFrom(depth);
-                parent.focus();
-            } else close();
+            close();  // every level, from a submenu too, with the focus back on the tab; the left arrow goes up one level
             break;
         case 'Enter': case ' ':
             if (item) choose(item);

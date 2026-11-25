@@ -918,8 +918,7 @@ try {
             assert(entries.length === 3 && entries.every(entry => entry.getAttribute('aria-disabled') === 'true'),
                 'Without an inspector to open, the entries of this page must be greyed');
             here.press(entries[0], {key: 'Escape'});
-            here.press(here.entries(0)[1], {key: 'Escape'});
-            assert(here.menus().length === 0 && document.activeElement === here.button(), 'Escape must close the menu and give the focus back to the tab');
+            assert(here.menus().length === 0 && document.activeElement === here.button(), 'Escape in a submenu must close the whole menu and give the focus back to the tab');
         }
 
         // Launching again: the bootstrap page of the same project, in a window of its own size.
@@ -981,9 +980,8 @@ try {
         assert(again.menus().length === 1 && page.activeElement === again.entries(0)[1], 'The left arrow must close the submenu');
         const tsEntries = await inspectorEntries(again, 2, /trustLoopbackClients/);
         assert(tsEntries.map(entry => entry.firstChild.textContent).join() === 'Packages,Bridge', 'The TypeScript state must offer its panels');
-        again.press(tsEntries[0], {key: 'Escape'});
-        again.press(page.activeElement, {key: 'Escape'});
-        assert(again.menus().length === 0 && page.activeElement === button, 'Escape must close the menu and give the focus back to the tab');
+        again.press(tsEntries[1], {key: 'Escape'});
+        assert(again.menus().length === 0 && page.activeElement === button, 'Escape in a submenu must close the whole menu and give the focus back to the tab');
         // The Menu key and Shift+F10 open it from the keyboard; its Terminal entry opens the terminal.
         again.press(button, {key: 'ContextMenu'});
         assert(again.menus().length === 1 && page.activeElement === again.entries(0)[0], 'The Menu key must open the menu on the tab');

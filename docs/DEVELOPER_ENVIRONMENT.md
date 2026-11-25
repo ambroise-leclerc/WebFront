@@ -429,8 +429,8 @@ environment's `mount`, not to the embedded bootstrap page):
   has the focus; a click and the shortcut keep opening and collapsing the terminal. Its entries are **Terminal**,
   **C++ state ▸** (Functions, Browsers and tasks, Watches) and **TypeScript state ▸** (Packages, Bridge), the inspectors
   of the application's state ([ADR-027](adr/ADR-027-inspecteurs-de-l-etat-de-l-application.md)). The arrow keys move in
-  it and open a submenu (right arrow, Enter or Space; the left arrow closes it), Escape closes it and gives the focus back
-  to the tab, and a press elsewhere closes it. It opens beside the tab and stays inside the browser window, on the other
+  it and open a submenu (right arrow, Enter or Space; the left arrow closes it), Escape closes the whole menu, from a
+  submenu too, and gives the focus back to the tab, and a press elsewhere closes it. It opens beside the tab and stays inside the browser window, on the other
   side or upwards when there is no room, and narrows to a window smaller than its width. Closed, it takes no key from
   the interface. A manifest may name Shift+F10 as the terminal's shortcut: on the focused tab, Shift+F10 then opens the
   menu, and the tab's click (Enter or Space) or the menu's Terminal entry opens the terminal; anywhere else, the menu
