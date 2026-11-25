@@ -27,13 +27,31 @@
 
 namespace webfront::bdd {
 
+namespace impl {
+
+/// A number approx() compares: an arithmetic type but bool whose every value a double holds exactly, so that the
+/// conversion never makes two different values equal (float, double, and the integers of at most 53 bits).
+template <typename T>
+concept Approximable = std::is_arithmetic_v<T> && !std::is_same_v<T, bool> && std::numeric_limits<T>::digits <= std::numeric_limits<double>::digits;
+
+/// A number a double cannot always hold: a 64-bit integer, or a long double wider than a double.
+template <typename T>
+concept Inexact = std::is_arithmetic_v<T> && !std::is_same_v<T, bool> && !Approximable<T>;
+
+}  // namespace impl
+
 /// An expected floating-point value and the tolerances within which a value equals it.
 class Approx {
 public:
     /// The default relative tolerance, Catch2's: a hundred times the epsilon of a float, about 1.2e-5.
     static constexpr double defaultEpsilon = static_cast<double>(std::numeric_limits<float>::epsilon()) * 100.0;
 
-    explicit Approx(double value) : expected{value} { }
+    /// The expected value: a number a double holds exactly, as for the measured value; a 64-bit integer or a wide long
+    /// double is refused unless converted explicitly, since its rounding would accept a different value.
+    template <impl::Approximable T>
+    explicit Approx(T value) : expected{static_cast<double>(value)} { }
+    template <impl::Inexact T>
+    explicit Approx(T value) = delete;
 
     /// Sets the relative tolerance, a fraction of the expected value. Throws std::invalid_argument when it is negative or NaN.
     Approx& epsilon(double relative) {
@@ -82,9 +100,13 @@ private:
 };
 
 /// An expected value compared within a tolerance: `check(reading == approx(5.0).margin(1e-6))`.
-inline Approx approx(double expected) {
+template <impl::Approximable T>
+Approx approx(T expected) {
     return Approx{expected};
 }
+/// Refused, as for a measured value: convert it explicitly (static_cast<double>) to accept the rounding.
+template <impl::Inexact T>
+Approx approx(T expected) = delete;
 
 /// Writes approx(5) (margin 1e-06, epsilon 1.19209e-05) in messages and in the operands of a failed checkEqual().
 template <>
@@ -122,20 +144,7 @@ private:
     bool   equality;
 };
 
-namespace impl {
-
-/// A number approx() compares: an arithmetic type but bool whose every value a double holds exactly, so that the
-/// conversion never makes two different values equal (float, double, and the integers of at most 53 bits).
-template <typename T>
-concept Approximable = std::is_arithmetic_v<T> && !std::is_same_v<T, bool> && std::numeric_limits<T>::digits <= std::numeric_limits<double>::digits;
-
-/// A number a double cannot always hold: a 64-bit integer, or a long double wider than a double.
-template <typename T>
-concept Inexact = std::is_arithmetic_v<T> && !std::is_same_v<T, bool> && !Approximable<T>;
-
-}  // namespace impl
-
-// Comparing approx() with a 64-bit integer or a wide long double is refused: beyond 2^53 the conversion to double would
+// Comparing approx() with a 64-bit integer or a wide long double, or building one from it, is refused: beyond 2^53 the conversion to double would
 // accept a different value even with no tolerance. Convert it explicitly (static_cast<double>) to accept the rounding,
 // or compare an integer exactly with checkEqual().
 template <impl::Inexact T>

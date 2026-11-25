@@ -314,6 +314,12 @@ constexpr bool approximable = requires(T value) { value == approx(1.0); };
 static_assert(approximable<int> && approximable<unsigned> && approximable<float> && approximable<double>);
 static_assert(!approximable<std::int64_t> && !approximable<std::uint64_t> && !approximable<bool>);
 static_assert(approximable<long double> == (std::numeric_limits<long double>::digits <= std::numeric_limits<double>::digits));
+// The same holds for the expected value, unless it is converted explicitly.
+template <typename T>
+constexpr bool expectable = requires(T value) { approx(value); } && std::is_constructible_v<Approx, T>;
+static_assert(expectable<int> && expectable<unsigned> && expectable<float> && expectable<double>);
+static_assert(!expectable<std::int64_t> && !expectable<std::uint64_t> && !expectable<bool>);
+static_assert(expectable<long double> == (std::numeric_limits<long double>::digits <= std::numeric_limits<double>::digits));
 
 const Scenario approxHolds{"approx holds", [] {
                                require(5.0 + 1e-6 == approx(5.0));
