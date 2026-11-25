@@ -265,6 +265,31 @@ tous les appels qui portent une révision, et il est vérifié **avant** tout au
 Une révision périmée ne préserve donc jamais une passe en cours, sauf pour `write`, qui ne touche à rien ; et une
 resynchronisation libère toujours la passe.
 
+**Atomicité des refus.** Règle générale : **une Promise rejetée garantit que ni la mémoire, ni une passe en cours, ni
+l'objet n'ont changé**, et **un appel qui a changé la mémoire se résout toujours et porte la révision qui en résulte**.
+Un appel qui modifie la mémoire s'exécute donc en deux phases :
+
+1. **validation, sans effet.** Tout ce qui peut échouer sans lire l'objet est vérifié d'abord : accès, observateur
+   connu, chemin bien formé et présent dans la mémoire, révision (contrat ci-dessus), drapeaux du nœud (modifiable,
+   profondeur atteinte), taille et analyse du texte d'une écriture (le genre et les bornes viennent du type), place
+   dans la mémoire, calculée sur la mémoire telle qu'elle serait après une interruption, puisque l'ensemble rangé la
+   donne. La source est ensuite appelée ; si elle échoue avant d'entrer dans le visiteur (exception, visiteur non
+   appelé, accès qui lève), rien n'a encore changé. Un échec de cette phase **rejette** la Promise ;
+2. **effet, sans rejet.** Une fois dans la fenêtre d'accès, l'interruption éventuelle de la passe et l'opération
+   s'exécutent, et l'appel **se résout** quoi qu'il arrive ensuite. Les échecs qui ne se voient qu'en lisant l'objet,
+   ou qui viennent du code de l'application, sont rapportés dans la réponse :
+   - pour `write`, la réponse est un tuple `(révision, code, message)` : code vide si l'écriture est appliquée, sinon
+     `webfront.inspector.stale` (précondition fausse) ou `webfront.inspector.refused` (refus du mutateur, avec le
+     message de son exception) ; dans les deux cas l'objet est inchangé, mais la révision est celle de la mémoire
+     après l'interruption, et l'inspecteur l'adopte ;
+   - pour `children`, `fold` et `changes`, la page ne peut plus échouer : une exception d'un formateur devient la
+     valeur du nœud (`‹exception : message›`, genre `opaque`), et une exception de `key` ou de `find` fait traiter
+     l'élément comme sans clé (position, non modifiable). Une exception de la source après le retour du visiteur est
+     écrite dans les diagnostics et ignorée.
+
+Un refus d'écriture qui suit une interruption ne fait donc jamais perdre la révision, et ne provoque pas de
+resynchronisation : la promesse qu'une passe interrompue n'en demande pas tient aussi en cas d'échec.
+
 **Différences paginées.** Une passe de `changes` commence au curseur 0, avec la révision R que l'inspecteur détient :
 
 1. si R est la révision de la mémoire, C++ compare la mémoire à l'état observé, en une seule lecture (section 5), et
@@ -306,7 +331,8 @@ changé depuis, elle est refusée comme périmée, et c'est le résultat attendu
 Avant d'exécuter l'appel, C++ rend aux entrées des pages
 **non encore servies** leur valeur d'avant la passe, gardée dans l'ensemble rangé : un nœud modifié reprend son ancienne
 valeur dans la mémoire, et un nœud retiré y revient. La mémoire décrit alors exactement ce que l'inspecteur a reçu, ni
-plus ni moins, sous une nouvelle révision rendue par l'appel. Puis l'appel s'exécute : un `children` qui relit un nœud
+plus ni moins, sous une nouvelle révision que la réponse de l'appel rend toujours, même pour une écriture refusée
+(« Atomicité des refus »). Puis l'appel s'exécute : un `children` qui relit un nœud
 de la partie non servie y met sa valeur fraîche, et un `fold` retire aussi les entrées restaurées sous le nœud replié.
 Les différences non servies ne sont pas perdues : la passe suivante les retrouve en comparant la mémoire restaurée à
 l'objet.
@@ -491,18 +517,20 @@ l'écriture. Une source qui rend une valeur ne peut pas écrire : sa copie n'est
 puis écrire ailleurs laisserait cet intervalle ouvert.
 
 `webfront.inspector.write(observateur, révision, chemin, attendu, texte)`, où `révision` est celle que l'inspecteur
-détient et `attendu` la valeur formatée qu'il affichait pour ce nœud :
+détient et `attendu` la valeur formatée qu'il affichait pour ce nœud, rend `(révision, code, message)` selon la règle
+« Atomicité des refus » (section 3). Il :
 
-1. vérifie l'accès (section 2) et que le nœud porte le drapeau « modifiable » ;
-2. analyse le texte selon le genre : booléens, entiers et flottants (dans les bornes du type, et dans celles d'un champ
-   de `forms::Description` quand il en a), chaînes, énumérations décrites, `std::bitset<N>` (N chiffres binaires).
-   Les autres genres ne sont pas modifiables ;
-3. dans la fenêtre d'accès, vérifie la **précondition** : la révision est celle de la mémoire, et le nœud cible ainsi
+1. vérifie, sans effet, l'accès (section 2), la révision, la taille du texte et que le nœud porte le drapeau
+   « modifiable » ;
+2. analyse le texte selon le genre, toujours sans effet : booléens, entiers et flottants (dans les bornes du type, et
+   dans celles d'un champ de `forms::Description` quand il en a), chaînes, énumérations décrites, `std::bitset<N>`
+   (N chiffres binaires). Les autres genres ne sont pas modifiables ;
+3. dans la fenêtre d'accès, interrompt une passe en cours, puis vérifie la **précondition** : le nœud cible ainsi
    que **chacun de ses ancêtres** montrent encore, dans l'objet, exactement ce que la mémoire a enregistré pour eux
    (libellé, valeur formatée, nombre d'enfants), la valeur de la cible étant aussi égale à `attendu`. Une insertion ou
    une suppression avant la cible change le nombre d'enfants d'un ancêtre ; un remplacement change la valeur ou le
-   libellé de la cible. Dans ces cas, l'écriture est refusée (`webfront.inspector.stale`) et l'inspecteur relit le nœud
-   avant de la proposer à nouveau ;
+   libellé de la cible. Dans ces cas, l'écriture n'est pas appliquée : la réponse porte le code
+   `webfront.inspector.stale` et la révision courante, et l'inspecteur relit le nœud avant de la proposer à nouveau ;
 4. construit la nouvelle valeur dans un temporaire, puis l'applique par le mutateur ou par affectation, toujours dans
    la même fenêtre.
 
@@ -514,10 +542,13 @@ valeur affichés sont tronqués n'est pas modifiable, puisque la comparaison por
 qui a besoin d'une identité exacte fournit une `PagedSource` avec des clés : le chemin porte alors la clé, que `find`
 résout et que la précondition vérifie, sous le contrat d'unicité et de stabilité de la section 5.
 
-Une précondition fausse (`webfront.inspector.stale`), une analyse refusée (`webfront.inspector.parse`), un nœud non
-modifiable (`webfront.inspector.readOnly`), un texte trop long (`webfront.inspector.tooLarge`) ou un refus du mutateur
-(`webfront.inspector.refused`, avec le message de son exception) rejettent la Promise et laissent l'état inchangé ;
-l'inspecteur affiche la raison. Un mutateur fourni par l'application doit être tout ou rien ; c'est son contrat.
+Une révision périmée ou une analyse refusée (`webfront.inspector.stale`, `webfront.inspector.parse`), un nœud non
+modifiable (`webfront.inspector.readOnly`) ou un texte trop long (`webfront.inspector.tooLarge`) **rejettent** la
+Promise : ils sont vus pendant la validation, avant tout effet. Une précondition fausse (`webfront.inspector.stale`) ou
+un refus du mutateur (`webfront.inspector.refused`, avec le message de son exception) ne se voient qu'après une
+éventuelle interruption : la Promise **se résout** avec ce code et la révision qui en résulte. Dans tous les cas l'objet
+est inchangé et l'inspecteur affiche la raison. Un mutateur fourni par l'application doit être tout ou rien ; c'est son
+contrat.
 
 ### 7. Fichier et ligne d'enregistrement
 
@@ -657,33 +688,39 @@ demanderait un grant et une décision propres.
   `changes` avec une révision ancienne pendant une passe (même résultat), `write` avec une révision ancienne pendant
   une passe (refus `stale` sans effet : mémoire, passe et objet inchangés, puis resynchronisation à l'appel suivant),
   deux appels qui modifient la mémoire envoyés sans attendre (le second périmé), écriture qui interrompt une passe
-  avec la révision de la passe (acceptée si l'état affiché tient, périmée sinon, y compris pour une cible d'une page
-  non servie) et avec une révision plus ancienne (refus `stale` sans effet), liste `[a, b, c, d]` lue en deux pages
-  avec une insertion en tête entre elles (liste recommencée, `d` lu), même cas avec une `PagedSource` à clés et une
-  insertion qui garde le nombre d'enfants (clé du dernier enfant déplacée), passe qui détecte un réordonnancement des
-  clés d'un parent déplié (« enfants modifiés », positions relues), premier nœud d'une page égal au parent, clé
-  contenant `/`, `%` et des octets non ASCII (encodage réversible), chemin mal formé refusé, clé dont l'encodage
-  dépasse 128 octets (position, non modifiable), clé dupliquée dans une page (position, non modifiable, diagnostic
-  unique), clé que `find` résout vers un élément dont `key` diffère (nœud retiré), clé dupliquée entre deux pages
-  (précondition sur l'état affiché), suppression annoncée seulement dans une page perdue (absente après la
-  resynchronisation et hors de la mémoire), `reset`, requête d'écriture à la taille exacte de `requestBudget` avec
-  tous ses arguments au maximum, texte d'un octet de trop refusé par la page puis par C++, segment très long (nom de
-  champ long, désigné par son rang), 64ᵉ niveau et chemin proche de 1 024 octets, opération entière sous le verrou du
-  visiteur, `PagedSource`, chaque genre de la section 4, exécuteur, poignée détruite pendant une lecture, destruction
-  depuis l'opération d'une source propriétaire (état encore vivant à la reprise, même quand la poignée en était le
-  dernier autre propriétaire), formatage borné (chaîne de 100 Mio copiée jusqu'au plafond seulement, formateur qui
-  écrit plus de 1 Gio directement dans l'itérateur de sortie sans allocation de WebFront au-delà de la borne,
-  troncature détectée), passe de milliers de pages avec le budget minimal interrompue par `children`, `fold`, `write`
-  et un nouveau curseur 0 (entrées non servies restaurées, différences retrouvées à la passe suivante, aucune
-  resynchronisation), destruction d'une source propriétaire sous le verrou de la source pendant qu'une opération
-  l'attend (sans interblocage, résultat abandonné, état encore vivant), destruction d'une source à références hors du
-  verrou pendant qu'une opération l'attend (attente puis fin), diagnostic d'une destruction qui attend plus que le
-  délai, `containers` d'une page non admise avec un frontend capable (`secondaryWindow` faux, aucun conteneur),
-  écriture acceptée, refusée par l'analyse, refusée par le mutateur et non permise) ; refus à une connexion non
-  prouvée sans `trustLoopbackClients` ; écritures `webfront.developer.*` refusées à une connexion non prouvée quand le
-  frontend transmet la preuve, acceptées depuis la vue, la fenêtre secondaire et le pilote `webfront-wf`, inchangées
-  avec le navigateur système ; lectures du projet inchangées ; `containers` pour chaque frontend et chaque réglage de
-  confiance ; absence des fonctions hors environnement et en distribution.
+  puis échoue sur la précondition ou sur le mutateur (réponse résolue avec le code et la nouvelle révision, objet
+  inchangé, appel suivant sans resynchronisation), refus de validation (révision, analyse, non modifiable, trop long)
+  qui rejettent sans interrompre la passe, `children` qui interrompt une passe avec une mémoire qui serait pleine
+  après restauration (refus avant interruption), exception d'un formateur ou de `key` dans une page après une
+  interruption (page servie, nœud `opaque` ou sans clé), source qui lève avant le visiteur (rejet sans effet) et après
+  lui (diagnostic, réponse servie), écriture qui interrompt une passe avec la révision de la passe (acceptée si l'état
+  affiché tient, périmée sinon, y compris pour une cible d'une page non servie) et avec une révision plus ancienne
+  (refus `stale` sans effet), liste `[a, b, c, d]` lue en deux pages avec une insertion en tête entre elles (liste
+  recommencée, `d` lu), même cas avec une `PagedSource` à clés et une insertion qui garde le nombre d'enfants (clé du
+  dernier enfant déplacée), passe qui détecte un réordonnancement des clés d'un parent déplié (« enfants modifiés »,
+  positions relues), premier nœud d'une page égal au parent, clé contenant `/`, `%` et des octets non ASCII (encodage
+  réversible), chemin mal formé refusé, clé dont l'encodage dépasse 128 octets (position, non modifiable), clé
+  dupliquée dans une page (position, non modifiable, diagnostic unique), clé que `find` résout vers un élément dont
+  `key` diffère (nœud retiré), clé dupliquée entre deux pages (précondition sur l'état affiché), suppression annoncée
+  seulement dans une page perdue (absente après la resynchronisation et hors de la mémoire), `reset`, requête
+  d'écriture à la taille exacte de `requestBudget` avec tous ses arguments au maximum, texte d'un octet de trop refusé
+  par la page puis par C++, segment très long (nom de champ long, désigné par son rang), 64ᵉ niveau et chemin proche
+  de 1 024 octets, opération entière sous le verrou du visiteur, `PagedSource`, chaque genre de la section 4,
+  exécuteur, poignée détruite pendant une lecture, destruction depuis l'opération d'une source propriétaire (état
+  encore vivant à la reprise, même quand la poignée en était le dernier autre propriétaire), formatage borné (chaîne
+  de 100 Mio copiée jusqu'au plafond seulement, formateur qui écrit plus de 1 Gio directement dans l'itérateur de
+  sortie sans allocation de WebFront au-delà de la borne, troncature détectée), passe de milliers de pages avec le
+  budget minimal interrompue par `children`, `fold`, `write` et un nouveau curseur 0 (entrées non servies restaurées,
+  différences retrouvées à la passe suivante, aucune resynchronisation), destruction d'une source propriétaire sous le
+  verrou de la source pendant qu'une opération l'attend (sans interblocage, résultat abandonné, état encore vivant),
+  destruction d'une source à références hors du verrou pendant qu'une opération l'attend (attente puis fin),
+  diagnostic d'une destruction qui attend plus que le délai, `containers` d'une page non admise avec un frontend
+  capable (`secondaryWindow` faux, aucun conteneur), écriture acceptée, refusée par l'analyse, refusée par le mutateur
+  et non permise) ; refus à une connexion non prouvée sans `trustLoopbackClients` ; écritures `webfront.developer.*`
+  refusées à une connexion non prouvée quand le frontend transmet la preuve, acceptées depuis la vue, la fenêtre
+  secondaire et le pilote `webfront-wf`, inchangées avec le navigateur système ; lectures du projet inchangées ;
+  `containers` pour chaque frontend et chaque réglage de confiance ; absence des fonctions hors environnement et en
+  distribution.
 - Test de processus : destruction de la poignée d'une source à références depuis son visiteur, qui écrit le diagnostic
   puis termine le processus.
 - Test de compilation refusée, comme `FormsReflectionRejects` : une politique de tampons dont `responseBudget` est
