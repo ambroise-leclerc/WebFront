@@ -265,7 +265,8 @@ auto other = app.watch("generations", [&] -> const History& { return history; },
 ```
 
 `watch(nom, source [, exécuteur] [, écriture])` rend une poignée RAII, comme `UISubscription` : l'observateur existe
-tant qu'elle vit, et la poignée reste sûre après la destruction de l'application.
+tant qu'elle vit, et la poignée reste sûre après la destruction de l'application. Contrairement à `UISubscription`, sa
+destruction peut attendre une opération en cours (« Destruction de la poignée », ci-dessous).
 
 Un observateur ne lit jamais un objet que possède un autre thread sans synchronisation. Une **opération** de
 l'observateur (une page de `children`, le calcul d'une passe de `changes`, `value`, `write`) se fait entièrement dans
@@ -305,10 +306,31 @@ conteneur :
 Une page tardive d'une très grande liste chaînée ou d'une `std::map` peut donc coûter un parcours linéaire, sous le
 verrou de l'application ; la documentation le dit, et `PagedSource` en est le remède.
 
-**Destruction pendant une lecture.** La destruction de la poignée retire l'observateur de la table. Elle attend la fin
-d'une lecture déjà commencée sur un autre thread, et aucune lecture ne commence ensuite. Détruite sur le thread qui
-exécute justement la lecture (depuis la source ou le visiteur), elle n'attend pas : la lecture en cours se termine et
-son résultat est abandonné. Un appel qui vise un observateur retiré échoue avec `webfront.inspector.unknown`.
+**Destruction de la poignée.** Une source capture en général des références à des objets de l'application (l'objet
+observé, son mutex). Détruire la poignée doit garantir qu'aucune opération ne les touche ensuite ; deux contrats
+existent, selon ce que la source capture.
+
+- **Source à références (par défaut) : la destruction attend.** Elle retire l'observateur de la table, aucune opération
+  ne commence ensuite, et elle attend la fin d'une opération déjà commencée sur un autre thread. C'est le contrat d'un
+  `std::jthread` qu'on joint, et il en a la règle : **la poignée se détruit hors de tout verrou que la source prend**,
+  et hors de l'exécuteur de l'observateur quand l'opération en cours y attend. Sinon l'opération attend le verrou que
+  tient le thread qui attend l'opération : c'est un interblocage, et WebFront ne peut pas le lever, faute de connaître
+  les verrous de l'application. L'exemple et la documentation détruisent la poignée avant de prendre le verrou, ou
+  par un membre déclaré après le mutex (détruit avant lui, hors section critique).
+- **Source propriétaire : la destruction n'attend pas.** `watch(nom, propriétaire, source [, exécuteur])` reçoit un
+  `std::shared_ptr` vers l'état que la source utilise (l'objet et son mutex, typiquement), et la source ne capture rien
+  d'autre par référence. Chaque opération garde une copie du `shared_ptr` le temps de son exécution. La destruction de
+  la poignée retire l'observateur et rend la main **sans attendre** : une opération en cours se termine sur un état qui
+  vit encore, et son résultat est abandonné. Détruire la poignée sous le verrou de la source est alors sans danger.
+  C'est la forme à choisir quand l'application ne peut pas garantir l'ordre de destruction.
+
+Dans les deux contrats, une destruction sur le thread qui exécute l'opération (depuis la source ou le visiteur)
+n'attend pas : l'opération se termine et son résultat est abandonné. Un appel qui vise un observateur retiré échoue avec
+`webfront.inspector.unknown`.
+
+Comme l'interblocage du premier contrat est silencieux, une destruction qui attend plus de cinq secondes écrit un
+diagnostic (ADR-011) qui nomme l'observateur et le fichier et la ligne de son `watch` (section 7), puis continue
+d'attendre : le diagnostic désigne la cause, il ne change pas le contrat.
 
 Le nom d'un observateur est unique tant que sa poignée vit ; un second `watch` du même nom lève
 `std::invalid_argument`.
@@ -376,15 +398,15 @@ booléens, et aucun état de l'application.
 
 | Booléen | Vrai quand |
 | --- | --- |
-| `secondaryWindow` | le frontend peut ouvrir une fenêtre secondaire (`canShowSecondaryWindow()`), qui recevra la preuve |
+| `secondaryWindow` | la page hôte peut effectivement ouvrir la fenêtre : le frontend le permet (`canShowSecondaryWindow()`) **et** la connexion hôte est admise, puisque `openWindow` vérifie l'accès comme toute fonction réservée |
 | `host` | la connexion de la page hôte est admise (section 2) |
 | `newConnections` | une nouvelle connexion non prouvée serait admise : l'application a choisi `trustLoopbackClients` |
 
 La page se charge dans le premier conteneur qui convient :
 
-1. **Fenêtre native secondaire** si `secondaryWindow` (WebKitGTK, WKWebView, WebView2). La fonction réservée
-   `webfront.inspector.openWindow` appelle `openSecondaryWindow`, qui transmet la preuve de vue à la nouvelle
-   fenêtre : elle ouvre sa propre connexion, prouvée. Rouvrir l'inspecteur ramène sa fenêtre au premier plan.
+1. **Fenêtre native secondaire** si `secondaryWindow`, donc seulement depuis une page hôte admise (WebKitGTK,
+   WKWebView, WebView2). La fonction réservée `webfront.inspector.openWindow` appelle `openSecondaryWindow`, qui
+   transmet la preuve de vue à la nouvelle fenêtre : elle ouvre sa propre connexion, prouvée. Rouvrir l'inspecteur ramène sa fenêtre au premier plan.
 2. **Onglet du navigateur système** (`window.open` vers la même origine) seulement si `newConnections` est vrai et que
    la page hôte tourne dans le navigateur système. L'onglet ouvre sa propre connexion, non prouvée, que seule cette
    confiance admet. Sous CEF ou dans une vue intégrée, `window.open` réussirait mais ouvrirait un cadre sans preuve :
@@ -438,6 +460,8 @@ demanderait un grant et une décision propres.
 | iframe ouvrant sa propre connexion | Elle ne serait pas prouvée, puisque les adaptateurs n'injectent la preuve que dans le cadre principal. |
 | Écriture désignée par le seul chemin | Après une insertion avant la cible, un indice ou un rang valide désigne le voisin : la saisie s'appliquerait au mauvais élément. |
 | Identifiant d'instantané implicite pour `value` | Deux lectures entrelacées aux mêmes décalages liraient silencieusement l'une dans l'autre. |
+| Destruction qui n'attend jamais, quelle que soit la source | Une opération en cours toucherait un objet ou un mutex déjà détruits ; la source propriétaire obtient ce comportement sans ce risque. |
+| Destruction qui abandonne l'attente après un délai | Laisserait l'opération continuer sur des références pendantes ; le délai ne fait qu'écrire un diagnostic. |
 | Modification libre de toute valeur | Changerait des invariants de l'application à son insu ; l'écriture reste un choix de l'application. |
 
 ## Conséquences
@@ -472,10 +496,13 @@ demanderait un grant et une décision propres.
   d'écriture à la taille exacte de `requestBudget` avec tous ses arguments au maximum, texte d'un octet de trop refusé
   par la page puis par C++, segment très long (nom de champ long, clé de `PagedSource` de plus de 128 octets), 64ᵉ
   niveau et chemin proche de 1 024 octets, opération entière sous le verrou du visiteur, `PagedSource`, chaque genre
-  de la section 4, exécuteur, poignée détruite pendant une lecture et depuis l'accès, écriture acceptée, refusée par
-  l'analyse, refusée par le mutateur et non permise) ; refus à une connexion non prouvée sans `trustLoopbackClients` ;
-  `containers` pour chaque frontend et chaque réglage de confiance ; absence des fonctions hors environnement et en
-  distribution.
+  de la section 4, exécuteur, poignée détruite pendant une lecture et depuis l'accès, destruction d'une source
+  propriétaire sous le verrou de la source pendant qu'une opération l'attend (sans interblocage, résultat abandonné,
+  état encore vivant), destruction d'une source à références hors du verrou pendant qu'une opération l'attend (attente
+  puis fin), diagnostic d'une destruction qui attend plus que le délai, `containers` d'une page non admise avec un
+  frontend capable (`secondaryWindow` faux, aucun conteneur), écriture acceptée, refusée par l'analyse, refusée par le
+  mutateur et non permise) ; refus à une connexion non prouvée sans `trustLoopbackClients` ; `containers` pour chaque
+  frontend et chaque réglage de confiance ; absence des fonctions hors environnement et en distribution.
 - Test de compilation refusée, comme `FormsReflectionRejects` : une politique de tampons dont `responseBudget` est
   plus petit que `minPageBytes`, ou dont `maxWriteTextBytes` est plus petit que 1 Kio, ne compile pas avec
   l'environnement développeur, y compris quand seul `maxMessageSize` est trop petit.
