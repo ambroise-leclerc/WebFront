@@ -66,8 +66,8 @@ pour une.
 
 ### 2. Accès : vues prouvées, autorisation explicite pour le reste
 
-Chaque fonction `webfront.inspector.*`, sauf `containers` (section 8), vérifie la connexion appelante avec le prédicat de l'ADR-020, règle 3
-(`isLocalClient`) : la connexion est associée à une vue de l'application, ou l'application a explicitement choisi
+Chaque fonction `webfront.inspector.*`, sauf `containers` (section 8), vérifie la connexion appelante avec le
+prédicat de l'ADR-020, règle 3 (`isLocalClient`) : la connexion est associée à une vue de l'application, ou l'application a explicitement choisi
 `trustLoopbackClients` et le pair est sur la boucle locale. Sinon l'appel est refusé avec le code d'erreur
 `webfront.inspector.denied` (codes d'erreur typés de l'ADR-003, version 1.18), avant toute lecture.
 
@@ -113,10 +113,17 @@ une page d'un seul nœud, avec son en-tête, dans `minPageBytes` (4 Kio). Un nœ
 ou 1 024 octets n'est pas refusé : il est envoyé sans enfants, avec le drapeau « profondeur atteinte », et l'inspecteur
 dit pourquoi il ne se déplie pas. Aucun nœud ne peut donc dépasser `maxNodeBytes`.
 
-Ces bornes s'imposent à la politique de tampons : l'enregistrement des fonctions `webfront.inspector.*` vérifie, par un
-`static_assert` sur les constantes de la politique, que `functionCallBufferSize` et `maxMessageSize` valent au moins
-`minPageBytes`. Une politique trop petite ne compile pas avec l'environnement développeur, au lieu d'échouer en cours
-d'inspection. La politique par défaut (32 Kio et 64 Mio) laisse une marge de seize pages minimales.
+**Budget d'une réponse.** Une réponse doit tenir à la fois dans le tampon d'encodage et dans la taille de message :
+toutes les bornes de cette décision se calculent sur `responseBudget = min(functionCallBufferSize, maxMessageSize)`, en
+comptant **tous** les octets encodés du message de retour (en-tête du message et identifiant de corrélation, tuple de
+la réponse, en-têtes de liste et de chaîne, nombres, booléens). Ces en-têtes ont une taille maximale fixe, connue à la
+compilation (`responseHeaderBytes`). L'enregistrement des fonctions `webfront.inspector.*` vérifie, par un
+`static_assert` sur les constantes de la politique, que `responseBudget` vaut au moins `minPageBytes`. Une politique
+trop petite ne compile pas avec l'environnement développeur, au lieu d'échouer en cours d'inspection. La politique par
+défaut (32 Kio et 64 Mio) donne un budget de 32 Kio, soit seize pages minimales.
+
+Une requête est bornée de même : le texte d'une écriture fait au plus `responseBudget - responseHeaderBytes` octets.
+L'inspecteur le vérifie avant d'envoyer, et C++ refuse un texte plus long (`webfront.inspector.tooLarge`).
 
 Une **page** est un tuple de premier niveau `(liste de nœuds, suivant, révision, resynchroniser)`, où `suivant` est la
 position ou le curseur de l'appel suivant (0 à la fin) et `resynchroniser` un booléen. L'ADR-003 permet une liste dans
@@ -126,23 +133,30 @@ appels sont :
 
 - `webfront.inspector.children(observateur, chemin, position, nombre)` : une page des enfants d'un nœud.
 - `webfront.inspector.changes(observateur, révision, curseur, nombre)` : une page des différences (ci-dessous).
-- `webfront.inspector.value(observateur, chemin, décalage)` : un fragment de la valeur complète d'un nœud tronqué
-  (ci-dessous) ;
+- `webfront.inspector.value(observateur, chemin, instantané, décalage)` : un fragment de la valeur complète d'un
+  nœud tronqué (ci-dessous) ;
 - `webfront.inspector.fold(observateur, chemin)` : retire de la mémoire un nœud replié et ses descendants.
 
-Le nombre vaut 200 par défaut et 1 000 au plus. C++ réduit chaque page pour qu'elle tienne dans le tampon de la
-politique (`functionCallBufferSize`) et rend le `suivant` qui reprend là où elle s'arrête : aucun appel ne lève
-`BufferOverflowException` ni ne dépasse `maxMessageSize`, quel que soit l'état observé. Les seuls échecs d'un appel valide sont les refus typés de cette décision
-(`webfront.inspector.*`).
+Le nombre vaut 200 par défaut et 1 000 au plus. C++ réduit chaque page pour qu'elle tienne dans `responseBudget` et
+rend le `suivant` qui reprend là où elle s'arrête : aucun appel ne lève `BufferOverflowException` ni ne dépasse
+`maxMessageSize`, quel que soit l'état observé. Les seuls échecs d'un appel valide sont les refus typés de cette
+décision (`webfront.inspector.*`).
 
-**Valeur complète.** Une valeur formatée peut dépasser `maxMessageSize` : `value` est donc paginé par octets. L'appel au
-décalage 0 formate la valeur en une seule opération (section 5) et la range comme instantané de la connexion ; il rend
-`(fragment, taille totale, décalage suivant, plafonnée)`. Les appels suivants lisent l'instantané, qui reste cohérent
-même si l'objet change entre deux fragments. Un fragment fait au plus `functionCallBufferSize` moins 64 octets et ne
-coupe jamais un caractère UTF-8. L'instantané est plafonné à 16 Mio : au-delà, la valeur est coupée et `plafonnée` est
-vrai, ce que l'inspecteur affiche. Une connexion a au plus un instantané, remplacé par le décalage 0 suivant et libéré
-à la déconnexion. Un décalage qui ne correspond pas à l'instantané courant est refusé (`webfront.inspector.stale`) ;
-l'inspecteur recommence au décalage 0.
+**Valeur complète.** Une valeur formatée peut dépasser `maxMessageSize` : `value` est donc paginé par octets, sur un
+instantané désigné par un identifiant.
+
+- L'appel avec l'instantané 0 (et le décalage 0) formate la valeur en une seule opération (section 5), la range comme
+  instantané de la connexion et lui donne un **identifiant** : un compteur de la connexion, jamais réutilisé tant
+  qu'elle vit. Il rend `(fragment, taille totale, décalage suivant, plafonnée, instantané)`.
+- Les appels suivants donnent cet identifiant et le décalage suivant reçu. C++ ne sert un fragment que si l'identifiant
+  est celui de l'instantané courant, et l'observateur, le chemin et le décalage ceux de cet instantané ; sinon il
+  refuse avec `webfront.inspector.stale`, et l'inspecteur recommence avec l'instantané 0. Une seconde lecture qui
+  remplace l'instantané fait donc échouer explicitement la suite de la première ; elle ne peut jamais lui servir un
+  fragment d'une autre valeur.
+- L'instantané reste cohérent même si l'objet change entre deux fragments. Un fragment fait au plus
+  `responseBudget - responseHeaderBytes` octets et ne coupe jamais un caractère UTF-8.
+- L'instantané est plafonné à 16 Mio : au-delà, la valeur est coupée et `plafonnée` est vrai, ce que l'inspecteur
+  affiche. Une connexion a au plus un instantané, libéré à la déconnexion.
 
 **Mémoire par connexion.** C++ garde, pour chaque connexion et chaque observateur, la valeur affichée des nœuds envoyés,
 comme le fait `forms::inspector`, et la révision de cette mémoire. Elle compte 10 000 nœuds au plus : au-delà,
@@ -180,9 +194,11 @@ L'inspecteur interroge à une période choisie, 250 ms par défaut, et peut se m
 l'initiative du navigateur (pull) : C++ n'envoie rien sans demande, et un inspecteur fermé ne coûte rien.
 
 Le chemin d'un élément de séquence est son indice. Celui d'un élément de tableau associatif est son rang dans
-l'itération, et son libellé est la clé formatée. Quand le conteneur change, un chemin peut désigner un autre élément ou
-plus aucun : C++ le revalide à chaque lecture et, quand il ne résout plus, signale le nœud comme retiré. L'identité d'un
-nœud au fil des modifications n'est pas garantie.
+l'itération, et son libellé est la clé formatée. Une `PagedSource` peut fournir une clé stable par élément
+(`key(position)`), qui remplace alors le rang dans le chemin. Quand le conteneur change, un chemin par indice ou par
+rang peut désigner un autre élément ou plus aucun : C++ le revalide à chaque lecture et, quand il ne résout plus,
+signale le nœud comme retiré. En lecture, l'identité d'un nœud au fil des modifications n'est pas garantie ; une
+écriture, elle, n'est appliquée que sous la précondition de la section 6.
 
 ### 4. Rendu des valeurs
 
@@ -247,17 +263,17 @@ conteneur :
 - les autres `sized_range` et les tableaux associatifs n'ont pas d'accès par rang : atteindre la position p parcourt
   les p éléments précédents. Une passe de `changes` regroupe les nœuds par parent et parcourt chaque parent déplié une
   seule fois, jusqu'au plus grand rang affiché ;
-- un type qui modèle `webfront::inspect::PagedSource` (`size()` et `visit(premier, nombre, fonction)`) fournit
-  lui-même l'accès par page : une page coûte ce que l'application en décide. C'est la voie d'un très grand conteneur
-  sans accès aléatoire, ou d'un contenu calculé à la demande.
+- un type qui modèle `webfront::inspect::PagedSource` (`size()`, `visit(premier, nombre, fonction)` et, en option,
+  `key(position)`, une clé stable) fournit lui-même l'accès par page : une page coûte ce que l'application en décide.
+  C'est la voie d'un très grand conteneur sans accès aléatoire, ou d'un contenu calculé à la demande.
 
 Une page tardive d'une très grande liste chaînée ou d'une `std::map` peut donc coûter un parcours linéaire, sous le
 verrou de l'application ; la documentation le dit, et `PagedSource` en est le remède.
 
 **Destruction pendant une lecture.** La destruction de la poignée retire l'observateur de la table. Elle attend la fin
 d'une lecture déjà commencée sur un autre thread, et aucune lecture ne commence ensuite. Détruite sur le thread qui
-exécute justement la lecture (depuis la source ou le visiteur), elle n'attend pas : la lecture en cours se termine et son résultat est
-abandonné. Un appel qui vise un observateur retiré échoue avec `webfront.inspector.unknown`.
+exécute justement la lecture (depuis la source ou le visiteur), elle n'attend pas : la lecture en cours se termine et
+son résultat est abandonné. Un appel qui vise un observateur retiré échoue avec `webfront.inspector.unknown`.
 
 Le nom d'un observateur est unique tant que sa poignée vit ; un second `watch` du même nom lève
 `std::invalid_argument`.
@@ -265,23 +281,42 @@ Le nom d'un observateur est unique tant que sa poignée vit ; un second `watch` 
 ### 6. Modification à la demande de l'application
 
 Un observateur est en lecture seule par défaut. L'application rend des valeurs modifiables en fournissant l'écriture :
-un visiteur non constant (`Visit<T>`), une référence non constante sur un exécuteur, ou un mutateur. L'écriture est une
-opération comme les autres (section 5) : avec un visiteur, l'affectation a lieu pendant l'appel du visiteur, sous le
-verrou de l'application ; avec un exécuteur, sur cet exécuteur. Une source qui rend une valeur ne peut écrire que par un
-mutateur, puisque sa copie n'est pas l'objet.
+un visiteur non constant (`Visit<T>`) ou une référence non constante sur un exécuteur, éventuellement avec un
+**mutateur** `mutate(T&, chemin, valeur)` qui applique le changement à sa façon et peut le refuser pour garder ses
+invariants. L'écriture est une opération comme les autres (section 5) : la vérification de la précondition, le mutateur
+et l'affectation s'exécutent dans **la même** fenêtre d'accès, pendant l'appel du visiteur, sous le verrou de
+l'application, ou sur l'exécuteur. Aucune autre modification ne peut donc s'intercaler entre la vérification et
+l'écriture. Une source qui rend une valeur ne peut pas écrire : sa copie n'est pas l'objet, et vérifier sur une copie
+puis écrire ailleurs laisserait cet intervalle ouvert.
 
-`webfront.inspector.write(observateur, chemin, texte)` :
+`webfront.inspector.write(observateur, révision, chemin, attendu, texte)`, où `révision` est celle que l'inspecteur
+détient et `attendu` la valeur formatée qu'il affichait pour ce nœud :
 
 1. vérifie l'accès (section 2) et que le nœud porte le drapeau « modifiable » ;
 2. analyse le texte selon le genre : booléens, entiers et flottants (dans les bornes du type, et dans celles d'un champ
    de `forms::Description` quand il en a), chaînes, énumérations décrites, `std::bitset<N>` (N chiffres binaires).
    Les autres genres ne sont pas modifiables ;
-3. construit la nouvelle valeur dans un temporaire, puis l'applique par le mutateur ou par affectation.
+3. dans la fenêtre d'accès, vérifie la **précondition** : la révision est celle de la mémoire, et le nœud cible ainsi
+   que **chacun de ses ancêtres** montrent encore, dans l'objet, exactement ce que la mémoire a enregistré pour eux
+   (libellé, valeur formatée, nombre d'enfants), la valeur de la cible étant aussi égale à `attendu`. Une insertion ou
+   une suppression avant la cible change le nombre d'enfants d'un ancêtre ; un remplacement change la valeur ou le
+   libellé de la cible. Dans ces cas, l'écriture est refusée (`webfront.inspector.stale`) et l'inspecteur relit le nœud
+   avant de la proposer à nouveau ;
+4. construit la nouvelle valeur dans un temporaire, puis l'applique par le mutateur ou par affectation, toujours dans
+   la même fenêtre.
 
-Une analyse refusée (`webfront.inspector.parse`), un nœud non modifiable (`webfront.inspector.readOnly`) ou un refus du
-mutateur (`webfront.inspector.refused`, avec le message de son exception) rejettent la Promise et laissent l'état
-inchangé ; l'inspecteur affiche la raison. Un mutateur fourni par l'application doit être tout ou rien ; c'est son
-contrat.
+La précondition compare ce que l'utilisateur a vu à ce que l'objet montre, comme un « compare-and-swap » sur l'état
+affiché. Elle ne peut pas distinguer deux éléments sans clé dont tout ce qui est affiché est identique : un déplacement
+qui laisse inchangés le libellé et la valeur de la cible, et le nombre d'enfants de chaque ancêtre, n'est pas détecté.
+L'écriture pose alors la valeur saisie sur un élément identique en tout point visible. Un nœud dont le libellé ou la
+valeur affichés sont tronqués n'est pas modifiable, puisque la comparaison porterait sur un préfixe. Une application
+qui a besoin d'une identité exacte fournit une `PagedSource` avec `key(position)` : le chemin porte alors la clé, et la
+précondition la vérifie.
+
+Une précondition fausse (`webfront.inspector.stale`), une analyse refusée (`webfront.inspector.parse`), un nœud non
+modifiable (`webfront.inspector.readOnly`), un texte trop long (`webfront.inspector.tooLarge`) ou un refus du mutateur
+(`webfront.inspector.refused`, avec le message de son exception) rejettent la Promise et laissent l'état inchangé ;
+l'inspecteur affiche la raison. Un mutateur fourni par l'application doit être tout ou rien ; c'est son contrat.
 
 ### 7. Fichier et ligne d'enregistrement
 
@@ -366,6 +401,8 @@ demanderait un grant et une décision propres.
 | Promettre une page en temps constant pour tout conteneur | Faux sans accès aléatoire ; `PagedSource` donne cette garantie quand l'application en a besoin. |
 | Inspecteur dans les ressources du cœur | Contraire à l'ADR-016 ; l'inspecteur n'a de sens que dans l'environnement développeur. |
 | iframe ouvrant sa propre connexion | Elle ne serait pas prouvée, puisque les adaptateurs n'injectent la preuve que dans le cadre principal. |
+| Écriture désignée par le seul chemin | Après une insertion avant la cible, un indice ou un rang valide désigne le voisin : la saisie s'appliquerait au mauvais élément. |
+| Identifiant d'instantané implicite pour `value` | Deux lectures entrelacées aux mêmes décalages liraient silencieusement l'une dans l'autre. |
 | Modification libre de toute valeur | Changerait des invariants de l'application à son insu ; l'écriture reste un choix de l'application. |
 
 ## Conséquences
@@ -392,14 +429,17 @@ demanderait un grant et une décision propres.
   différences par connexion, passe de `changes` sur plusieurs pages pendant que l'objet change, resynchronisation
   après une page perdue, limite de la mémoire, `children`, `fold` et `write` entrelacés avec une passe (la passe se
   termine et la page suivante demande la resynchronisation), appels concurrents traités dans l'ordre, nœud de
-  profondeur atteinte, `value` d'une chaîne plus grande que
-  `maxMessageSize` par fragments (coupure UTF-8, plafond, décalage périmé), opération entière sous le verrou du
-  visiteur, `PagedSource`, chaque genre de la section 4, exécuteur, poignée détruite pendant une lecture et depuis
-  l'accès, écriture acceptée, refusée par l'analyse, refusée par le mutateur et non permise) ; refus à une connexion
-  non prouvée sans `trustLoopbackClients` ; `containers` pour chaque frontend et chaque réglage de confiance ; absence
-  des fonctions hors environnement et en distribution.
-- Test de compilation refusée, comme `FormsReflectionRejects` : une politique de tampons plus petite que `minPageBytes`
-  ne compile pas avec l'environnement développeur.
+  profondeur atteinte, `value` d'une chaîne plus grande que `maxMessageSize` par fragments (coupure UTF-8, plafond,
+  décalage périmé, deux lectures entrelacées dont la suite de la première est refusée), réponses à la taille exacte de
+  `responseBudget` avec `maxMessageSize` inférieur au tampon, écriture refusée comme périmée après une insertion avant
+  la cible, un remplacement de la cible ou une révision ancienne, écriture par clé d'une `PagedSource`, opération
+  entière sous le verrou du visiteur, `PagedSource`, chaque genre de la section 4, exécuteur, poignée détruite pendant
+  une lecture et depuis l'accès, écriture acceptée, refusée par l'analyse, refusée par le mutateur et non permise) ;
+  refus à une connexion non prouvée sans `trustLoopbackClients` ; `containers` pour chaque frontend et chaque réglage
+  de confiance ; absence des fonctions hors environnement et en distribution.
+- Test de compilation refusée, comme `FormsReflectionRejects` : une politique de tampons dont `responseBudget` est
+  plus petit que `minPageBytes` ne compile pas avec l'environnement développeur, y compris quand seul `maxMessageSize`
+  est trop petit.
 - Tests d'encodage et de décodage des nœuds et des pages, et test Jasmine dans un vrai navigateur (règles de l'ADR-003),
   dont un dépliement pendant une passe de `changes` et la lecture par fragments d'une valeur plus grande que
   `maxMessageSize`.
