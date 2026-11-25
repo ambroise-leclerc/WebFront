@@ -469,6 +469,42 @@ describe('The developer page layout', () => {
                     expect(menu.isOpen).toBeFalse();
                 } finally { jasmine.clock().uninstall(); }
             });
+
+            it('stays open after a long press when the engine sends mouse events once the finger lifts', () => {
+                jasmine.clock().install();
+                try {
+                    const touch = type => button.dispatchEvent(new PointerEvent(type, {bubbles: true, pointerType: 'touch', clientX: 980, clientY: 100}));
+                    const mouseDown = () => button.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true}));
+                    touch('pointerdown');
+                    jasmine.clock().tick(longPress.delay);
+                    touch('pointerup');
+                    const first = items(0)[0];
+                    expect(document.activeElement).toBe(first);
+                    // The compatibility mousedown does not move the focus, and an engine that moves it anyway gives it back.
+                    expect(mouseDown()).toBeFalse();
+                    button.focus();
+                    button.dispatchEvent(new FocusEvent('focusin', {bubbles: true}));
+                    expect(menu.isOpen).toBeTrue();
+                    expect(document.activeElement).toBe(first);
+                    button.click();
+                    expect(menu.isOpen).toBeTrue();
+                    expect(activated).toEqual([]);
+                    // Once that touch is over, the tab is a tab again: a press closes the menu, a mousedown is the browser's.
+                    expect(mouseDown()).toBeTrue();
+                    menu.close({focus: false});
+                    // An engine that sends no click: the touch is over shortly after the finger lifts.
+                    touch('pointerdown');
+                    jasmine.clock().tick(longPress.delay);
+                    touch('pointerup');
+                    jasmine.clock().tick(longPress.settle);
+                    expect(mouseDown()).toBeTrue();
+                    button.focus();
+                    button.dispatchEvent(new FocusEvent('focusin', {bubbles: true}));
+                    expect(menu.isOpen).toBeFalse();
+                    button.click();
+                    expect(activated).toEqual(['click']);
+                } finally { jasmine.clock().uninstall(); }
+            });
         });
 
         // A workspace of this page on a project in memory, whose webfront.inspector.containers() answers `containers`.

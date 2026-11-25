@@ -85,8 +85,11 @@ export function placeMenu(anchor, size, viewport) {
 export const isMenuKey = event => event.key === 'ContextMenu'
     || (event.key === 'F10' && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey);
 
-/** How long a touch stays on the tab before the menu opens instead of the terminal, and how far it may move. */
-export const longPress = {delay: 550, distance: 10};
+/**
+ * How long a touch stays on the tab before the menu opens instead of the terminal, how far it may move, and how long
+ * after the finger lifts the events of that touch (compatibility mouse events, click) are still its own.
+ */
+export const longPress = {delay: 550, distance: 10, settle: 1000};
 
 // --- Menu ------------------------------------------------------------------------------------------------------
 
@@ -118,7 +121,16 @@ export function createTabMenu({button, entries, activate}) {
     const page = button.ownerDocument, view = page.defaultView;
     const number = ++menus;
     const levels = [];         // the open panels, the root first: {panel, list, items, entries, parent}
-    let longTimer = null, pressed = null, swallowClick = false, lastPointer = null;
+    let longTimer = null, pressed = null, lastPointer = null;
+    // After a long press opened the menu, until the click that ends the touch (or shortly after the finger lifts, for an
+    // engine that sends none): that click must not toggle the terminal, and the compatibility mouse events must not take
+    // the focus from the menu, which would close it.
+    let afterLongPress = false, longPressEnd = null;
+    const endLongPress = () => {
+        afterLongPress = false;
+        view.clearTimeout(longPressEnd);
+        longPressEnd = null;
+    };
 
     const reasonOf = entry => (entry.reason?.() ?? '') || '';
 
@@ -340,7 +352,10 @@ export function createTabMenu({button, entries, activate}) {
     }
     // The focus left the menu for another element of the page, or for the interface's frame (the window loses it).
     function focusMoved(event) {
-        if (levelOf(event.target) < 0) closeQuietly();
+        if (levelOf(event.target) >= 0) return;
+        // The tab took the focus from the touch that opened the menu: the menu keeps it.
+        if (afterLongPress && button.contains(event.target)) { levels[0]?.items[0]?.focus(); return; }
+        closeQuietly();
     }
     function windowLeft() { closeQuietly(); }
 
@@ -366,7 +381,7 @@ export function createTabMenu({button, entries, activate}) {
         pressed = null;
     };
     button.addEventListener('pointerdown', event => {
-        swallowClick = false;
+        endLongPress();
         if (event.pointerType === 'mouse' && event.button === 2 || event.pointerType !== 'mouse')
             lastPointer = {x: event.clientX, y: event.clientY, time: view.performance.now()};
         if (event.pointerType === 'mouse') return;
@@ -374,14 +389,20 @@ export function createTabMenu({button, entries, activate}) {
         pressed = {x: event.clientX, y: event.clientY};
         longTimer = view.setTimeout(() => {
             longTimer = null;
-            swallowClick = true;
+            afterLongPress = true;
             open({left: pressed.x, right: pressed.x, top: pressed.y, bottom: pressed.y});
         }, longPress.delay);
     });
     button.addEventListener('pointermove', event => {
         if (pressed && Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) > longPress.distance) cancelPress();
     });
-    button.addEventListener('pointerup', () => { view.clearTimeout(longTimer); longTimer = null; });
+    button.addEventListener('pointerup', () => {
+        view.clearTimeout(longTimer);
+        longTimer = null;
+        if (afterLongPress && longPressEnd === null) longPressEnd = view.setTimeout(endLongPress, longPress.settle);
+    });
+    // The mousedown that a touch engine sends after the finger lifts would move the focus to the tab: it is cancelled.
+    button.addEventListener('mousedown', event => { if (afterLongPress) event.preventDefault(); });
     button.addEventListener('pointercancel', cancelPress);
 
     return {
@@ -399,8 +420,8 @@ export function createTabMenu({button, entries, activate}) {
         get panels() { return levels.map(level => level.panel); },
         /** Whether the click that follows a long press must be ignored; reading it clears it. */
         consumeClick() {
-            const swallowed = swallowClick;
-            swallowClick = false;
+            const swallowed = afterLongPress;
+            endLongPress();
             return swallowed;
         },
     };
