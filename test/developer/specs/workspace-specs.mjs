@@ -3,6 +3,8 @@
 import {hasInterface, previewDirectory, State, initialState, nextState, clampRect, defaultRect, keyboardRect, minimumSize, step,
     isToggleKey, Status, tabStatus, statusText, defaultShortcut, shortcutText, readShortcut, parsePlace, formatPlace, readPlace, placeStore, placePath} from '../../../js/developer/environment/workspace.mjs';
 import {publish} from '../../../js/developer/environment/io.mjs';
+import {inspectorAccess, readInspectorAccess, accessReasons, containersFunction, placeMenu, createTabMenu, longPress, inspectorMenus,
+    menuStyles} from '../../../js/developer/environment/menu.mjs';
 import {memoryBridge} from '../memory-bridge.mjs';
 
 describe('The developer page layout', () => {
@@ -182,6 +184,226 @@ describe('The developer page layout', () => {
             const store = placeStore({cppFunction: () => async () => { throw new Error('read-only project'); }}, 60000);
             store.remember({x: 1, y: 2, width: 400, height: 300});
             await expectAsync(store.saved()).toBeResolved();
+        });
+    });
+
+    describe('tab menu', () => {
+        describe('access to the inspectors', () => {
+            it('is open to an admitted page, whatever the container', () => {
+                expect(inspectorAccess([true, true, false])).toEqual({containers: {secondaryWindow: true, host: true, newConnections: false}, reason: ''});
+                expect(inspectorAccess([false, true, true]).containers).toEqual({secondaryWindow: false, host: true, newConnections: true});
+            });
+
+            it('names no container to a page that is not admitted, and says how to admit one', () => {
+                for (const answer of [[false, false, false], [false, false, true]]) {
+                    const access = inspectorAccess(answer);
+                    expect(access.containers).toBeNull();
+                    expect(access.reason).toBe(accessReasons.noContainer);
+                }
+                expect(accessReasons.noContainer).toContain('trustLoopbackClients');
+                expect(accessReasons.noContainer).toContain('embedded frontend');
+            });
+
+            it('tells a library without inspectors from a bridge that fails', () => {
+                expect(inspectorAccess(null, Object.assign(new Error('not found'), {code: 'webfront.notFound'})).reason).toBe(accessReasons.tooOld);
+                expect(inspectorAccess(null, new Error('connection lost')).reason).toContain('connection lost');
+                expect(inspectorAccess(['yes', true, true]).containers).toBeNull();
+                expect(inspectorAccess([true, true]).containers).toBeNull();
+            });
+
+            it('asks the reserved function once', async () => {
+                const asked = [];
+                const bridge = answer => ({cppFunction: name => async () => { asked.push(name); return answer(); }});
+                expect((await readInspectorAccess(bridge(() => [false, true, false]))).containers?.host).toBeTrue();
+                expect((await readInspectorAccess(bridge(() => { throw Object.assign(new Error('no'), {code: 'webfront.notFound'}); }))).reason)
+                    .toBe(accessReasons.tooOld);
+                expect(asked).toEqual([containersFunction, containersFunction]);
+            });
+        });
+
+        describe('place', () => {
+            const viewport = {width: 1000, height: 600}, size = {width: 240, height: 200};
+            const tab = {left: 956, right: 1000, top: 64, bottom: 152};
+
+            it('opens on the left of the tab, level with its top', () => {
+                expect(placeMenu(tab, size, viewport)).toEqual({x: 716, y: 64, side: 'left'});
+            });
+
+            it('opens on the right of an anchor with no room on its left, and ends at its bottom near the window\'s', () => {
+                expect(placeMenu({left: 100, right: 300, top: 500, bottom: 540}, size, viewport)).toEqual({x: 300, y: 340, side: 'right'});
+            });
+
+            it('stays inside a window smaller than the menu', () => {
+                const placed = placeMenu({left: 200, right: 200, top: 90, bottom: 90}, size, {width: 280, height: 140});
+                expect(placed.x).toBe(0);
+                expect(placed.y).toBe(0);
+                expect(placeMenu(tab, {width: 2000, height: 50}, viewport)).toEqual({x: 0, y: 64, side: 'left'});
+            });
+        });
+
+        describe('on the page', () => {
+            let style, button, activated, menu, reason;
+            const key = (target, init) => target.dispatchEvent(new KeyboardEvent('keydown', {bubbles: true, cancelable: true, ...init}));
+            const items = (level = 0) => [...menu.panels[level].querySelectorAll('[role=menuitem]')];
+            const labels = level => items(level).map(item => item.firstChild.textContent);
+
+            beforeEach(() => {
+                style = document.createElement('style');
+                style.textContent = menuStyles;
+                document.head.append(style);
+                button = document.createElement('button');
+                button.textContent = 'tab';
+                button.style.cssText = 'position:fixed;right:0;top:64px;width:44px;height:88px';
+                document.body.append(button);
+                activated = [];
+                reason = 'Not here.';
+                menu = createTabMenu({button, activate: id => activated.push(id), entries: [
+                    {id: 'terminal', label: 'Terminal', hint: 'F9', keys: 'F9'},
+                    ...inspectorMenus.map(group => ({...group, children: group.children.map(panel => ({...panel, reason: () => reason}))})),
+                ]});
+                button.addEventListener('click', () => { if (!menu.consumeClick()) activated.push('click'); });
+            });
+            afterEach(() => {
+                menu.close({focus: false});
+                button.remove();
+                style.remove();
+            });
+
+            it('opens with a right click, on a menu that names its entries, and leaves the click to the terminal', () => {
+                expect(button.getAttribute('aria-haspopup')).toBe('menu');
+                expect(menu.isOpen).toBeFalse();
+                const event = new MouseEvent('contextmenu', {bubbles: true, cancelable: true, button: 2, clientX: 980, clientY: 100});
+                expect(button.dispatchEvent(event)).toBeFalse();  // the browser's own menu does not open
+                expect(menu.isOpen).toBeTrue();
+                expect(menu.panels[0].querySelector('[role=menu]')).not.toBeNull();
+                expect(labels(0)).toEqual(['Terminal', 'C++ state', 'TypeScript state']);
+                expect(items(0)[1].getAttribute('aria-haspopup')).toBe('menu');
+                expect(items(0)[0].getAttribute('aria-keyshortcuts')).toBe('F9');
+                expect(document.activeElement).toBe(items(0)[0]);
+                expect(items(0).every(item => item.getBoundingClientRect().height >= 44)).toBeTrue();
+                const box = menu.panels[0].getBoundingClientRect();
+                expect(box.right).toBeLessThanOrEqual(document.documentElement.clientWidth + 0.5);
+                expect(box.left).toBeGreaterThanOrEqual(0);
+                button.click();  // a click still toggles the terminal
+                expect(activated).toEqual(['click']);
+            });
+
+            it('opens with the Menu key and Shift+F10, and is driven with the arrows', () => {
+                button.focus();
+                key(button, {key: 'F10'});
+                expect(menu.isOpen).toBeFalse();
+                key(button, {key: 'F10', shiftKey: true});
+                expect(menu.isOpen).toBeTrue();
+                menu.close();
+                expect(document.activeElement).toBe(button);
+                key(button, {key: 'ContextMenu'});
+                expect(menu.isOpen).toBeTrue();
+                const [terminal, cpp, typescript] = items(0);
+                key(terminal, {key: 'ArrowDown'});
+                expect(document.activeElement).toBe(cpp);
+                key(cpp, {key: 'ArrowUp'});
+                key(terminal, {key: 'ArrowUp'});
+                expect(document.activeElement).toBe(typescript);  // it wraps
+                key(typescript, {key: 'Home'});
+                expect(document.activeElement).toBe(terminal);
+                key(terminal, {key: 'End'});
+                key(typescript, {key: 'ArrowUp'});
+                key(cpp, {key: 'ArrowRight'});
+                expect(cpp.getAttribute('aria-expanded')).toBe('true');
+                expect(labels(1)).toEqual(['Functions', 'Browsers and tasks', 'Watches']);
+                expect(menu.panels[1].querySelector('[role=menu]').getAttribute('aria-labelledby')).toBe(cpp.id);
+                expect(document.activeElement).toBe(items(1)[0]);
+                key(items(1)[0], {key: 'ArrowLeft'});
+                expect(menu.panels.length).toBe(1);
+                expect(document.activeElement).toBe(cpp);
+                key(cpp, {key: 'Enter'});
+                expect(menu.panels.length).toBe(2);
+                key(items(1)[0], {key: 'Escape'});
+                expect(menu.panels.length).toBe(1);
+                key(cpp, {key: 'Escape'});
+                expect(menu.isOpen).toBeFalse();
+                expect(document.activeElement).toBe(button);
+                expect(document.querySelector('.webfront-menu')).toBeNull();
+            });
+
+            it('greys an unavailable entry with its reason, and does nothing when it is chosen', () => {
+                button.dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true}));
+                key(items(0)[2], {key: 'ArrowRight'});
+                expect(labels(1)).toEqual(['Packages', 'Bridge']);
+                const note = menu.panels[1].querySelector('.webfront-menu-reason');
+                expect(note.textContent).toBe('Not here.');
+                for (const item of items(1)) {
+                    expect(item.getAttribute('aria-disabled')).toBe('true');
+                    expect(item.getAttribute('aria-describedby')).toBe(note.id);
+                    expect(item.title).toBe('Not here.');
+                }
+                key(items(1)[0], {key: 'Enter'});
+                items(1)[1].click();
+                expect(activated).toEqual([]);
+                expect(menu.isOpen).toBeTrue();
+                // The reasons are read each time a submenu opens.
+                reason = '';
+                key(items(1)[0], {key: 'ArrowLeft'});
+                key(items(0)[2], {key: 'ArrowRight'});
+                expect(items(1).some(item => item.hasAttribute('aria-disabled'))).toBeFalse();
+                expect(getComputedStyle(menu.panels[1].querySelector('.webfront-menu-reason')).display).toBe('none');
+                key(items(1)[1], {key: 'Enter'});
+                expect(activated).toEqual(['typescript.bridge']);
+                expect(menu.isOpen).toBeFalse();
+            });
+
+            it('activates the terminal, and closes on a press elsewhere without taking the focus', () => {
+                button.dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true}));
+                key(items(0)[0], {key: ' '});
+                expect(activated).toEqual(['terminal']);
+                expect(menu.isOpen).toBeFalse();
+                const field = document.createElement('input');
+                document.body.append(field);
+                try {
+                    button.dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true}));
+                    document.body.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true}));
+                    expect(menu.isOpen).toBeFalse();
+                    button.dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true}));
+                    field.focus();
+                    expect(menu.isOpen).toBeFalse();
+                    expect(document.activeElement).toBe(field);
+                } finally { field.remove(); }
+            });
+
+            it('takes no key while it is closed', () => {
+                const seen = [];
+                const listener = event => seen.push(event.key);
+                window.addEventListener('keydown', listener);
+                try {
+                    for (const name of ['Escape', 'ArrowDown', 'Enter']) key(document.body, {key: name});
+                    expect(seen).toEqual(['Escape', 'ArrowDown', 'Enter']);
+                } finally { window.removeEventListener('keydown', listener); }
+            });
+
+            it('opens with a long press on a touch screen, without toggling the terminal', () => {
+                jasmine.clock().install();
+                try {
+                    const touch = (type, x = 980, y = 100) => button.dispatchEvent(new PointerEvent(type, {bubbles: true, pointerType: 'touch', clientX: x, clientY: y}));
+                    touch('pointerdown');
+                    jasmine.clock().tick(longPress.delay - 1);
+                    expect(menu.isOpen).toBeFalse();
+                    jasmine.clock().tick(1);
+                    expect(menu.isOpen).toBeTrue();
+                    touch('pointerup');
+                    button.click();
+                    expect(activated).toEqual([]);
+                    menu.close();
+                    // A short tap is a click; a press that moves is not a long press.
+                    touch('pointerdown');
+                    touch('pointerup');
+                    button.click();
+                    expect(activated).toEqual(['click']);
+                    touch('pointerdown');
+                    touch('pointermove', 980, 100 + longPress.distance + 5);
+                    jasmine.clock().tick(longPress.delay * 2);
+                    expect(menu.isOpen).toBeFalse();
+                } finally { jasmine.clock().uninstall(); }
+            });
         });
     });
 });

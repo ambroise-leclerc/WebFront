@@ -425,8 +425,25 @@ environment's `mount`, not to the embedded bootstrap page):
   the application after changing it. The tab's tooltip names the shortcut in use.
 - While the terminal is collapsed, `wf dev` keeps reloading the full-window interface, and a failed build still shows its
   diagnostic over it.
+- **The tab's menu** opens with a right click, a long press on a touch screen, or the Menu key or Shift+F10 while the tab
+  has the focus; a click and the shortcut keep opening and collapsing the terminal. Its entries are **Terminal**,
+  **C++ state ▸** (Functions, Browsers and tasks, Watches) and **TypeScript state ▸** (Packages, Bridge), the inspectors
+  of the application's state ([ADR-027](adr/ADR-027-inspecteurs-de-l-etat-de-l-application.md)). The arrow keys move in
+  it and open a submenu (right arrow, Enter or Space; the left arrow closes it), Escape closes it and gives the focus back
+  to the tab, and a press elsewhere closes it. It opens beside the tab and stays inside the browser window, on the other
+  side or upwards when there is no room. Closed, it takes no key from the interface.
 
-The tab is a button (`aria-expanded`, 44 px target) and the window a non-modal dialog. The interface stays in the preview
+  An inspector entry that cannot open is greyed, and the menu says why. The page asks C++ once which containers would
+  reach the inspectors (`webfront.inspector.containers()`, section 8 of the ADR). A library without that function is too
+  old for the inspectors. The inspectors answer only a page that is admitted (`UI::isLocalClient`): the view of an
+  embedded frontend (WebKitGTK, WKWebView, WebView2, CEF), which proves itself at the handshake, or any loopback page when
+  the application sets `WebFrontConfig::trustLoopbackClients`. With the system browser, which never receives that proof,
+  the entries are therefore unavailable by default, and the menu says to choose an embedded frontend or to set
+  `trustLoopbackClients`, knowing that any local process can then read the state of the application. The inspector panels
+  themselves come with the next versions of the environment; until then an admitted page's entries say so.
+
+The tab is a button (`aria-expanded`, `aria-haspopup="menu"`, 44 px target), its menu a `menu` of `menuitem`s of 44 px,
+and the window a non-modal dialog. The interface stays in the preview
 frame, as before: the layout adds nothing to the application's documents except the shortcut's listener and the preview page's announcement, installed in the interface
 and in the same-origin frames it embeds (not in a frame of another origin, nor one inside a shadow tree: click the interface
 or the tab first). This is a layout, not a

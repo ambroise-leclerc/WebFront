@@ -15,6 +15,7 @@
 #include "WebFront.hpp"
 
 #include <optional>
+#include <tuple>
 
 namespace webfront {
 
@@ -70,6 +71,14 @@ inline constexpr int protocolVersion = 1;
 inline constexpr int apiVersion      = 1;
 
 inline constexpr std::string_view defaultRegistry{"https://registry.npmjs.org/"};
+
+/// What webfront.inspector.containers() answers (ADR-027, section 8): whether the calling page can open a secondary window
+/// that reaches the inspectors (the frontend opens one and the page is admitted, since opening it is checked like any
+/// inspector call), whether the page itself is admitted (UI::isLocalClient), and whether a new connection that is not
+/// proven would be (trustLoopbackClients). Three booleans and no state of the application: the call checks no access.
+inline constexpr std::tuple<bool, bool, bool> inspectorContainers(bool frontendOpensWindows, bool hostAdmitted, bool trustLoopback) noexcept {
+    return {frontendOpensWindows && hostAdmitted, hostAdmitted, trustLoopback};
+}
 
 /// The configuration the environment reads. "registry" always names a usable registry, for environments
 /// that predate "registryExplicit"; the latter tells whether the application chose it.
@@ -131,6 +140,14 @@ private:
         expose<&Store::abort, void, std::string>("webfront.developer.abort");
         expose<&Store::stateOfLines, std::string, std::string>("webfront.developer.state");
         expose<&Store::commitGroupLines, void, std::string, std::string, std::string>("webfront.developer.commitGroup");
+#if !(defined(WEBFRONT_DISTRIBUTION) && WEBFRONT_DISTRIBUTION)
+        // The inspectors exist only in the developer environment and never in a distribution build (ADR-027, section 1).
+        // The menu of the environment's tab asks it first: an environment that does not find it says the library is too old.
+        using Caller = typename Base::UI;
+        this->template cppFunction<std::tuple<bool, bool, bool>, Caller>("webfront.inspector.containers", [trust = this->trustsLoopbackClients()](Caller ui) {
+            return developer::inspectorContainers(Base::canShowSecondaryWindow(), ui.isLocalClient(), trust);
+        });
+#endif
     }
 
     /// Registers a store operation as a bridge callback; the store stays alive as long as the callback.

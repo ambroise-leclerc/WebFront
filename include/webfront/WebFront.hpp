@@ -1488,6 +1488,12 @@ protected:
             windowOptions.background = "#141821";
     }
 
+    /// Whether the application chose WebFrontConfig::trustLoopbackClients: a new connection that is not proven would then
+    /// be a local client when its peer is the loopback (the inspectors' containers, ADR-027 section 8).
+    [[nodiscard]] bool trustsLoopbackClients() const noexcept {
+        return trustLoopbackClients;
+    }
+
 private:
     // The constructor has already bound and listened; this thread services the queued I/O.
     // Launch server only once or restart if previous thread ended

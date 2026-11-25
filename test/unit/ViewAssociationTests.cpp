@@ -10,6 +10,8 @@
 // A connection proves it comes from the view of an embedded frontend by the secret of the launch (#453, ADR-020).
 
 #include "InjectableNetworking.hpp"
+#include "TemporaryDirectory.hpp"
+#include <webfront/DeveloperApp.hpp>
 #include <webfront/networking/TCPNetworkingStdnet.hpp>
 #include <webfront/system/DefaultFS.hpp>
 #include <webfront/testing/Bdd.hpp>
@@ -21,6 +23,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using namespace webfront::bdd;
@@ -60,15 +63,16 @@ struct ViewVerdict {
 };
 
 // Connects one browser whose handshake carries `proof` after its two header bytes, and reports what the UI says.
-ViewVerdict connect(ViewApp& app, const std::string& proof) {
+template <typename Application = ViewApp>
+ViewVerdict connect(Application& app, const std::string& proof, const std::string& request = viewUpgradeRequest) {
     ViewVerdict verdict;
     bool        started = false;
-    app.onUIStarted([&](ViewApp::UI ui) {
+    app.onUIStarted([&](typename Application::UI ui) {
         verdict.embedded = ui.isEmbeddedView();
         verdict.local    = ui.isLocalClient();
         started          = true;
     });
-    ViewSocket::receive(std::as_bytes(std::span(viewUpgradeRequest)));
+    ViewSocket::receive(std::as_bytes(std::span(request)));
     msg::Handshake         handshake;
     std::vector<std::byte> payload(handshake.header().begin(), handshake.header().end());
     for (const char c : proof)
@@ -274,3 +278,116 @@ const Scenario handshakeSecret{"The handshake's secret never reaches the diagnos
                                    });
                                    log::removeSinks(sink);
                                }};
+
+namespace {
+/// A frontend that opens no secondary window: the developer environment's own frontend in these tests.
+struct InspectorQuietFrontend {
+    static constexpr frontend::Action action{frontend::Action::keepServerRunning};
+    static void                       initialize() { }
+    static void                       open(std::string_view, std::string_view) { }
+};
+using InspectorApp = DeveloperAppWithNetwork<ViewOneBrowserNet, InspectorQuietFrontend>;
+
+/// The browser calls a function without argument; the answer is among the socket's writes.
+void callWithoutArgument(const std::string& name, msg::CallId callId) {
+    msg::FunctionCall<> message;
+    message.setCallId(callId);
+    websocket::Frame<ViewOneBrowserNet> frame{std::span(reinterpret_cast<const std::byte*>(message.header().data()), message.header().size())};
+    message.encodeParameter(name, frame);
+    frame.freeze();
+    ViewSocket::receive(testing::clientFrame(testing::messagePayload(frame)));
+}
+
+/// The encoded answer of webfront.inspector.containers(): a tuple of three booleans.
+std::string containersAnswer(bool secondaryWindow, bool host, bool newConnections) {
+    const auto boolean = [](bool value) {
+        return static_cast<char>(value ? msg::CodedType::booleanTrue : msg::CodedType::booleanFalse);
+    };
+    return {static_cast<char>(msg::CodedType::tuple), char{3}, boolean(secondaryWindow), boolean(host), boolean(newConnections)};
+}
+
+/// The developer environment refuses a WebSocket without an Origin; the test's browser names one that the policy admits.
+WebFrontConfig inspectorConfig(bool trustLoopback) {
+    WebFrontConfig config{.port = "0", .trustLoopbackClients = trustLoopback};
+    config.contentPolicy.allowAnyBridgeOrigin = true;
+    return config;
+}
+const std::string inspectorUpgradeRequest = "GET / HTTP/1.1\r\nHost: localhost\r\nOrigin: http://localhost\r\nUpgrade: websocket\r\n"
+                                            "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+
+/// The application of a developer project, bootstrapped, with one browser that presents `proof` and asks for the containers.
+struct InspectorBrowser {
+    explicit InspectorBrowser(bool trustLoopback) : app(project.path(), inspectorConfig(trustLoopback)) {
+        app.bootstrap("developer", {.environment = "https://example.test/env.tgz", .integrity = "sha512-abc"});
+    }
+    void connectAndAsk(const std::string& proof) {
+        connect(app, proof, inspectorUpgradeRequest);
+        callWithoutArgument("webfront.inspector.containers", 7);
+    }
+    webfront::test::TemporaryDirectory project;
+    InspectorApp                       app;
+};
+}  // namespace
+
+const Scenario inspectorContainersScenario{"The inspectors' containers follow the effective access of the calling page (ADR-027, section 8)",
+                                           {"view-association"},
+                                           [] {
+                                               given("the three answers computed from the frontend, the page and the trust", [&] {
+                                                   then("a frontend that opens windows offers one only to an admitted page", [&] {
+                                                       require(developer::inspectorContainers(true, true, false) == std::tuple{true, true, false});
+                                                       require(developer::inspectorContainers(true, false, false) == std::tuple{false, false, false});
+                                                       require(developer::inspectorContainers(true, false, true) == std::tuple{false, false, true});
+                                                   });
+                                                   then("a frontend that opens none offers no window, even to an admitted page", [&] {
+                                                       require(developer::inspectorContainers(false, true, true) == std::tuple{false, true, true});
+                                                       require(developer::inspectorContainers(false, false, false) == std::tuple{false, false, false});
+                                                   });
+                                               });
+                                               given("a developer application whose frontend opens no secondary window", [&] {
+                                                   freshNetwork();
+                                                   InspectorBrowser browser{false};
+                                                   then("the function is registered once the environment is bootstrapped", [&] {
+                                                       require(browser.app.hasCppFunction("webfront.inspector.containers"));
+                                                   });
+                                                   when("the view presents the secret of the launch", [&] {
+                                                       browser.connectAndAsk(testing::LaunchSecret<InspectorApp>::of(browser.app));
+                                                       then("the page is admitted, without a secondary window or new connections", [&] {
+                                                           require(ViewSocket::wrote(containersAnswer(false, true, false)));
+                                                       });
+                                                   });
+                                               });
+                                               given("a page that is not proven, such as the system browser's or a frame's", [&] {
+                                                   freshNetwork();
+                                                   ViewSocket::peerIsLoopback = true;
+                                                   InspectorBrowser browser{false};
+                                                   browser.connectAndAsk({});
+                                                   then("the call is answered, and no container is admitted", [&] {
+                                                       require(ViewSocket::wrote(containersAnswer(false, false, false)));
+                                                   });
+                                               });
+                                               given("trustLoopbackClients and a page that is not proven on the loopback", [&] {
+                                                   freshNetwork();
+                                                   ViewSocket::peerIsLoopback = true;
+                                                   InspectorBrowser browser{true};
+                                                   browser.connectAndAsk({});
+                                                   then("the page and the new connections are admitted", [&] {
+                                                       require(ViewSocket::wrote(containersAnswer(false, true, true)));
+                                                   });
+                                               });
+                                               given("trustLoopbackClients and a page that is not on the loopback", [&] {
+                                                   freshNetwork();
+                                                   InspectorBrowser browser{true};
+                                                   browser.connectAndAsk({});
+                                                   then("the page is not admitted, though new loopback connections would be", [&] {
+                                                       require(ViewSocket::wrote(containersAnswer(false, false, true)));
+                                                   });
+                                               });
+                                               given("a developer application that is not bootstrapped", [&] {
+                                                   freshNetwork();
+                                                   webfront::test::TemporaryDirectory project;
+                                                   InspectorApp                       app(project.path(), WebFrontConfig{.port = "0"});
+                                                   then("it has no inspector function", [&] {
+                                                       require(!app.hasCppFunction("webfront.inspector.containers"));
+                                                   });
+                                               });
+                                           }};
