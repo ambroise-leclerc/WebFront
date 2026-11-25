@@ -145,7 +145,8 @@ une page d'un seul nœud, avec son en-tête, dans `minPageBytes` (4 Kio).
 | champ d'un type décrit, désigné par son **rang** dans la description (le nom, qui peut être long, est le libellé) | `.` puis le décimal | 21 octets |
 | clé stable d'une `PagedSource` (section 5) | `k` puis la clé encodée en pourcent : chaque octet hors de `A-Z a-z 0-9 - . _ ~` devient `%HH` | 129 octets |
 
-L'encodage est réversible : C++ décode un chemin reçu segment par segment, et refuse un chemin mal formé
+La **racine** d'un observateur, l'objet que rend sa source, a le chemin vide (`""`), sans segment. L'encodage est
+réversible : C++ décode un chemin reçu segment par segment, et refuse un chemin mal formé
 (`webfront.inspector.unknown`). Une clé dont l'encodage dépasserait 128 octets n'est pas tronquée, ce qui la rendrait
 ambiguë : son élément est désigné par sa position, comme sans clé, et n'est pas modifiable.
 
@@ -291,7 +292,7 @@ l'objet n'ont changé**, et **un appel qui a changé la mémoire se résout touj
 Un appel qui modifie la mémoire s'exécute donc en deux phases :
 
 1. **validation, sans effet.** Tout ce qui peut échouer sans lire l'objet est vérifié d'abord : accès, observateur
-   connu, chemin bien formé et présent dans la mémoire, révision (contrat ci-dessus), drapeaux du nœud (modifiable,
+   connu, chemin bien formé et présent dans la mémoire (sauf la racine, ci-dessous), révision (contrat ci-dessus), drapeaux du nœud (modifiable,
    profondeur atteinte), taille et analyse du texte d'une écriture (le genre et les bornes viennent du type), place
    dans la mémoire, calculée sur la mémoire telle qu'elle serait après une interruption, puisque l'ensemble rangé la
    donne. La source est ensuite appelée ; si elle échoue avant d'entrer dans le visiteur (exception, visiteur non
@@ -333,7 +334,7 @@ resynchronisation : la promesse qu'une passe interrompue n'en demande pas tient 
 **Resynchronisation.** Une réponse avec `resynchroniser` vrai a déjà **vidé** la mémoire de cet observateur pour cette
 connexion, et libéré la passe et son ensemble rangé ; elle porte la révision de la mémoire vide. L'inspecteur jette
 alors tout l'arbre affiché de l'observateur, en ne gardant que la liste des chemins qu'il avait dépliés, puis relit
-depuis la racine par `children`, et ne redéplie que les chemins qui figurent encore dans les pages reçues. Un nœud
+depuis la racine par `children` avec la révision rendue (la racine est toujours dépliable, section 3), et ne redéplie que les chemins qui figurent encore dans les pages reçues. Un nœud
 supprimé dont la suppression n'était annoncée que dans une page perdue n'est renvoyé par aucun `children` : il n'est
 donc ni affiché ni gardé en mémoire, et n'occupe rien de la limite de 10 000 nœuds. L'inspecteur peut aussi demander
 cette remise à zéro lui-même avec `webfront.inspector.reset(observateur)`, qui rend la révision de la mémoire vide.
@@ -387,6 +388,16 @@ déjà reçu en sautant le dernier. Trois règles empêchent qu'un élément soi
 1. **Le parent voyage avec ses enfants.** Le premier nœud de chaque page de `children` est le parent lui-même, lu dans
    la même opération que la page : son nombre d'enfants et sa valeur sont ceux du moment de la page, et la mémoire les
    enregistre. La mémoire garde aussi, pour chaque parent déplié, le chemin de l'enfant à chaque position chargée.
+
+**La racine est toujours dépliable.** La racine (chemin vide) est le seul chemin qu'un appel peut viser sans qu'il soit
+dans la mémoire : elle existe tant que l'observateur existe. `children(observateur, "", révision, 0, nombre)` est donc
+admis avec une mémoire vide, que ce soit à la première ouverture d'un observateur découvert par `watches`, après
+`reset` ou après une resynchronisation, dont la révision rendue est celle que cet appel doit porter. Sa page commence,
+comme toute page, par le parent, ici la racine, qui entre alors dans la mémoire ; ses enfants suivent. Une racine sans
+enfants (un scalaire observé) donne une page qui ne contient qu'elle : c'est ainsi que l'inspecteur lit sa valeur, et
+qu'elle devient modifiable si l'observateur l'est. Les autres appels (`fold`, `value`, `write`) visent un nœud de la
+mémoire, racine comprise, et exigent donc d'abord ce premier `children`. `fold` de la racine retire tous ses
+descendants mais garde la racine.
 2. **Une liste se lit sur un état cohérent, ou recommence.** `suivant` reste la position suivante ; C++ garde dans la
    mémoire, pour la liste en cours de chaque parent, l'état du parent à la dernière page servie : son nombre d'enfants
    et, pour une `PagedSource` à clés, la clé du dernier enfant servi. Chaque page suivante vérifie, dans son opération, que le parent n'a pas changé de nombre
@@ -740,37 +751,42 @@ demanderait un grant et une décision propres.
   interruption (page servie, nœud `opaque` ou sans clé), source qui lève avant le visiteur (rejet sans effet) et après
   lui (diagnostic, réponse servie), mutateur dont le message fait 1 Mio et dont un caractère multioctet chevauche la
   borne de 256 octets (message tronqué sur une frontière de caractère, réponse dans `responseBudget` avec le budget
-  minimal, révision reçue), `watches` (page bornée, curseur par identifiant stable sous retraits et ajouts pendant la
-  liste, `nombre` à 0, `changé`), observateur retiré puis réenregistré sous le même nom (nouvel identifiant, appels à
-  l'ancien refusés), réponse terminale `unknown` pour une opération en cours d'une source propriétaire détruite, pour
-  une opération en file sur l'exécuteur et pour un appel ultérieur, aucune Promise en attente après le retrait,
-  écriture qui interrompt une passe avec la révision de la passe (acceptée si l'état affiché tient, périmée sinon, y
-  compris pour une cible d'une page non servie) et avec une révision plus ancienne (refus `stale` sans effet), liste
-  `[a, b, c, d]` lue en deux pages avec une insertion en tête entre elles (liste recommencée, `d` lu), même cas avec
-  une `PagedSource` à clés et une insertion qui garde le nombre d'enfants (clé du dernier enfant déplacée), passe qui
-  détecte un réordonnancement des clés d'un parent déplié (« enfants modifiés », positions relues), premier nœud d'une
-  page égal au parent, clé contenant `/`, `%` et des octets non ASCII (encodage réversible), chemin mal formé refusé,
-  clé dont l'encodage dépasse 128 octets (position, non modifiable), clé dupliquée dans une page (position, non
-  modifiable, diagnostic unique), clé que `find` résout vers un élément dont `key` diffère (nœud retiré), clé
-  dupliquée entre deux pages (précondition sur l'état affiché), suppression annoncée seulement dans une page perdue
-  (absente après la resynchronisation et hors de la mémoire), `reset`, requête d'écriture à la taille exacte de
-  `requestBudget` avec tous ses arguments au maximum, texte d'un octet de trop refusé par la page puis par C++,
-  segment très long (nom de champ long, désigné par son rang), 64ᵉ niveau et chemin proche de 1 024 octets, opération
-  entière sous le verrou du visiteur, `PagedSource`, chaque genre de la section 4, exécuteur, poignée détruite pendant
-  une lecture, destruction depuis l'opération d'une source propriétaire (état encore vivant à la reprise, même quand
-  la poignée en était le dernier autre propriétaire), formatage borné (chaîne de 100 Mio copiée jusqu'au plafond
-  seulement, formateur qui écrit plus de 1 Gio directement dans l'itérateur de sortie sans allocation de WebFront
-  au-delà de la borne, troncature détectée), passe de milliers de pages avec le budget minimal interrompue par
-  `children`, `fold`, `write` et un nouveau curseur 0 (entrées non servies restaurées, différences retrouvées à la
-  passe suivante, aucune resynchronisation), destruction d'une source propriétaire sous le verrou de la source pendant
-  qu'une opération l'attend (sans interblocage, réponse `unknown`, état encore vivant), destruction d'une source à
-  références hors du verrou pendant qu'une opération l'attend (attente puis fin), diagnostic d'une destruction qui
-  attend plus que le délai, `containers` d'une page non admise avec un frontend capable (`secondaryWindow` faux, aucun
-  conteneur), écriture acceptée, refusée par l'analyse, refusée par le mutateur et non permise) ; refus à une
-  connexion non prouvée sans `trustLoopbackClients` ; écritures `webfront.developer.*` refusées à une connexion non
-  prouvée quand le frontend transmet la preuve, acceptées depuis la vue, la fenêtre secondaire et le pilote
-  `webfront-wf`, inchangées avec le navigateur système ; lectures du projet inchangées ; `containers` pour chaque
-  frontend et chaque réglage de confiance ; absence des fonctions hors environnement et en distribution.
+  minimal, révision reçue), première ouverture d'un observateur découvert par `watches` (mémoire vide, `children` de
+  la racine admis, racine puis enfants dans la page et dans la mémoire, `value` ou `write` de la racine refusés avant
+  ce premier appel), reconstruction après `reset` et après une resynchronisation avec la révision rendue (racine
+  relue, chemins dépliés retrouvés), racine scalaire (page réduite à la racine, écriture de la racine), `fold` de la
+  racine (descendants retirés, racine gardée), `watches` (page bornée, curseur par identifiant stable sous retraits et
+  ajouts pendant la liste, `nombre` à 0, `changé`), observateur retiré puis réenregistré sous le même nom (nouvel
+  identifiant, appels à l'ancien refusés), réponse terminale `unknown` pour une opération en cours d'une source
+  propriétaire détruite, pour une opération en file sur l'exécuteur et pour un appel ultérieur, aucune Promise en
+  attente après le retrait, écriture qui interrompt une passe avec la révision de la passe (acceptée si l'état affiché
+  tient, périmée sinon, y compris pour une cible d'une page non servie) et avec une révision plus ancienne (refus
+  `stale` sans effet), liste `[a, b, c, d]` lue en deux pages avec une insertion en tête entre elles (liste
+  recommencée, `d` lu), même cas avec une `PagedSource` à clés et une insertion qui garde le nombre d'enfants (clé du
+  dernier enfant déplacée), passe qui détecte un réordonnancement des clés d'un parent déplié (« enfants modifiés »,
+  positions relues), premier nœud d'une page égal au parent, clé contenant `/`, `%` et des octets non ASCII (encodage
+  réversible), chemin mal formé refusé, clé dont l'encodage dépasse 128 octets (position, non modifiable), clé
+  dupliquée dans une page (position, non modifiable, diagnostic unique), clé que `find` résout vers un élément dont
+  `key` diffère (nœud retiré), clé dupliquée entre deux pages (précondition sur l'état affiché), suppression annoncée
+  seulement dans une page perdue (absente après la resynchronisation et hors de la mémoire), `reset`, requête
+  d'écriture à la taille exacte de `requestBudget` avec tous ses arguments au maximum, texte d'un octet de trop refusé
+  par la page puis par C++, segment très long (nom de champ long, désigné par son rang), 64ᵉ niveau et chemin proche
+  de 1 024 octets, opération entière sous le verrou du visiteur, `PagedSource`, chaque genre de la section 4,
+  exécuteur, poignée détruite pendant une lecture, destruction depuis l'opération d'une source propriétaire (état
+  encore vivant à la reprise, même quand la poignée en était le dernier autre propriétaire), formatage borné (chaîne
+  de 100 Mio copiée jusqu'au plafond seulement, formateur qui écrit plus de 1 Gio directement dans l'itérateur de
+  sortie sans allocation de WebFront au-delà de la borne, troncature détectée), passe de milliers de pages avec le
+  budget minimal interrompue par `children`, `fold`, `write` et un nouveau curseur 0 (entrées non servies restaurées,
+  différences retrouvées à la passe suivante, aucune resynchronisation), destruction d'une source propriétaire sous le
+  verrou de la source pendant qu'une opération l'attend (sans interblocage, réponse `unknown`, état encore vivant),
+  destruction d'une source à références hors du verrou pendant qu'une opération l'attend (attente puis fin),
+  diagnostic d'une destruction qui attend plus que le délai, `containers` d'une page non admise avec un frontend
+  capable (`secondaryWindow` faux, aucun conteneur), écriture acceptée, refusée par l'analyse, refusée par le mutateur
+  et non permise) ; refus à une connexion non prouvée sans `trustLoopbackClients` ; écritures `webfront.developer.*`
+  refusées à une connexion non prouvée quand le frontend transmet la preuve, acceptées depuis la vue, la fenêtre
+  secondaire et le pilote `webfront-wf`, inchangées avec le navigateur système ; lectures du projet inchangées ;
+  `containers` pour chaque frontend et chaque réglage de confiance ; absence des fonctions hors environnement et en
+  distribution.
 - Test de processus : destruction de la poignée d'une source à références depuis son visiteur, qui écrit le diagnostic
   puis termine le processus.
 - Test de compilation refusée, comme `FormsReflectionRejects` : une politique de tampons dont `responseBudget` est
