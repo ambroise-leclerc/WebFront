@@ -62,8 +62,11 @@ public:
         constexpr double infinity = std::numeric_limits<double>::infinity();
         if (other == infinity || other == -infinity || expected == infinity || expected == -infinity)
             return other == expected;
-        double difference = other < expected ? expected - other : other - expected;  // infinite when it overflows
-        return difference <= absoluteTolerance || difference <= relativeTolerance * (expected < 0 ? -expected : expected);
+        // The difference of two finite values overflows when it exceeds the largest double: halving every term then keeps
+        // it finite, and a relative tolerance that still overflows is truly larger than any such difference.
+        double scale      = other - expected == infinity || expected - other == infinity ? 0.5 : 1.0;
+        double difference = other < expected ? expected * scale - other * scale : other * scale - expected * scale;
+        return difference <= absoluteTolerance * scale || difference <= relativeTolerance * ((expected < 0 ? -expected : expected) * scale);
     }
 
 private:

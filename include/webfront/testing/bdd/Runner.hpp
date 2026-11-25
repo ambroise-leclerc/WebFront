@@ -140,17 +140,19 @@ inline Result runScenario(const Entry& entry) {
     return {&entry, outcome, now() - start, current.report};
 }
 
-/// Calls the run-ending listeners; returns false when one threw, which is reported.
-inline bool endRun() {
-    bool ended = true;
+/// Calls the run-ending listeners and returns the messages of the exceptions they threw, one per line, which are also
+/// printed; empty when every listener returned.
+inline std::string endRun() {
+    std::string errors;
     for (auto listener : listeners().runEnding)
         try {
             listener();
         } catch (...) {
-            ended = false;
-            print(concat("FAILED: a run-ending listener threw: ", exceptionMessage(std::current_exception()), '\n'));
+            auto message = exceptionMessage(std::current_exception());
+            errors      += concat(message, '\n');
+            print(concat("FAILED: a run-ending listener threw: ", message, '\n'));
         }
-    return ended;
+    return errors;
 }
 
 /// The length of the UTF-8 sequence that starts a text and that XML 1.0 accepts, or 0.
@@ -211,17 +213,21 @@ inline std::string xmlEscape(std::string_view text) {
     return escaped;
 }
 
-inline bool writeJUnit(std::string_view path, const std::vector<Result>& results, double total) {
-    std::size_t failed = 0, skipped = 0;
+/// Writes the JUnit report. The exceptions of the run-ending listeners (endRun()), when there are any, are an error of
+/// one more test case, "Run ending", so that the tools that read the report see why the run failed.
+inline bool writeJUnit(std::string_view path, const std::vector<Result>& results, double total, std::string_view endErrors = {}) {
+    std::size_t failed = 0, skipped = 0, errors = endErrors.empty() ? 0 : 1;
     for (const auto& result : results) {
         failed  += result.outcome == Outcome::failed;
         skipped += result.outcome == Outcome::skipped;
     }
     auto xml = concat("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites>\n  <testsuite name=\"tests\" tests=\"",
-                      results.size(),
+                      results.size() + errors,
                       "\" failures=\"",
                       failed,
-                      "\" errors=\"0\" skipped=\"",
+                      "\" errors=\"",
+                      errors,
+                      "\" skipped=\"",
                       skipped,
                       "\" time=\"",
                       seconds(total),
@@ -235,6 +241,11 @@ inline bool writeJUnit(std::string_view path, const std::vector<Result>& results
         else
             xml += ">\n      <skipped/>\n    </testcase>\n";
     }
+    if (errors)
+        xml += concat("    <testcase classname=\"tests\" name=\"Run ending\" time=\"0.000\">\n"
+                      "      <error message=\"a run-ending listener threw\">",
+                      xmlEscape(endErrors),
+                      "</error>\n    </testcase>\n");
     xml += "  </testsuite>\n</testsuites>\n";
     std::string name{path};
     std::FILE*  file = nullptr;
@@ -396,8 +407,9 @@ inline int run(int argc, char** argv) {
     auto start = now();
     for (const auto* entry : selection)
         results.push_back(runScenario(*entry));
-    auto elapsed = now() - start;
-    bool ended   = endRun();
+    auto elapsed   = now() - start;
+    auto endErrors = endRun();
+    bool ended     = endErrors.empty();
 
     std::size_t failed = 0, skipped = 0;
     for (const auto& result : results) {
@@ -416,7 +428,7 @@ inline int run(int argc, char** argv) {
                  " failed, ",
                  skipped,
                  " skipped)\n"));
-    if (!options.junit.empty() && !writeJUnit(options.junit, results, elapsed)) {
+    if (!options.junit.empty() && !writeJUnit(options.junit, results, elapsed, endErrors)) {
         std::fprintf(stderr, "Cannot write %s\n", std::string{options.junit}.c_str());
         return 1;
     }

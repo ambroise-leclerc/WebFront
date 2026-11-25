@@ -326,6 +326,11 @@ const Scenario approxHolds{"approx holds", [] {
                                require(infinite != approx(-infinite));
                                require(largest == approx(largest));
                                require(largest != approx(-largest));
+                               // A difference of 2 x largest overflows, and so may the relative tolerance: compared halved.
+                               require(-largest != approx(largest).epsilon(1.1));
+                               require(-largest == approx(largest).epsilon(2.1));
+                               require(-largest == approx(largest).epsilon(5.0));
+                               require(-largest != approx(largest).margin(largest));
                                require(Approx::defaultEpsilon > 1.1e-5 && Approx::defaultEpsilon < 1.2e-5);
                                requireEqual(5.0 + 1e-6, approx(5.0));
                                requireThrows<std::invalid_argument>([] {
@@ -482,6 +487,21 @@ int main() {
     }
     throwAtEnd = true;
     expect("approx holds", 1, {"approx"});
+    // The JUnit report shows that error and its message, beside the scenario that passed.
+    {
+        std::string report = "bdd_self_test_report.xml";
+        expectExit({"--exact", "approx holds", "--junit", report}, 1);
+        auto xml = readFile(report);
+        for (std::string_view part : {"tests=\"2\" failures=\"0\" errors=\"1\"",
+                                      "<testcase classname=\"tests\" name=\"Scenario: approx holds\"",
+                                      "<testcase classname=\"tests\" name=\"Run ending\" time=\"0.000\">\n      <error "
+                                      "message=\"a run-ending listener threw\">cannot save the recording\n</error>"})
+            if (xml.find(part) == std::string::npos) {
+                ++failures;
+                std::cerr << "MISMATCH: the report of a failed run ending lacks \"" << part << "\"\n";
+            }
+        std::remove(report.c_str());
+    }
     throwAtEnd     = false;
     auto unchanged = runsEnded;
     expectExit({"[unknown]"}, 2);
