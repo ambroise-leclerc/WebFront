@@ -38,7 +38,8 @@ namespace webfront {
  * The application owns its spaces and decides when to destroy one: onLastUIClosed tells it when the last page closed,
  * and it may keep the space through a grace delay (a task of app.spawn awaiting app.resumeAfter). Destroying a space
  * closes its pages (the application's subscribeUIClosed handlers are told; the space's are not, being released),
- * unregisters its functions and routes, and lets the resolver decide again for its segment. Destroy it on the server
+ * unregisters its functions and routes, and lets the resolver decide again for its segment; destroyed by one of its handlers,
+ * it calls none of its handlers that would have followed. Destroy it on the server
  * thread, where its callbacks run, or once none of them can run: a callback in progress keeps what it captured but not
  * what it refers to. Destroy the spaces before their application; one that outlives it only releases what it holds.
  */

@@ -2017,8 +2017,10 @@ private:
                 if (space && space->alive) {
                     if (const auto handler = space->onStarted())
                         handler(ui);
-                    if (space->alive)
-                        space->started->notify(ui);
+                    // A handler may destroy the space: the space's handlers that follow it are then not called.
+                    space->started->notifyWhile(ui, [&space] {
+                        return space->alive.load();
+                    });
                 }
                 break;
             }
@@ -2054,8 +2056,10 @@ private:
                     domDocuments.erase(found);
                 }
                 const auto ui = uiOf(event.webLinkId);
-                if (space && space->alive)
-                    space->closed->notify(ui);
+                if (space)
+                    space->closed->notifyWhile(ui, [&space] {
+                        return space->alive.load();
+                    });
                 uiClosedSubscribers->notify(ui);
                 if (lastPage && space->alive) {
                     // The handler may destroy the space: it runs on a copy, and the state is kept by `space`.

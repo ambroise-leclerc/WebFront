@@ -673,17 +673,22 @@ inline std::optional<std::pair<std::string, std::string>> splitTarget(const std:
     return std::pair{collapseSegments(decoded), mark == std::string::npos ? std::string{} : uri.substr(mark + 1)};
 }
 
-/// A decoded path percent-encoded again, segment by segment: decoding it once gives the path back, whatever it holds.
-inline std::string encodePath(std::string_view path) {
-    std::string encoded;
-    for (std::size_t start = 0;;) {
-        const auto end = path.find('/', start);
-        encoded       += uri::encode(path.substr(start, end == std::string_view::npos ? std::string_view::npos : end - start));
-        if (end == std::string_view::npos)
-            return encoded;
-        encoded += '/';
-        start    = end + 1;
+/// The segments of a path as it came, each percent-decoded on its own, without the empty and "." ones (as collapseSegments
+/// drops them): "/s/a%2Fb/./c" gives "s", "a/b" and "c", where decoding the whole path first would give four segments.
+inline std::vector<std::string> decodedSegments(std::string_view raw) {
+    std::vector<std::string> segments;
+    for (std::size_t start = 0; start <= raw.size();) {
+#ifdef _WIN32
+        const auto end = std::min(raw.find_first_of("/\\", start), raw.size());  // a separator for the providers there
+#else
+        const auto end = std::min(raw.find('/', start), raw.size());
+#endif
+        auto decoded = uri::decode(raw.substr(start, end - start), false);
+        if (!decoded.empty() && decoded != ".")
+            segments.push_back(std::move(decoded));
+        start = end + 1;
     }
+    return segments;
 }
 
 /// Refuses what could split a response or contradict the framing the server owns.
@@ -1205,21 +1210,35 @@ private:
         }
         if (!resolver)
             return {};
-        const auto& [path, query] = *split;
-        const auto rest           = std::string_view(path).substr(prefix.size());
-        const auto slash          = rest.find('/');
-        const auto segment        = rest.substr(0, slash);
-        Mounted    mounted;
-        if (slash == std::string_view::npos) {
+        const auto& query = split->second;
+        Mounted     mounted;
+        const auto  notFound = [&mounted] {
+            mounted.reply = textReply(Response::notFound, "Not Found\n");
+            return mounted;
+        };
+        // The segment is cut in the path as it came, each segment decoded on its own: an encoded separator ("%2F") stays
+        // inside its segment, where it names no space, instead of becoming a boundary that would select another one.
+        const auto raw            = std::string_view(request.uri).substr(0, request.uri.find('?'));
+        const auto segments       = routing::decodedSegments(raw);
+        const auto prefixSegments = routing::decodedSegments(prefix);
+        const auto depth          = prefixSegments.size();
+        if (segments.size() <= depth || !std::equal(prefixSegments.begin(), prefixSegments.end(), segments.begin()))
+            return notFound();  // under the prefix once decoded, but not segment by segment
+        const auto& segment = segments[depth];
+        if (segment.find_first_of("/\\") != std::string::npos || segment == "..")
+            return notFound();
+        const bool trailingSlash = raw.ends_with('/');
+        if (segments.size() == depth + 1 && !trailingSlash) {
             // The relative URLs of a page resolve against its directory: "/s/abc" must become "/s/abc/".
             if (request.isUpgradeRequest("websocket"))
-                mounted.reply = textReply(Response::notFound, "Not Found\n");
-            else {
-                mounted.reply = textReply(Response::movedPermanently, "");
-                mounted.reply->headers.emplace_back("Location", routing::encodePath(prefix + std::string(segment) + "/") + (query.empty() ? "" : "?" + query));
-            }
+                return notFound();
+            mounted.reply = textReply(Response::movedPermanently, "");
+            mounted.reply->headers.emplace_back("Location", prefix + uri::encode(segment) + "/" + (query.empty() ? "" : "?" + query));
             return mounted;
         }
+        std::string rest = "/";
+        for (auto index = depth + 1; index < segments.size(); ++index)
+            rest += uri::encode(segments[index]) + (index + 1 < segments.size() || trailingSlash ? "/" : "");
         MountAnswer answer;
         try {
             answer = (*resolver)(segment);
@@ -1234,8 +1253,8 @@ private:
             mounted.reply = std::move(answer.refusal);
             return mounted;
         }
-        mounted.space  = prefix + std::string(segment) + "/";
-        mounted.uri    = routing::encodePath(rest.substr(slash)) + (query.empty() ? "" : "?" + query);
+        mounted.space  = prefix + segment + "/";
+        mounted.uri    = rest + (query.empty() ? "" : "?" + query);
         mounted.routes = std::move(answer.routes);
         return mounted;
     }

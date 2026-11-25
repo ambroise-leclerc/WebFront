@@ -552,3 +552,104 @@ const Scenario withoutSpaces{"An application without spaces behaves as before th
                                      require(page.receiveUntil("pong-from-application"));
                                  });
                              }};
+
+const Scenario encodedSeparator{"An encoded separator never selects a space other than the one its segment names", {"spaces"}, [] {
+                                    App                                                app{WebFrontConfig{.port = "0"}};
+                                    std::map<std::string, std::unique_ptr<App::Space>> spaces;
+                                    std::vector<http::RouteTable::Registration>        routes;
+                                    std::mutex                                         seenMutex;
+                                    std::vector<std::string>                           seen;
+                                    app.spaces("/s/", [&](std::string_view segment) -> std::optional<http::RouteReply> {
+                                        {
+                                            std::scoped_lock lock{seenMutex};
+                                            seen.emplace_back(segment);
+                                        }
+                                        auto space = std::make_unique<App::Space>(app, "/s/", segment);
+                                        routes.push_back(space->addRoute("/data/", [name = std::string(segment)](const http::RouteRequest& request) {
+                                            return http::textReply(http::Response::ok, name + "-data " + std::string(request.path));
+                                        }));
+                                        spaces.emplace(segment, std::move(space));
+                                        return std::nullopt;
+                                    });
+                                    Running running{app};
+                                    require(httpGet(app.port(), "/s/alpha/data/x").find("alpha-data /data/x") != std::string::npos);
+
+                                    then("a segment holding an encoded '/' is not found, and never reaches the resolver", [&] {
+                                        const auto answer = httpGet(app.port(), "/s/alpha%2Fdata/x");
+                                        require(answer.starts_with("HTTP/1.1 404"));
+                                        require(answer.find("alpha-data") == std::string::npos);
+                                        Page page{app.port(), "/s/alpha%2Fdata/"};
+                                        require(!page.upgraded);
+                                        std::scoped_lock lock{seenMutex};
+                                        require(seen == std::vector<std::string>{"alpha"});
+                                    });
+                                    then("the encoded prefix separator does not reach a space either", [&] {
+                                        require(httpGet(app.port(), "/s%2Falpha/data/x").starts_with("HTTP/1.1 404"));
+                                    });
+                                    then("other encoded characters of the segment and the rest are decoded as at the root", [&] {
+                                        require(httpGet(app.port(), "/s/%61lpha/data/x").find("alpha-data /data/x") != std::string::npos);
+                                        require(httpGet(app.port(), "/s/alpha/data/a%2Fb").find("alpha-data /data/a/b") != std::string::npos);
+                                    });
+                                }};
+
+const Scenario destroyedBy{"A space destroyed by one of its handlers calls none of the handlers that follow", {"spaces"}, [] {
+                               App                           app{WebFrontConfig{.port = "0"}};
+                               std::unique_ptr<App::Space>   space;
+                               std::atomic<int>              before{0}, after{0}, applicationClosed{0};
+                               std::optional<UISubscription> first, second;
+                               app.spaces("/s/", [](std::string_view) -> std::optional<http::RouteReply> {
+                                   return http::textReply(http::Response::notFound, "Unknown session");
+                               });
+                               auto closed = app.subscribeUIClosed([&](App::UI) {
+                                   ++applicationClosed;
+                               });
+                               space       = std::make_unique<App::Space>(app, "/s/", "alpha");
+
+                               when("the first of two started handlers destroys the space", [&] {
+                                   first.emplace(space->subscribeUIStarted([&](App::UI) {
+                                       ++before;
+                                       space.reset();
+                                   }));
+                                   second.emplace(space->subscribeUIStarted([&](App::UI) {
+                                       ++after;
+                                   }));
+                                   Running running{app};
+                                   Page    page{app.port(), "/s/alpha/"};
+                                   then("the second is not called, and the page is closed", [&] {
+                                       require(page.receiveUntilClosed());
+                                       require(before == 1);
+                                       require(after == 0);
+                                   });
+                               });
+                               when("the first of two closed handlers destroys the space", [&] {
+                                   std::atomic<int> started{0};
+                                   space->onUIStarted([&](App::UI) {
+                                       ++started;
+                                   });
+                                   first.emplace(space->subscribeUIClosed([&](App::UI) {
+                                       ++before;
+                                       space.reset();
+                                   }));
+                                   second.emplace(space->subscribeUIClosed([&](App::UI) {
+                                       ++after;
+                                   }));
+                                   std::atomic<int> notices{0};
+                                   space->onLastUIClosed([&] {
+                                       ++notices;
+                                   });
+                                   Running running{app};
+                                   auto    page = std::make_unique<Page>(app.port(), "/s/alpha/");
+                                   require(spaceWaitUntil([&] {
+                                       return started == 1;
+                                   }));
+                                   page.reset();
+                                   then("neither the second nor the last-page notice is called; the application is still told", [&] {
+                                       require(spaceWaitUntil([&] {
+                                           return applicationClosed == 1;
+                                       }));
+                                       require(before == 1);
+                                       require(after == 0);
+                                       require(notices == 0);
+                                   });
+                               });
+                           }};
