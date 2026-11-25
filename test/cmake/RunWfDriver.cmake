@@ -14,6 +14,18 @@
 if(PROFILE)
     file(REMOVE_RECURSE "${PROFILE}")
     set(ENV{WEBFRONT_TEST_CEF_PROFILE} "${PROFILE}/cef")
+    # The throwaway XDG roots are process-wide: every program the application starts inherits them. The real values
+    # (empty when unset) stay available for an application that gives them back to its children (docs/WEBKITGTK.md).
+    if(DEFINED ENV{XDG_DATA_HOME})
+        set(ENV{WEBFRONT_TEST_REAL_XDG_DATA_HOME} "$ENV{XDG_DATA_HOME}")
+    else()
+        set(ENV{WEBFRONT_TEST_REAL_XDG_DATA_HOME} "")
+    endif()
+    if(DEFINED ENV{XDG_CACHE_HOME})
+        set(ENV{WEBFRONT_TEST_REAL_XDG_CACHE_HOME} "$ENV{XDG_CACHE_HOME}")
+    else()
+        set(ENV{WEBFRONT_TEST_REAL_XDG_CACHE_HOME} "")
+    endif()
     set(ENV{XDG_DATA_HOME} "${PROFILE}/data")
     set(ENV{XDG_CACHE_HOME} "${PROFILE}/cache")
     # A fresh native profile also isolates WebView2 HTTP/module caches and lingering

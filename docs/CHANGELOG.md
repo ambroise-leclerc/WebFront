@@ -10,6 +10,10 @@ these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
+### Added
+
+- The test helpers export the real `XDG_DATA_HOME` and `XDG_CACHE_HOME` as `WEBFRONT_TEST_REAL_XDG_DATA_HOME` and `WEBFRONT_TEST_REAL_XDG_CACHE_HOME`, so an application under test can keep the throwaway WebKitGTK profile away from the programs it starts ([#664](https://github.com/ambroise-leclerc/WebFront/issues/664)).
+
 ## [1.2.0] - 2026-11-24
 
 WebFront 1.2 ships with developer environment 1.2.0. The application itself becomes the MCP server that a coding agent drives

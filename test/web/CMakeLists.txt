@@ -132,7 +132,8 @@ endif()
 # its own, emptied by the fixture WebProfileReset before the tests run.
 function(webfront_use_own_profile name group)
     set(directory "${CMAKE_CURRENT_BINARY_DIR}/webkitgtk-profiles/${group}")
-    set_property(TEST ${name} APPEND PROPERTY ENVIRONMENT "XDG_DATA_HOME=${directory}/data" "XDG_CACHE_HOME=${directory}/cache"
+    set_property(TEST ${name} APPEND PROPERTY ENVIRONMENT "WEBFRONT_TEST_REAL_XDG_DATA_HOME=$ENV{XDG_DATA_HOME}"
+        "WEBFRONT_TEST_REAL_XDG_CACHE_HOME=$ENV{XDG_CACHE_HOME}" "XDG_DATA_HOME=${directory}/data" "XDG_CACHE_HOME=${directory}/cache"
         "WEBFRONT_TEST_CEF_PROFILE=${directory}/cef")
     set_property(TEST ${name} APPEND PROPERTY FIXTURES_REQUIRED WebProfileReset)
 endfunction()

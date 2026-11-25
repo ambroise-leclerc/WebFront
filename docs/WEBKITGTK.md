@@ -100,7 +100,13 @@ profile. Instances within a process and concurrent processes launched from the
 same executable path share these persistent directories; there is no per-instance
 profile isolation or per-application profile option. To isolate separate processes,
 launch each with different absolute XDG roots. CTest explicitly appends private
-data/cache paths inside its build tree to every WebKitGTK test environment.
+data/cache paths inside its build tree to every WebKitGTK test environment. These
+variables are process-wide, so the programs the application under test starts (a
+terminal's shell, a client installing itself under `$XDG_DATA_HOME`) inherit the
+throwaway profile too. The test helpers export the original values as
+`WEBFRONT_TEST_REAL_XDG_DATA_HOME` and `WEBFRONT_TEST_REAL_XDG_CACHE_HOME` (empty when
+they were unset); an application can give them back to its children, restoring
+`XDG_DATA_HOME`/`XDG_CACHE_HOME` or removing them when empty.
 
 The shared content policy blocks unmanaged popups, controls DevTools and context
 menus, and checks main-document HTTP(S) responses before commit, including redirected
