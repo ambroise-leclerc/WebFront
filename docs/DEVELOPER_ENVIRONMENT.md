@@ -456,7 +456,9 @@ environment's `mount`, not to the embedded bootstrap page):
   | System browser with `trustLoopbackClients` | a tab of the system browser (`window.open`), with its own loopback connection; when the pop-up blocker refuses it, the panel stays in the floating window and a message offers to try again; the tab closes when the page that opened it is gone |
   | CEF, or an embedded view without secondary windows | none: Detach is greyed, with the reason in its tooltip (`window.open` there would open a frame without the proof) |
 
-  The project keeps the detached panels and the floating window's place in `.webfront/developer/inspector-window.json`.
+  Attach brings the panel back to the page that detached it only, even when other pages of the application are open on
+  the same origin. The project keeps the detached panels and the floating window's place in
+  `.webfront/developer/inspector-window.json`.
   The **Watches** panel lists the application's watches (`app.watch(name, source)`, declared after `bootstrap()`): their
   name, the kind of their root and where they were declared. It asks C++ for the revision of their table every 250 ms
   (Pause stops it), reads the list again when it changed, and adds or removes the watches that appeared or disappeared.

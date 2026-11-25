@@ -86,12 +86,23 @@ inline constexpr std::tuple<bool, bool, bool> inspectorContainers(bool frontendO
 /// The inspector panels a detached window can show (the entries of the tab's menu, js/developer/environment/menu.mjs).
 inline constexpr std::array<std::string_view, 5> inspectorPanels{"cpp.functions", "cpp.browsers", "cpp.watches", "typescript.packages", "typescript.bridge"};
 
-/// The page of the environment that shows an inspector panel, as openSecondaryWindow() names its window: one window per
-/// panel, so that opening a panel again brings its window to the front. Throws std::invalid_argument for an unknown panel.
-inline std::string inspectorPage(std::string_view panel) {
+/// The identifier of the page that holds the tab (the inspectors' host): 1 to 64 letters, digits, `-` or `_`. It names the
+/// host in the page of a detached panel, so that the panel is attached again to the page that detached it only.
+inline bool inspectorHostIdentifier(std::string_view host) noexcept {
+    return !host.empty() && host.size() <= 64 && std::ranges::all_of(host, [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+    });
+}
+
+/// The page of the environment that shows an inspector panel for a host page, as openSecondaryWindow() names its window:
+/// one window per panel and host, so that the same host opening a panel again brings its window to the front. Throws
+/// std::invalid_argument for an unknown panel or an invalid host identifier.
+inline std::string inspectorPage(std::string_view panel, std::string_view host) {
     if (std::ranges::find(inspectorPanels, panel) == inspectorPanels.end())
         throw std::invalid_argument("Unknown inspector panel");
-    return "webfront/developer/environment/inspector.html?panel=" + std::string(panel);
+    if (!inspectorHostIdentifier(host))
+        throw std::invalid_argument("Invalid inspector host identifier");
+    return "webfront/developer/environment/inspector.html?panel=" + std::string(panel) + "&host=" + std::string(host);
 }
 
 /// A window size asked by the page, as a whole number of pixels within what a screen can show.
@@ -194,13 +205,13 @@ private:
                 admit(ui);
                 return registry->page(revision, after, count, inspect::responseBudget<Policy>);
             });
-        // A secondary window of the panel, with the proof of the view (section 8); opening it again brings it to the front.
+        // A secondary window of the panel for the host page, with the proof of the view (section 8); opening it again brings it to the front.
         // The window is opened on the interface thread, where openSecondaryWindow() does not hold the server's thread.
-        this->template reservedCppFunction<ResultTask<void>, Caller, std::string, double, double>(
+        this->template reservedCppFunction<ResultTask<void>, Caller, std::string, std::string, double, double>(
             "webfront.inspector.openWindow",
-            [this](Caller ui, std::string panel, double width, double height) -> ResultTask<void> {
+            [this](Caller ui, std::string panel, std::string host, double width, double height) -> ResultTask<void> {
                 admit(ui);
-                auto page = developer::inspectorPage(panel);
+                auto page = developer::inspectorPage(panel, host);
                 if (!Base::canShowSecondaryWindow())
                     throw webfront::detail::makeBridgeError(inspect::code::unavailable, "This frontend cannot open a secondary window");
                 WindowOptions options{.title  = "WebFront inspector",
@@ -211,12 +222,12 @@ private:
                     this->openSecondaryWindow(page, std::move(options));
                 });
             });
-        // Closes the panel's secondary window, when it is attached again; false when none is open.
-        this->template reservedCppFunction<ResultTask<bool>, Caller, std::string>(
+        // Closes the panel's secondary window of that host, when it is attached again; false when none is open.
+        this->template reservedCppFunction<ResultTask<bool>, Caller, std::string, std::string>(
             "webfront.inspector.closeWindow",
-            [this](Caller ui, std::string panel) -> ResultTask<bool> {
+            [this](Caller ui, std::string panel, std::string host) -> ResultTask<bool> {
                 admit(ui);
-                auto page = developer::inspectorPage(panel);
+                auto page = developer::inspectorPage(panel, host);
                 if (!Base::canShowSecondaryWindow())
                     co_return false;
                 co_return co_await networking::ex::then(this->uiExecutor().schedule(), [&] {

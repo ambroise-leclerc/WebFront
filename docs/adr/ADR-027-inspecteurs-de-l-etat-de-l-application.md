@@ -4,7 +4,7 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.1 | 2026-11-25 | Proposée | Ambroise Leclerc | Hôte détachable (#680) : `webfront.inspector.embedded()` dit à la page hôte si elle est la vue d'un frontend intégré, ce qui décide de l'onglet du navigateur système ; `webfront.inspector.closeWindow(panneau)` ferme la fenêtre d'un panneau rattaché ; une fenêtre par panneau ; choix et place conservés dans `inspector-window.json`. | À renseigner après intégration. |
+| 1.1 | 2026-11-25 | Proposée | Ambroise Leclerc | Hôte détachable (#680) : `webfront.inspector.embedded()` dit à la page hôte si elle est la vue d'un frontend intégré, ce qui décide de l'onglet du navigateur système ; `webfront.inspector.closeWindow(panneau, hôte)` ferme la fenêtre d'un panneau rattaché ; une fenêtre par panneau et par page hôte, qui seule le rattache ; choix et place conservés dans `inspector-window.json`. | À renseigner après intégration. |
 | 1.0 | 2026-11-25 | Proposée | Ambroise Leclerc | Décision initiale (#678, épique #677) : inspecteurs réservés à l'environnement développeur, accès réservé aux vues prouvées sauf autorisation explicite, nœuds d'arbre sur les types existants du pont, lecture et différences paginées, opérations entières sous le verrou ou sur l'exécuteur de l'application, modification à la demande de l'application, page unique `inspector.html` dans un conteneur choisi sur l'accès effectif. | À renseigner après intégration. |
 
 ## État et portée
@@ -673,12 +673,19 @@ La page se charge dans le premier conteneur qui convient :
 
 La page hôte ne sait pas d'elle-même si elle tourne dans le navigateur système : `containers()` décrit l'accès, pas la
 vue. Elle le demande à `webfront.inspector.embedded()`, qui vérifie l'accès comme les autres fonctions et rend
-`UI::isEmbeddedView()` de l'appelant ; un échec compte comme une vue intégrée, ce qui n'essaie jamais d'onglet. Chaque
-panneau détaché a sa propre fenêtre, nommée par la page `inspector.html?panel=<id>` : `openWindow(panneau, largeur,
-hauteur)` n'accepte que les panneaux du menu, et `webfront.inspector.closeWindow(panneau)` ferme celle d'un panneau
-rattaché de nouveau. Les deux s'exécutent sur le thread de l'interface, où `openSecondaryWindow` et
-`requestClose(page)` ne retiennent pas le thread du serveur. Une fenêtre détachée demande son rattachement à la page
-hôte par un `BroadcastChannel` de même origine, et ne se ferme qu'après sa réponse.
+`UI::isEmbeddedView()` de l'appelant ; un échec compte comme une vue intégrée, ce qui n'essaie jamais d'onglet.
+
+Chaque page hôte a un **identifiant** (1 à 64 lettres, chiffres, `-` ou `_`), gardé dans le stockage de session de son
+onglet. Un panneau détaché a sa propre fenêtre, nommée par la page `inspector.html?panel=<id>&host=<hôte>` :
+`openWindow(panneau, hôte, largeur, hauteur)` n'accepte que les panneaux du menu et un identifiant valide, et
+`webfront.inspector.closeWindow(panneau, hôte)` ferme celle d'un panneau rattaché de nouveau. Les deux s'exécutent sur
+le thread de l'interface, où `openSecondaryWindow` et `requestClose(page)` ne retiennent pas le thread du serveur. Une
+fenêtre détachée demande son rattachement par un `BroadcastChannel` de même origine, en nommant son hôte : seule la page
+qui l'a détachée le prend, les autres pages de l'application ouvertes sur la même origine l'ignorent, et la fenêtre ne
+se ferme qu'après cette réponse.
+
+La liste des observateurs se lit page après page sous la révision de la première ; une page qui répond `changé` fait
+recommencer la liste, pour qu'un observateur retiré entre deux pages ne reste pas affiché sous la nouvelle révision.
 
 La même règle désactive « Détacher » quand aucun conteneur détaché ne donnerait l'accès.
 

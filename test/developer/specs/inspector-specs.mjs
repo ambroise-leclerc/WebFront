@@ -2,8 +2,8 @@
 // project, the floating window, detaching and attaching, and the discovery of the watches. The page in a real window, tab
 // or frame is checked in test/web/developer-specs.mjs.
 import {detachedContainer, containerFor, hostReasons, parsePreferences, formatPreferences, readPreferences, preferencesPath,
-    createInspectorHost, defaultInspectorRect, panelTitle} from '../../../js/developer/environment/inspector-host.mjs';
-import {readDescriptor, readPage, listWatches, reconcile, createWatchDiscovery, renderWatches, pageBridge, attachAgain,
+    createInspectorHost, defaultInspectorRect, panelTitle, hostIdentifier, hostKey} from '../../../js/developer/environment/inspector-host.mjs';
+import {readDescriptor, readPage, listWatches, listingAttempts, reconcile, createWatchDiscovery, renderWatches, pageBridge, attachAgain,
     watchesFunction} from '../../../js/developer/environment/inspector.mjs';
 import {inspectorChannel, inspectorPanels} from '../../../js/developer/environment/menu.mjs';
 import {memoryBridge} from '../memory-bridge.mjs';
@@ -85,7 +85,7 @@ describe('The inspectors', () => {
     describe('host', () => {
         const hosts = [];
         // A host of this page on a project in memory, whose inspector functions answer as `answers` says.
-        async function testHost({containers, embedded = true, files = new Map(), openWindow = async () => {}, windowOpen = () => ({})} = {}) {
+        async function testHost({containers, embedded = true, files = new Map(), openWindow = async () => {}, windowOpen = () => ({}), hostId = 'host-a'} = {}) {
             const {bridge: projectBridge, storage} = memoryBridge(files);
             const calls = [];
             const bridge = {cppFunction: name => async (...args) => {
@@ -96,7 +96,7 @@ describe('The inspectors', () => {
             }};
             const opened = [];
             const host = await createInspectorHost({bridge, page: document, inspectorUrl: '/webfront/developer/environment/inspector.html',
-                access: Promise.resolve({containers, reason: ''}), windowOpen: (url, name) => { opened.push([url, name]); return windowOpen(url, name); }});
+                access: Promise.resolve({containers, reason: ''}), hostId, windowOpen: (url, name) => { opened.push([url, name]); return windowOpen(url, name); }});
             hosts.push(host);
             return {host, calls, opened, storage};
         }
@@ -151,8 +151,9 @@ describe('The inspectors', () => {
             await host.open('cpp.watches');
             expect(host.detachButton.getAttribute('aria-disabled')).toBe('false');
             expect(await host.detach('cpp.watches')).toBe('window');
-            const [, panel, width, height] = calls.find(([name]) => name === 'webfront.inspector.openWindow');
+            const [, panel, hostId, width, height] = calls.find(([name]) => name === 'webfront.inspector.openWindow');
             expect(panel).toBe('cpp.watches');
+            expect(hostId).toBe(host.id);
             expect(width).toBeGreaterThan(0);
             expect(height).toBeGreaterThan(0);
             expect(host.panel.hidden).toBeTrue();
@@ -180,6 +181,7 @@ describe('The inspectors', () => {
             const [url, name] = opened[0];
             expect(new URL(url).searchParams.get('panel')).toBe('cpp.watches');
             expect(new URL(url).searchParams.has('frame')).toBeFalse();
+            expect(new URL(url).searchParams.get('host')).toBe('host-a');
             expect(name).toBe('webfront-inspector-cpp-watches');
             expect(host.panel.hidden).toBeFalse();
             expect(host.notice.textContent).toContain(hostReasons.blocked);
@@ -212,13 +214,52 @@ describe('The inspectors', () => {
                 const answered = new Promise(resolve => inspector.addEventListener('message', ({data}) => {
                     if (data?.type === 'attached') resolve(data.id);
                 }));
-                inspector.postMessage({type: 'attach', panel: 'cpp.watches', id: 'request-1'});
+                inspector.postMessage({type: 'attach', panel: 'cpp.watches', host: 'host-a', id: 'request-1'});
                 expect(await answered).toBe('request-1');
                 expect(host.shownPanel).toBe('cpp.watches');
                 expect(host.panel.hidden).toBeFalse();
                 await host.saved();
                 expect([...parsePreferences(new TextDecoder().decode(storage.get(preferencesPath))).detached]).toEqual([]);
             } finally { inspector.close(); }
+        });
+
+        it('attaches a panel again only in the page that detached it', async () => {
+            const {host: mine} = await testHost({containers: admitted(true), hostId: 'host-a'});
+            const {host: other, storage: otherStorage} = await testHost({containers: admitted(true), hostId: 'host-b'});
+            const inspector = new BroadcastChannel(inspectorChannel);
+            try {
+                const answers = [];
+                inspector.addEventListener('message', ({data}) => { if (data?.type === 'attached') answers.push(data.id); });
+                inspector.postMessage({type: 'attach', panel: 'cpp.watches', host: 'host-a', id: 'request-a'});
+                await new Promise(resolve => setTimeout(resolve, 50));
+                expect(answers).toEqual(['request-a']);
+                expect(mine.shownPanel).toBe('cpp.watches');
+                expect(other.shownPanel).toBeNull();
+                expect(other.panel.hidden).toBeTrue();
+                // A request without a host, or for a page that is gone, is taken by nobody.
+                inspector.postMessage({type: 'attach', panel: 'cpp.functions', id: 'request-none'});
+                inspector.postMessage({type: 'attach', panel: 'cpp.functions', host: 'host-gone', id: 'request-gone'});
+                await new Promise(resolve => setTimeout(resolve, 50));
+                expect(answers).toEqual(['request-a']);
+                expect(mine.shownPanel).toBe('cpp.watches');
+                await other.saved();
+                expect(otherStorage.has(preferencesPath)).toBeFalse();
+            } finally { inspector.close(); }
+        });
+
+        it('names each tab\'s page by an identifier its tab keeps', () => {
+            const store = new Map();
+            const view = {crypto, sessionStorage: {getItem: key => store.get(key) ?? null, setItem: (key, value) => store.set(key, value)}};
+            const first = hostIdentifier(view);
+            expect(first).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
+            expect(hostIdentifier(view)).toBe(first);  // a reload of the same tab
+            expect(store.get(hostKey)).toBe(first);
+            const otherTab = {crypto, sessionStorage: {getItem: () => null, setItem: () => {}}};
+            expect(hostIdentifier(otherTab)).not.toBe(first);
+            const noStorage = {crypto, get sessionStorage() { throw new Error('denied'); }};
+            expect(hostIdentifier(noStorage)).toMatch(/^[0-9a-f]{24}$/);
+            store.set(hostKey, 'bad/value');
+            expect(hostIdentifier(view)).not.toBe('bad/value');
         });
 
         it('opens at a default place inside a small viewport', () => {
@@ -242,12 +283,15 @@ describe('The inspectors', () => {
             const view = {BroadcastChannel, setTimeout: (run, delay) => setTimeout(run, delay), clearTimeout: id => clearTimeout(id), opener: {}, close: () => closed.push(true)};
             const host = new BroadcastChannel(inspectorChannel);
             host.addEventListener('message', ({data}) => {
-                if (data?.type === 'attach') host.postMessage({type: 'attached', id: data.id});
+                if (data?.type === 'attach' && data.host === 'host-a') host.postMessage({type: 'attached', id: data.id});
             });
-            try { expect(await attachAgain(view, null, 'cpp.watches', status)).toBeTrue(); }
-            finally { host.close(); }
+            try {
+                expect(await attachAgain(view, null, 'cpp.watches', status, {host: 'host-b', wait: 50})).toBeFalse();  // another page
+                expect(closed).toEqual([]);
+                expect(await attachAgain(view, null, 'cpp.watches', status, {host: 'host-a'})).toBeTrue();
+            } finally { host.close(); }
             expect(closed).toEqual([true]);
-            expect(await attachAgain(view, null, 'cpp.watches', status, 50)).toBeFalse();
+            expect(await attachAgain(view, null, 'cpp.watches', status, {host: 'host-a', wait: 50})).toBeFalse();
             expect(status.textContent).toContain('did not answer');
             expect(closed.length).toBe(1);
         });
@@ -259,9 +303,12 @@ describe('The inspectors', () => {
             const view = {BroadcastChannel, setTimeout: (run, delay) => setTimeout(run, delay), clearTimeout: id => clearTimeout(id), opener: null, close: () => {}};
             const host = new BroadcastChannel(inspectorChannel);
             host.addEventListener('message', ({data}) => host.postMessage({type: 'attached', id: data.id}));
-            try { expect(await attachAgain(view, bridge, 'cpp.functions', status)).toBeTrue(); }
+            try { expect(await attachAgain(view, bridge, 'cpp.functions', status, {host: 'host-a'})).toBeTrue(); }
             finally { host.close(); }
-            expect(calls).toEqual([['webfront.inspector.closeWindow', 'cpp.functions']]);
+            expect(calls).toEqual([['webfront.inspector.closeWindow', 'cpp.functions', 'host-a']]);
+            // Without the identifier of its page, the window does not ask anybody.
+            expect(await attachAgain(view, bridge, 'cpp.functions', status)).toBeFalse();
+            expect(calls.length).toBe(1);
         });
     });
 
@@ -287,6 +334,37 @@ describe('The inspectors', () => {
             expect(watches.map(watch => watch.name)).toEqual(['a', 'b', 'c', 'd', 'e']);
             expect(revision).toBe(6);
             expect(registry.calls.map(([, after]) => after)).toEqual([0, 2, 4]);
+        });
+
+        it('are listed again when the registry changes between two pages, so that a removed watch is not kept', async () => {
+            const registry = memoryWatches(2);
+            const ids = ['a', 'b', 'c', 'd'].map(name => registry.add(name));
+            let removed = false;
+            const bridge = {cppFunction: () => async (...args) => {
+                const answer = registry.answer(...args);
+                // Between the first and the second page, a watch already read is removed.
+                if (!removed && args[1] === 0) { removed = true; registry.remove(ids[0]); }
+                return answer;
+            }};
+            const {watches, revision} = await listWatches(bridge, 0);
+            expect(watches.map(watch => watch.name)).toEqual(['b', 'c', 'd']);
+            expect(revision).toBe(6);
+            // The next poll with that revision sees no change, and the list is right.
+            expect(registry.answer(revision, 0, 0)[3]).toBeFalse();
+        });
+
+        it('give up the revision when the registry keeps changing, so that the next poll reads the list again', async () => {
+            const registry = memoryWatches(1);
+            ['a', 'b'].forEach(name => registry.add(name));
+            const bridge = {cppFunction: () => async (...args) => {
+                const answer = registry.answer(...args);
+                if (args[1] === 0) registry.add(`x${registry.calls.length}`);
+                return answer;
+            }};
+            const {watches, revision} = await listWatches(bridge, 0);
+            expect(revision).toBe(0);
+            expect(watches.length).toBeGreaterThan(0);
+            expect(registry.calls.filter(([, after]) => after === 0).length).toBeGreaterThanOrEqual(listingAttempts);
         });
 
         it('reconcile the watches shown with a new list', () => {

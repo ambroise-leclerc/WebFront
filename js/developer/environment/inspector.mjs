@@ -58,15 +58,39 @@ export function readPage(answer) {
     return {descriptors, next, revision, changed};
 }
 
-/** Every live watch, page after page from the start, with the revision of the registry that the last page gave. */
+/** How many times a listing starts again because the registry changed while it was read, before it gives up. */
+export const listingAttempts = 8;
+
+/**
+ * Every live watch, page after page from the start, with the revision of the registry they describe. The pages give the
+ * revision of the first one: a page that answers "changed" means that a watch was registered or removed while the list was
+ * read, so the pages already read may name a removed watch, and the listing starts again. After `listingAttempts` such
+ * changes, the list is given with the revision 0, which the next poll always finds changed.
+ */
 export async function listWatches(bridge, revision = 0) {
+    for (let attempt = 0; attempt < listingAttempts; ++attempt) {
+        const first = readPage(await bridge.cppFunction(watchesFunction)(revision, 0, 200));
+        const watches = [...first.descriptors];
+        let next = first.next, stable = true;
+        while (stable && next) {
+            const page = readPage(await bridge.cppFunction(watchesFunction)(first.revision, next, 200));
+            watches.push(...page.descriptors);
+            stable = !page.changed;
+            next = page.next;
+        }
+        if (stable) return {watches, revision: first.revision};
+        revision = 0;
+    }
+    const {watches} = await listWatchesOnce(bridge);
+    return {watches, revision: 0};
+}
+
+async function listWatchesOnce(bridge) {
     const watches = [];
-    let after = 0, latest = revision;
-    for (;;) {
-        const page = readPage(await bridge.cppFunction(watchesFunction)(revision, after, 200));
+    for (let after = 0;;) {
+        const page = readPage(await bridge.cppFunction(watchesFunction)(0, after, 200));
         watches.push(...page.descriptors);
-        latest = page.revision;
-        if (!page.next) return {watches, revision: latest};
+        if (!page.next) return {watches};
         after = page.next;
     }
 }
@@ -236,7 +260,7 @@ export async function main(view = window) {
         attach.textContent = 'Attach';
         attach.title = 'Show this panel in the floating window of the main page';
         header.append(attach);
-        attach.addEventListener('click', () => attachAgain(view, bridge, id, status));
+        attach.addEventListener('click', () => attachAgain(view, bridge, id, status, {host: params.get('host')}));
         // A tab that the main page opened closes with it, as a secondary window closes with the main window (#616).
         if (view.opener) {
             const opener = view.opener;
@@ -287,12 +311,13 @@ export async function main(view = window) {
 }
 
 /**
- * Asks the main page to show the panel again, and closes this window once it answered: a native window through C++, a tab
- * by itself. Without an answer the window stays, and says why.
+ * Asks the page that detached the panel (`host`, the identifier its address carries) to show it again, and closes this
+ * window once that page answered: a native window through C++, a tab by itself. Another page of the same origin does not
+ * answer. Without an answer the window stays, and says why.
  */
-export async function attachAgain(view, bridge, id, status, wait = 1000) {
-    if (typeof view.BroadcastChannel !== 'function') {
-        status.textContent = 'This browser cannot reach the main page from here: close this window and open the panel from the menu.';
+export async function attachAgain(view, bridge, id, status, {host = null, wait = 1000} = {}) {
+    if (typeof view.BroadcastChannel !== 'function' || !host) {
+        status.textContent = 'This window cannot reach the page that opened it: close it and open the panel from the menu.';
         return false;
     }
     const channel = new view.BroadcastChannel(channelName);
@@ -304,7 +329,7 @@ export async function attachAgain(view, bridge, id, status, wait = 1000) {
             view.clearTimeout(timer);
             resolve(true);
         });
-        channel.postMessage({type: 'attach', panel: id, id: request});
+        channel.postMessage({type: 'attach', panel: id, host, id: request});
     });
     channel.close();
     if (!answered) {
@@ -312,6 +337,6 @@ export async function attachAgain(view, bridge, id, status, wait = 1000) {
         return false;
     }
     if (view.opener) view.close();
-    else await bridge.cppFunction('webfront.inspector.closeWindow')(id).catch(() => view.close());
+    else await bridge.cppFunction('webfront.inspector.closeWindow')(id, host).catch(() => view.close());
     return true;
 }

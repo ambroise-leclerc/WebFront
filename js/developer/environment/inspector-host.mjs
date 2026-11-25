@@ -118,15 +118,37 @@ const styles = `
 .webfront-inspector-notice button{margin:0 0 0 auto;padding:4px 8px;border:1px solid #f4e3b5;border-radius:4px;background:none;color:inherit;font:inherit;cursor:pointer}
 .webfront-inspector-frame{flex:1 1 auto;min-height:0;width:100%;border:0;background:#141821}`;
 
+/** Where a page keeps its host identifier: the session storage of its tab, so that a reload keeps its detached windows. */
+export const hostKey = 'webfront-inspector-host';
+
+/**
+ * The identifier of this host page: the one its tab already has, else a new random one (1 to 64 letters, digits, `-` or
+ * `_`, which webfront.inspector.openWindow checks). Each tab has its own, so a detached panel is attached again only to
+ * the page that detached it, even when several pages of the application are open on the same origin.
+ */
+export function hostIdentifier(view) {
+    const valid = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value);
+    let stored = null;
+    try { stored = view.sessionStorage?.getItem(hostKey); }
+    catch { /* no storage: a new identifier for this load */ }
+    if (valid(stored)) return stored;
+    const bytes = view.crypto.getRandomValues(new Uint8Array(12));
+    const made = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+    try { view.sessionStorage?.setItem(hostKey, made); }
+    catch { /* kept for this load only */ }
+    return made;
+}
+
 /**
  * The inspectors' host for the page that holds the tab. `inspectorUrl` is the URL of inspector.html, `access` resolves to what
  * the menu read (menu.mjs, inspectorAccess), and `embedded` to whether this page is an embedded view (by default asked to
  * webfront.inspector.embedded(); an error counts as embedded, which never offers a tab). `open(panel)` shows a panel in its
  * container, `detach(panel)` and `attach(panel)` move it, and `reason(panel)` says why it cannot be detached ('' when it
- * can). `windowOpen` replaces window.open (tests).
+ * can). `windowOpen` replaces window.open (tests). `hostId` names this page in its detached windows (hostIdentifier()).
  */
-export async function createInspectorHost({bridge, page, inspectorUrl, access, embedded = null, windowOpen = null}) {
+export async function createInspectorHost({bridge, page, inspectorUrl, access, embedded = null, windowOpen = null, hostId = null}) {
     const view = page.defaultView, root = page.documentElement;
+    const self = hostId ?? hostIdentifier(view);
     const viewport = () => ({width: root.clientWidth, height: root.clientHeight});
     const [preferences, containers, isEmbedded] = await Promise.all([
         readPreferences(bridge),
@@ -139,6 +161,7 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
     const urlOf = (panel, extra = {}) => {
         const url = new URL(inspectorUrl, view.location.href);
         url.searchParams.set('panel', panel);
+        url.searchParams.set('host', self);
         for (const [key, value] of Object.entries(extra)) url.searchParams.set(key, value);
         return url.href;
     };
@@ -244,7 +267,7 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
         if (container === 'window') {
             const rect = shown();
             try {
-                await bridge.cppFunction('webfront.inspector.openWindow')(id, rect.width, rect.height);
+                await bridge.cppFunction('webfront.inspector.openWindow')(id, self, rect.width, rect.height);
                 return true;
             } catch (error) {
                 retryPanel = id;
@@ -262,6 +285,8 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
     const host = {
         get containers() { return containers; },
         get embedded() { return isEmbedded; },
+        /** The identifier that names this page in its detached windows. */
+        get id() { return self; },
         get shownPanel() { return shownPanel; },
         get frame() { return frame; },
         panel, bar, detachButton, closeButton, notice,
@@ -316,7 +341,8 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
     if (typeof view.BroadcastChannel === 'function') {
         const channel = new view.BroadcastChannel(inspectorChannel);
         channel.addEventListener('message', ({data}) => {
-            if (data?.type !== 'attach' || !panels.has(data.panel) || !containers?.host) return;
+            // Only the page that detached the panel takes it back: other pages of the same origin ignore the request.
+            if (data?.type !== 'attach' || data.host !== self || !panels.has(data.panel) || !containers?.host) return;
             host.attach(data.panel);
             channel.postMessage({type: 'attached', id: data.id});
         });

@@ -968,7 +968,7 @@ try {
                         await window.webfrontInspectorHost.saved();
                         const kept = JSON.parse(new TextDecoder().decode(await call('read', '.webfront/developer/inspector-window.json', 0)));
                         assert(kept.detached.includes('cpp.watches'), `The project must remember the detached panel: ${JSON.stringify(kept)}`);
-                        assert(await webFront.cppFunction('webfront.inspector.closeWindow')('cpp.watches') === true, 'The panel\'s window must close');
+                        assert(await webFront.cppFunction('webfront.inspector.closeWindow')('cpp.watches', window.webfrontInspectorHost.id) === true, 'The panel\'s window must close');
                         await until(async () => await webFront.cppFunction('test.views')() === views, 'The closed inspector window must disconnect');
                         window.webfrontInspectorHost.attach('cpp.watches');
                         await window.webfrontInspectorHost.saved();

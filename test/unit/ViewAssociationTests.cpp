@@ -473,7 +473,7 @@ const Scenario inspectorWindowAccess{
             freshNetwork();
             InspectorWindowFrontend::opened = 0;
             AdmittedBrowser<InspectorWindowApp> browser{false, false};
-            callWith("webfront.inspector.openWindow", 9, std::string{"cpp.watches"}, 720.0, 560.0);
+            callWith("webfront.inspector.openWindow", 9, std::string{"cpp.watches"}, std::string{"host-1"}, 720.0, 560.0);
             then("the call is refused as denied, and no window opens", [&] {
                 require(ViewSocket::wrote(inspect::code::denied));
                 requireEqual(InspectorWindowFrontend::opened, 0);
@@ -483,7 +483,7 @@ const Scenario inspectorWindowAccess{
             freshNetwork();
             InspectorWindowFrontend::opened = 0;
             AdmittedBrowser<InspectorWindowApp> browser{false, true};
-            callWith("webfront.inspector.openWindow", 9, std::string{"../../etc/passwd"}, 720.0, 560.0);
+            callWith("webfront.inspector.openWindow", 9, std::string{"../../etc/passwd"}, std::string{"host-1"}, 720.0, 560.0);
             then("the call is refused before any window", [&] {
                 require(ViewSocket::wrote("Unknown inspector panel"));
                 requireEqual(InspectorWindowFrontend::opened, 0);
@@ -492,17 +492,24 @@ const Scenario inspectorWindowAccess{
         given("the proven view of a frontend that opens no secondary window", [&] {
             freshNetwork();
             AdmittedBrowser<InspectorApp> browser{false, true};
-            callWith("webfront.inspector.openWindow", 9, std::string{"cpp.watches"}, 720.0, 560.0);
+            callWith("webfront.inspector.openWindow", 9, std::string{"cpp.watches"}, std::string{"host-1"}, 720.0, 560.0);
             then("the call is refused as unavailable", [&] {
                 require(ViewSocket::wrote(inspect::code::unavailable));
             });
         });
         given("the pages of a panel", [&] {
-            then("each panel has its own window, and only the panels of the menu have one", [&] {
-                requireEqual(developer::inspectorPage("cpp.watches"), std::string{"webfront/developer/environment/inspector.html?panel=cpp.watches"});
+            then("each panel of each host page has its own window, and only the panels of the menu have one", [&] {
+                requireEqual(developer::inspectorPage("cpp.watches", "a1_b-2"),
+                             std::string{"webfront/developer/environment/inspector.html?panel=cpp.watches&host=a1_b-2"});
                 checkThrows<std::invalid_argument>([] {
-                    static_cast<void>(developer::inspectorPage("cpp"));
+                    static_cast<void>(developer::inspectorPage("cpp", "host"));
                 });
+                // The host page names itself in the window's address: no other text reaches the page string.
+                for (const auto* host : {"", "a/b", "a&panel=x", "é", "x x"})
+                    checkThrows<std::invalid_argument>([host] {
+                        static_cast<void>(developer::inspectorPage("cpp.watches", host));
+                    });
+                require(developer::inspectorHostIdentifier(std::string(64, 'a')) && !developer::inspectorHostIdentifier(std::string(65, 'a')));
                 requireEqual(developer::inspectorWindowExtent(10.0, 720), 720);
                 requireEqual(developer::inspectorWindowExtent(800.5, 720), 800);
             });
