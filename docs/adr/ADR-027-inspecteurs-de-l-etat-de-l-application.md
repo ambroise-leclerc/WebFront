@@ -4,7 +4,7 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.0 | 2026-11-25 | Proposée | Ambroise Leclerc | Décision initiale (#678, épique #677) : inspecteurs réservés à l'environnement développeur, accès réservé aux vues prouvées sauf autorisation explicite, nœuds d'arbre sur les types existants du pont, lecture paginée et différentielle, threads des observateurs, modification à la demande de l'application, page unique `inspector.html` et ordre des conteneurs. | À renseigner après intégration. |
+| 1.0 | 2026-11-25 | Proposée | Ambroise Leclerc | Décision initiale (#678, épique #677) : inspecteurs réservés à l'environnement développeur, accès réservé aux vues prouvées sauf autorisation explicite, nœuds d'arbre sur les types existants du pont, lecture et différences paginées, opérations entières sous le verrou ou sur l'exécuteur de l'application, modification à la demande de l'application, page unique `inspector.html` dans un conteneur choisi sur l'accès effectif. | À renseigner après intégration. |
 
 ## État et portée
 
@@ -66,7 +66,7 @@ pour une.
 
 ### 2. Accès : vues prouvées, autorisation explicite pour le reste
 
-Chaque fonction `webfront.inspector.*` vérifie la connexion appelante avec le prédicat de l'ADR-020, règle 3
+Chaque fonction `webfront.inspector.*`, sauf `containers` (section 8), vérifie la connexion appelante avec le prédicat de l'ADR-020, règle 3
 (`isLocalClient`) : la connexion est associée à une vue de l'application, ou l'application a explicitement choisi
 `trustLoopbackClients` et le pair est sur la boucle locale. Sinon l'appel est refusé avec le code d'erreur
 `webfront.inspector.denied` (codes d'erreur typés de l'ADR-003, version 1.18), avant toute lecture.
@@ -107,21 +107,42 @@ Un **nœud** est un tuple de six champs, de même forme pour tous les nœuds d'u
 L'épique décrivait cinq champs ; le sixième porte ce que l'inspecteur doit savoir sans nouvel appel (le nœud est-il
 modifiable, sa valeur est-elle complète, a-t-il disparu).
 
-Une **page** est un tuple de premier niveau `(liste de nœuds, position suivante, révision)`. L'ADR-003 permet une liste
-dans un tuple de premier niveau, pas de liste imbriquée : l'arbre circule donc à plat, un niveau déplié par appel. Les
+Le libellé est tronqué comme la valeur, et un chemin a 64 segments au plus : un nœud a donc une taille bornée, et toute
+page d'au moins un nœud tient dans le tampon de la politique.
+
+Une **page** est un tuple de premier niveau `(liste de nœuds, suivant, révision, resynchroniser)`, où `suivant` est la
+position ou le curseur de l'appel suivant (0 à la fin) et `resynchroniser` un booléen. L'ADR-003 permet une liste dans
+un tuple de premier niveau, pas de liste imbriquée : l'arbre circule donc à plat, un niveau déplié par appel. **Toute**
+réponse qui porte des nœuds est une page : aucun appel ne rend une liste dont la longueur dépend de l'état observé. Les
 appels sont :
 
-- `webfront.inspector.children(observateur, chemin, position, nombre)` : une page des enfants d'un nœud. Le nombre
-  vaut 200 par défaut et 1 000 au plus. C++ réduit la page pour qu'elle tienne dans le tampon de la politique et rend
-  la position suivante, si bien qu'aucun appel ne lève `BufferOverflowException`.
-- `webfront.inspector.changes(observateur, révision)` : les nœuds déjà envoyés à **cette connexion** dont la valeur, le
-  nombre d'enfants ou les drapeaux ont changé depuis cette révision, et ceux qui ont disparu (drapeau « retiré »).
+- `webfront.inspector.children(observateur, chemin, position, nombre)` : une page des enfants d'un nœud.
+- `webfront.inspector.changes(observateur, révision, curseur, nombre)` : une page des différences (ci-dessous).
 - `webfront.inspector.value(observateur, chemin)` : la valeur complète d'un nœud tronqué, bornée par la taille de
   message.
 
-C++ garde, pour chaque connexion et chaque observateur, la valeur affichée des nœuds envoyés, comme le fait
-`forms::inspector`. Cet état est libéré à la déconnexion ou quand l'inspecteur replie un nœud. Un conteneur d'un million
-d'éléments ne se copie jamais en entier ; une lecture ne parcourt que la page demandée et les nœuds dépliés.
+Le nombre vaut 200 par défaut et 1 000 au plus. C++ réduit chaque page pour qu'elle tienne dans le tampon de la
+politique (`functionCallBufferSize`) et rend le `suivant` qui reprend là où elle s'arrête : aucun appel ne lève
+`BufferOverflowException` ni ne dépasse `maxMessageSize`, quel que soit l'état observé.
+
+**Mémoire par connexion.** C++ garde, pour chaque connexion et chaque observateur, la valeur affichée des nœuds envoyés,
+comme le fait `forms::inspector`, et la révision de cette mémoire. Elle compte 10 000 nœuds au plus : au-delà,
+`children` échoue avec `webfront.inspector.limit` et l'inspecteur propose de replier des nœuds. Elle est libérée à la
+déconnexion, et un nœud replié en sort avec ses descendants.
+
+**Différences paginées.** Une passe de `changes` commence au curseur 0, avec la révision R que l'inspecteur détient :
+
+1. si R est la révision de la mémoire, C++ compare la mémoire à l'état observé, en une seule lecture (section 5), et
+   range l'ensemble des différences : nœuds modifiés et nœuds retirés. La mémoire prend la nouvelle valeur, sous une
+   révision R′, et la première page de l'ensemble est rendue avec R′ ;
+2. l'inspecteur demande les pages suivantes avec (R′, curseur) jusqu'à un `suivant` nul. Elles sont lues dans
+   l'ensemble rangé, pas dans l'état courant : la passe est cohérente même si l'objet change entre deux pages. Après la
+   dernière, l'inspecteur détient R′ ;
+3. une révision ou un curseur qui ne correspondent pas à la passe en cours (page perdue, passe abandonnée, mémoire
+   libérée) donnent une page vide avec `resynchroniser` vrai. L'inspecteur relit alors les nœuds dépliés par
+   `children`, ce qui reconstruit la mémoire.
+
+L'ensemble rangé est borné par la mémoire (10 000 nœuds) et libéré au début de la passe suivante ou à la déconnexion.
 
 L'inspecteur interroge à une période choisie, 250 ms par défaut, et peut se mettre en pause. C'est une lecture à
 l'initiative du navigateur (pull) : C++ n'envoie rien sans demande, et un inspecteur fermé ne coûte rien.
@@ -151,30 +172,59 @@ terminal (ADR-023) : une chaîne de l'application n'est pas de confiance pour le
 ### 5. Observateurs et threads
 
 ```cpp
-auto watch = app.watch("grid", [&] { std::scoped_lock lock{mutex}; return grid; });   // accès sous le verrou
-auto other = app.watch("generations", accessor, app.uiExecutor());                    // lecture sur un exécuteur
+// Objet partagé : tout le travail de l'observateur se fait dans visit, sous le verrou de l'application.
+auto watch = app.watch("grid", [&](webfront::inspect::Visit<const Grid> visit) {
+    std::scoped_lock lock{mutex};
+    visit(grid);
+});
+// Objet confiné à un thread : l'accès rend une référence, et tout le travail se fait sur l'exécuteur de ce thread.
+auto other = app.watch("generations", [&] -> const History& { return history; }, app.uiExecutor());
 ```
 
-`watch(nom, accès [, exécuteur] [, écriture])` rend une poignée RAII, comme `UISubscription` : l'observateur existe
+`watch(nom, source [, exécuteur] [, écriture])` rend une poignée RAII, comme `UISubscription` : l'observateur existe
 tant qu'elle vit, et la poignée reste sûre après la destruction de l'application.
 
-Un observateur ne lit jamais un objet que possède un autre thread sans synchronisation. L'application choisit :
+Un observateur ne lit jamais un objet que possède un autre thread sans synchronisation. Une **opération** de
+l'observateur (une page de `children`, le calcul d'une passe de `changes`, `value`, `write`) se fait entièrement dans
+une seule fenêtre d'accès que l'application définit ; aucune référence à l'objet n'en sort. L'application choisit la
+source :
 
-- **un accès** qui lit sous son propre verrou, appelé sur le thread du serveur ;
-- **un exécuteur** sur lequel la lecture se fait (`app.uiExecutor()`, la boucle d'un `host-loop`, un exécuteur de
-  l'application). La lecture devient alors une `webfront::ResultTask` : la Promise se règle quand elle se termine, la
-  déconnexion du navigateur l'arrête, et l'arrêt la joint (ADR-004, ADR-006).
+- **un visiteur** (`Visit<const T>`, ou `Visit<T>` pour écrire) : WebFront appelle la source avec un visiteur, et la
+  source l'appelle une fois avec l'objet, sous son propre verrou. L'opération entière s'exécute pendant cet appel, donc
+  sous le verrou. C'est la forme d'un objet partagé entre threads. Une source qui n'appelle pas le visiteur fait
+  échouer l'opération avec `webfront.inspector.unavailable` ;
+- **une référence sur un exécuteur** : l'objet n'est touché que par le thread d'un exécuteur (`app.uiExecutor()`, la
+  boucle d'un `host-loop`, un exécuteur de l'application). L'accès et l'opération entière s'exécutent sur cet
+  exécuteur, et la référence reste valide pendant toute l'opération ;
+- **une valeur** : l'accès rend une copie, que l'observateur parcourt librement. C'est sûr partout, mais l'objet
+  entier est copié à chaque opération ; cette forme convient aux petits objets et ne bénéficie d'aucune des bornes de
+  coût ci-dessous.
 
-Sans exécuteur, la lecture se fait sur le thread du serveur, celui des callbacks `cppFunction`. Ce cas par défaut n'est
-correct que si l'objet n'est modifié que sur ce thread, ou si l'accès prend lui-même le verrou nécessaire ; la
-documentation le dit en ces termes.
+Avec un exécuteur, l'opération est une `webfront::ResultTask` : la Promise se règle quand elle se termine, la
+déconnexion du navigateur l'arrête, et l'arrêt la joint (ADR-004, ADR-006). Sans exécuteur, la source est appelée sur
+le thread du serveur, celui des callbacks `cppFunction`. Un accès qui rend une référence sans exécuteur n'est correct
+que si l'objet n'est touché que par ce thread ; la documentation le dit en ces termes et l'exemple montre le visiteur
+sous verrou. Un verrou pris dans un accès qui rend une référence ne protège rien, puisqu'il est relâché avant le
+parcours : c'est l'erreur que la forme du visiteur évite.
 
-L'accès rend une valeur ou une référence. Une valeur est une copie que l'observateur parcourt librement ; une référence
-n'est valide que pendant l'appel, et l'observateur n'en garde rien au-delà de la page qu'il construit.
+**Coût d'une opération.** Avec un visiteur ou une référence, aucune opération ne copie l'objet observé, et la mémoire
+ainsi que la taille de message d'une opération sont proportionnelles à la page, non au conteneur. Le temps dépend du
+conteneur :
+
+- une `std::ranges::random_access_range` atteint la position demandée en temps constant : une page coûte sa taille ;
+- les autres `sized_range` et les tableaux associatifs n'ont pas d'accès par rang : atteindre la position p parcourt
+  les p éléments précédents. Une passe de `changes` regroupe les nœuds par parent et parcourt chaque parent déplié une
+  seule fois, jusqu'au plus grand rang affiché ;
+- un type qui modèle `webfront::inspect::PagedSource` (`size()` et `visit(premier, nombre, fonction)`) fournit
+  lui-même l'accès par page : une page coûte ce que l'application en décide. C'est la voie d'un très grand conteneur
+  sans accès aléatoire, ou d'un contenu calculé à la demande.
+
+Une page tardive d'une très grande liste chaînée ou d'une `std::map` peut donc coûter un parcours linéaire, sous le
+verrou de l'application ; la documentation le dit, et `PagedSource` en est le remède.
 
 **Destruction pendant une lecture.** La destruction de la poignée retire l'observateur de la table. Elle attend la fin
 d'une lecture déjà commencée sur un autre thread, et aucune lecture ne commence ensuite. Détruite sur le thread qui
-exécute justement la lecture (depuis l'accès), elle n'attend pas : la lecture en cours se termine et son résultat est
+exécute justement la lecture (depuis la source ou le visiteur), elle n'attend pas : la lecture en cours se termine et son résultat est
 abandonné. Un appel qui vise un observateur retiré échoue avec `webfront.inspector.unknown`.
 
 Le nom d'un observateur est unique tant que sa poignée vit ; un second `watch` du même nom lève
@@ -183,8 +233,10 @@ Le nom d'un observateur est unique tant que sa poignée vit ; un second `watch` 
 ### 6. Modification à la demande de l'application
 
 Un observateur est en lecture seule par défaut. L'application rend des valeurs modifiables en fournissant l'écriture :
-un mutateur, ou un accès qui rend une référence non constante. L'écriture s'exécute sur le même exécuteur que la lecture,
-sous la même règle de threads.
+un visiteur non constant (`Visit<T>`), une référence non constante sur un exécuteur, ou un mutateur. L'écriture est une
+opération comme les autres (section 5) : avec un visiteur, l'affectation a lieu pendant l'appel du visiteur, sous le
+verrou de l'application ; avec un exécuteur, sur cet exécuteur. Une source qui rend une valeur ne peut écrire que par un
+mutateur, puisque sa copie n'est pas l'objet.
 
 `webfront.inspector.write(observateur, chemin, texte)` :
 
@@ -213,20 +265,38 @@ inspecteur n'en paie pas le coût.
 
 ### 8. Une page, trois conteneurs
 
-Les inspecteurs sont une seule page de l'environnement, `inspector.html`, qui parle à C++ par le pont. Elle se charge
-dans le premier conteneur disponible :
+Les inspecteurs sont une seule page de l'environnement, `inspector.html`, qui parle à C++ par le pont.
 
-1. **Fenêtre native secondaire** quand `canShowSecondaryWindow()` est vrai (WebKitGTK, WKWebView, WebView2). La
-   fonction réservée `webfront.inspector.openWindow` appelle `openSecondaryWindow`, qui transmet la preuve de vue à la
-   nouvelle fenêtre : elle ouvre sa propre connexion, prouvée. Rouvrir l'inspecteur ramène sa fenêtre au premier plan.
-2. **Onglet du navigateur système** (`window.open` vers la même origine). Il ouvre sa propre connexion, non prouvée :
-   il n'a accès que si l'application a choisi `trustLoopbackClients` (section 2). Si le bloqueur de fenêtres refuse
-   l'ouverture, on passe au conteneur 3 et un message propose de réessayer.
-3. **Fenêtre flottante dans la page** (CEF, `NativeOrBrowserFrontend` replié sur le navigateur, refus du bloqueur) : le
-   composant de la fenêtre du terminal, avec un iframe de `inspector.html`. Les adaptateurs n'injectent la preuve que
-   dans le cadre principal, si bien qu'une connexion ouverte par l'iframe ne serait pas prouvée. L'iframe, de même
-   origine, **n'ouvre donc pas de connexion** : il emprunte le pont de la page hôte (`window.parent.webFront`), dont la
-   connexion porte la preuve quand la page est une vue.
+**Le conteneur se choisit sur l'accès effectif, pas seulement sur ce qui s'ouvre.** Une fenêtre qui s'ouvre mais dont
+la connexion serait refusée n'est jamais choisie. Avant d'ouvrir quoi que ce soit, la page hôte appelle
+`webfront.inspector.containers()`. C'est la seule fonction réservée qui ne vérifie pas l'accès : elle ne rend que trois
+booléens, et aucun état de l'application.
+
+| Booléen | Vrai quand |
+| --- | --- |
+| `secondaryWindow` | le frontend peut ouvrir une fenêtre secondaire (`canShowSecondaryWindow()`), qui recevra la preuve |
+| `host` | la connexion de la page hôte est admise (section 2) |
+| `newConnections` | une nouvelle connexion non prouvée serait admise : l'application a choisi `trustLoopbackClients` |
+
+La page se charge dans le premier conteneur qui convient :
+
+1. **Fenêtre native secondaire** si `secondaryWindow` (WebKitGTK, WKWebView, WebView2). La fonction réservée
+   `webfront.inspector.openWindow` appelle `openSecondaryWindow`, qui transmet la preuve de vue à la nouvelle
+   fenêtre : elle ouvre sa propre connexion, prouvée. Rouvrir l'inspecteur ramène sa fenêtre au premier plan.
+2. **Onglet du navigateur système** (`window.open` vers la même origine) seulement si `newConnections` est vrai et que
+   la page hôte tourne dans le navigateur système. L'onglet ouvre sa propre connexion, non prouvée, que seule cette
+   confiance admet. Sous CEF ou dans une vue intégrée, `window.open` réussirait mais ouvrirait un cadre sans preuve :
+   ce conteneur n'y est jamais essayé. Si le bloqueur de fenêtres refuse l'ouverture, on passe au conteneur 3 et un
+   message propose de réessayer.
+3. **Fenêtre flottante dans la page** si `host` : le composant de la fenêtre du terminal, avec un iframe de
+   `inspector.html`. C'est le conteneur de CEF, d'une vue intégrée sans fenêtre secondaire, et du navigateur système
+   quand l'onglet est bloqué. Les adaptateurs n'injectent la preuve que dans le cadre principal, si bien qu'une
+   connexion ouverte par l'iframe ne serait pas prouvée. L'iframe, de même origine, **n'ouvre donc pas de connexion** :
+   il emprunte le pont de la page hôte (`window.parent.webFront`), dont l'accès vient d'être constaté.
+4. **Aucun** sinon (navigateur système sans `trustLoopbackClients`) : les entrées du menu sont désactivées et disent
+   pourquoi (section 2).
+
+La même règle désactive « Détacher » quand aucun conteneur détaché ne donnerait l'accès.
 
 Chaque panneau a une action « Détacher / Rattacher », désactivée avec sa raison quand aucun conteneur détaché n'est
 disponible. Le choix est conservé par projet dans `.webfront/developer/`, comme `terminal-window.json`.
@@ -258,6 +328,10 @@ demanderait un grant et une décision propres.
 | Nouveau code de type pour les nœuds ou les arbres | Rompt les deux codecs et l'environnement publié pour un besoin que les listes de tuples couvrent. |
 | Arbre complet envoyé en une fois, ou poussé par C++ | Copie les grands conteneurs, coûte même quand personne ne regarde, et dépasse le tampon de la politique. |
 | Lecture sans exécuteur ni verrou fourni | Une course de données silencieuse dans l'outil censé aider à les trouver. |
+| Accès qui prend un verrou et rend une référence | Le verrou est relâché au retour, avant le parcours et l'écriture ; le visiteur garde l'opération sous le verrou. |
+| `changes` en une seule réponse | Après plusieurs pages dépliées, une modification globale dépasserait le tampon ou `maxMessageSize`, et l'inspecteur ne pourrait plus se resynchroniser. |
+| Choisir le conteneur sur le seul succès de l'ouverture | Sous CEF, `window.open` réussit et ouvre un cadre sans preuve, dont chaque appel serait refusé. |
+| Promettre une page en temps constant pour tout conteneur | Faux sans accès aléatoire ; `PagedSource` donne cette garantie quand l'application en a besoin. |
 | Inspecteur dans les ressources du cœur | Contraire à l'ADR-016 ; l'inspecteur n'a de sens que dans l'environnement développeur. |
 | iframe ouvrant sa propre connexion | Elle ne serait pas prouvée, puisque les adaptateurs n'injectent la preuve que dans le cadre principal. |
 | Modification libre de toute valeur | Changerait des invariants de l'application à son insu ; l'écriture reste un choix de l'application. |
@@ -272,20 +346,25 @@ demanderait un grant et une décision propres.
 - **Coût accepté :** la signature publique de `cppFunction` gagne un paramètre par défaut.
 - **Coût accepté :** l'identité d'un nœud n'est pas stable quand un conteneur change ; l'inspecteur peut montrer un
   élément voisin à la place d'un élément retiré jusqu'à la lecture suivante.
-- **Risque :** qu'un accès fourni sans verrou crée une course ; la documentation et l'exemple Life montrent l'accès sous
-  verrou et l'exécuteur.
+- **Coût accepté :** une page tardive d'un conteneur sans accès aléatoire coûte un parcours linéaire, sous le verrou
+  de l'application, sauf si elle fournit une `PagedSource` ; une source qui rend une valeur copie l'objet à chaque
+  opération.
+- **Risque :** qu'un accès qui rend une référence sans exécuteur crée une course ; la documentation et l'exemple Life
+  montrent le visiteur sous verrou et l'exécuteur.
 - **Risque :** que les valeurs affichées révèlent des données personnelles dans une capture d'écran ou un partage ;
   c'est le prix d'un outil de développement, absent des constructions de distribution.
 
 ## Validation
 
 - Tests BDD : métadonnées des fonctions et `std::source_location` ; observateurs (pagination, réduction au tampon,
-  différences par connexion, chaque genre de la section 4, exécuteur, poignée détruite pendant une lecture et depuis
+  différences par connexion, passe de `changes` sur plusieurs pages pendant que l'objet change, résynchronisation après
+  une page perdue, limite de la mémoire, opération entière sous le verrou du visiteur, `PagedSource`, chaque genre de la section 4, exécuteur, poignée détruite pendant une lecture et depuis
   l'accès, écriture acceptée, refusée par l'analyse, refusée par le mutateur et non permise) ; refus à une connexion non
-  prouvée sans `trustLoopbackClients` ; absence des fonctions hors environnement et en distribution.
+  prouvée sans `trustLoopbackClients` ; `containers` pour chaque frontend et chaque réglage de confiance ; absence des
+  fonctions hors environnement et en distribution.
 - Tests d'encodage et de décodage des nœuds et des pages, et test Jasmine dans un vrai navigateur (règles de l'ADR-003).
 - `DeveloperBrowserIntegration` : menu au clavier et à la souris, inspecteur en fenêtre secondaire sous WebKitGTK,
-  fenêtre flottante sous CEF par le pont de la page hôte, arbre des paquets du projet Life.
+  fenêtre flottante sous CEF par le pont de la page hôte (sans ouverture d'onglet), arbre des paquets du projet Life.
 - `MinimalCoreAssets` inchangé.
 - À l'intégration de l'épique, passer l'état à « Acceptée » et consigner les révisions Git réelles.
 
