@@ -9,6 +9,7 @@
 
 // Application spaces under a path prefix (#671).
 
+#include "InjectableNetworking.hpp"
 #include <webfront/networking/TCPNetworkingStdnet.hpp>
 #include <webfront/Space.hpp>
 #include <webfront/system/DefaultFS.hpp>
@@ -24,6 +25,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <future>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -40,8 +42,8 @@ using namespace webfront;
 using namespace std::chrono_literals;
 
 namespace {
-using Stdnet = networking::TCPStdnet;
-using App    = BasicWF<Stdnet, fs::DefaultFS>;
+using Stdnet   = networking::TCPStdnet;
+using SpaceApp = BasicWF<Stdnet, fs::DefaultFS>;
 
 bool spaceWaitUntil(auto condition, std::chrono::milliseconds timeout = 5s) {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
@@ -54,9 +56,9 @@ bool spaceWaitUntil(auto condition, std::chrono::milliseconds timeout = 5s) {
 }
 
 /// A loopback connection that records what the server sends.
-class Connection {
+class LoopbackConnection {
 public:
-    explicit Connection(std::string_view port) : socket(context) {
+    explicit LoopbackConnection(std::string_view port) : socket(context) {
         socket.connect(Stdnet::Resolve("127.0.0.1", port));
     }
 
@@ -127,7 +129,7 @@ private:
 
 /// The whole answer of the server to one HTTP request.
 std::string httpGet(std::string_view port, std::string_view target) {
-    Connection connection{port};
+    LoopbackConnection connection{port};
     connection.send("GET " + std::string(target) + " HTTP/1.1\r\nHost: localhost\r\n\r\n");
     connection.receiveUntilClosed();
     return connection.received();
@@ -161,9 +163,9 @@ std::vector<std::byte> clientFrame(std::span<const std::byte> payload) {
 }
 
 /// A page whose bridge connected from `path`, as WebFront.js does from the page's directory.
-class Page : public Connection {
+class Page : public LoopbackConnection {
 public:
-    Page(std::string_view port, std::string_view path) : Connection(port) {
+    Page(std::string_view port, std::string_view path) : LoopbackConnection(port) {
         send("GET " + std::string(path)
              + " HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n");
@@ -185,7 +187,7 @@ public:
 
 /// Runs the application's server on its own thread until destroyed.
 struct Running {
-    explicit Running(App& application)
+    explicit Running(SpaceApp& application)
         : app(application), thread([&application] {
               application.run();
           }) { }
@@ -194,7 +196,7 @@ struct Running {
         thread.join();
         app.shutdown();
     }
-    App&        app;
+    SpaceApp&   app;
     std::thread thread;
 };
 
@@ -208,7 +210,7 @@ struct Bridge {
     }
 };
 
-Task destroyLater(std::unique_ptr<App::Space>& space, std::atomic<bool>& destroyed) {
+Task destroyLater(std::unique_ptr<SpaceApp::Space>& space, std::atomic<bool>& destroyed) {
     space.reset();
     destroyed = true;
     co_return;
@@ -216,14 +218,14 @@ Task destroyLater(std::unique_ptr<App::Space>& space, std::atomic<bool>& destroy
 }  // namespace
 
 const Scenario twoSpaces{"Two spaces with a function of the same name answer independently", {"spaces"}, [] {
-                             App                                                app{WebFrontConfig{.port = "0"}};
-                             std::map<std::string, std::unique_ptr<App::Space>> spaces;
-                             std::optional<Bridge<App::Space>>                  bridge;
+                             SpaceApp                                                app{WebFrontConfig{.port = "0"}};
+                             std::map<std::string, std::unique_ptr<SpaceApp::Space>> spaces;
+                             std::optional<Bridge<SpaceApp::Space>>                  bridge;
                              app.cppFunction("shared", [] {
                                  return std::string{"from-application"};
                              });
                              app.spaces("/s/", [&](std::string_view segment) -> std::optional<http::RouteReply> {
-                                 auto space = std::make_unique<App::Space>(app, "/s/", segment);
+                                 auto space = std::make_unique<SpaceApp::Space>(app, "/s/", segment);
                                  space->cppFunction("whoAmI", [name = std::string(segment)] {
                                      return "space-" + name;
                                  });
@@ -274,17 +276,17 @@ const Scenario twoSpaces{"Two spaces with a function of the same name answer ind
                          }};
 
 const Scenario pageOf{"A page of one space never receives a call or a broadcast of another", {"spaces"}, [] {
-                          App                                                app{WebFrontConfig{.port = "0"}};
-                          std::map<std::string, std::unique_ptr<App::Space>> spaces;
-                          std::atomic<int>                                   applicationStarted{0}, alphaStarted{0}, betaStarted{0};
-                          std::vector<UISubscription>                        subscriptions;
-                          app.onUIStarted([&](App::UI) {
+                          SpaceApp                                                app{WebFrontConfig{.port = "0"}};
+                          std::map<std::string, std::unique_ptr<SpaceApp::Space>> spaces;
+                          std::atomic<int>                                        applicationStarted{0}, alphaStarted{0}, betaStarted{0};
+                          std::vector<UISubscription>                             subscriptions;
+                          app.onUIStarted([&](SpaceApp::UI) {
                               ++applicationStarted;
                           });
                           app.spaces("/s/", [&](std::string_view segment) -> std::optional<http::RouteReply> {
-                              auto  space   = std::make_unique<App::Space>(app, "/s/", segment);
+                              auto  space   = std::make_unique<SpaceApp::Space>(app, "/s/", segment);
                               auto& counter = segment == "alpha" ? alphaStarted : betaStarted;
-                              space->onUIStarted([&counter](App::UI ui) {
+                              space->onUIStarted([&counter](SpaceApp::UI ui) {
                                   ++counter;
                                   ui.jsFunction("welcome")(std::string{"welcome-to-own-space"});
                               });
@@ -297,8 +299,8 @@ const Scenario pageOf{"A page of one space never receives a call or a broadcast 
                           require(spaceWaitUntil([&] {
                               return alphaStarted == 1 && betaStarted == 1 && applicationStarted == 2;
                           }));
-                          App::Space& alphaSpace = *spaces.at("alpha");
-                          App::Space& betaSpace  = *spaces.at("beta");
+                          SpaceApp::Space& alphaSpace = *spaces.at("alpha");
+                          SpaceApp::Space& betaSpace  = *spaces.at("beta");
 
                           then("each space's handler saw its own page only, and the application's saw both", [&] {
                               require(alphaStarted == 1);
@@ -311,7 +313,7 @@ const Scenario pageOf{"A page of one space never receives a call or a broadcast 
                               betaSpace.broadcast("onState")(std::string{"beta-state"});
                               alphaSpace.broadcast("onState", {.maxPendingWrites = 1})(std::string{"alpha-state"});
                               std::size_t visited = 0;
-                              alphaSpace.forEachUI([&](App::UI ui) {
+                              alphaSpace.forEachUI([&](SpaceApp::UI ui) {
                                   ++visited;
                                   ui.jsFunction("each")(std::string{"alpha-each"});
                               });
@@ -331,7 +333,7 @@ const Scenario pageOf{"A page of one space never receives a call or a broadcast 
                       }};
 
 const Scenario resolverRefusal{"The resolver's refusal reaches the browser", {"spaces"}, [] {
-                                   App              app{WebFrontConfig{.port = "0"}};
+                                   SpaceApp         app{WebFrontConfig{.port = "0"}};
                                    std::atomic<int> resolved{0};
                                    app.spaces("/s/", [&](std::string_view segment) -> std::optional<http::RouteReply> {
                                        ++resolved;
@@ -362,91 +364,91 @@ const Scenario resolverRefusal{"The resolver's refusal reaches the browser", {"s
                                    });
                                }};
 
-const Scenario lastPage{"The last-page notice fires once each time a space empties", {"spaces"}, [] {
-                            App                           app{WebFrontConfig{.port = "0"}};
-                            std::unique_ptr<App::Space>   space;
-                            std::atomic<int>              notices{0}, spaceClosed{0}, applicationClosed{0}, started{0};
-                            std::optional<UISubscription> spaceSubscription;
-                            app.spaces("/s/", [](std::string_view) -> std::optional<http::RouteReply> {
-                                return http::textReply(http::Response::notFound, "Unknown session");
-                            });
-                            space = std::make_unique<App::Space>(app, "/s/", "alpha");  // created beforehand, outside the resolver
-                            space->onUIStarted([&](App::UI) {
-                                ++started;
-                            });
-                            space->onLastUIClosed([&] {
-                                ++notices;
-                            });
-                            spaceSubscription.emplace(space->subscribeUIClosed([&](App::UI) {
-                                ++spaceClosed;
-                            }));
-                            auto    applicationSubscription = app.subscribeUIClosed([&](App::UI) {
-                                ++applicationClosed;
-                            });
-                            Running running{app};
-                            auto    first  = std::make_unique<Page>(app.port(), "/s/alpha/");
-                            auto    second = std::make_unique<Page>(app.port(), "/s/alpha/sub/");  // a page of a subdirectory
-                            require(spaceWaitUntil([&] {
-                                return started == 2;
-                            }));
+const Scenario lastPageNotice{"The last-page notice fires once each time a space empties", {"spaces"}, [] {
+                                  SpaceApp                         app{WebFrontConfig{.port = "0"}};
+                                  std::unique_ptr<SpaceApp::Space> space;
+                                  std::atomic<int>                 notices{0}, spaceClosed{0}, applicationClosed{0}, started{0};
+                                  std::optional<UISubscription>    spaceSubscription;
+                                  app.spaces("/s/", [](std::string_view) -> std::optional<http::RouteReply> {
+                                      return http::textReply(http::Response::notFound, "Unknown session");
+                                  });
+                                  space = std::make_unique<SpaceApp::Space>(app, "/s/", "alpha");  // created beforehand, outside the resolver
+                                  space->onUIStarted([&](SpaceApp::UI) {
+                                      ++started;
+                                  });
+                                  space->onLastUIClosed([&] {
+                                      ++notices;
+                                  });
+                                  spaceSubscription.emplace(space->subscribeUIClosed([&](SpaceApp::UI) {
+                                      ++spaceClosed;
+                                  }));
+                                  auto    applicationSubscription = app.subscribeUIClosed([&](SpaceApp::UI) {
+                                      ++applicationClosed;
+                                  });
+                                  Running running{app};
+                                  auto    first  = std::make_unique<Page>(app.port(), "/s/alpha/");
+                                  auto    second = std::make_unique<Page>(app.port(), "/s/alpha/sub/");  // a page of a subdirectory
+                                  require(spaceWaitUntil([&] {
+                                      return started == 2;
+                                  }));
 
-                            when("one of the two pages closes", [&] {
-                                first.reset();
-                                require(spaceWaitUntil([&] {
-                                    return spaceClosed == 1;
-                                }));
-                                then("the space is not empty: no notice", [&] {
-                                    require(applicationClosed == 1);
-                                    require(notices == 0);
-                                });
-                                andWhen("the other closes too", [&] {
-                                    second.reset();
-                                    require(spaceWaitUntil([&] {
-                                        return notices >= 1 && applicationClosed == 2;
-                                    }));
-                                    std::this_thread::sleep_for(50ms);
-                                    then("the notice fired once, after the closed handlers", [&] {
-                                        require(notices == 1);
-                                        require(spaceClosed == 2);
-                                    });
-                                    andWhen("a page joins the emptied space and closes", [&] {
-                                        auto again = std::make_unique<Page>(app.port(), "/s/alpha/");
-                                        require(spaceWaitUntil([&] {
-                                            return started == 3;
-                                        }));
-                                        again.reset();
-                                        then("the space is reported empty again", [&] {
-                                            require(spaceWaitUntil([&] {
-                                                return notices == 2;
-                                            }));
-                                        });
-                                    });
-                                });
-                            });
-                        }};
+                                  when("one of the two pages closes", [&] {
+                                      first.reset();
+                                      require(spaceWaitUntil([&] {
+                                          return spaceClosed == 1;
+                                      }));
+                                      then("the space is not empty: no notice", [&] {
+                                          require(applicationClosed == 1);
+                                          require(notices == 0);
+                                      });
+                                      andWhen("the other closes too", [&] {
+                                          second.reset();
+                                          require(spaceWaitUntil([&] {
+                                              return notices >= 1 && applicationClosed == 2;
+                                          }));
+                                          std::this_thread::sleep_for(50ms);
+                                          then("the notice fired once, after the closed handlers", [&] {
+                                              require(notices == 1);
+                                              require(spaceClosed == 2);
+                                          });
+                                          andWhen("a page joins the emptied space and closes", [&] {
+                                              auto again = std::make_unique<Page>(app.port(), "/s/alpha/");
+                                              require(spaceWaitUntil([&] {
+                                                  return started == 3;
+                                              }));
+                                              again.reset();
+                                              then("the space is reported empty again", [&] {
+                                                  require(spaceWaitUntil([&] {
+                                                      return notices == 2;
+                                                  }));
+                                              });
+                                          });
+                                      });
+                                  });
+                              }};
 
 const Scenario destroyedSpace{"A destroyed space releases its functions and routes, and closes its pages", {"spaces"}, [] {
-                                  App                            app{WebFrontConfig{.port = "0"}};
-                                  std::unique_ptr<App::Space>    space;
-                                  http::RouteTable::Registration route;
-                                  auto                           captured = std::make_shared<int>(0);
-                                  std::weak_ptr<int>             observed = captured;
-                                  std::atomic<int>               started{0}, applicationClosed{0}, resolved{0};
+                                  SpaceApp                         app{WebFrontConfig{.port = "0"}};
+                                  std::unique_ptr<SpaceApp::Space> space;
+                                  http::RouteTable::Registration   route;
+                                  auto                             captured = std::make_shared<int>(0);
+                                  std::weak_ptr<int>               observed = captured;
+                                  std::atomic<int>                 started{0}, applicationClosed{0}, resolved{0};
                                   app.spaces("/s/", [&](std::string_view) -> std::optional<http::RouteReply> {
                                       ++resolved;
                                       return http::textReply(http::Response::notFound, "The session has ended");
                                   });
-                                  space = std::make_unique<App::Space>(app, "/s/", "alpha");
+                                  space = std::make_unique<SpaceApp::Space>(app, "/s/", "alpha");
                                   space->cppFunction("hold", [captured = std::move(captured)] {
                                       return *captured;
                                   });
-                                  space->onUIStarted([&](App::UI) {
+                                  space->onUIStarted([&](SpaceApp::UI) {
                                       ++started;
                                   });
                                   route          = space->addRoute("/data/", [](const http::RouteRequest& request) {
                                       return http::textReply(http::Response::ok, "space-data " + std::string(request.path));
                                   });
-                                  auto    closed = app.subscribeUIClosed([&](App::UI) {
+                                  auto    closed = app.subscribeUIClosed([&](SpaceApp::UI) {
                                       ++applicationClosed;
                                   });
                                   Running running{app};
@@ -483,14 +485,14 @@ const Scenario destroyedSpace{"A destroyed space releases its functions and rout
                               }};
 
 const Scenario servedUnder{"A space serves the application's files and routes under its prefix, its own routes first", {"spaces"}, [] {
-                               App                                                app{WebFrontConfig{.port = "0"}};
-                               std::map<std::string, std::unique_ptr<App::Space>> spaces;
-                               std::vector<http::RouteTable::Registration>        routes;
+                               SpaceApp                                                app{WebFrontConfig{.port = "0"}};
+                               std::map<std::string, std::unique_ptr<SpaceApp::Space>> spaces;
+                               std::vector<http::RouteTable::Registration>             routes;
                                routes.push_back(app.addRoute("/api/", [](const http::RouteRequest&) {
                                    return http::textReply(http::Response::ok, "application-api");
                                }));
                                app.spaces("/s/", [&](std::string_view segment) -> std::optional<http::RouteReply> {
-                                   auto space = std::make_unique<App::Space>(app, "/s/", segment);
+                                   auto space = std::make_unique<SpaceApp::Space>(app, "/s/", segment);
                                    if (segment == "alpha")
                                        routes.push_back(space->addRoute("/api/", [](const http::RouteRequest& request) {
                                            return http::textReply(http::Response::ok, "alpha-api " + std::string(request.path));
@@ -519,14 +521,14 @@ const Scenario servedUnder{"A space serves the application's files and routes un
                            }};
 
 const Scenario withoutSpaces{"An application without spaces behaves as before them", {"spaces"}, [] {
-                                 App app{WebFrontConfig{.port = "0"}};
+                                 SpaceApp app{WebFrontConfig{.port = "0"}};
                                  app.cppFunction("ping", [] {
                                      return std::string{"pong-from-application"};
                                  });
 
                                  then("a space cannot be created without its family, nor with a segment that cannot name one", [&] {
                                      requireThrows<std::invalid_argument>([&] {
-                                         App::Space space{app, "/s/", "alpha"};
+                                         SpaceApp::Space space{app, "/s/", "alpha"};
                                      });
                                      app.spaces("/s/", [](std::string_view) {
                                          return std::optional<http::RouteReply>{};
@@ -534,7 +536,7 @@ const Scenario withoutSpaces{"An application without spaces behaves as before th
                                      for (const auto* segment : {"a/b", "a..b", "..", ".", "", "a\\b", "a\x01b"}) {
                                          auto scope = info(segment);
                                          requireThrows<std::invalid_argument>([&] {
-                                             App::Space space{app, "/s/", segment};
+                                             SpaceApp::Space space{app, "/s/", segment};
                                          });
                                      }
                                      requireThrows<std::invalid_argument>([&] {
@@ -542,9 +544,9 @@ const Scenario withoutSpaces{"An application without spaces behaves as before th
                                              return std::optional<http::RouteReply>{};
                                          });
                                      });
-                                     App::Space space{app, "/s/", "alpha"};
+                                     SpaceApp::Space space{app, "/s/", "alpha"};
                                      requireThrows<std::logic_error>([&] {
-                                         App::Space twin{app, "/s/", "alpha"};
+                                         SpaceApp::Space twin{app, "/s/", "alpha"};
                                      });
                                  });
                                  then("a page connected from any directory reaches the application's functions", [&] {
@@ -557,17 +559,17 @@ const Scenario withoutSpaces{"An application without spaces behaves as before th
                              }};
 
 const Scenario encodedSeparator{"An encoded separator never selects a space other than the one its segment names", {"spaces"}, [] {
-                                    App                                                app{WebFrontConfig{.port = "0"}};
-                                    std::map<std::string, std::unique_ptr<App::Space>> spaces;
-                                    std::vector<http::RouteTable::Registration>        routes;
-                                    std::mutex                                         seenMutex;
-                                    std::vector<std::string>                           seen;
+                                    SpaceApp                                                app{WebFrontConfig{.port = "0"}};
+                                    std::map<std::string, std::unique_ptr<SpaceApp::Space>> spaces;
+                                    std::vector<http::RouteTable::Registration>             routes;
+                                    std::mutex                                              seenMutex;
+                                    std::vector<std::string>                                seen;
                                     app.spaces("/s/", [&](std::string_view segment) -> std::optional<http::RouteReply> {
                                         {
                                             std::scoped_lock lock{seenMutex};
                                             seen.emplace_back(segment);
                                         }
-                                        auto space = std::make_unique<App::Space>(app, "/s/", segment);
+                                        auto space = std::make_unique<SpaceApp::Space>(app, "/s/", segment);
                                         routes.push_back(space->addRoute("/data/", [name = std::string(segment)](const http::RouteRequest& request) {
                                             return http::textReply(http::Response::ok, name + "-data " + std::string(request.path));
                                         }));
@@ -612,24 +614,24 @@ const Scenario encodedSeparator{"An encoded separator never selects a space othe
                                 }};
 
 const Scenario destroyedBy{"A space destroyed by one of its handlers calls none of the handlers that follow", {"spaces"}, [] {
-                               App                           app{WebFrontConfig{.port = "0"}};
-                               std::unique_ptr<App::Space>   space;
-                               std::atomic<int>              before{0}, after{0}, applicationClosed{0};
-                               std::optional<UISubscription> first, second;
+                               SpaceApp                         app{WebFrontConfig{.port = "0"}};
+                               std::unique_ptr<SpaceApp::Space> space;
+                               std::atomic<int>                 before{0}, after{0}, applicationClosed{0};
+                               std::optional<UISubscription>    first, second;
                                app.spaces("/s/", [](std::string_view) -> std::optional<http::RouteReply> {
                                    return http::textReply(http::Response::notFound, "Unknown session");
                                });
-                               auto closed = app.subscribeUIClosed([&](App::UI) {
+                               auto closed = app.subscribeUIClosed([&](SpaceApp::UI) {
                                    ++applicationClosed;
                                });
-                               space       = std::make_unique<App::Space>(app, "/s/", "alpha");
+                               space       = std::make_unique<SpaceApp::Space>(app, "/s/", "alpha");
 
                                when("the first of two started handlers destroys the space", [&] {
-                                   first.emplace(space->subscribeUIStarted([&](App::UI) {
+                                   first.emplace(space->subscribeUIStarted([&](SpaceApp::UI) {
                                        ++before;
                                        space.reset();
                                    }));
-                                   second.emplace(space->subscribeUIStarted([&](App::UI) {
+                                   second.emplace(space->subscribeUIStarted([&](SpaceApp::UI) {
                                        ++after;
                                    }));
                                    Running running{app};
@@ -642,14 +644,14 @@ const Scenario destroyedBy{"A space destroyed by one of its handlers calls none 
                                });
                                when("the first of two closed handlers destroys the space", [&] {
                                    std::atomic<int> started{0};
-                                   space->onUIStarted([&](App::UI) {
+                                   space->onUIStarted([&](SpaceApp::UI) {
                                        ++started;
                                    });
-                                   first.emplace(space->subscribeUIClosed([&](App::UI) {
+                                   first.emplace(space->subscribeUIClosed([&](SpaceApp::UI) {
                                        ++before;
                                        space.reset();
                                    }));
-                                   second.emplace(space->subscribeUIClosed([&](App::UI) {
+                                   second.emplace(space->subscribeUIClosed([&](SpaceApp::UI) {
                                        ++after;
                                    }));
                                    std::atomic<int> notices{0};
@@ -683,15 +685,15 @@ const Scenario logsMask{"The logs never show the segment of a space, which can b
                                 logged.append(line).push_back('\n');
                             });
                             {
-                                App                                                app{WebFrontConfig{.port = "0"}};
-                                std::map<std::string, std::unique_ptr<App::Space>> spaces;
-                                std::vector<http::RouteTable::Registration>        routes;
+                                SpaceApp                                                app{WebFrontConfig{.port = "0"}};
+                                std::map<std::string, std::unique_ptr<SpaceApp::Space>> spaces;
+                                std::vector<http::RouteTable::Registration>             routes;
                                 app.spaces("/s/", [&](std::string_view segment) -> std::optional<http::RouteReply> {
                                     if (segment.starts_with("throwing"))
                                         throw std::runtime_error("no session " + std::string(segment));
                                     if (segment.starts_with("refused"))
                                         return http::textReply(http::Response::notFound, "Unknown session");
-                                    auto space = std::make_unique<App::Space>(app, "/s/", segment);
+                                    auto space = std::make_unique<SpaceApp::Space>(app, "/s/", segment);
                                     space->cppFunction("ping", [] {
                                         return std::string{"pong"};
                                     });
@@ -726,3 +728,124 @@ const Scenario logsMask{"The logs never show the segment of a space, which can b
                                 require(found == std::string::npos);
                             });
                         }};
+
+const Scenario routeWait{"Destroying a space waits for its route handlers and bodies running on the workers", {"spaces"}, [] {
+                             SpaceApp                         app{WebFrontConfig{.port = "0"}};
+                             http::RouteTable::Registration   route;
+                             std::unique_ptr<SpaceApp::Space> space;
+                             std::promise<void>               entered, release;
+                             const auto                       gate = release.get_future().share();
+                             app.spaces("/s/", [](std::string_view) -> std::optional<http::RouteReply> {
+                                 return http::textReply(http::Response::notFound, "Unknown session");
+                             });
+                             space = std::make_unique<SpaceApp::Space>(app, "/s/", "alpha");
+                             std::atomic<bool> destroyed{false};
+                             // Starts the request, waits for the route to block in it, destroys the space on the server thread.
+                             const auto destroyWhileBlocked = [&](std::string target) {
+                                 auto answer = std::async(std::launch::async, [&app, target] {
+                                     return httpGet(app.port(), target);
+                                 });
+                                 require(entered.get_future().wait_for(5s) == std::future_status::ready);
+                                 static_cast<void>(app.spawn(destroyLater(space, destroyed)));
+                                 std::this_thread::sleep_for(100ms);
+                                 const bool waited = !destroyed;
+                                 release.set_value();
+                                 require(spaceWaitUntil([&] {
+                                     return destroyed.load();
+                                 }));
+                                 require(answer.wait_for(5s) == std::future_status::ready);
+                                 return std::pair{waited, answer.get()};
+                             };
+
+                             when("a route handler is running", [&] {
+                                 route = space->addRoute("/slow/", [&](const http::RouteRequest&) {
+                                     entered.set_value();
+                                     gate.wait();
+                                     return http::textReply(http::Response::ok, "slow-answer");
+                                 });
+                                 Running running{app};
+                                 const auto [waited, answer] = destroyWhileBlocked("/s/alpha/slow/");
+                                 then("the destruction waits for it, whose answer is sent; its body, read afterwards, is cut", [&] {
+                                     require(waited);
+                                     require(answer.starts_with("HTTP/1.1 200"));
+                                     require(answer.find("slow-answer") == std::string::npos);
+                                     require(spaceWaitUntil([&] {
+                                         return !route;  // once the request that held the space's routes has ended
+                                     }));
+                                 });
+                             });
+                             when("the body of a route's reply is being read", [&] {
+                                 route = space->addRoute("/stream/", [&](const http::RouteRequest&) {
+                                     http::RouteReply reply;
+                                     reply.contentLength = 10;
+                                     reply.body          = [&, calls = 0](std::span<char> out) mutable {
+                                         const std::string_view part = calls++ == 0 ? "part1" : "part2";
+                                         if (part == "part1") {
+                                             entered.set_value();
+                                             gate.wait();
+                                         }
+                                         std::copy(part.begin(), part.end(), out.begin());
+                                         return part.size();
+                                     };
+                                     return reply;
+                                 });
+                                 Running running{app};
+                                 const auto [waited, answer] = destroyWhileBlocked("/s/alpha/stream/");
+                                 then("the destruction waits for the chunk being read, and the body ends early", [&] {
+                                     require(waited);
+                                     require(answer.find("part1") != std::string::npos);
+                                     require(answer.find("part2") == std::string::npos);
+                                 });
+                             });
+                         }};
+
+namespace {
+/// One connection, whose network the test drives: its writes complete only when the test says so.
+struct OnePageNet : webfront::testing::InjectableNetworking {
+    static inline bool accepted{};
+    static auto        Accept(Acceptor&) {
+        return networking::ex::then(networking::ex::just(), []() -> Socket {
+            if (std::exchange(accepted, true))
+                throw std::system_error(std::make_error_code(std::errc::operation_canceled));
+            return Socket{};
+        });
+    }
+};
+}  // namespace
+
+const Scenario upgradeJoins{"A WebSocket joins the space resolved for its request, never a later one of the same segment", {"spaces"}, [] {
+                                using Socket   = webfront::testing::InjectableSocket;
+                                using Injected = BasicWF<OnePageNet, fs::DefaultFS>;
+                                Socket::reset();
+                                OnePageNet::accepted = false;
+                                Injected app{WebFrontConfig{.port = "0"}};
+                                app.spaces("/s/", [](std::string_view) -> std::optional<http::RouteReply> {
+                                    return http::textReply(http::Response::notFound, "Unknown session");
+                                });
+                                auto resolved = std::make_unique<Injected::Space>(app, "/s/", "alpha");
+                                Socket::deferWrites();
+                                const std::string upgrade = "GET /s/alpha/ HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                                                            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+                                Socket::receive(std::as_bytes(std::span(upgrade)));
+                                require(Socket::hasDeferredWrites());  // the 101 is being written: the upgrade has not completed
+
+                                when("the space is destroyed and another takes its segment before the upgrade completes", [&] {
+                                    resolved.reset();
+                                    auto replacement = std::make_unique<Injected::Space>(app, "/s/", "alpha");
+                                    while (Socket::completeDeferredWrites() != 0) { }
+                                    then("the connection joins neither the replacement nor the application", [&] {
+                                        require(replacement->connectedBrowsers() == 0);
+                                        require(app.connectedBrowsers() == 0);
+                                    });
+                                });
+                                when("the space lives until the upgrade completes", [&] {
+                                    while (Socket::completeDeferredWrites() != 0) { }
+                                    then("the connection joins it", [&] {
+                                        require(resolved->connectedBrowsers() == 1);
+                                    });
+                                });
+                                Socket::deferWrites(false);
+                                app.shutdown();
+                                resolved.reset();
+                                Socket::reset();
+                            }};

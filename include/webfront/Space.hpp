@@ -16,6 +16,9 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -64,6 +67,7 @@ public:
         {
             std::scoped_lock lock{registry->mutex};
             if (!registry->attached) {
+                state->routeGuard->retire();
                 state->release();
                 return;
             }
@@ -139,12 +143,14 @@ public:
 
     /// As BasicWF::addRoute, with a prefix relative to the space: "/data/" answers `/s/abc/data/...`, and the handler
     /// receives the path within the space (RouteRequest::path starts with "/data/"). The space's routes precede the
-    /// application's; destroying the space unregisters them.
+    /// application's. The handler and its reply's body run on the server's workers: destroying the space waits for those
+    /// running (so neither may wait for the server thread, where the space is destroyed), then unregisters the routes; a
+    /// request that arrives afterwards is not found, and a body still streaming ends early.
     [[nodiscard]] http::RouteTable::Registration addRoute(std::string prefix, http::RouteHandler handler) {
-        return routes().add(std::move(prefix), std::move(handler));
+        return routes().add(std::move(prefix), guarded(std::move(handler)));
     }
     [[nodiscard]] http::RouteTable::Registration addRoute(std::string prefix, http::RouteHandler handler, http::RouteOptions options) {
-        return routes().add(std::move(prefix), std::move(handler), std::move(options));
+        return routes().add(std::move(prefix), guarded(std::move(handler)), std::move(options));
     }
 
     /// As BasicWF::forEachUI, for the started pages of this space.
@@ -179,6 +185,31 @@ private:
 
     void sendToStartedLinks(const detail::BroadcastCall<Net>& call) {
         app.sendToStartedLinks(call, state.get());
+    }
+
+    /// The handler, and the body of each reply it gives, run through the space's route guard.
+    http::RouteHandler guarded(http::RouteHandler handler) const {
+        if (!handler)
+            return handler;  // refused by RouteTable::add
+        return [guard = state->routeGuard, handler = std::move(handler)](const http::RouteRequest& request) {
+            std::optional<http::RouteReply> reply;
+            guard->run([&] {
+                reply = handler(request);
+            });
+            if (!reply)
+                return http::textReply(http::Response::notFound, "Not Found\n");  // the space is destroyed
+            if (reply->body)
+                reply->body = [guard, body = std::move(reply->body)](std::span<char> out) {
+                    std::optional<std::size_t> count;
+                    guard->run([&] {
+                        count = body(out);
+                    });
+                    if (!count)
+                        throw std::runtime_error("The space of this route was destroyed");
+                    return *count;
+                };
+            return std::move(*reply);
+        };
     }
 
     http::RouteTable& routes() {

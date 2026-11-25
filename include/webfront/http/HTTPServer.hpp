@@ -509,6 +509,15 @@ struct MountAnswer {
     std::shared_ptr<const RouteTable> routes{};
     /// Set, the request is answered with this reply, and nothing of the space is served (unknown space, full server...).
     std::optional<RouteReply> refusal{};
+    /// What the resolver resolved, handed unchanged to the upgrade handler of a WebSocket of this request (UpgradeSpace):
+    /// the connection then joins that very space, not whichever has the segment once the upgrade completes.
+    std::shared_ptr<void> target{};
+};
+
+/// The space of a connection upgraded to a WebSocket, as its mount resolved it for the upgrade request; empty outside mounts.
+struct UpgradeSpace {
+    std::string           path;    ///< The path of the mount and segment, "/s/abc/".
+    std::shared_ptr<void> target;  ///< MountAnswer::target.
 };
 
 /// Called on the server context with the decoded segment that follows the prefix of a mount: `/s/abc/x` gives "abc".
@@ -1138,13 +1147,13 @@ public:
     }
 
     /// Called, on the context's thread, with the socket of a connection upgraded to a WebSocket. A handler that also takes a
-    /// std::string_view receives the space of the upgrade: the path of its mount and segment ("/s/abc/"), empty outside.
+    /// `const UpgradeSpace&` receives the space of the upgrade, as its mount resolved it; empty outside the mounts.
     template <typename Handler>
     void onUpgrade(Handler&& handler) {
-        if constexpr (std::invocable<Handler&, typename Net::Socket&&, std::string_view>)
+        if constexpr (std::invocable<Handler&, typename Net::Socket&&, const UpgradeSpace&>)
             upgradeHandler = std::forward<Handler>(handler);
         else
-            upgradeHandler = [forward = std::forward<Handler>(handler)](typename Net::Socket&& socket, std::string_view) mutable {
+            upgradeHandler = [forward = std::forward<Handler>(handler)](typename Net::Socket&& socket, const UpgradeSpace&) mutable {
                 forward(std::move(socket));
             };
     }
@@ -1189,7 +1198,7 @@ private:
     // providers (WebFront.js, pages) keep flowing for the other browsers.
     BlockingWorker                                                            routeWorker{4};
     BlockingWorker                                                            fileWorker{2};
-    std::function<void(typename Net::Socket&&, std::string_view)>             upgradeHandler;
+    std::function<void(typename Net::Socket&&, const UpgradeSpace&)>          upgradeHandler;
     mutable std::mutex                                                        mountsMutex;  // guards mounts, added from any thread
     std::vector<std::pair<std::string, std::shared_ptr<const MountResolver>>> mounts;
 
@@ -1200,6 +1209,7 @@ private:
         std::string                       logged;  ///< What the logs show of it: the segment, a session's secret, masked ("/s/*").
         std::string                       uri;     ///< The target within the space, encoded again: "/rest?query".
         std::shared_ptr<const RouteTable> routes;
+        std::shared_ptr<void>             target;  ///< MountAnswer::target.
     };
 
     std::optional<Mounted> resolveMount(const Request& request) const {
@@ -1273,6 +1283,7 @@ private:
         mounted.logged = prefix + "*";
         mounted.uri    = rest + (query.empty() ? "" : "?" + query);
         mounted.routes = std::move(answer.routes);
+        mounted.target = std::move(answer.target);
         return mounted;
     }
 
@@ -1593,7 +1604,7 @@ private:
         bool                                                        head           = false;
         bool                                                        servicesTarget = false;
         Response                                                    response;
-        std::string                                                 space;  // the path of the mount and segment, under a mount
+        UpgradeSpace                                                space;  // the space resolved for a request under a mount
         try {
             std::array<char, Policy::receptionBufferSize> buffer;
             std::string_view                              rest;  // received after the headers, still in `buffer`: the start of a body
@@ -1616,7 +1627,7 @@ private:
                     co_await sendReply(socket, request.method == Request::Method::Head, std::move(*mounted->reply));
                     co_return;
                 }
-                space       = std::move(mounted->space);
+                space       = UpgradeSpace{std::move(mounted->space), std::move(mounted->target)};
                 within      = std::move(mounted->logged);
                 spaceRoutes = std::move(mounted->routes);
                 request.uri = std::move(mounted->uri);

@@ -769,16 +769,14 @@ private:
           ptyPagesAllowed(config.allowPtyPages),
           idsCounter(0) {
         // Links are created on the server thread, outside the lock: identifiers are only assigned here.
-        httpServer.onUpgrade([this](typename Net::Socket&& socket, std::string_view spacePath) {
-            WebLinkId                   id{};
-            WebLinkGeneration           generation{};
-            std::shared_ptr<SpaceState> space;
-            if (!spacePath.empty()) {
-                // The space was resolved for the upgrade request: one destroyed since then leaves the socket to close.
-                space = spaceRegistry->find(spacePath);
-                if (!space)
-                    return;
-            }
+        httpServer.onUpgrade([this](typename Net::Socket&& socket, const http::UpgradeSpace& resolved) {
+            WebLinkId         id{};
+            WebLinkGeneration generation{};
+            // The very space resolved for the upgrade request, never another that took its segment since: one destroyed
+            // meanwhile (checked below, under the lock its destruction takes) leaves the socket to close.
+            auto space = std::static_pointer_cast<SpaceState>(resolved.target);
+            if (!resolved.path.empty() && !space)
+                return;
             {
                 std::scoped_lock lock{linksMutex};
                 if (space && !space->alive)
@@ -916,18 +914,18 @@ public:
                              const auto path   = prefix + std::string(segment) + "/";
                              const auto routes = [&]() -> std::optional<http::MountAnswer> {
                                  if (const auto found = spaceRegistry->find(path))
-                                     return http::MountAnswer{.routes = found->routeTable(), .refusal = {}};
+                                     return http::MountAnswer{.routes = found->routeTable(), .refusal = {}, .target = found};
                                  return std::nullopt;
                              };
                              if (auto existing = routes())
                                  return std::move(*existing);
                              if (!detail::validSpaceSegment(segment))
-                                 return {.routes = nullptr, .refusal = http::textReply(http::Response::notFound, "Not Found\n")};
+                                 return {.routes = nullptr, .refusal = http::textReply(http::Response::notFound, "Not Found\n"), .target = nullptr};
                              if (auto refusal = (*resolve)(segment))
-                                 return {.routes = nullptr, .refusal = std::move(refusal)};
+                                 return {.routes = nullptr, .refusal = std::move(refusal), .target = nullptr};
                              if (auto created = routes())
                                  return std::move(*created);
-                             return {.routes = nullptr, .refusal = http::textReply(http::Response::notFound, "Not Found\n")};
+                             return {.routes = nullptr, .refusal = http::textReply(http::Response::notFound, "Not Found\n"), .target = nullptr};
                          });
         std::scoped_lock lock{spaceRegistry->mutex};
         spaceRegistry->families.push_back(std::move(prefix));
@@ -1622,6 +1620,8 @@ private:
                     links.push_back(connection.link);
                 }
         }
+        // Route handlers run on the server's workers, not on this thread: the space waits for those running, and none starts.
+        space->routeGuard->retire();
         space->release();
         for (const auto& link : links)
             link->stop();  // a stopped link reports no closure: closeSpacePages does what the closed event would
@@ -2031,13 +2031,13 @@ private:
                 std::optional<WebLinkGeneration>       closedGeneration;
                 std::shared_ptr<detail::DeferredCalls> stoppedCalls;
                 std::shared_ptr<SpaceState>            space;
-                bool                                   lastPage = false;
+                bool                                   spaceEmptied = false;
                 {
                     std::scoped_lock lock{linksMutex};
                     if (auto found = webLinks.find(event.webLinkId); found != webLinks.end()) {
                         space = found->second.space;
                         if (space && !found->second.closed)
-                            lastPage = --space->pages == 0 && space->alive;
+                            spaceEmptied = --space->pages == 0 && space->alive;
                         found->second.closed = true;
                         found->second.deferred.clear();
                         closedGeneration = found->second.generation;
@@ -2061,7 +2061,7 @@ private:
                         return space->alive.load();
                     });
                 uiClosedSubscribers->notify(ui);
-                if (lastPage && space->alive) {
+                if (spaceEmptied && space->alive) {
                     // The handler may destroy the space: it runs on a copy, and the state is kept by `space`.
                     if (const auto handler = space->onLastClosed())
                         handler();

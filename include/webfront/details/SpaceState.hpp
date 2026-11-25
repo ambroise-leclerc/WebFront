@@ -11,6 +11,7 @@
 
 #include "../http/HTTPServer.hpp"
 #include "../UISubscribers.hpp"
+#include "../weblink/WebLink.hpp"
 
 #include <atomic>
 #include <cstddef>
@@ -38,6 +39,10 @@ struct SpaceState {
     std::atomic<bool> alive{true};
     /// The pages connected and not closed; guarded by the application's lock of its connections.
     std::size_t pages = 0;
+
+    /// Every call of the space's route handlers and of their replies' bodies runs through it: destroying the space retires
+    /// it, which waits for those running on the server's workers and lets none start afterwards.
+    const std::shared_ptr<HandlerGuard> routeGuard = std::make_shared<HandlerGuard>();
 
     const std::shared_ptr<UISubscribers<UI>> started = std::make_shared<UISubscribers<UI>>();
     const std::shared_ptr<UISubscribers<UI>> closed  = std::make_shared<UISubscribers<UI>>();

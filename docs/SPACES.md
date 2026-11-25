@@ -85,6 +85,11 @@ space->onLastUIClosed([&app, &sessions, id = std::string(id)] {
 Destroying a space closes its pages (the application's `subscribeUIClosed` handlers are told; the space's own handlers
 are released first and are not), unregisters its functions and routes, and lets the resolver decide again for its segment.
 A space destroyed by one of its own handlers calls none of its handlers that would have followed, nor `onLastUIClosed`.
+A space's route handlers and the bodies of their replies run on the server's workers, not on the server thread: destroying
+the space waits for those running, so neither may wait for the server thread. A request that reaches a destroyed space's
+route afterwards is not found, and a body that is still streaming ends early. A WebSocket joins the space resolved for its
+request: if that space is destroyed before the upgrade completes, the connection is closed, even when another space has
+taken the segment meanwhile.
 Destroy a space on the server thread, where its callbacks run (in a task of `app.spawn`, in `onLastUIClosed`, in a
 callback), or at a time when none of its callbacks can run; destroy the spaces before their application.
 
