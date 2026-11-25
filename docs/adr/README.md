@@ -1,7 +1,7 @@
 # WebFront architecture decision records
 
 This directory describes WebFront’s architectural choices and the constraints to preserve
-when making changes or generating code. It contains **26 ADRs**, with unique numbers.
+when making changes or generating code. It contains **27 ADRs**, with unique numbers.
 The accepted baseline corresponds to commit `b031ab5` dated **2026-10-19**;
 the developer environment proposals are dated **2026-10-20**, the direct frontend access proposal **2026-10-24**,
 the DOM access proposal **2026-10-26**, the developer automation proposal **2026-10-28**, accepted **2026-10-29**, the system services proposal **2026-10-31**, and the developer environment publication proposal **2026-11-02**. Each ADR is versioned
@@ -58,7 +58,7 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-013](ADR-013-bootstrap-developpeur-a-la-demande.md) | Bootstrapping a downloaded developer environment | Accepted | 2026-10-20 | 1.0 — 2026-10-24 |
 | [ADR-014](ADR-014-construction-javascript-dans-le-browser.md) | Resolving npm dependencies and building inside the browser | Accepted | 2026-10-20 | 1.0 — 2026-10-24 |
 | [ADR-015](ADR-015-ressources-generees-par-application.md) | Generating application-owned embedded resources | Accepted | 2026-10-20 | 1.0 — 2026-10-24 |
-| [ADR-016](ADR-016-bootstrap-comme-socle.md) | The bootstrap environment as WebFront's foundation | Accepted | 2026-10-22 | 1.6 — 2026-10-26 |
+| [ADR-016](ADR-016-bootstrap-comme-socle.md) | The bootstrap environment as WebFront's foundation | Accepted through 1.6; 1.7 proposed (ADR-027) | 2026-10-22 | 1.7 — 2026-11-25 |
 | [ADR-017](ADR-017-acces-direct-aux-frontends.md) | Direct access to embedded frontends, with HTML kept normative | Proposed | 2026-10-24 | 1.1 — 2026-10-25 |
 | [ADR-018](ADR-018-acces-au-dom.md) | DOM access from C++ through a bounded mutation stream, without contesting the DOM of UI libraries | Proposed, partially superseded, partially delivered | 2026-10-26 | 1.5 — 2026-10-30 |
 | [ADR-019](ADR-019-developpement-automatisable-et-agents.md) | Automating the developer environment through shared operations and an optional local MCP adapter | Accepted (1.2); amendment 1.5 by ADR-025 proposed | 2026-10-28 | 1.5 — 2026-11-21 |
@@ -69,6 +69,7 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-024](ADR-024-tls-integre.md) | Optional integrated TLS 1.3 server | Proposed | 2026-11-21 | 1.0 |
 | [ADR-025](ADR-025-mcp-http-dans-l-application.md) | The application serves MCP over Streamable HTTP on its own loopback listener, with a session Bearer token, strict Host/Origin checks, per-instance discovery and no automation in distribution builds; the webfront-agent launcher is removed; amends ADR-019 | Accepted (delivery in progress) | 2026-11-21 | 1.3 — 2026-11-22 |
 | [ADR-026](ADR-026-configuration-mcp-persistante.md) | Stable MCP client configuration with explicit development security modes | Accepted | 2026-11-22 | 1.2 — 2026-11-22 |
+| [ADR-027](ADR-027-inspecteurs-de-l-etat-de-l-application.md) | Application state inspectors in the developer environment only: reserved `webfront.inspector.*` functions refused to unproven views unless the application trusts loopback clients, tree nodes on existing bridge types with paged reads and paged differences, observer operations run whole under the application's lock or on its executor, writes only when the application provides them, one `inspector.html` page in the first container that grants access | Proposed | 2026-11-25 | 1.0 — 2026-11-25 |
 
 Numbering follows the reading topics; milestones and individual file histories provide
 the chronology, which does not follow the numerical order.
@@ -97,6 +98,7 @@ the chronology, which does not follow the numerical order.
 | Downloaded development environment, npm libraries and generated application assets | 008, 009, 010, 013, 014, 015, 016 |
 | Developer automation, agent access, MCP and consumer UI tests | 004, 006, 008, 012, 013, 014, 016, 019, 025 |
 | System services: file dialogs, host files, clipboard, notifications, opening links | 002, 003, 006, 007, 008, 010, 017, 020 |
+| Developer environment inspectors, observers and the registry of C++ functions | 003, 004, 006, 008, 016, 020, 023, 027 |
 
 ADRs explain decisions; [AGENTS.md](../../AGENTS.md) sets out working instructions,
 the [README](../../README.md) provides the user journey, and specialist documents define
@@ -114,7 +116,7 @@ Do not replace historical dates with the date of an editorial change to the docu
 Keep previous rows and update the current version in the index.
 
 - Use one `ADR-NNN-description.md` file per decision and one row in this index. The next number
-  is **ADR-027**. Retain historical numbers and files.
+  is **ADR-028**. Retain historical numbers and files.
 - For a new decision that has not been integrated, use **Proposée** (Proposed), its actual
   proposal date and validation criteria; do not assign an artificial historical commit date.
 - After integration, record the date and supporting commits, the accepted negative

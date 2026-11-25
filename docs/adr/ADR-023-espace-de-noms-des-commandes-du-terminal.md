@@ -135,3 +135,7 @@ Elles n'ont pas d'opération d'automatisation, comme `wf list` : un agent lit le
 - **Preuves :** specs Jasmine `files-specs.mjs` et `dependencies-specs.mjs`, scénarios Catch2 de `Store::entries` et
   des noms réservés, test `CommandNamesAgree`, et le parcours navigateur `developer_integration` qui exécute les commandes
   dans le terminal.
+- **Accès (proposé par l'[ADR-027](ADR-027-inspecteurs-de-l-etat-de-l-application.md)) :** quand le frontend transmet la
+  preuve de vue, `webfront.commands.start` et `webfront.commands.cancel` exigent une connexion prouvée
+  (`isLocalClient`), car une commande de l'application peut écrire dans le projet ; `webfront.commands.list` garde le
+  contrôle d'origine.

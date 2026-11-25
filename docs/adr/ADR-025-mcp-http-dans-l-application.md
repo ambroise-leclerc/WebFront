@@ -249,3 +249,6 @@ Les menaces, actifs et risques résiduels de l'ADR-019 restent valables. Ce qui 
 - [MCP 2025-11-25, transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) (Streamable HTTP,
   `Mcp-Session-Id`, `MCP-Protocol-Version`, validation d'`Origin`).
 - [MCP, bonnes pratiques de sécurité](https://modelcontextprotocol.io/docs/2025-11-25/tutorials/security/security_best_practices).
+- [ADR-027](ADR-027-inspecteurs-de-l-etat-de-l-application.md) : si la story #685 est retenue, les lectures des inspecteurs
+  deviennent des outils MCP de l'application, sous les grants et l'authentification de cette décision ; leur écriture n'est
+  pas exposée en MCP.
