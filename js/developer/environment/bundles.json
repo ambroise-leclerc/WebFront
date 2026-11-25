@@ -23,7 +23,7 @@
   "js/developer/environment/testing.mjs": "aeb584505fab5957b9c02e78536e12f7d7f3d12f8adb2e17f1a1a6e395e43f3c",
   "js/developer/environment/terminal.mjs": "1d81a28a6e6cfd5bdb1ff8854e17a273b7bcfebf2c97d469b8706db636f3799e",
   "js/developer/environment/workspace.mjs": "5af5ea2a9a27c403d60fe54c268ae07741cae8a89da2cc148e4f64114f2b71d7",
-  "js/developer/environment/menu.mjs": "ed1ce2b94c123d74c43f224a171351ab75bbb735f50f2a0547c8fb6ce1234879",
+  "js/developer/environment/menu.mjs": "9399a5d6a4c28cbf775713ae87e59de905a109d67034024abe03b81a5af9eeb4",
   "js/developer/environment/tarball.mjs": "1c1e1aea067910e1fec74e85b4bf9fbefed9b38187a04d8d2764f0b9a96fca39",
   "js/developer/environment/commands.mjs": "a759f48584b78aed79e9965fd202d2ec108a6948ef6f1b8d689fed87a458b265",
   "js/developer/environment/files.mjs": "199336f7f3d23f6370da352993bf4686738b1f394b79aa9883769d19824540e0",

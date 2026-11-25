@@ -403,7 +403,11 @@ export function createTabMenu({button, entries, activate}) {
     });
     // The mousedown that a touch engine sends after the finger lifts would move the focus to the tab: it is cancelled.
     button.addEventListener('mousedown', event => { if (afterLongPress) event.preventDefault(); });
-    button.addEventListener('pointercancel', cancelPress);
+    // A cancelled pointer sends neither compatibility mouse events nor a click: the touch, long press included, is over.
+    button.addEventListener('pointercancel', () => {
+        cancelPress();
+        endLongPress();
+    });
 
     return {
         open, close,

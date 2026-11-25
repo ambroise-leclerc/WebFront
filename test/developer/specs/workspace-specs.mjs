@@ -470,6 +470,25 @@ describe('The developer page layout', () => {
                 } finally { jasmine.clock().uninstall(); }
             });
 
+            it('ends the long press when its pointer is cancelled after the menu opened', () => {
+                jasmine.clock().install();
+                try {
+                    const touch = type => button.dispatchEvent(new PointerEvent(type, {bubbles: true, pointerType: 'touch', clientX: 980, clientY: 100}));
+                    touch('pointerdown');
+                    jasmine.clock().tick(longPress.delay);
+                    expect(menu.isOpen).toBeTrue();
+                    touch('pointercancel');  // no pointerup, no click: nothing else comes from this touch
+                    // The tab is a tab again at once, with no delay to wait for.
+                    expect(button.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true}))).toBeTrue();
+                    button.focus();
+                    button.dispatchEvent(new FocusEvent('focusin', {bubbles: true}));
+                    expect(menu.isOpen).toBeFalse();
+                    expect(document.activeElement).toBe(button);
+                    button.click();  // Enter or Space on the tab
+                    expect(activated).toEqual(['click']);
+                } finally { jasmine.clock().uninstall(); }
+            });
+
             it('stays open after a long press when the engine sends mouse events once the finger lifts', () => {
                 jasmine.clock().install();
                 try {
