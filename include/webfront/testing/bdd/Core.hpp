@@ -37,6 +37,7 @@
 #pragma once
 
 #include <atomic>
+#include <cfloat>
 #include <charconv>
 #include <clocale>
 #include <concepts>
@@ -150,9 +151,14 @@ void append(std::string& text, const T& value) {
     else if constexpr (std::is_enum_v<T>)
         append(text, static_cast<std::underlying_type_t<T>>(value));
     else if constexpr (std::is_floating_point_v<T>) {
+        // A long double keeps its own precision, so that two operands that differ are not written alike.
         char buffer[64];
-        auto length = std::snprintf(buffer, sizeof buffer, "%.17g", static_cast<double>(value));
-        text       += withPoint({buffer, length > 0 ? static_cast<std::size_t>(length) : 0});
+        int  length;
+        if constexpr (std::is_same_v<T, long double>)
+            length = std::snprintf(buffer, sizeof buffer, "%.*Lg", LDBL_DECIMAL_DIG, value);
+        else
+            length = std::snprintf(buffer, sizeof buffer, "%.17g", static_cast<double>(value));
+        text += withPoint({buffer, length > 0 ? static_cast<std::size_t>(length) : 0});
     } else if constexpr (std::is_integral_v<T>) {
         char buffer[64];
         auto [end, error] = std::to_chars(buffer, buffer + sizeof buffer, value);

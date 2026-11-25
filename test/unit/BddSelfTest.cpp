@@ -15,6 +15,7 @@
 
 #include <chrono>
 #include <clocale>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
@@ -378,6 +379,7 @@ const Scenario equalFails{"checkEqual reports its operands", [] {
                               checkEqual(Opaque{1}, Opaque{2});
                               checkEqual(std::string{"left text"}, "right text");
                               checkEqual(static_cast<const char*>(nullptr), "x");
+                              checkEqual(1.0L, std::nextafter(1.0L, 2.0L));  // written with the precision of a long double
                               trace.push_back("after check");
                               requireEqual(2, 3);
                               trace.push_back("not reached");
@@ -556,6 +558,7 @@ int main() {
                                       "left:  {?}\n  right: {?}",
                                       "left:  left text\n  right: right text",
                                       "left:  nullptr\n  right: x",
+                                      "left:  1\n  right: 1.0000000000000",
                                       "left:  2\n  right: 3"})
             if (xml.find(part) == std::string::npos) {
                 ++failures;
