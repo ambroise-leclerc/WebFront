@@ -77,13 +77,21 @@ export function placeMenu(anchor, size, viewport) {
     return {x: within(x, size.width, viewport.width), y: within(y, size.height, viewport.height), side};
 }
 
+/**
+ * Whether a key opens the menu of the focused tab: the Menu key, or Shift+F10 alone. On the tab they open its menu
+ * before the terminal's shortcut, which a manifest may set to Shift+F10 (workspace.mjs): a click, Enter or Space on the
+ * tab, and the menu's Terminal entry, still reach the terminal there.
+ */
+export const isMenuKey = event => event.key === 'ContextMenu'
+    || (event.key === 'F10' && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey);
+
 /** How long a touch stays on the tab before the menu opens instead of the terminal, and how far it may move. */
 export const longPress = {delay: 550, distance: 10};
 
 // --- Menu ------------------------------------------------------------------------------------------------------
 
 export const menuStyles = `
-.webfront-menu{position:fixed;z-index:2147483647;box-sizing:border-box;min-width:220px;max-width:min(360px,100vw);max-height:100vh;overflow:auto;padding:4px;background:#202737;color:#e8edf4;border:1px solid #46536a;border-radius:8px;box-shadow:0 8px 32px #000a;font:14px system-ui}
+.webfront-menu{position:fixed;z-index:2147483647;box-sizing:border-box;min-width:min(220px,100vw);max-width:min(360px,100vw);max-height:100vh;overflow:auto;padding:4px;background:#202737;color:#e8edf4;border:1px solid #46536a;border-radius:8px;box-shadow:0 8px 32px #000a;font:14px system-ui}
 .webfront-menu[hidden]{display:none}
 .webfront-menu [role=menu]{display:flex;flex-direction:column}
 .webfront-menu-item{box-sizing:border-box;display:flex;align-items:center;gap:16px;width:100%;min-height:44px;margin:0;padding:0 12px;border:0;border-radius:4px;background:none;color:inherit;font:inherit;text-align:start;cursor:pointer}
@@ -351,8 +359,7 @@ export function createTabMenu({button, entries, activate}) {
         open(atPointer ? {left: lastPointer.x, right: lastPointer.x, top: lastPointer.y, bottom: lastPointer.y} : undefined);
     });
     button.addEventListener('keydown', event => {
-        const menuKey = event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey);
-        if (!menuKey) return;
+        if (!isMenuKey(event)) return;
         event.preventDefault();
         event.stopPropagation();
         open();

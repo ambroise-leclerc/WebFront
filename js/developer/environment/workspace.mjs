@@ -5,7 +5,7 @@
 // context menu (menu.mjs): the terminal and the inspectors of the application's state.
 import {call, readProject, publish} from './io.mjs';
 import {parseShortcut, defaultTerminalShortcut, parseManifest, manifestPath} from './manifest.mjs';
-import {createTabMenu, inspectorMenus, readInspectorAccess, accessReasons, menuStyles} from './menu.mjs';
+import {createTabMenu, inspectorMenus, readInspectorAccess, accessReasons, menuStyles, isMenuKey} from './menu.mjs';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -342,6 +342,8 @@ export async function createWorkspace({bridge, element, frame, openInspector = n
     // The listener is the first of its window (below), so the application's ones never see the shortcut.
     const onKey = event => {
         if (!isToggleKey(event, shortcut) || state === State.terminal) return;
+        // On the focused tab, a shortcut that is also a menu key (Shift+F10 in the manifest) opens the tab's menu.
+        if (event.target === button && isMenuKey(event)) return;
         event.preventDefault();
         event.stopImmediatePropagation();
         menu.close({focus: false});

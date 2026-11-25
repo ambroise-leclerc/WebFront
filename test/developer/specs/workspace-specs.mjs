@@ -464,26 +464,93 @@ describe('The developer page layout', () => {
             });
         });
 
-        describe('with an answer of C++ that comes after the submenu opened', () => {
-            const press = (target, init) => target.dispatchEvent(new KeyboardEvent('keydown', {bubbles: true, cancelable: true, ...init}));
-            let workspace, frame, answer;
-
-            beforeEach(async () => {
-                const {bridge: projectBridge} = memoryBridge();
-                const asked = new Promise(resolve => { answer = resolve; });
-                const bridge = {cppFunction: name => name === containersFunction ? () => asked : projectBridge.cppFunction(name)};
-                const element = document.createElement('div');
-                frame = document.createElement('iframe');
-                frame.hidden = true;
-                document.body.append(element, frame);
-                workspace = await createWorkspace({bridge, element, frame, openInspector: () => {}});
-            });
-            afterEach(() => {
+        // A workspace of this page on a project in memory, whose webfront.inspector.containers() answers `containers`.
+        const press = (target, init) => target.dispatchEvent(new KeyboardEvent('keydown', {bubbles: true, cancelable: true, ...init}));
+        async function testWorkspace({files = new Map(), containers = Promise.resolve([false, true, false])} = {}) {
+            const {bridge: projectBridge} = memoryBridge(files);
+            const bridge = {cppFunction: name => name === containersFunction ? () => containers : projectBridge.cppFunction(name)};
+            const element = document.createElement('div'), frame = document.createElement('iframe');
+            frame.hidden = true;
+            document.body.append(element, frame);
+            const workspace = await createWorkspace({bridge, element, frame, openInspector: () => {}});
+            const remove = async () => {
                 workspace.menu.close({focus: false});
+                frame.hidden = true;  // the layout goes back to the terminal alone: its listeners on this window do nothing
+                await new Promise(resolve => setTimeout(resolve));
                 [workspace.panel, workspace.button, frame].forEach(node => node.remove());
                 document.head.querySelectorAll('style').forEach(style => { if (style.textContent.includes('.webfront-terminal-toggle')) style.remove(); });
                 document.documentElement.removeAttribute('data-webfront-workspace');
+            };
+            return {workspace, frame, remove};
+        }
+
+        describe('with Shift+F10 as the terminal\'s shortcut', () => {
+            let mounted;
+            beforeEach(async () => {
+                const manifest = encode(JSON.stringify({format: 1, name: 'app', version: '0.1.0', developer: {terminalShortcut: 'Shift+F10'}}));
+                const files = new Map([['webfront.project.json', manifest], [`${previewDirectory}/index.html`, encode('<p>app')]]);
+                mounted = await testWorkspace({files});
             });
+            afterEach(() => mounted.remove());
+
+            it('opens the menu of the focused tab, and toggles the terminal anywhere else', () => {
+                const {workspace} = mounted;
+                expect(workspace.shortcut).toBe('Shift+F10');
+                expect(workspace.state).toBe(State.interface);
+                workspace.button.focus();
+                press(workspace.button, {key: 'F10', shiftKey: true});
+                expect(workspace.menu.isOpen).toBeTrue();
+                expect(workspace.state).toBe(State.interface);
+                // In the menu, the shortcut is the terminal's again: it closes the menu and opens the terminal.
+                press(document.activeElement, {key: 'F10', shiftKey: true});
+                expect(workspace.menu.isOpen).toBeFalse();
+                expect(workspace.state).toBe(State.floating);
+                press(document.body, {key: 'F10', shiftKey: true});
+                expect(workspace.state).toBe(State.interface);
+                expect(workspace.menu.isOpen).toBeFalse();
+                // From the tab, the terminal is still a click (Enter or Space) away.
+                workspace.button.click();
+                expect(workspace.state).toBe(State.floating);
+            });
+        });
+
+        it('fits a window narrower than its usual width', async () => {
+            const host = document.createElement('iframe');
+            host.style.cssText = 'position:fixed;left:0;top:0;width:180px;height:400px;border:0';
+            const loaded = new Promise(resolve => host.addEventListener('load', resolve, {once: true}));
+            host.srcdoc = '<!doctype html><body style="margin:0">';
+            document.body.append(host);
+            await loaded;
+            try {
+                const page = host.contentDocument, style = page.createElement('style'), tab = page.createElement('button');
+                style.textContent = menuStyles;
+                tab.style.cssText = 'position:fixed;right:0;top:64px;width:44px;height:88px';
+                page.head.append(style);
+                page.body.append(tab);
+                const narrow = createTabMenu({button: tab, activate: () => {}, entries: [
+                    {id: 'terminal', label: 'Terminal', hint: 'F9'},
+                    ...inspectorMenus.map(group => ({...group, children: group.children.map(panel => ({...panel, reason: () => accessReasons.noContainer}))})),
+                ]});
+                narrow.open();
+                press(page.activeElement, {key: 'ArrowDown'});
+                press(page.activeElement, {key: 'ArrowRight'});
+                expect(narrow.panels.length).toBe(2);
+                for (const panel of narrow.panels) {
+                    const box = panel.getBoundingClientRect();
+                    expect(box.left >= 0 && box.right <= 180.5 && box.width <= 180).withContext(JSON.stringify(box)).toBeTrue();
+                }
+                narrow.close({focus: false});
+            } finally { host.remove(); }
+        });
+
+        describe('with an answer of C++ that comes after the submenu opened', () => {
+            let mounted, workspace, answer;
+
+            beforeEach(async () => {
+                mounted = await testWorkspace({containers: new Promise(resolve => { answer = resolve; })});
+                workspace = mounted.workspace;
+            });
+            afterEach(() => mounted.remove());
             // Opens the submenu of `group` (1: C++ state, 2: TypeScript state) while C++ has not answered yet.
             const openSubmenu = (group, anchor) => {
                 workspace.menu.open(anchor);

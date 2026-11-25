@@ -431,7 +431,10 @@ environment's `mount`, not to the embedded bootstrap page):
   of the application's state ([ADR-027](adr/ADR-027-inspecteurs-de-l-etat-de-l-application.md)). The arrow keys move in
   it and open a submenu (right arrow, Enter or Space; the left arrow closes it), Escape closes it and gives the focus back
   to the tab, and a press elsewhere closes it. It opens beside the tab and stays inside the browser window, on the other
-  side or upwards when there is no room. Closed, it takes no key from the interface.
+  side or upwards when there is no room, and narrows to a window smaller than its width. Closed, it takes no key from
+  the interface. A manifest may name Shift+F10 as the terminal's shortcut: on the focused tab, Shift+F10 then opens the
+  menu, and the tab's click (Enter or Space) or the menu's Terminal entry opens the terminal; anywhere else, the menu
+  included, the shortcut toggles the terminal.
 
   An inspector entry that cannot open is greyed, and the menu says why. The page asks C++ once which containers would
   reach the inspectors (`webfront.inspector.containers()`, section 8 of the ADR). A library without that function is too
