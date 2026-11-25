@@ -121,22 +121,42 @@ const styles = `
 /** Where a page keeps its host identifier: the session storage of its tab, so that a reload keeps its detached windows. */
 export const hostKey = 'webfront-inspector-host';
 
+const validHost = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value);
+const randomHost = view => Array.from(view.crypto.getRandomValues(new Uint8Array(12)), byte => byte.toString(16).padStart(2, '0')).join('');
+
+/** Takes the lock `name` for as long as the page lives, when nobody holds it; resolves with whether it did. */
+function holdLock(locks, name) {
+    return new Promise(resolve => {
+        locks.request(name, {ifAvailable: true}, lock => {
+            resolve(Boolean(lock));
+            return lock ? new Promise(() => {}) : undefined;  // held until the page goes away
+        }).catch(() => resolve(false));
+    });
+}
+
 /**
- * The identifier of this host page: the one its tab already has, else a new random one (1 to 64 letters, digits, `-` or
- * `_`, which webfront.inspector.openWindow checks). Each tab has its own, so a detached panel is attached again only to
- * the page that detached it, even when several pages of the application are open on the same origin.
+ * The identifier of this host page (1 to 64 letters, digits, `-` or `_`, which webfront.inspector.openWindow checks), so
+ * that a detached panel is attached again only to the page that detached it. A reload keeps it: it is kept in the tab's
+ * session storage. That storage is also copied into a page that this one opens, so the identifier is used only by the page
+ * that holds its lock (Web Locks, exclusive for the origin, released when the page goes away): a page that finds it held
+ * takes a new one. Without Web Locks nothing can tell a reload from a copy, and every load takes a new identifier.
  */
-export function hostIdentifier(view) {
-    const valid = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value);
+export async function claimHostIdentifier(view) {
     let stored = null;
     try { stored = view.sessionStorage?.getItem(hostKey); }
     catch { /* no storage: a new identifier for this load */ }
-    if (valid(stored)) return stored;
-    const bytes = view.crypto.getRandomValues(new Uint8Array(12));
-    const made = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
-    try { view.sessionStorage?.setItem(hostKey, made); }
+    const locks = view.navigator?.locks;
+    let claimed = null;
+    if (locks) {
+        for (let candidate = validHost(stored) ? stored : randomHost(view), attempt = 0; attempt < 4 && !claimed; ++attempt) {
+            if (await holdLock(locks, `${hostKey}:${candidate}`)) claimed = candidate;
+            else candidate = randomHost(view);
+        }
+    }
+    claimed ??= randomHost(view);
+    try { view.sessionStorage?.setItem(hostKey, claimed); }
     catch { /* kept for this load only */ }
-    return made;
+    return claimed;
 }
 
 /**
@@ -144,11 +164,11 @@ export function hostIdentifier(view) {
  * the menu read (menu.mjs, inspectorAccess), and `embedded` to whether this page is an embedded view (by default asked to
  * webfront.inspector.embedded(); an error counts as embedded, which never offers a tab). `open(panel)` shows a panel in its
  * container, `detach(panel)` and `attach(panel)` move it, and `reason(panel)` says why it cannot be detached ('' when it
- * can). `windowOpen` replaces window.open (tests). `hostId` names this page in its detached windows (hostIdentifier()).
+ * can). `windowOpen` replaces window.open (tests). `hostId` names this page in its detached windows (claimHostIdentifier()).
  */
 export async function createInspectorHost({bridge, page, inspectorUrl, access, embedded = null, windowOpen = null, hostId = null}) {
     const view = page.defaultView, root = page.documentElement;
-    const self = hostId ?? hostIdentifier(view);
+    const self = hostId ?? await claimHostIdentifier(view);
     const viewport = () => ({width: root.clientWidth, height: root.clientHeight});
     const [preferences, containers, isEmbedded] = await Promise.all([
         readPreferences(bridge),
@@ -275,7 +295,8 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
                 return false;
             }
         }
-        const tab = openTab(urlOf(id), `webfront-inspector-${id.replace('.', '-')}`);
+        // The target names the host too: a tab of another page of the same browsing group is never reused for this one.
+        const tab = openTab(urlOf(id), `webfront-inspector-${self}-${id.replace('.', '-')}`);
         if (tab) return true;
         retryPanel = id;
         showFloating(id, hostReasons.blocked);

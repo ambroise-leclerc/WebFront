@@ -676,7 +676,10 @@ vue. Elle le demande à `webfront.inspector.embedded()`, qui vérifie l'accès c
 `UI::isEmbeddedView()` de l'appelant ; un échec compte comme une vue intégrée, ce qui n'essaie jamais d'onglet.
 
 Chaque page hôte a un **identifiant** (1 à 64 lettres, chiffres, `-` ou `_`), gardé dans le stockage de session de son
-onglet. Un panneau détaché a sa propre fenêtre, nommée par la page `inspector.html?panel=<id>&host=<hôte>` :
+onglet pour qu'un rechargement le garde. Ce stockage étant copié dans une page qu'elle ouvre, l'identifiant n'est repris
+que par la page qui en détient le verrou (Web Locks, exclusif pour l'origine, libéré quand la page disparaît) ; sans
+Web Locks, chaque chargement en tire un nouveau. Le nom de l'onglet d'un panneau détaché nomme aussi l'hôte, pour qu'une
+autre page du même groupe de navigation ne réutilise pas son onglet. Un panneau détaché a sa propre fenêtre, nommée par la page `inspector.html?panel=<id>&host=<hôte>` :
 `openWindow(panneau, hôte, largeur, hauteur)` n'accepte que les panneaux du menu et un identifiant valide, et
 `webfront.inspector.closeWindow(panneau, hôte)` ferme celle d'un panneau rattaché de nouveau. Les deux s'exécutent sur
 le thread de l'interface, où `openSecondaryWindow` et `requestClose(page)` ne retiennent pas le thread du serveur. Une

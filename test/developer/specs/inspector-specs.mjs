@@ -2,7 +2,7 @@
 // project, the floating window, detaching and attaching, and the discovery of the watches. The page in a real window, tab
 // or frame is checked in test/web/developer-specs.mjs.
 import {detachedContainer, containerFor, hostReasons, parsePreferences, formatPreferences, readPreferences, preferencesPath,
-    createInspectorHost, defaultInspectorRect, panelTitle, hostIdentifier, hostKey, prepareInspectors} from '../../../js/developer/environment/inspector-host.mjs';
+    createInspectorHost, defaultInspectorRect, panelTitle, claimHostIdentifier, hostKey, prepareInspectors} from '../../../js/developer/environment/inspector-host.mjs';
 import {readDescriptor, readPage, listWatches, listingAttempts, reconcile, createWatchDiscovery, renderWatches, pageBridge, attachAgain,
     watchesFunction} from '../../../js/developer/environment/inspector.mjs';
 import {inspectorChannel, inspectorPanels} from '../../../js/developer/environment/menu.mjs';
@@ -182,7 +182,7 @@ describe('The inspectors', () => {
             expect(new URL(url).searchParams.get('panel')).toBe('cpp.watches');
             expect(new URL(url).searchParams.has('frame')).toBeFalse();
             expect(new URL(url).searchParams.get('host')).toBe('host-a');
-            expect(name).toBe('webfront-inspector-cpp-watches');
+            expect(name).toBe('webfront-inspector-host-a-cpp-watches');
             expect(host.panel.hidden).toBeFalse();
             expect(host.notice.textContent).toContain(hostReasons.blocked);
             const retry = host.notice.querySelector('button');
@@ -192,6 +192,15 @@ describe('The inspectors', () => {
             await new Promise(resolve => setTimeout(resolve));
             expect(opened.length).toBe(2);
             expect(host.panel.hidden).toBeTrue();
+        });
+
+        it('opens a tab of its own for each page, even for the same panel', async () => {
+            const {host: firstHost, opened: first} = await testHost({containers: admitted(false, true), embedded: false, hostId: 'host-a'});
+            const {host: second, opened: other} = await testHost({containers: admitted(false, true), embedded: false, hostId: 'host-b'});
+            await firstHost.detach('cpp.watches');
+            await second.detach('cpp.watches');
+            expect(first[0][1]).not.toBe(other[0][1]);
+            expect(new URL(other[0][0]).searchParams.get('host')).toBe('host-b');
         });
 
         it('never opens a tab from an embedded view', async () => {
@@ -247,19 +256,49 @@ describe('The inspectors', () => {
             } finally { inspector.close(); }
         });
 
-        it('names each tab\'s page by an identifier its tab keeps', () => {
-            const store = new Map();
+        // The Web Locks of an origin, shared by the pages of a test: a page holds a lock until it is released.
+        function originLocks() {
+            const held = new Set();
+            return {held, locks: {request: async (name, options, callback) => {
+                const available = !held.has(name);
+                if (available) held.add(name);
+                const result = callback(available ? {name} : null);
+                if (available) await result;
+                return result;
+            }}};
+        }
+        const pageOf = ({locks, store = new Map()}) => ({crypto, navigator: {locks},
+            sessionStorage: {getItem: key => store.get(key) ?? null, setItem: (key, value) => store.set(key, value)}, store});
+
+        it('keeps a page\'s identifier across a reload of its tab', async () => {
+            const first = originLocks(), store = new Map();
+            const id = await claimHostIdentifier(pageOf({locks: first.locks, store}));
+            expect(id).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
+            expect(store.get(hostKey)).toBe(id);
+            // The reloaded page: the old one released its lock as it went away.
+            const reloaded = originLocks();
+            expect(await claimHostIdentifier(pageOf({locks: reloaded.locks, store}))).toBe(id);
+        });
+
+        it('gives a page opened by another one, whose session storage is a copy, an identifier of its own', async () => {
+            const origin = originLocks(), store = new Map();
+            const opener = await claimHostIdentifier(pageOf({locks: origin.locks, store}));
+            const copied = new Map(store);
+            const opened = await claimHostIdentifier(pageOf({locks: origin.locks, store: copied}));
+            expect(opened).not.toBe(opener);
+            expect(copied.get(hostKey)).toBe(opened);
+            expect(store.get(hostKey)).toBe(opener);
+            expect(origin.held.size).toBe(2);
+        });
+
+        it('takes a new identifier at each load without Web Locks or storage, and never keeps an invalid one', async () => {
+            const store = new Map([[hostKey, 'bad/value']]);
             const view = {crypto, sessionStorage: {getItem: key => store.get(key) ?? null, setItem: (key, value) => store.set(key, value)}};
-            const first = hostIdentifier(view);
-            expect(first).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
-            expect(hostIdentifier(view)).toBe(first);  // a reload of the same tab
-            expect(store.get(hostKey)).toBe(first);
-            const otherTab = {crypto, sessionStorage: {getItem: () => null, setItem: () => {}}};
-            expect(hostIdentifier(otherTab)).not.toBe(first);
+            const first = await claimHostIdentifier(view);
+            expect(first).toMatch(/^[0-9a-f]{24}$/);
+            expect(await claimHostIdentifier(view)).not.toBe(first);
             const noStorage = {crypto, get sessionStorage() { throw new Error('denied'); }};
-            expect(hostIdentifier(noStorage)).toMatch(/^[0-9a-f]{24}$/);
-            store.set(hostKey, 'bad/value');
-            expect(hostIdentifier(view)).not.toBe('bad/value');
+            expect(await claimHostIdentifier(noStorage)).toMatch(/^[0-9a-f]{24}$/);
         });
 
         it('listens for its detached panels as soon as the page reaches the inspectors, before any panel is opened', async () => {
