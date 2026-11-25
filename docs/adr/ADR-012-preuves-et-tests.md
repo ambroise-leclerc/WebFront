@@ -13,7 +13,7 @@
 | 1.6 | 2026-10-19 | Acceptée | Ambroise Leclerc | Contrôles hors ligne de fraîcheur et de contenu des ressources gzip reproductibles. | [b031ab5](https://github.com/ambroise-leclerc/WebFront/commit/b031ab58ea9cc32290d701094c1333bab455e67f) |
 | 1.7 | 2026-11-14 | Acceptée | Ambroise Leclerc | Catch2 remplacé par `test/unit/Bdd.hpp`, un cadre BDD en un seul en-tête. | [54c0d0f](https://github.com/ambroise-leclerc/WebFront/commit/54c0d0fd35a414e01e2cff0c27882695ca9a4e9d) |
 | 1.8 | 2026-11-23 | Acceptée | Ambroise Leclerc | Le cadre BDD devient une interface publique maintenue : `WebFront::Bdd`, `webfront_bdd_discover_tests` et `docs/BDD.md`. | [1386947](https://github.com/ambroise-leclerc/WebFront/commit/138694770e3849cd089f7a71120a332ed445f496) |
-| 1.9 | 2026-11-25 | Acceptée | Ambroise Leclerc | Le cadre BDD se découpe en un cœur léger et des parties optionnelles ; `checkEqual` rapporte ses opérandes, `approx` compare des flottants. | — |
+| 1.9 | 2026-11-25 | Acceptée | Ambroise Leclerc | Le cadre BDD se découpe en un cœur léger et des parties optionnelles ; `checkEqual` rapporte ses opérandes, `approx` compare des flottants. | [4c7a768](https://github.com/ambroise-leclerc/WebFront/commit/4c7a7680feee55bdbd8f0cec54e76f1e6ed06b7f) |
 
 ## État et chronologie
 
