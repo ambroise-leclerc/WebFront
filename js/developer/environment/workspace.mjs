@@ -175,22 +175,24 @@ export function placeStore(bridge, delay = 300) {
  * the inspector's share it.
  */
 export function windowControls({view, bar, panel, shown, choose, viewport, shownNow}) {
+    // One move at a time, by the pointer that started it: a second finger on the bar neither takes the move over nor ends it.
     let grip = null;
     bar.addEventListener('pointerdown', event => {
-        if (event.button !== 0 || event.target.closest?.('button')) return;
+        if (grip || event.button !== 0 || event.target.closest?.('button')) return;
         const rect = shown();
-        grip = {x: event.clientX - rect.x, y: event.clientY - rect.y};
+        grip = {id: event.pointerId, x: event.clientX - rect.x, y: event.clientY - rect.y};
         try { bar.setPointerCapture(event.pointerId); }
         catch { /* a pointer that is already gone: the move ends with it */ }
         event.preventDefault();
         bar.focus();
     });
     bar.addEventListener('pointermove', event => {
-        if (grip) choose({...shown(), x: event.clientX - grip.x, y: event.clientY - grip.y});
+        if (grip?.id === event.pointerId) choose({...shown(), x: event.clientX - grip.x, y: event.clientY - grip.y});
     });
-    const release = () => { grip = null; };
+    const release = event => { if (grip?.id === event.pointerId) grip = null; };
     bar.addEventListener('pointerup', release);
     bar.addEventListener('pointercancel', release);
+    bar.addEventListener('lostpointercapture', release);
     bar.addEventListener('keydown', event => {
         if (event.target !== bar) return;
         const rect = keyboardRect(shown(), event, viewport());

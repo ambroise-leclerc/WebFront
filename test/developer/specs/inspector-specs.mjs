@@ -2,8 +2,9 @@
 // project, the floating window, detaching and attaching, and the discovery of the watches. The page in a real window, tab
 // or frame is checked in test/web/developer-specs.mjs.
 import {detachedContainer, containerFor, hostReasons, parsePreferences, formatPreferences, readPreferences, preferencesPath,
-    createInspectorHost, defaultInspectorRect, panelTitle, claimHostIdentifier, hostKey, prepareInspectors} from '../../../js/developer/environment/inspector-host.mjs';
-import {readDescriptor, readPage, listWatches, listingAttempts, reconcile, createWatchDiscovery, renderWatches, pageBridge, attachAgain,
+    createInspectorHost, defaultInspectorRect, panelTitle, claimHostIdentifier, hostKey, prepareInspectors,
+    preferencesStore, applyPreferenceChanges} from '../../../js/developer/environment/inspector-host.mjs';
+import {readDescriptor, readPage, listWatches, listingAttempts, reconcile, watchOpener, createWatchDiscovery, renderWatches, pageBridge, attachAgain,
     watchesFunction} from '../../../js/developer/environment/inspector.mjs';
 import {inspectorChannel, inspectorPanels} from '../../../js/developer/environment/menu.mjs';
 import {memoryBridge} from '../memory-bridge.mjs';
@@ -79,6 +80,54 @@ describe('The inspectors', () => {
             const {bridge} = memoryBridge(new Map([[preferencesPath, encode(formatPreferences({detached: new Set(['cpp.watches']), rect: null}))]]));
             expect([...(await readPreferences(bridge)).detached]).toEqual(['cpp.watches']);
             expect([...(await readPreferences(memoryBridge().bridge)).detached]).toEqual([]);
+        });
+    });
+
+    describe('choices kept by several pages', () => {
+        it('apply the changes of a page to the choices of the project, not its whole copy', () => {
+            const current = {detached: new Set(['cpp.watches']), rect: {x: 1, y: 2, width: 300, height: 200}};
+            const next = applyPreferenceChanges(current, {panels: new Map([['cpp.functions', true]]), rect: undefined});
+            expect([...next.detached].sort()).toEqual(['cpp.functions', 'cpp.watches']);
+            expect(next.rect).toEqual(current.rect);
+            expect([...applyPreferenceChanges(current, {panels: new Map([['cpp.watches', false]]), rect: null}).detached]).toEqual([]);
+        });
+
+        it('keep what another page wrote meanwhile, and write a detach at once', async () => {
+            jasmine.clock().install();
+            try {
+                const {bridge, storage} = memoryBridge();
+                const first = preferencesStore(bridge), second = preferencesStore(bridge);
+                // The first page detaches Watches: written at once, without waiting for the delay of the places.
+                first.detached('cpp.watches', true);
+                await first.saved();
+                expect([...parsePreferences(new TextDecoder().decode(storage.get(preferencesPath))).detached]).toEqual(['cpp.watches']);
+                // The second page, which read the file before, moves its window: the detach of the first is kept.
+                second.place({x: 5, y: 6, width: 400, height: 300});
+                jasmine.clock().tick(300);
+                await second.saved();
+                const kept = parsePreferences(new TextDecoder().decode(storage.get(preferencesPath)));
+                expect([...kept.detached]).toEqual(['cpp.watches']);
+                expect(kept.rect).toEqual({x: 5, y: 6, width: 400, height: 300});
+            } finally { jasmine.clock().uninstall(); }
+        });
+
+        it('write again a change whose file changed between its read and its commit', async () => {
+            const {bridge: memory, storage} = memoryBridge();
+            let raced = false;
+            const bridge = {cppFunction: name => async (...args) => {
+                // Another page commits between this page's read and its commit, once.
+                if (name === 'webfront.developer.commitGroup' && !raced) {
+                    raced = true;
+                    storage.set(preferencesPath, encode(formatPreferences({detached: new Set(['typescript.bridge']), rect: null})));
+                }
+                return memory.cppFunction(name)(...args);
+            }};
+            const store = preferencesStore(bridge);
+            store.detached('cpp.watches', true);
+            await store.saved();
+            expect(raced).toBeTrue();
+            expect([...parsePreferences(new TextDecoder().decode(storage.get(preferencesPath))).detached].sort())
+                .toEqual(['cpp.watches', 'typescript.bridge']);
         });
     });
 
@@ -336,6 +385,33 @@ describe('The inspectors', () => {
             expect(made.length).toBe(1);
         });
 
+        it('does not show a panel again when its native window fails after another action', async () => {
+            let fail;
+            const pending = new Promise((resolve, reject) => { fail = reject; });
+            const {host} = await testHost({containers: admitted(true), openWindow: () => pending});
+            await host.open('cpp.watches');
+            const detaching = host.detach('cpp.watches');
+            await host.open('cpp.functions');  // the user opens another panel meanwhile
+            fail(new Error('no session'));
+            expect(await detaching).toBe('floating');
+            expect(host.shownPanel).toBe('cpp.functions');
+            expect(host.notice.hidden).toBeTrue();
+        });
+
+        it('keeps a panel attached while its detach was pending', async () => {
+            let opened;
+            const pending = new Promise(resolve => { opened = resolve; });
+            const {host} = await testHost({containers: admitted(true), openWindow: () => pending});
+            await host.open('cpp.watches');
+            const detaching = host.detach('cpp.watches');
+            host.attach('cpp.watches');  // the window asks to come back before C++ answered
+            opened();
+            await detaching;
+            expect(host.panel.hidden).toBeFalse();
+            expect(host.shownPanel).toBe('cpp.watches');
+            expect(host.preferences.detached.has('cpp.watches')).toBeFalse();
+        });
+
         it('opens at a default place inside a small viewport', () => {
             const rect = defaultInspectorRect({width: 400, height: 300});
             expect(rect.x + rect.width).toBeLessThanOrEqual(400);
@@ -368,6 +444,24 @@ describe('The inspectors', () => {
             expect(await attachAgain(view, null, 'cpp.watches', status, {host: 'host-a', wait: 50})).toBeFalse();
             expect(status.textContent).toContain('did not answer');
             expect(closed.length).toBe(1);
+        });
+
+        it('closes a tab once the page that opened it is gone, and watches nothing without an opener', () => {
+            jasmine.clock().install();
+            try {
+                const opener = {closed: false}, closed = [];
+                const handlers = [];
+                const view = {opener, setInterval: (run, delay) => setInterval(run, delay), clearInterval: id => clearInterval(id),
+                    close: () => closed.push(true), addEventListener: (name, handler) => handlers.push([name, handler])};
+                expect(watchOpener(view, 1000)).not.toBeNull();
+                jasmine.clock().tick(1000);
+                expect(closed).toEqual([]);
+                opener.closed = true;
+                jasmine.clock().tick(1000);
+                expect(closed).toEqual([true]);
+                handlers.find(([name]) => name === 'pagehide')[1]();
+                expect(watchOpener({...view, opener: null})).toBeNull();
+            } finally { jasmine.clock().uninstall(); }
         });
 
         it('closes its native window through C++ when it has no opener', async () => {

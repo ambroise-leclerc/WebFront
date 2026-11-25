@@ -204,7 +204,8 @@ const placeholders = {
 export function renderWatches(list, watches) {
     const page = list.ownerDocument;
     const items = new Map([...list.children].map(item => [Number(item.dataset.watch), item]));
-    for (const [id, item] of items) if (!watches.some(watch => watch.id === id)) item.remove();
+    const ids = new Set(watches.map(watch => watch.id));
+    for (const [id, item] of items) if (!ids.has(id)) item.remove();
     for (const watch of watches) {
         if (items.has(watch.id)) continue;
         const item = page.createElement('li');
@@ -219,6 +220,15 @@ export function renderWatches(list, watches) {
         if (watch.writable) item.append(cell('writable', 'writable'));
         list.append(item);
     }
+}
+
+/** Closes this window once the page that opened it is gone; nothing for a window that no page opened. */
+export function watchOpener(view, period = 1000) {
+    const opener = view.opener;
+    if (!opener) return null;
+    const watcher = view.setInterval(() => { if (opener.closed) view.close(); }, period);
+    view.addEventListener('pagehide', () => view.clearInterval(watcher));
+    return watcher;
 }
 
 /**
@@ -249,6 +259,10 @@ export async function main(view = window) {
         return null;
     }
 
+    // A tab that the main page opened closes with it, as a secondary window closes with the main window (#616): watched
+    // before the bridge is awaited, so that a tab whose connection fails or is still opening closes too.
+    if (!framed) watchOpener(view);
+
     let bridge;
     try { bridge = await pageBridge(view, {frame: framed}); }
     catch (error) {
@@ -266,12 +280,6 @@ export async function main(view = window) {
         attach.title = 'Show this panel in the floating window of the main page';
         header.append(attach);
         attach.addEventListener('click', () => attachAgain(view, bridge, id, status, {host: params.get('host')}));
-        // A tab that the main page opened closes with it, as a secondary window closes with the main window (#616).
-        if (view.opener) {
-            const opener = view.opener;
-            const watcher = view.setInterval(() => { if (opener.closed) view.close(); }, 1000);
-            view.addEventListener('pagehide', () => view.clearInterval(watcher));
-        }
     }
 
     if (id !== 'cpp.watches') {

@@ -3,7 +3,7 @@
 // the system browser (its own connection, admitted only by trustLoopbackClients), or a floating window of this page whose
 // frame opens no connection and borrows this page's bridge. Each panel can be detached and attached again; the choice and
 // the floating window's place are kept in the project, as the terminal's place is.
-import {readProject, publish} from './io.mjs';
+import {readProject, call, writeChunks} from './io.mjs';
 import {clampRect, step, minimumSize, windowControls} from './workspace.mjs';
 import {inspectorPanels as panels, panelTitle, inspectorChannel} from './menu.mjs';
 
@@ -71,25 +71,62 @@ export async function readPreferences(bridge) {
     catch { return parsePreferences(''); }
 }
 
-/** Writes the choices shortly after they stop changing; a failed write keeps the inspector usable. */
+/** The choices after `changes` ({panels: Map of panel id to detached, rect: undefined when unchanged}) apply to `current`. */
+export function applyPreferenceChanges(current, {panels, rect}) {
+    const detached = new Set(current.detached);
+    for (const [id, away] of panels) if (away) detached.add(id); else detached.delete(id);
+    return {detached, rect: rect === undefined ? current.rect : rect};
+}
+
+// Another page writing the choices, or having changed them since they were read: the change is tried again shortly after.
+const preferenceConflict = /changed since it was read|already being written/;
+
+/** Applies `changes` to the choices as the project has them now, committed only if the file did not change meanwhile. */
+async function writePreferenceChanges(bridge, changes) {
+    for (let attempt = 1; ; ++attempt) {
+        let id = null;
+        try {
+            const token = await call(bridge, 'state', preferencesPath);
+            const text = formatPreferences(applyPreferenceChanges(await readPreferences(bridge), changes));
+            id = await call(bridge, 'begin', preferencesPath, false);
+            await writeChunks(bridge, {id, path: 'output', bytes: encoder.encode(text)});
+            await call(bridge, 'commitGroup', id, preferencesPath, token);
+            return;
+        } catch (error) {
+            if (id !== null) await call(bridge, 'abort', id).catch(() => {});
+            if (attempt === 20 || !preferenceConflict.test(error?.message)) throw error;
+            await new Promise(resolve => setTimeout(resolve, 10 + Math.random() * 40));
+        }
+    }
+}
+
+/**
+ * Writes the choices of this page as changes to those of the project, so that the pages of a project do not undo each
+ * other's: whether a panel is detached is written at once, the window's place shortly after it stops moving. Each write
+ * reads the file again and applies only what this page changed, and is committed only if the file did not change since
+ * it was read (else it is tried again). `saved()` writes what is pending and resolves once it is written; a failed write
+ * keeps the inspector usable.
+ */
 export function preferencesStore(bridge, delay = 300) {
-    let timer = null, pending = null, writes = Promise.resolve(), written = null;
+    let timer = null, pending = {panels: new Map(), rect: undefined}, writes = Promise.resolve();
     const flush = () => {
         clearTimeout(timer);
         timer = null;
-        if (!pending) return writes;
-        const text = formatPreferences(pending);
-        pending = null;
-        writes = writes.then(async () => {
-            if (text === written) return;
-            await publish(bridge, preferencesPath, new Map([['output', encoder.encode(text)]]), {directory: false});
-            written = text;
-        }).catch(() => {});
+        if (!pending.panels.size && pending.rect === undefined) return writes;
+        const changes = pending;
+        pending = {panels: new Map(), rect: undefined};
+        writes = writes.then(() => writePreferenceChanges(bridge, changes)).catch(() => {});
         return writes;
     };
     return {
-        remember(preferences) {
-            pending = {detached: new Set(preferences.detached), rect: preferences.rect};
+        /** Remembers whether `id` is detached, at once: a page closed just after a detach keeps it. */
+        detached(id, away) {
+            pending.panels.set(id, away);
+            flush();
+        },
+        /** Remembers the floating window's place once it stops changing. */
+        place(rect) {
+            pending.rect = rect;
             clearTimeout(timer);
             timer = setTimeout(flush, delay);
         },
@@ -176,7 +213,6 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
         Promise.resolve(embedded ?? bridge.cppFunction('webfront.inspector.embedded')()).then(Boolean, () => true),
     ]);
     const store = preferencesStore(bridge);
-    const remember = () => store.remember(preferences);
     const openTab = windowOpen ?? ((url, name) => view.open(url, name));
     const urlOf = (panel, extra = {}) => {
         const url = new URL(inspectorUrl, view.location.href);
@@ -230,6 +266,10 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
     page.body.append(panel);
 
     let shownPanel = null, retryPanel = null;
+    // Each action on the floating window (show, hide, attach, detach) takes a new number: a detached container that answers
+    // late only changes the window when no other action came meanwhile, so it never hides a panel shown since, nor shows
+    // one closed since.
+    let action = 0;
     const shown = () => clampRect(preferences.rect ?? defaultInspectorRect(viewport()), viewport());
     function render() {
         if (panel.hidden) return;
@@ -238,7 +278,7 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
     }
     function choose(rect) {
         preferences.rect = clampRect(rect, viewport());
-        remember();
+        store.place(preferences.rect);
         render();
     }
     windowControls({view, bar, panel, shown, choose, viewport, shownNow: () => !panel.hidden});
@@ -252,6 +292,7 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
         notice.hidden = !text;
     }
     function showFloating(id, message = '') {
+        ++action;
         shownPanel = id;
         title.textContent = panelTitle(id);
         panel.setAttribute('aria-label', `WebFront inspector: ${panelTitle(id)}`);
@@ -273,6 +314,7 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
         render();
     }
     function hideFloating() {
+        ++action;
         panel.hidden = true;
         shownPanel = null;
         const empty = page.createElement('iframe');  // unloads the panel without navigating
@@ -285,13 +327,16 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
     /** Opens `id` in its detached container; resolves with whether it did. A failure leaves it in the floating window. */
     async function openDetached(id, container) {
         if (container === 'window') {
-            const rect = shown();
+            const rect = shown(), started = action;
             try {
                 await bridge.cppFunction('webfront.inspector.openWindow')(id, self, rect.width, rect.height);
                 return true;
             } catch (error) {
-                retryPanel = id;
-                showFloating(id, `${hostReasons.windowFailed}: ${error?.message ?? error}`);
+                // Shown as the fallback only if nothing was done with the window while the native one was being opened.
+                if (action === started) {
+                    retryPanel = id;
+                    showFloating(id, `${hostReasons.windowFailed}: ${error?.message ?? error}`);
+                }
                 return false;
             }
         }
@@ -301,6 +346,11 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
         retryPanel = id;
         showFloating(id, hostReasons.blocked);
         return false;
+    }
+
+    /** Hides the floating window's `id` now that its detached container opened, unless it was attached or changed since. */
+    function hideIfStill(id, started) {
+        if (shownPanel === id && preferences.detached.has(id) && action === started) hideFloating();
     }
 
     const host = {
@@ -322,8 +372,9 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
                 showFloating(id);
                 return 'floating';
             }
+            const started = action;
             if (await openDetached(id, container)) {
-                if (shownPanel === id) hideFloating();
+                hideIfStill(id, started);
                 return container;
             }
             return 'floating';
@@ -333,9 +384,10 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
             const container = detachedContainer(containers, {embedded: isEmbedded});
             if (!container) return null;
             preferences.detached.add(id);
-            remember();
+            store.detached(id, true);
+            const started = action;
             if (await openDetached(id, container)) {
-                if (shownPanel === id) hideFloating();
+                hideIfStill(id, started);
                 return container;
             }
             return 'floating';
@@ -343,7 +395,7 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
         /** Moves `id` back to this page's floating window, and remembers it there. */
         attach(id) {
             preferences.detached.delete(id);
-            remember();
+            store.detached(id, false);
             retryPanel = null;
             showFloating(id);
         },
@@ -369,6 +421,8 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
         });
         host.channel = channel;
     }
+    // A place still waiting for its write is written when the page goes away (a detach is written at once).
+    view.addEventListener('pagehide', () => { store.saved(); });
     // The frame of the floating window reaches its host here: the same origin, and no connection of its own.
     view.webfrontInspectorHost = host;
     return host;

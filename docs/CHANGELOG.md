@@ -10,6 +10,9 @@ these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
+### Breaking
+- `cppFunction` (and `Space::cppFunction`) refuses the names starting with `webfront.inspector.`, reserved to the inspectors, with `std::invalid_argument`: rename such a function, and its `webFront.cppFunction(...)` calls in the page, to a name of your own (#680, ADR-027).
+
 ### Added
 - Open the inspectors from the WebFront tab's menu of the developer environment: each panel shows in a floating window of the page and can be detached to a native secondary window (WebKitGTK, WKWebView, WebView2) or, with `trustLoopbackClients`, a tab of the system browser; the choice and the place are kept per project (#680, ADR-027, `docs/DEVELOPER_ENVIRONMENT.md`).
 - Declare what the inspectors show with `app.watch(name, source)`, whose handle removes the watch when it is destroyed; the Watches panel follows their registrations and removals. Outside the developer environment and in a distribution build, `watch` registers nothing (#680, ADR-027).
@@ -21,7 +24,6 @@ these entries stays in the GitHub releases and the Git history.
 - The test helpers, `webfront_add_jasmine_test` included, export the real `XDG_DATA_HOME` and `XDG_CACHE_HOME` as `WEBFRONT_TEST_REAL_XDG_DATA_HOME` and `WEBFRONT_TEST_REAL_XDG_CACHE_HOME`, so an application under test can keep the throwaway WebKitGTK profile away from the programs it starts ([#664](https://github.com/ambroise-leclerc/WebFront/issues/664), `docs/CONSUMER_TESTING.md`).
 
 ### Changed
-- `cppFunction` refuses the names starting with `webfront.inspector.`, which belong to the inspectors, with `std::invalid_argument` (#680, ADR-027).
 - `WebFront.js` opens its WebSocket on the directory of the page (`ws://host/dir/` instead of `ws://host`), which tells the server a page's space; the server still ignores that path outside the spaces (#671).
 
 ### Fixed

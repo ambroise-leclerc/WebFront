@@ -81,41 +81,56 @@ inline constexpr std::string_view reservedPrefix = "webfront.inspector.";
     return text.substr(0, end);
 }
 
+namespace detail {
+/// Appends `c` to `visible`, a control character as its visible picture (U+2400 to U+241F, U+2421 for DEL).
+inline void appendVisible(std::string& visible, char c) {
+    const auto byte = static_cast<unsigned char>(c);
+    if (byte < 0x20u || byte == 0x7Fu) {
+        const unsigned picture = byte == 0x7Fu ? 0x2421u : 0x2400u + byte;  // three UTF-8 bytes: E2 90 xx
+        visible               += static_cast<char>(0xE2);
+        visible               += static_cast<char>(0x80u | ((picture >> 6) & 0x3Fu));
+        visible               += static_cast<char>(0x80u | (picture & 0x3Fu));
+    } else
+        visible += c;
+}
+inline constexpr std::string_view ellipsis = "\u2026";
+}  // namespace detail
+
 /// A text of the application made safe to show and bounded: control characters become their visible pictures (U+2400
 /// to U+241F, U+2421 for DEL), then the text is cut to `limit` bytes on a character boundary, ending with "…" when cut.
+/// A limit too small for the ellipsis gives the longest prefix that fits, without it.
 [[nodiscard]] inline std::string boundedText(std::string_view text, std::size_t limit = maxTextBytes) {
     std::string visible;
     visible.reserve((std::min)(text.size(), limit + 4));  // parenthesized: Windows headers may define min
     for (const char c : text) {
-        const auto byte = static_cast<unsigned char>(c);
-        if (byte < 0x20u || byte == 0x7Fu) {
-            const unsigned picture = byte == 0x7Fu ? 0x2421u : 0x2400u + byte;  // three UTF-8 bytes: E2 90 xx
-            visible               += static_cast<char>(0xE2);
-            visible               += static_cast<char>(0x80u | ((picture >> 6) & 0x3Fu));
-            visible               += static_cast<char>(0x80u | (picture & 0x3Fu));
-        } else
-            visible += c;
+        detail::appendVisible(visible, c);
         if (visible.size() > limit + 4)
             break;  // enough to know that it is cut
     }
     if (visible.size() <= limit)
         return visible;
-    constexpr std::string_view ellipsis = "…";
-    std::string                cut{utf8Prefix(visible, limit - ellipsis.size())};
-    cut += ellipsis;
+    if (limit < detail::ellipsis.size())
+        return std::string{utf8Prefix(visible, limit)};
+    std::string cut{utf8Prefix(visible, limit - detail::ellipsis.size())};
+    cut += detail::ellipsis;
     return cut;
 }
 
-/// Where a watch was declared, "file:line", keeping the end of a long path (the file's name) within the bound.
+/// Where a watch was declared, "file:line", made visible as boundedText() does, then cut from its start when it is too long:
+/// the end of the path, the file's name and the line, are what identify it.
+[[nodiscard]] inline std::string locationText(std::string_view file, std::uint_least32_t line) {
+    std::string visible;
+    for (const char c : std::string(file) + ':' + std::to_string(line))
+        detail::appendVisible(visible, c);
+    if (visible.size() <= maxTextBytes)
+        return visible;
+    std::size_t start = visible.size() - (maxTextBytes - detail::ellipsis.size());
+    while (start < visible.size() && (static_cast<unsigned char>(visible[start]) & 0xC0u) == 0x80u)
+        ++start;  // a character is never cut: its first byte is not a continuation byte
+    return std::string(detail::ellipsis) + visible.substr(start);
+}
 [[nodiscard]] inline std::string locationText(const std::source_location& location) {
-    const std::string full = std::string(location.file_name()) + ':' + std::to_string(location.line());
-    if (full.size() <= maxTextBytes)
-        return boundedText(full);
-    constexpr std::string_view ellipsis = "…";
-    std::size_t                start    = full.size() - (maxTextBytes - ellipsis.size());
-    while (start < full.size() && (static_cast<unsigned char>(full[start]) & 0xC0u) == 0x80u)
-        ++start;
-    return boundedText(std::string(ellipsis) + full.substr(start));
+    return locationText(location.file_name(), location.line());
 }
 
 // --- Kinds (ADR-027, section 4) --------------------------------------------------------------------------------
@@ -296,17 +311,22 @@ public:
         std::shared_ptr<void> source;  // what the source captures lives as long as its registration
     };
 
-    /// Registers a watch; throws std::invalid_argument for an empty name, a name longer than maxTextBytes, or the name
-    /// of a watch that is still registered.
+    /// Registers a watch; throws std::invalid_argument for an empty name, a name longer than maxTextBytes, a kind longer
+    /// than maxKindBytes, or the name of a watch that is still registered. The location is made visible and bounded as a
+    /// text of the application is, so that every descriptor fits a page of the smallest budget.
     std::uint64_t add(std::string name, std::string_view kind, std::string location, bool writable, std::shared_ptr<void> source) {
         checkName(name);
+        if (kind.empty() || kind.size() > maxKindBytes)
+            throw std::invalid_argument("A watch's kind is 1 to 16 bytes");
+        auto             label   = boundedText(name);
+        auto             shown   = boundedText(location);
+        auto             keeping = source;  // declared before the lock: a source released by a failed insertion is destroyed after it
         std::scoped_lock lock{mutex};
         for (const auto& [id, entry] : entries)
             if (entry.name == name)
                 throw std::invalid_argument("A watch named '" + name + "' is already registered");
-        const auto id    = nextId++;
-        auto       label = boundedText(name);
-        entries.emplace(id, Entry{std::move(name), std::move(label), std::string(kind), std::move(location), writable, std::move(source)});
+        const auto id = nextId++;
+        entries.emplace(id, Entry{std::move(name), std::move(label), std::string(kind), std::move(shown), writable, std::move(source)});
         ++currentRevision;
         return id;
     }

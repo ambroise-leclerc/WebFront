@@ -420,6 +420,14 @@ void callWith(const std::string& name, msg::CallId callId, Arguments... argument
     ViewSocket::receive(testing::clientFrame(testing::messagePayload(frame)));
 }
 
+/// The encoded answer of a call that returns a boolean: the header of the return, then the boolean.
+std::string booleanAnswer(msg::CallId callId, bool value) {
+    const msg::FunctionCallHeader<msg::Command::functionReturn> header{.parametersCount = 1, .callId = callId, .parametersDataSize = 1};
+    std::string                                                 bytes(reinterpret_cast<const char*>(&header), sizeof header);
+    bytes += static_cast<char>(value ? msg::CodedType::booleanTrue : msg::CodedType::booleanFalse);
+    return bytes;
+}
+
 /// A bootstrapped developer application of `Frontend`, with one browser that presented `proof` (or not).
 template <typename Application>
 struct AdmittedBrowser {
@@ -535,9 +543,9 @@ const Scenario inspectorWatchesAccess{
                 require(ViewSocket::wrote("sequence"));
                 require(ViewSocket::wrote("ViewAssociationTests.cpp:"));
             });
-            then("the page asks whether this page is an embedded view", [&] {
+            then("the proven view is told that it is an embedded view, which never offers it a tab", [&] {
                 callWithoutArgument("webfront.inspector.embedded", 12);
-                require(!ViewSocket::wrote(inspect::code::denied));
+                require(ViewSocket::wrote(booleanAnswer(12, true)));
             });
             then("a second watch of the same name is refused while the first lives", [&] {
                 checkThrows<std::invalid_argument>([&] {
@@ -563,8 +571,18 @@ const Scenario inspectorWatchesAccess{
             freshNetwork();
             AdmittedBrowser<InspectorApp> browser{false, false};
             callWithoutArgument("webfront.inspector.embedded", 12);
-            then("the call is refused as denied", [&] {
+            then("the call is refused as denied, without an answer", [&] {
                 require(ViewSocket::wrote(inspect::code::denied));
+                require(!ViewSocket::wrote(booleanAnswer(12, false)) && !ViewSocket::wrote(booleanAnswer(12, true)));
+            });
+        });
+        given("a trusted loopback page that is not proven asks whether it is an embedded view", [&] {
+            freshNetwork();
+            ViewSocket::peerIsLoopback = true;
+            AdmittedBrowser<InspectorApp> browser{true, false};
+            callWithoutArgument("webfront.inspector.embedded", 12);
+            then("it is admitted and told that it is not one: a tab of the system browser may be offered to it", [&] {
+                require(ViewSocket::wrote(booleanAnswer(12, false)));
             });
         });
         given("a trusted loopback page", [&] {

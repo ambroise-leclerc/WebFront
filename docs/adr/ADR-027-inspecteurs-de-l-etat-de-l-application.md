@@ -219,7 +219,8 @@ appels sont :
 - `webfront.inspector.reset(observateur)` : vide la mémoire de l'observateur pour cette connexion (ci-dessous) ;
 - `webfront.inspector.limits()` : les bornes de cette section, dont `maxWriteTextBytes`.
 
-Le nombre vaut 200 par défaut et 1 000 au plus. C++ réduit chaque page pour qu'elle tienne dans `responseBudget` et
+Le nombre est un argument de chaque appel, puisque le pont n'a pas d'argument facultatif : l'inspecteur demande 200
+par défaut, et C++ le ramène à 1 000 au plus (0 ne demande que la révision, pour `watches`). C++ réduit chaque page pour qu'elle tienne dans `responseBudget` et
 rend le `suivant` qui reprend là où elle s'arrête : aucun appel ne lève `BufferOverflowException` ni ne dépasse
 `maxMessageSize`, quel que soit l'état observé. Les seuls échecs d'un appel valide sont les refus typés de cette
 décision (`webfront.inspector.*`).
@@ -653,7 +654,9 @@ booléens, et aucun état de l'application.
 | `host` | la connexion de la page hôte est admise (section 2) |
 | `newConnections` | une nouvelle connexion non prouvée serait admise : l'application a choisi `trustLoopbackClients` |
 
-La page se charge dans le premier conteneur qui convient :
+Un panneau s'ouvre là où le projet le garde : dans la fenêtre flottante tant qu'il est rattaché, ce qui est son état
+initial, et dans son conteneur détaché une fois détaché, tant que ce conteneur reste disponible (sinon la fenêtre
+flottante sert de repli). L'ordre qui suit choisit le conteneur d'un panneau **détaché** :
 
 1. **Fenêtre native secondaire** si `secondaryWindow`, donc seulement depuis une page hôte admise (WebKitGTK,
    WKWebView, WebView2). La fonction réservée `webfront.inspector.openWindow` appelle `openSecondaryWindow`, qui
@@ -689,6 +692,11 @@ se ferme qu'après cette réponse.
 
 La liste des observateurs se lit page après page sous la révision de la première ; une page qui répond `changé` fait
 recommencer la liste, pour qu'un observateur retiré entre deux pages ne reste pas affiché sous la nouvelle révision.
+
+Le choix de chaque panneau et la place de la fenêtre flottante sont écrits comme des **changements** du fichier du
+projet, relu au moment de l'écriture et validé seulement s'il n'a pas changé depuis (sinon l'écriture recommence) :
+plusieurs pages d'un même projet ne défont pas leurs choix. Un détachement ou un rattachement est écrit aussitôt, la
+place après une courte pause.
 
 La même règle désactive « Détacher » quand aucun conteneur détaché ne donnerait l'accès.
 

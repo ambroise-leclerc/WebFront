@@ -445,10 +445,12 @@ environment's `mount`, not to the embedded bootstrap page):
   `trustLoopbackClients`, knowing that any local process can then read the state of the application.
 
   **The inspector** is one page of the environment, `/webfront/developer/environment/inspector.html?panel=<id>`, that talks
-  to C++ through the bridge. An entry of the menu opens its panel in a **floating window** of the page (moved and resized
-  like the terminal's window, with the mouse or with the arrow keys on its title bar), whose frame opens no connection of its
-  own and borrows the page's bridge: the adapters give the proof of the view to the main frame only. **Detach** moves the
-  panel to a window of its own, and **Attach**, in that window, brings it back to the floating window:
+  to C++ through the bridge. An entry of the menu opens its panel where the project keeps it: at first, and whenever its
+  detached container is unavailable, in a **floating window** of the page (moved and resized like the terminal's window,
+  with the mouse or with the arrow keys on its title bar), whose frame opens no connection of its own and borrows the page's
+  bridge, since the adapters give the proof of the view to the main frame only. **Detach** moves the panel to a window of its
+  own, and the next opening of that panel goes there again; **Attach**, in that window, brings it back to the floating
+  window, where it then opens:
 
   | Frontend of the page | Detached container |
   | --- | --- |

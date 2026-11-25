@@ -954,8 +954,13 @@ try {
                     // A watch registered while the inspector is open appears, and disappears once removed (ADR-027, section 3).
                     await webFront.cppFunction('test.watch')('integration');
                     await until(() => listed().includes('integration'), `A registered watch must appear in the inspector: ${listed()}`);
+                    // The list that showed it must be the one that loses it: the same document, still shown.
+                    const shownDocument = frame.contentDocument, shownList = shownDocument.querySelector('ul.watches');
+                    const inShownList = () => [...shownList.querySelectorAll('li .name')].map(item => item.textContent).includes('integration');
                     await webFront.cppFunction('test.unwatch')('integration');
-                    await until(() => !listed().includes('integration'), `A removed watch must disappear from the inspector: ${listed()}`);
+                    await until(() => !inShownList(), `A removed watch must disappear from the inspector: ${listed()}`);
+                    assert(shownList.isConnected && frame.isConnected && frame.contentDocument === shownDocument,
+                        'The watch must have disappeared from the list that showed it, still in the inspector');
                     const detach = floating().querySelector('.webfront-inspector-detach');
                     if (secondaryWindow) {
                         // A frontend that opens windows: Detach moves the panel to a native window with its own proven connection.

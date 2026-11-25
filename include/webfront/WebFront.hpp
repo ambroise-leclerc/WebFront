@@ -1038,6 +1038,17 @@ private:
     friend struct testing::ConnectionIds;  // lets a test start the identifiers near their wrap
     template <typename>
     friend struct testing::LaunchSecret;   // lets a test present the secret an embedded view would
+    template <typename Network, frontend::FrontendType DeveloperFrontend, fs::Provider... Extra>
+    friend class DeveloperAppWithNetwork;  // installs the inspectors' reserved functions (reservedCppFunction)
+
+    /// Registers one of WebFront's own reserved functions (`webfront.inspector.*`), which cppFunction refuses to the
+    /// application. Only the developer environment calls it, and a name already taken is an error, never ignored: the
+    /// inspectors' callbacks are WebFront's or none (ADR-027, section 1).
+    template <typename R, typename... Args>
+    void reservedCppFunction(std::string functionName, auto&& function) {
+        if (!registerCppFunction<R, Args...>(functionName, std::forward<decltype(function)>(function)))
+            throw std::logic_error("webfront: the reserved function " + functionName + " is already registered");
+    }
 
     /// Sends `call` to each browser not reported closed whose onUIStarted handlers have returned: at once, on the
     /// calling thread and outside every lock. For a browser whose handlers are running, `call` is kept, within its
@@ -1590,12 +1601,6 @@ protected:
         // toolkit's white between the bootstrap page and the project's page (a flash on every navigation).
         if (windowOptions.background.empty())
             windowOptions.background = "#141821";
-    }
-
-    /// Registers one of WebFront's own reserved functions (`webfront.inspector.*`), which cppFunction refuses to the application.
-    template <typename R, typename... Args>
-    bool reservedCppFunction(std::string functionName, auto&& function) {
-        return registerCppFunction<R, Args...>(std::move(functionName), std::forward<decltype(function)>(function));
     }
 
     /// For the developer environment: from now on, watch() registers in the table that the inspectors read (ADR-027).

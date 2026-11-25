@@ -61,10 +61,21 @@ const Scenario watchTexts{"The texts of a watch are bounded and made visible (AD
                                       require(cut.ends_with("…"));
                                       requireEqual(inspect::utf8Prefix("aé", 2), std::string_view{"a"});
                                   });
+                                  then("a bound smaller than the ellipsis keeps the prefix that fits, without it", [&] {
+                                      requireEqual(inspect::boundedText("abc", 1), std::string{"a"});
+                                      requireEqual(inspect::boundedText("\u00e9t\u00e9", 2), std::string{"\u00e9"});
+                                      requireEqual(inspect::boundedText("abc", 0), std::string{});
+                                  });
                                   then("a long location keeps the end of the path", [&] {
                                       const auto text = inspect::locationText(std::source_location::current());
                                       require(text.size() <= inspect::maxTextBytes);
                                       require(text.contains("WatchTests.cpp:"));
+                                  });
+                                  then("a path that its visible form makes too long still ends with its file and line", [&] {
+                                      const auto text = inspect::locationText(std::string(90, '\t') + "/app.cpp", 17);
+                                      require(text.size() <= inspect::maxTextBytes);
+                                      require(text.ends_with("/app.cpp:17"));
+                                      require(text.starts_with("\u2026\u2409"));  // cut between two pictures, never inside one
                                   });
                               });
                           }};
@@ -201,7 +212,15 @@ const Scenario watchPages{
                 requireEqual(namesOf(next), std::vector<std::string>{"c", "d"});
             });
             then("a count above 1 000 is read as 1 000, and numbers that are not whole are refused", [&] {
-                requireEqual(std::get<0>(registry.page(revision, 0, 5000, 32768)).size(), std::size_t{5});
+                WatchRegistry many;
+                for (int index = 0; index < 1001; ++index)
+                    static_cast<void>(addWatch(many, "w" + std::to_string(index)));
+                const auto all   = static_cast<double>(many.revision());
+                const auto first = many.page(all, 0, 5000, 1 << 20);  // a budget that holds every entry
+                requireEqual(std::get<0>(first).size(), std::size_t{1000});
+                const auto rest = many.page(all, std::get<1>(first), 5000, 1 << 20);
+                requireEqual(namesOf(rest), std::vector<std::string>{"w1000"});
+                requireEqual(std::get<1>(rest), 0.0);
                 for (const double bad : {-1.0, 0.5, 1e300})
                     checkThrows<std::invalid_argument>([&] {
                         static_cast<void>(registry.page(bad, 0, 0, 32768));
@@ -216,6 +235,16 @@ const Scenario watchPages{
             static_cast<void>(registry.add(std::string(inspect::maxTextBytes, 'n'), "formatted", std::string(inspect::maxTextBytes, 'l'), true, nullptr));
             then("a page of it fits the smallest budget", [&] {
                 requireEqual(std::get<0>(registry.page(0, 0, 1, inspect::minPageBytes)).size(), std::size_t{1});
+            });
+            then("a longer location is bounded when it is registered, and a longer kind refused", [&] {
+                WatchRegistry bounded;
+                static_cast<void>(bounded.add("long", "formatted", std::string(4096, 'l'), false, nullptr));
+                const auto page = bounded.page(0, 0, 200, inspect::minPageBytes);
+                requireEqual(std::get<0>(page).size(), std::size_t{1});
+                require(std::get<3>(std::get<0>(page)[0]).size() <= inspect::maxTextBytes);
+                checkThrows<std::invalid_argument>([&] {
+                    static_cast<void>(bounded.add("kind", std::string(inspect::maxKindBytes + 1, 'k'), "app.cpp:1", false, nullptr));
+                });
             });
         });
         given("watches whose names hold control characters", [&] {
