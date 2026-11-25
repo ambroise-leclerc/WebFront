@@ -408,7 +408,8 @@ struct IsAbc {
 const Scenario explainFails{"a failing explanation", [] {
                                 if (!check(Unexplained{}))
                                     trace.push_back("after check");
-                                require("abc", IsAbc{});
+                                std::string_view abc = "abc";
+                                require(abc, IsAbc{});
                                 check("abd", !IsAbc{});
                                 trace.push_back("matched");
                             }};
