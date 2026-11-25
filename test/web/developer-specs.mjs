@@ -88,15 +88,25 @@ const nonInteractive = (args, context, {expect} = {}) =>
 // Ends a part of the test that does not run the others, and the --public smoke test (no local registry for the checks that
 // follow the generated headers), with its report.
 class Done extends Error {}
-try {
-    await webFront.ready;
-    for (let attempt = 0; attempt < 300; ++attempt) {
-        const text = document.getElementById('status')?.textContent ?? '';
-        if (text.startsWith('Bootstrap failed:')) throw new Error(text);
-        if (text.startsWith('Developer environment ready.')) break;
-        if (attempt === 299) throw new Error('Bootstrap readiness timed out');
+// Waits until the bootstrap page `page` (a document, or a function returning one while a frame loads) reports that its
+// environment is ready, and throws at once when it reports a failure. Starting verifies the cached environment (SHA-512 of
+// the archive, digest of every file through the bridge): 9 s for the first launch on a loaded hosted runner (#660), so a
+// launch, the first or a later one, gets the same generous bound, and a failure names the last status it showed.
+const bootstrapLimitMs = 60000;
+const bootstrapped = async (page, what) => {
+    const started = profileNow();
+    for (let text = '';;) {
+        text = (typeof page === 'function' ? page() : page)?.getElementById('status')?.textContent ?? '';
+        if (text.startsWith('Bootstrap failed:')) throw new Error(`${what}: ${text}`);
+        if (text.startsWith('Developer environment ready.')) return;
+        if (profileNow() - started > bootstrapLimitMs)
+            throw new Error(`${what} did not start in ${bootstrapLimitMs / 1000} s; its last status: ${JSON.stringify(text)}`);
         await delay(100);
     }
+};
+try {
+    await webFront.ready;
+    await bootstrapped(document, 'The bootstrap page');
     await progress('bootstrap ready');
     // `all` (no part given) runs every part in one project; a part starts from a fresh project and runs alone, in parallel
     // with the others.
@@ -896,11 +906,7 @@ try {
         relaunched.style.cssText = 'position:fixed;left:0;top:0;width:900px;height:600px;border:0;z-index:2147483647;background:#141821';
         relaunched.src = location.pathname;
         document.body.append(relaunched);
-        await until(() => {
-            const text = relaunched.contentDocument?.getElementById('status')?.textContent ?? '';
-            if (text.startsWith('Bootstrap failed:')) throw new Error(text);
-            return text.startsWith('Developer environment ready.');
-        }, 'The relaunched page did not start');
+        await bootstrapped(() => relaunched.contentDocument, 'The relaunched page');
         const again = layout(relaunched.contentDocument);
         const page = relaunched.contentDocument, pagePreview = page.getElementById('preview');
         assert(again.state() === 'interface', `A project with an interface must open on it: ${again.state()}`);

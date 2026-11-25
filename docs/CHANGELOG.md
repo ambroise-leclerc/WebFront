@@ -18,6 +18,7 @@ these entries stays in the GitHub releases and the Git history.
 - The test helpers, `webfront_add_jasmine_test` included, export the real `XDG_DATA_HOME` and `XDG_CACHE_HOME` as `WEBFRONT_TEST_REAL_XDG_DATA_HOME` and `WEBFRONT_TEST_REAL_XDG_CACHE_HOME`, so an application under test can keep the throwaway WebKitGTK profile away from the programs it starts ([#664](https://github.com/ambroise-leclerc/WebFront/issues/664), `docs/CONSUMER_TESTING.md`).
 
 ### Fixed
+- `DeveloperBrowserIntegration-workspace` gives the relaunched bootstrap page the same 60 s to start as the first one, instead of 10 s, which a loaded runner exceeded while the page verified its cached environment (#660).
 - Applications started from the terminal of a Snap-packaged editor (VSCodium) now run on WebKitGTK without cleaning the environment by hand; `WEBFRONT_KEEP_SNAP_ENVIRONMENT=1` opts out (#662, `docs/WEBKITGTK.md`).
 
 ## [1.2.0] - 2026-11-24
