@@ -194,7 +194,8 @@ public:
         });
     }
 
-    /// The spaces of spaces-specs.mjs (#671): a page loaded under /s/<name>/ reaches the function of its own space only.
+    /// The spaces of spaces-specs.mjs (#671): a page loaded under /s/<name>/ reaches the function of its own space only, and
+    /// reads the path its bridge connected from (#672).
     void registerSpaces(TestWF& app) {
         app.spaces("/s/", [this, &app](std::string_view segment) -> std::optional<http::RouteReply> {
             if (segment != "alpha" && segment != "beta")
@@ -202,6 +203,10 @@ public:
             auto space = std::make_unique<TestWF::Space>(app, "/s/", segment);
             space->cppFunction("spaceName", [name = std::string(segment)] {
                 return name;
+            });
+            // The path of the page's bridge within its space (#672): "/sub/" for a page of /s/alpha/sub/.
+            space->cppFunction("bridgePath", [](TestWF::UI ui) {
+                return ui.path();
             });
             spaces.emplace(segment, std::move(space));
             return std::nullopt;

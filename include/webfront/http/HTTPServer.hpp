@@ -514,10 +514,15 @@ struct MountAnswer {
     std::shared_ptr<void> target{};
 };
 
-/// The space of a connection upgraded to a WebSocket, as its mount resolved it for the upgrade request; empty outside mounts.
+/// Where a connection upgraded to a WebSocket belongs: the space its mount resolved for the upgrade request (empty outside
+/// the mounts) and the path of the request, which WebFront.js makes the directory of its page.
 struct UpgradeSpace {
-    std::string           path;    ///< The path of the mount and segment, "/s/abc/".
+    std::string           path;    ///< The path of the mount and segment, "/s/abc/"; empty outside the mounts.
     std::shared_ptr<void> target;  ///< MountAnswer::target.
+    /// The path of the upgrade request, within the space under a mount: decoded and normalized as a file request reads it
+    /// (empty and "." segments dropped, a trailing slash kept), without the query. "/a/b/" for `ws://host/a/b/`, "/sub/"
+    /// for `ws://host/s/abc/sub/` under the mount "/s/".
+    std::string requestPath;
 };
 
 /// Called on the server context with the decoded segment that follows the prefix of a mount: `/s/abc/x` gives "abc".
@@ -889,9 +894,10 @@ private:
 
     // The file a request URI names, or nothing when the URI is not a safe absolute path.
     static std::optional<std::filesystem::path> filePath(const std::string& uri) {
-        // The query is not part of the file name; it is cut before decoding, so "%3F" stays in the name.
+        // The query is not part of the file name; it is cut before decoding, so "%3F" stays in the name. A '+' of a URL path
+        // is literal, as for the routes, the spaces and the path of a WebSocket upgrade (UI::path): "/a+b/" is "a+b/".
         const auto rawPath    = std::string_view(uri).substr(0, uri.find('?'));
-        auto       requestUri = uri::decode(rawPath);
+        auto       requestUri = uri::decode(rawPath, false);
         const bool secret     = routing::mentionsServices(uri) || routing::mentionsServices(requestUri);
         if (!secret)
             log::debug("Request path - raw:'{}' decoded:'{}'", rawPath, requestUri);  // never the query
@@ -905,10 +911,13 @@ private:
         return requestPath;
     }
 
+    // The rule of routing::splitTarget, which a WebSocket upgrade follows: an absolute path without ".." or a control character.
     static bool isSafePath(std::string_view path) {
-        if (!path.starts_with('/'))
+        if (!path.starts_with('/') || path.find("..") != std::string_view::npos)
             return false;
-        return path.find("..") == std::string_view::npos;
+        return std::none_of(path.begin(), path.end(), [](char c) {
+            return static_cast<unsigned char>(c) < 32 || c == 127;
+        });
     }
 
     std::optional<Response> webSocketUpgrade(const Request& request) const {
@@ -1148,7 +1157,8 @@ public:
     }
 
     /// Called, on the context's thread, with the socket of a connection upgraded to a WebSocket. A handler that also takes a
-    /// `const UpgradeSpace&` receives the space of the upgrade, as its mount resolved it; empty outside the mounts.
+    /// `const UpgradeSpace&` receives the space of the upgrade, as its mount resolved it (empty outside the mounts), and the
+    /// path of the upgrade request.
     template <typename Handler>
     void onUpgrade(Handler&& handler) {
         if constexpr (std::invocable<Handler&, typename Net::Socket&&, const UpgradeSpace&>)
@@ -1226,7 +1236,7 @@ private:
                 return {};  // an application without mounts pays nothing more per request
             segments = routing::decodedSegments(raw);
             // A target at or under a prefix, read either way (whole or segment by segment), and even one that is not a safe
-            // path, belongs to the mount: nothing there falls through to the application, whose upgrade ignores the path.
+            // path, belongs to the mount: nothing there falls through to the application, which would read it as its own.
             // The prefix's name without its slash ("/s", or "/WebFront.js" for "/WebFront.js/") is not under it.
             const auto decoded = routing::collapseSegments(uri::decode(raw, false));
             for (const auto& [candidate, found] : mounts) {
@@ -1644,10 +1654,17 @@ private:
                     co_await sendReply(socket, request.method == Request::Method::Head, std::move(*mounted->reply));
                     co_return;
                 }
-                space       = UpgradeSpace{std::move(mounted->space), std::move(mounted->target)};
+                space       = UpgradeSpace{std::move(mounted->space), std::move(mounted->target), {}};
                 within      = std::move(mounted->logged);
                 spaceRoutes = std::move(mounted->routes);
                 request.uri = std::move(mounted->uri);
+            }
+            if (request.isUpgradeRequest("websocket")) {
+                // The upgrade is accepted where a file would be served, and refused as a file request is otherwise.
+                auto target = routing::splitTarget(request.uri);
+                if (!target)
+                    throw BadRequestException();
+                space.requestPath = std::move(target->first);
             }
             auto match = matchRoute(request, spaceRoutes.get());
             if (match && match->route->secretPath)

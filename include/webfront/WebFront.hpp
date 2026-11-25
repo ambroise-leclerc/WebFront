@@ -195,6 +195,14 @@ public:
         return webFront->isLocalClient(webLinkId, generation);
     }
 
+    /// The path on which this browser opened its bridge, decoded and normalized as a file request reads it (a '+' stays a
+    /// '+', "%20" is a space), without the query: by default the directory of its page, "/" for a page at the root, "/a/b/" for `/a/b/index.html`. Under a
+    /// space, the path within it: "/" for a page of `/s/abc/`, "/sub/" for one of `/s/abc/sub/`. The client chooses it,
+    /// so it locates the page and proves nothing. Still known to the closed handlers; empty once the connection is released.
+    [[nodiscard]] std::string path() const {
+        return webFront->pathOf(webLinkId, generation);
+    }
+
     /// A read URL on `route` for this browser's connection: the page reads it with `<img>`, `<video>`, `fetch` or a
     /// download; `path` is what the route's handler receives (ReadGrant::rest). Unless `options.transferable`, the URL
     /// works only from the browser client of this connection and only while the connection is open; it stays valid for
@@ -820,7 +828,8 @@ private:
                                             .deferred       = {},
                                             .viewAssociated = false,
                                             .loopbackPeer   = loopbackPeer,
-                                            .space          = std::move(space)});
+                                            .space          = std::move(space),
+                                            .path           = resolved.requestPath});
             }
             link->start();  // registered first: every event it dispatches finds it
         });
@@ -1092,6 +1101,12 @@ private:
         if (!isEmbeddedView(id, generation))
             return std::unexpected(frontend::NativeWindowError::notEmbedded);
         return nativeWindow().get();
+    }
+
+    [[nodiscard]] std::string pathOf(WebLinkId id, WebLinkGeneration generation) const {
+        std::scoped_lock lock{linksMutex};
+        const auto       found = webLinks.find(id);
+        return found != webLinks.end() && found->second.generation == generation ? found->second.path : std::string{};
     }
 
     [[nodiscard]] bool isLocalClient(WebLinkId id, WebLinkGeneration generation) const {
@@ -1877,6 +1892,7 @@ private:
         bool                                    loopbackPeer   = false;      // peer address was the loopback (read only with trustLoopbackClients)
         std::shared_ptr<detail::DeferredCalls>  deferredCalls  = std::make_shared<detail::DeferredCalls>();  // calls a callback answers later
         std::shared_ptr<SpaceState>             space{};  // the space the page was loaded in; null outside the spaces
+        std::string                             path{};   // the path of the upgrade, within the space (UI::path)
     };
     std::map<WebLinkId, Connection>                webLinks;
     WebLinkId                                      idsCounter{0};
