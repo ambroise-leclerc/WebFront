@@ -180,8 +180,9 @@ export function createTabMenu({button, entries, activate}) {
         note.textContent = reasons.join(' ');
     }
 
-    function place(level, anchor) {
-        const {panel} = level;
+    /** Places a panel beside its anchor (level.anchor()), inside the viewport, for the size it has now. */
+    function place(level) {
+        const {panel} = level, anchor = level.anchor();
         panel.style.left = '0px';
         panel.style.top = '0px';
         const viewport = {width: page.documentElement.clientWidth, height: page.documentElement.clientHeight};
@@ -219,7 +220,8 @@ export function createTabMenu({button, entries, activate}) {
         const root = panelFor(entries, null, 0);
         levels.push(root);
         page.body.append(root.panel);
-        place(root, anchor);
+        root.anchor = () => anchor;
+        place(root);
         root.panel.addEventListener('keydown', onKey);
         root.panel.addEventListener('click', onClick);
         root.panel.addEventListener('pointerover', onHover);
@@ -244,8 +246,12 @@ export function createTabMenu({button, entries, activate}) {
         item.setAttribute('aria-controls', sub.menu.id);
         item.setAttribute('aria-expanded', 'true');
         page.body.append(sub.panel);
-        const rect = item.getBoundingClientRect(), parentRect = level.panel.getBoundingClientRect();
-        place(sub, {left: parentRect.left, right: parentRect.right, top: rect.top, bottom: rect.bottom});
+        // Beside its parent panel, level with its entry: read again each time it is placed, since the parent may move.
+        sub.anchor = () => {
+            const rect = item.getBoundingClientRect(), parentRect = level.panel.getBoundingClientRect();
+            return {left: parentRect.left, right: parentRect.right, top: rect.top, bottom: rect.bottom};
+        };
+        place(sub);
         sub.panel.addEventListener('keydown', onKey);
         sub.panel.addEventListener('click', onClick);
         sub.panel.addEventListener('pointerover', onHover);
@@ -377,8 +383,14 @@ export function createTabMenu({button, entries, activate}) {
 
     return {
         open, close,
-        /** Reads the reasons again for the panels that are open, which keep their place and their focus. */
-        refresh() { levels.forEach(applyReasons); },
+        /**
+         * Reads the reasons again for the panels that are open, which keep their focus. A reason may change their size:
+         * each one is placed again beside its anchor, the root first, so that a submenu follows a parent that moved.
+         */
+        refresh() {
+            levels.forEach(applyReasons);
+            levels.forEach(place);
+        },
         get isOpen() { return isOpen(); },
         /** The panels shown, the root first. */
         get panels() { return levels.map(level => level.panel); },

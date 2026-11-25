@@ -391,6 +391,25 @@ describe('The developer page layout', () => {
                 expect(items(0).some(item => item.hasAttribute('aria-disabled'))).toBeFalse();  // the groups stay available
             });
 
+            it('places the open panels again when a longer reason makes them taller, near the bottom of the window', () => {
+                const height = document.documentElement.clientHeight, width = document.documentElement.clientWidth;
+                const inside = panel => {
+                    const box = panel.getBoundingClientRect();
+                    return box.top >= 0 && box.bottom <= height + 0.5 && box.left >= 0 && box.right <= width + 0.5;
+                };
+                reason = 'Wait.';
+                menu.open({left: width - 44, right: width, top: height - 88, bottom: height});
+                key(items(0)[2], {key: 'ArrowRight'});
+                const [root, submenu] = menu.panels, before = submenu.getBoundingClientRect().height;
+                expect(inside(root) && inside(submenu)).toBeTrue();
+                reason = 'A reason long enough to take several lines in the submenu. '.repeat(4);
+                menu.refresh();
+                expect(submenu.getBoundingClientRect().height).toBeGreaterThan(before + 20);
+                expect(menu.panels).toEqual([root, submenu]);
+                expect(inside(root) && inside(submenu)).withContext(JSON.stringify(submenu.getBoundingClientRect())).toBeTrue();
+                expect(document.activeElement).toBe(items(1)[0]);
+            });
+
             it('leaves the menu with Tab and Shift+Tab, from the tab, in the direction asked', () => {
                 for (const shiftKey of [false, true]) {
                     for (const depth of [0, 1]) {
@@ -445,34 +464,61 @@ describe('The developer page layout', () => {
             });
         });
 
-        it('updates a submenu opened before C++ said which containers reach the inspectors', async () => {
-            const {bridge: projectBridge} = memoryBridge();
-            let answer;
-            const asked = new Promise(resolve => { answer = resolve; });
-            const bridge = {cppFunction: name => name === containersFunction ? () => asked : projectBridge.cppFunction(name)};
-            const element = document.createElement('div'), frame = document.createElement('iframe');
-            frame.hidden = true;
-            document.body.append(element, frame);
-            const workspace = await createWorkspace({bridge, element, frame, openInspector: () => {}});
+        describe('with an answer of C++ that comes after the submenu opened', () => {
             const press = (target, init) => target.dispatchEvent(new KeyboardEvent('keydown', {bubbles: true, cancelable: true, ...init}));
-            try {
-                workspace.menu.open();
-                const [, cpp] = workspace.menu.panels[0].querySelectorAll('[role=menuitem]');
-                press(cpp, {key: 'ArrowRight'});
-                const submenu = workspace.menu.panels[1], entries = [...submenu.querySelectorAll('[role=menuitem]')];
+            let workspace, frame, answer;
+
+            beforeEach(async () => {
+                const {bridge: projectBridge} = memoryBridge();
+                const asked = new Promise(resolve => { answer = resolve; });
+                const bridge = {cppFunction: name => name === containersFunction ? () => asked : projectBridge.cppFunction(name)};
+                const element = document.createElement('div');
+                frame = document.createElement('iframe');
+                frame.hidden = true;
+                document.body.append(element, frame);
+                workspace = await createWorkspace({bridge, element, frame, openInspector: () => {}});
+            });
+            afterEach(() => {
+                workspace.menu.close({focus: false});
+                [workspace.panel, workspace.button, frame].forEach(node => node.remove());
+                document.head.querySelectorAll('style').forEach(style => { if (style.textContent.includes('.webfront-terminal-toggle')) style.remove(); });
+                document.documentElement.removeAttribute('data-webfront-workspace');
+            });
+            // Opens the submenu of `group` (1: C++ state, 2: TypeScript state) while C++ has not answered yet.
+            const openSubmenu = (group, anchor) => {
+                workspace.menu.open(anchor);
+                press(workspace.menu.panels[0].querySelectorAll('[role=menuitem]')[group], {key: 'ArrowRight'});
+                const submenu = workspace.menu.panels[1];
                 expect(submenu.querySelector('.webfront-menu-reason').textContent).toBe(accessReasons.checking);
+                return submenu;
+            };
+
+            it('enables the entries of an admitted page', async () => {
+                const submenu = openSubmenu(1), entries = [...submenu.querySelectorAll('[role=menuitem]')];
                 expect(entries.every(entry => entry.getAttribute('aria-disabled') === 'true')).toBeTrue();
                 answer([false, true, false]);
                 await workspace.inspectorAccess;
                 expect(workspace.menu.panels[1]).toBe(submenu);
                 expect(submenu.querySelector('.webfront-menu-reason').textContent).toBe('');
                 expect(entries.some(entry => entry.hasAttribute('aria-disabled'))).toBeFalse();
-            } finally {
-                workspace.menu.close({focus: false});
-                [workspace.panel, workspace.button, frame].forEach(node => node.remove());
-                document.head.querySelectorAll('style').forEach(style => { if (style.textContent.includes('.webfront-terminal-toggle')) style.remove(); });
-                document.documentElement.removeAttribute('data-webfront-workspace');
-            }
+            });
+
+            it('keeps a submenu opened near the bottom of the window inside it once its reason is longer', async () => {
+                const height = document.documentElement.clientHeight, width = document.documentElement.clientWidth;
+                const submenu = openSubmenu(2, {left: width - 44, right: width, top: height - 88, bottom: height});
+                const before = submenu.getBoundingClientRect();
+                expect(before.bottom).toBeLessThanOrEqual(height + 0.5);
+                answer([false, false, false]);  // a page that is not admitted: the longest reason
+                await workspace.inspectorAccess;
+                const after = submenu.getBoundingClientRect();
+                expect(submenu.querySelector('.webfront-menu-reason').textContent).toBe(accessReasons.noContainer);
+                expect(after.height).toBeGreaterThan(before.height);
+                expect(after.top >= 0 && after.bottom <= height + 0.5).withContext(JSON.stringify(after)).toBeTrue();
+                for (const panel of workspace.menu.panels) {
+                    const box = panel.getBoundingClientRect();
+                    expect(box.left >= 0 && box.right <= width + 0.5 && box.top >= 0 && box.bottom <= height + 0.5).toBeTrue();
+                }
+            });
         });
     });
 });
