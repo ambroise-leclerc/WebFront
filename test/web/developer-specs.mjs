@@ -852,7 +852,27 @@ try {
                     const rect = box(selector);
                     return rect.left === 0 && rect.top === 0 && Math.abs(rect.width - root.clientWidth) < 1 && Math.abs(rect.height - root.clientHeight) < 1;
                 },
+                // The tab's context menu (#679): its panels, the root first, and the entries of one of them.
+                menus: () => [...page.querySelectorAll('.webfront-menu')],
+                entries: level => [...(page.querySelectorAll('.webfront-menu')[level]?.querySelectorAll('[role=menuitem]') ?? [])],
+                press: (target, init) => target.dispatchEvent(new view.KeyboardEvent('keydown', {bubbles: true, cancelable: true, ...init})),
+                rightClick: (target, x, y) => target.dispatchEvent(new view.MouseEvent('contextmenu', {bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y})),
             };
+        };
+        // The reason the inspector entries give, from what webfront.inspector.containers() answered to the page's bridge:
+        // an admitted page has no inspector to open yet (#680), another one is told how to be admitted (ADR-027, section 8).
+        const inspectorReason = async bridge => {
+            const [, host] = await bridge.cppFunction('webfront.inspector.containers')();
+            return host ? /cannot open the inspectors yet/ : /trustLoopbackClients/;
+        };
+        // Opens the submenu of `group` (1: C++ state, 2: TypeScript state) until the menu has read the page's access.
+        const inspectorEntries = async (layoutOf, group, expected) => {
+            await until(() => {
+                layoutOf.menus().slice(1).forEach(() => layoutOf.press(layoutOf.entries(1)[0], {key: 'ArrowLeft'}));
+                layoutOf.press(layoutOf.entries(0)[group], {key: 'ArrowRight'});
+                return expected.test(layoutOf.menus()[1]?.querySelector('.webfront-menu-reason')?.textContent ?? '');
+            }, 'The inspector entries must give the reason they are unavailable');
+            return layoutOf.entries(1);
         };
         const here = layout(document);
         if (part === 'workspace') {
@@ -900,6 +920,16 @@ try {
         if (part === 'workspace') await until(() => here.state() === 'floating', `The first preview must leave the terminal open: ${here.state()}`);
         assert(here.state() !== 'terminal' && here.fills('#preview') && here.style('.webfront-terminal-toggle').display !== 'none',
             'A displayed interface must fill the window, with the icon');
+        if (part === 'workspace') {
+            // This page's own menu: the inspector entries follow what its connection is admitted to.
+            const tabBox = here.box('.webfront-terminal-toggle');
+            here.rightClick(here.button(), tabBox.left + 10, tabBox.top + 10);
+            const entries = await inspectorEntries(here, 1, await inspectorReason(webFront));
+            assert(entries.length === 3 && entries.every(entry => entry.getAttribute('aria-disabled') === 'true'),
+                'Without an inspector to open, the entries of this page must be greyed');
+            here.press(entries[0], {key: 'Escape'});
+            assert(here.menus().length === 0 && document.activeElement === here.button(), 'Escape in a submenu must close the whole menu and give the focus back to the tab');
+        }
 
         // Launching again: the bootstrap page of the same project, in a window of its own size.
         const relaunched = document.createElement('iframe');
@@ -928,6 +958,54 @@ try {
         const sessionText = () => page.querySelector('#terminal .xterm-rows')?.textContent ?? '';
         await until(() => sessionText().includes('>'), 'The collapsed terminal must have its prompt');
         const before = sessionText();
+
+        // The tab's context menu (#679): a right click opens it beside the tab, inside the window, with the focus on its
+        // first entry and without opening the terminal.
+        assert(button.getAttribute('aria-haspopup') === 'menu', 'The tab must announce its menu');
+        assert(!again.rightClick(button, icon.left + icon.width / 2, icon.top + icon.height / 2), 'The browser\'s own menu must not open on the tab');
+        assert(again.menus().length === 1 && again.menus()[0].querySelector('[role=menu]'), 'A right click on the tab must open its menu');
+        assert(again.entries(0).map(entry => entry.firstChild.textContent).join() === 'Terminal,C++ state,TypeScript state',
+            `The menu must offer the terminal and the inspectors: ${again.entries(0).map(entry => entry.textContent)}`);
+        assert(again.inside('.webfront-menu') && again.entries(0).every(entry => entry.getBoundingClientRect().height >= 44),
+            'The menu must stay inside the window, with targets of 44 px');
+        assert(page.activeElement === again.entries(0)[0] && again.state() === 'interface', 'The menu must take the focus, and leave the terminal collapsed');
+        // The arrows move in the menu and open a submenu. This page is a frame of the test page: its connection is not
+        // the proven view, so no container is admitted and the entries say how to admit one.
+        again.press(again.entries(0)[0], {key: 'ArrowDown'});
+        assert(page.activeElement === again.entries(0)[1], 'The down arrow must move to the next entry');
+        const [, framedHost] = await relaunched.contentWindow.webFront.cppFunction('webfront.inspector.containers')();
+        assert(framedHost === false, 'A frame of the page is not admitted to the inspectors');
+        const cppEntries = await inspectorEntries(again, 1, /trustLoopbackClients/);
+        assert(cppEntries.map(entry => entry.firstChild.textContent).join() === 'Functions,Browsers and tasks,Watches'
+            && cppEntries.every(entry => entry.getAttribute('aria-disabled') === 'true' && /trustLoopbackClients/.test(entry.title)),
+            'The entries of a page that is not admitted must be greyed with their reason');
+        assert(page.activeElement === cppEntries[0] && again.inside('.webfront-menu[data-level="1"]'), 'The submenu must take the focus, inside the window');
+        again.press(cppEntries[0], {key: 'Enter'});
+        assert(again.menus().length === 2 && again.state() === 'interface', 'An unavailable entry must do nothing');
+        again.press(cppEntries[0], {key: 'ArrowLeft'});
+        assert(again.menus().length === 1 && page.activeElement === again.entries(0)[1], 'The left arrow must close the submenu');
+        const tsEntries = await inspectorEntries(again, 2, /trustLoopbackClients/);
+        assert(tsEntries.map(entry => entry.firstChild.textContent).join() === 'Packages,Bridge', 'The TypeScript state must offer its panels');
+        again.press(tsEntries[1], {key: 'Escape'});
+        assert(again.menus().length === 0 && page.activeElement === button, 'Escape in a submenu must close the whole menu and give the focus back to the tab');
+        // The Menu key and Shift+F10 open it from the keyboard; its Terminal entry opens the terminal.
+        again.press(button, {key: 'ContextMenu'});
+        assert(again.menus().length === 1 && page.activeElement === again.entries(0)[0], 'The Menu key must open the menu on the tab');
+        again.press(page.activeElement, {key: 'Escape'});
+        again.press(button, {key: 'F10', shiftKey: true});
+        assert(again.menus().length === 1, 'Shift+F10 must open the menu on the tab');
+        again.press(again.entries(0)[0], {key: 'Enter'});
+        assert(again.menus().length === 0 && again.state() === 'floating' && again.panel().contains(page.activeElement),
+            'The Terminal entry must open the terminal and give it the keys');
+        page.querySelector('.webfront-terminal-close').click();
+        assert(again.state() === 'interface' && page.activeElement === pagePreview && sessionText() === before,
+            'The terminal opened from the menu must collapse as before');
+        // Closed, the menu takes no key from the interface.
+        again.press(pagePreview.contentDocument.body, {key: 'Escape'});
+        again.press(pagePreview.contentDocument.body, {key: 'ArrowDown'});
+        assert(again.menus().length === 0 && again.state() === 'interface' && pagePreview.contentWindow.seen.join() === 'Escape,ArrowDown',
+            `A closed menu must leave the keys to the interface: ${pagePreview.contentWindow.seen}`);
+        pagePreview.contentWindow.seen.length = 0;
 
         button.click();
         assert(again.state() === 'floating' && button.getAttribute('aria-expanded') === 'true', 'A click on the icon must open the terminal');

@@ -1,9 +1,11 @@
 // The layout of the developer page: the terminal alone while the project has no interface, then the interface over the
 // whole window with the terminal in a floating, movable window that a tab on the right edge opens and collapses. The terminal is mounted
 // once in its window and never moves in the document afterwards: collapsing only hides it, so the session, a running
-// command, the line being typed and the scrollback are kept. The interface stays in the preview frame.
+// command, the line being typed and the scrollback are kept. The interface stays in the preview frame. The tab also has a
+// context menu (menu.mjs): the terminal and the inspectors of the application's state.
 import {call, readProject, publish} from './io.mjs';
 import {parseShortcut, defaultTerminalShortcut, parseManifest, manifestPath} from './manifest.mjs';
+import {createTabMenu, inspectorMenus, readInspectorAccess, accessReasons, menuStyles, isMenuKey} from './menu.mjs';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -200,7 +202,7 @@ ${floating} .webfront-terminal-bar{display:flex}
 @keyframes webfront-terminal-working{to{opacity:.35}}
 @media (prefers-reduced-motion:reduce){.webfront-terminal-status{animation:none!important}}
 :root[${attribute}=terminal] .webfront-terminal-toggle,:root[${attribute}=terminal] .webfront-interface{display:none}
-`;
+${menuStyles}`;
 
 const layouts = new WeakMap();
 /** Whether a workspace already lays out this preview frame: a page has one, whatever the terminals mounted in it. */
@@ -216,8 +218,10 @@ export const layoutState = frame => layouts.get(frame)?.workspace?.state;
  * terminal opens in `element`, then attach({focus, fit}) with the functions that focus the terminal and fit it to `element`.
  * The result gives the `state`, `interfaceExists` (the page opened on an existing interface, to load in the frame),
  * the `status` shown on the tab and command(running) to say that a command runs, toggle(), open({focus}) and close(), `button` and `panel`, the `shortcut` in use ("F9") and placeSaved().
+ * The tab's context menu (menu.mjs) is `menu`, and `inspectorAccess` resolves to what webfront.inspector.containers()
+ * allowed. `openInspector(panel)`, when given, opens an inspector panel; without it the menu says they cannot open yet.
  */
-export async function createWorkspace({bridge, element, frame}) {
+export async function createWorkspace({bridge, element, frame, openInspector = null}) {
     const layout = {workspace: null};
     layouts.set(frame, layout);
     const page = element.ownerDocument, view = page.defaultView, root = page.documentElement;
@@ -229,6 +233,8 @@ export async function createWorkspace({bridge, element, frame}) {
     let place = remembered;  // as chosen; what is displayed is fitted to the viewport
     let focusTerminal = () => {}, fitTerminal = () => {};
     const session = {command: false, dev: null};
+    // Asked once: whether this page may reach the inspectors does not change while its connection lives.
+    let access = null;
 
     const style = page.createElement('style');
     style.textContent = styles;
@@ -272,6 +278,7 @@ export async function createWorkspace({bridge, element, frame}) {
     const shown = () => clampRect(place ?? defaultRect(viewport()), viewport());
     function render() {
         root.setAttribute(attribute, state);
+        if (state === State.terminal) menu.close({focus: false});  // the tab is hidden with the interface
         const open = state === State.floating;
         button.setAttribute('aria-expanded', String(open));
         const status = tabStatus(session), words = statusText(status);
@@ -298,7 +305,28 @@ export async function createWorkspace({bridge, element, frame}) {
         else focusTerminal();
     }
 
-    button.addEventListener('click', () => apply('toggle'));
+    // The context menu: the terminal, and the inspectors when this page reaches them (ADR-027, section 8).
+    const inspectorReason = () => !access ? accessReasons.checking : access.reason || (openInspector ? '' : accessReasons.noInspector);
+    const menu = createTabMenu({
+        button,
+        entries: [
+            {id: 'terminal', label: 'Terminal', hint: keys, keys: keys.replace('Ctrl', 'Control')},
+            ...inspectorMenus.map(group => ({...group, children: group.children.map(panel => ({...panel, reason: inspectorReason}))})),
+        ],
+        activate: id => {
+            if (id === 'terminal') {
+                if (state === State.floating) focusTerminal(); else apply('open');
+            } else if (!inspectorReason()) openInspector(id);
+        },
+    });
+
+    const inspectorAccess = readInspectorAccess(bridge).then(result => {
+        access = result;
+        menu.refresh();  // a submenu opened while C++ was asked still says it is checking
+        return result;
+    });
+    // A long press that opened the menu ends with a click: it does not also toggle the terminal.
+    button.addEventListener('click', () => { if (!menu.consumeClick()) apply('toggle'); });
     closeButton.addEventListener('click', () => apply('close'));
     // Only a published preview loaded in the frame is an interface. wf dev also unhides the frame to show the diagnostic
     // of a failed build: before any preview, the frame stays out of the page and the terminal, which prints the
@@ -314,8 +342,11 @@ export async function createWorkspace({bridge, element, frame}) {
     // The listener is the first of its window (below), so the application's ones never see the shortcut.
     const onKey = event => {
         if (!isToggleKey(event, shortcut) || state === State.terminal) return;
+        // On the focused tab, a shortcut that is also a menu key (Shift+F10 in the manifest) opens the tab's menu.
+        if (event.target === button && isMenuKey(event)) return;
         event.preventDefault();
         event.stopImmediatePropagation();
+        menu.close({focus: false});
         apply('toggle');
     };
     view.addEventListener('keydown', onKey, true);
@@ -393,7 +424,7 @@ export async function createWorkspace({bridge, element, frame}) {
             session.command = Boolean(running);
             render();
         },
-        interfaceExists, button, panel, bar, shortcut: keys,
+        interfaceExists, button, panel, bar, shortcut: keys, menu, inspectorAccess,
         attach({focus, fit = () => {}}) {
             focusTerminal = focus;
             fitTerminal = fit;

@@ -496,6 +496,13 @@ add_test(NAME AutomationAbsentFromDistribution
          COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --target automation_distribution_guard --config $<CONFIG>)
 set_tests_properties(AutomationAbsentFromDistribution PROPERTIES PASS_REGULAR_EXPRESSION "does not exist in a distribution build")
 
+# The inspectors do not exist in a distribution build either (ADR-027, section 1): a bootstrapped developer application
+# compiled with WEBFRONT_DISTRIBUTION registers no webfront.inspector.* function.
+add_executable(inspector_distribution Main.cpp InspectorDistribution.cpp)
+target_link_libraries(inspector_distribution PRIVATE WebFront WebFront::Bdd WebFront_test_hardening WebFront_warnings WebFront_options)
+target_compile_definitions(inspector_distribution PRIVATE WEBFRONT_DISTRIBUTION=1)
+add_test(NAME InspectorsAbsentFromDistribution COMMAND inspector_distribution)
+
 # A project outside WebFront finds the installed WebFrontBdd package, writes scenarios and has CTest discover them (#647).
 # Only the top-level project installs the package, so only it can run this check.
 if(WEBFRONT_IS_TOP_LEVEL)
