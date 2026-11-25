@@ -111,14 +111,18 @@ modifiable, sa valeur est-elle complète, a-t-il disparu).
 le genre 16, plus les deux nombres et les en-têtes du codec. Un nœud encodé tient donc dans `maxNodeBytes` (2 Kio), et
 une page d'un seul nœud, avec son en-tête, dans `minPageBytes` (4 Kio).
 
-**Chemins bornés par construction.** Un chemin est la suite des segments de ses ancêtres, séparés par un octet, et
-chaque segment a une taille maximale connue avant d'être construit :
+**Encodage des chemins.** Un chemin est une chaîne ASCII : la suite des segments de ses ancêtres, chacun précédé de
+`/`. Chaque segment commence par une lettre qui dit sa nature, et son contenu ne contient jamais `/` :
 
-- un indice de séquence ou un rang de tableau associatif s'écrit en décimal (20 octets au plus) ;
-- un champ d'un type décrit est désigné par son **rang** dans la description, pas par son nom, qui peut être long (le nom
-  est le libellé) ;
-- une clé stable de `PagedSource` (section 5) fait 128 octets au plus. Un élément dont la clé est plus longue est
-  désigné par sa position, comme sans clé, et n'est pas modifiable, puisque son identité ne peut plus être vérifiée.
+| Segment | Forme | Taille maximale |
+| --- | --- | --- |
+| indice de séquence, ou rang dans un tableau associatif ou une `PagedSource` sans clé | `#` puis le décimal | 21 octets |
+| champ d'un type décrit, désigné par son **rang** dans la description (le nom, qui peut être long, est le libellé) | `.` puis le décimal | 21 octets |
+| clé stable d'une `PagedSource` (section 5) | `k` puis la clé encodée en pourcent : chaque octet hors de `A-Z a-z 0-9 - . _ ~` devient `%HH` | 129 octets |
+
+L'encodage est réversible : C++ décode un chemin reçu segment par segment, et refuse un chemin mal formé
+(`webfront.inspector.unknown`). Une clé dont l'encodage dépasserait 128 octets n'est pas tronquée, ce qui la rendrait
+ambiguë : son élément est désigné par sa position, comme sans clé, et n'est pas modifiable.
 
 Un nœud n'est jamais construit avec un chemin hors limite : c'est son **parent** qui s'arrête. Quand le parent est au
 64ᵉ niveau, ou quand la longueur de son chemin plus un séparateur et le plus long segment possible de ses enfants
@@ -186,15 +190,25 @@ instantané désigné par un identifiant.
 - L'instantané est plafonné à 16 Mio : au-delà, la valeur est coupée et `plafonnée` est vrai, ce que l'inspecteur
   affiche. Une connexion a au plus un instantané, libéré à la déconnexion.
 
-**Formatage borné.** Aucune valeur n'est formatée en entier puis tronquée. Toute valeur, celle d'un nœud (256 octets)
-comme celle d'un instantané (16 Mio), s'écrit dans un **récepteur borné** : une chaîne n'est copiée que jusqu'à la
-borne, et un type formatable passe par `std::format_to_n` vers un tampon de la taille de la borne, qui compte la taille
-qu'aurait la sortie complète sans la stocker. La troncature est détectée par cette taille, et le drapeau « valeur
-tronquée » ou `plafonnée` la signale. La mémoire d'une valeur est donc bornée par la borne plus une constante, quelle que
-soit la sortie du formateur. Le temps, lui, ne l'est pas : `std::format_to_n` appelle le formateur jusqu'au bout, et un
-formateur qui produirait des gigaoctets les produirait sous le verrou de l'application. La documentation le dit ;
-l'application qui observe un tel type le décrit (`forms::Description`) ou le pagine (`PagedSource`) plutôt que de
-compter sur `std::formatter`.
+**Formatage borné.** Aucune valeur n'est formatée en entier puis tronquée par WebFront. Toute valeur, celle d'un nœud
+(256 octets) comme celle d'un instantané (16 Mio), s'écrit dans un **récepteur borné** : une chaîne n'est copiée que
+jusqu'à la borne, et un type formatable passe par `std::format_to_n` vers un tampon de la taille de la borne, qui compte
+la taille qu'aurait la sortie complète sans la stocker. La troncature est détectée par cette taille, et le drapeau
+« valeur tronquée » ou `plafonnée` la signale.
+
+La garantie porte sur **les allocations de WebFront**, et sa portée dépend du genre (section 4) :
+
+- pour les genres que WebFront rend lui-même (scalaires, chaînes, énumérations décrites, `bitset`, conteneurs,
+  `optional`, `variant`, tuples, types décrits), la mémoire d'une valeur est bornée par la borne plus une constante, et
+  aucun code de l'application n'est appelé, hors de la source et d'une description ;
+- pour le genre `formatted`, WebFront appelle le `std::formatter` du type. Il borne ce qu'il stocke de la sortie, pas ce
+  que le formateur alloue pour la produire : un formateur qui construit une chaîne intermédiaire, ou un sous-formatage
+  par `std::format`, alloue à sa guise. Sa mémoire comme son temps sont **sous la responsabilité de l'application**, et
+  ils courent sous le verrou de la source. La documentation le dit ; l'application qui observe un type au formatage
+  coûteux le décrit (`forms::Description`) ou le pagine (`PagedSource`) plutôt que de compter sur `std::formatter`.
+
+WebFront ne restreint pas les formateurs acceptés : il ne peut pas savoir ce qu'un formateur alloue, et refuser
+`std::formatter` priverait l'inspecteur de tous les types de l'application qui n'ont pas de description.
 
 **Mémoire par connexion.** C++ garde, pour chaque connexion et chaque observateur, la valeur affichée des nœuds envoyés,
 comme le fait `forms::inspector`, et la révision de cette mémoire. Elle compte 10 000 nœuds au plus : au-delà,
@@ -250,8 +264,8 @@ L'inspecteur interroge à une période choisie, 250 ms par défaut, et peut se m
 l'initiative du navigateur (pull) : C++ n'envoie rien sans demande, et un inspecteur fermé ne coûte rien.
 
 Le chemin d'un élément de séquence est son indice. Celui d'un élément de tableau associatif est son rang dans
-l'itération, et son libellé est la clé formatée. Une `PagedSource` peut fournir une clé stable par élément
-(`key(position)`), qui remplace alors le rang dans le chemin. Quand le conteneur change, un chemin par indice ou par
+l'itération, et son libellé est la clé formatée. Une `PagedSource` peut fournir une clé stable par élément,
+qui remplace alors le rang dans le chemin (section 5). Quand le conteneur change, un chemin par indice ou par
 rang peut désigner un autre élément ou plus aucun : C++ le revalide à chaque lecture et, quand il ne résout plus,
 signale le nœud comme retiré. En lecture, l'identité d'un nœud au fil des modifications n'est pas garantie ; une
 écriture, elle, n'est appliquée que sous la précondition de la section 6.
@@ -321,8 +335,22 @@ conteneur :
   les p éléments précédents. Une passe de `changes` regroupe les nœuds par parent et parcourt chaque parent déplié une
   seule fois, jusqu'au plus grand rang affiché ;
 - un type qui modèle `webfront::inspect::PagedSource` (`size()`, `visit(premier, nombre, fonction)` et, en option,
-  `key(position)`, une clé stable) fournit lui-même l'accès par page : une page coûte ce que l'application en décide.
+  `key(position)` et `find(clé)`) fournit lui-même l'accès par page : une page coûte ce que l'application en décide.
   C'est la voie d'un très grand conteneur sans accès aléatoire, ou d'un contenu calculé à la demande.
+
+**Clés d'une `PagedSource`.** Une `PagedSource` qui fournit `key(position)` fournit aussi `find(clé)`, qui rend la
+position actuelle de l'élément ou rien. Son contrat est celui d'une clé primaire : à un instant donné, une clé désigne
+au plus un élément (**unicité**), et un élément garde sa clé tant qu'il existe (**stabilité**). WebFront ne peut pas
+vérifier ce contrat sur tout le conteneur sans le parcourir ; il en vérifie ce qui est local et borné :
+
+- un chemin par clé se résout par `find`, puis C++ vérifie que `key` à la position trouvée rend bien la même clé ;
+  sinon le nœud est retiré ;
+- deux éléments d'une même page qui rendent la même clé violent l'unicité : ils sont désignés par leur position, ne
+  sont pas modifiables, et un diagnostic nomme l'observateur une fois.
+
+Une clé dupliquée entre deux pages, ou une clé qui change d'élément, échappe à ces contrôles. La précondition
+d'écriture (section 6) compare alors encore le libellé, la valeur et les ancêtres affichés : une source qui viole son
+contrat de clé retombe sur la garantie d'un conteneur sans clé, jamais en dessous.
 
 Une page tardive d'une très grande liste chaînée ou d'une `std::map` peut donc coûter un parcours linéaire, sous le
 verrou de l'application ; la documentation le dit, et `PagedSource` en est le remède.
@@ -400,8 +428,8 @@ affiché. Elle ne peut pas distinguer deux éléments sans clé dont tout ce qui
 qui laisse inchangés le libellé et la valeur de la cible, et le nombre d'enfants de chaque ancêtre, n'est pas détecté.
 L'écriture pose alors la valeur saisie sur un élément identique en tout point visible. Un nœud dont le libellé ou la
 valeur affichés sont tronqués n'est pas modifiable, puisque la comparaison porterait sur un préfixe. Une application
-qui a besoin d'une identité exacte fournit une `PagedSource` avec `key(position)` : le chemin porte alors la clé, et la
-précondition la vérifie.
+qui a besoin d'une identité exacte fournit une `PagedSource` avec des clés : le chemin porte alors la clé, que `find`
+résout et que la précondition vérifie, sous le contrat d'unicité et de stabilité de la section 5.
 
 Une précondition fausse (`webfront.inspector.stale`), une analyse refusée (`webfront.inspector.parse`), un nœud non
 modifiable (`webfront.inspector.readOnly`), un texte trop long (`webfront.inspector.tooLarge`) ou un refus du mutateur
@@ -496,6 +524,8 @@ demanderait un grant et une décision propres.
 | Destruction qui n'attend jamais, quelle que soit la source | Une opération en cours toucherait un objet ou un mutex déjà détruits ; la source propriétaire obtient ce comportement sans ce risque. |
 | Destruction qui abandonne l'attente après un délai | Laisserait l'opération continuer sur des références pendantes ; le délai ne fait qu'écrire un diagnostic. |
 | Terminer une passe interrompue par une resynchronisation, ou faire attendre les dépliements | Une passe peut compter des milliers de pages : l'attente bloquerait l'utilisateur, la resynchronisation relirait tout l'arbre à chaque dépliement. |
+| Séparer les segments d'un chemin par un octet, sans encodage | Une clé contenant le séparateur se confondrait avec plusieurs segments. |
+| Refuser `std::formatter` pour borner toute la mémoire | WebFront ne sait pas ce qu'un formateur alloue ; le refuser priverait l'inspecteur des types sans description. |
 | Formater la valeur entière puis la tronquer | Un formateur ou une chaîne énormes alloueraient sans limite avant la troncature. |
 | Laisser finir une opération après la destruction de sa poignée depuis la source à références | L'opération reprendrait sur des objets que l'application peut détruire juste après la poignée. |
 | Modification libre de toute valeur | Changerait des invariants de l'application à son insu ; l'écriture reste un choix de l'application. |
@@ -508,8 +538,10 @@ demanderait un grant et une décision propres.
 - **Coût accepté :** avec le frontend par défaut (navigateur système), les inspecteurs sont refusés tant que
   l'application ne choisit pas un frontend intégré ou `trustLoopbackClients`. Le menu le dit.
 - **Coût accepté :** la signature publique de `cppFunction` gagne un paramètre par défaut.
-- **Coût accepté :** le formatage d'une valeur a une mémoire bornée mais pas un temps borné ; un formateur très
-  bavard s'exécute en entier sous le verrou de l'application.
+- **Coût accepté :** WebFront borne ce qu'il alloue pour une valeur, pas ce qu'alloue un `std::formatter` de
+  l'application, ni son temps ; un formateur coûteux s'exécute en entier sous le verrou de l'application.
+- **Coût accepté :** l'unicité et la stabilité des clés d'une `PagedSource` sont un contrat de l'application, vérifié
+  seulement localement (résolution par `find`, doublons d'une page).
 - **Coût accepté :** détruire la poignée d'une source à références depuis cette source termine le processus, avec un
   diagnostic ; la source propriétaire est la forme qui le permet.
 - **Coût accepté :** l'identité d'un nœud n'est pas stable quand un conteneur change ; l'inspecteur peut montrer un
@@ -531,23 +563,26 @@ demanderait un grant et une décision propres.
   grande que `maxMessageSize` par fragments (coupure UTF-8, plafond, décalage périmé, deux lectures entrelacées dont
   la suite de la première est refusée), réponses à la taille exacte de `responseBudget` avec `maxMessageSize`
   inférieur au tampon, écriture refusée comme périmée après une insertion avant la cible, un remplacement de la cible
-  ou une révision ancienne, écriture par clé d'une `PagedSource`, suppression annoncée seulement dans une page perdue
-  (absente après la resynchronisation et hors de la mémoire), `reset`, requête d'écriture à la taille exacte de
-  `requestBudget` avec tous ses arguments au maximum, texte d'un octet de trop refusé par la page puis par C++,
-  segment très long (nom de champ long, clé de `PagedSource` de plus de 128 octets), 64ᵉ niveau et chemin proche de 1
-  024 octets, opération entière sous le verrou du visiteur, `PagedSource`, chaque genre de la section 4, exécuteur,
-  poignée détruite pendant une lecture, destruction depuis l'opération d'une source propriétaire (état encore vivant à
-  la reprise, même quand la poignée en était le dernier autre propriétaire), formatage borné (chaîne de 100 Mio copiée
-  jusqu'au plafond seulement, formateur dont la sortie dépasse 1 Gio sans allocation au-delà de la borne, troncature
-  détectée), passe de milliers de pages avec le budget minimal interrompue par `children`, `fold`, `write` et un
-  nouveau curseur 0 (entrées non servies restaurées, différences retrouvées à la passe suivante, aucune
-  resynchronisation), destruction d'une source propriétaire sous le verrou de la source pendant qu'une opération
-  l'attend (sans interblocage, résultat abandonné, état encore vivant), destruction d'une source à références hors du
-  verrou pendant qu'une opération l'attend (attente puis fin), diagnostic d'une destruction qui attend plus que le
-  délai, `containers` d'une page non admise avec un frontend capable (`secondaryWindow` faux, aucun conteneur),
-  écriture acceptée, refusée par l'analyse, refusée par le mutateur et non permise) ; refus à une connexion non
-  prouvée sans `trustLoopbackClients` ; `containers` pour chaque frontend et chaque réglage de confiance ; absence des
-  fonctions hors environnement et en distribution.
+  ou une révision ancienne, écriture par clé d'une `PagedSource`, clé contenant `/`, `%` et des octets non ASCII
+  (encodage réversible), chemin mal formé refusé, clé dont l'encodage dépasse 128 octets (position, non modifiable),
+  clé dupliquée dans une page (position, non modifiable, diagnostic unique), clé que `find` résout vers un élément
+  dont `key` diffère (nœud retiré), clé dupliquée entre deux pages (précondition sur l'état affiché), suppression
+  annoncée seulement dans une page perdue (absente après la resynchronisation et hors de la mémoire), `reset`, requête
+  d'écriture à la taille exacte de `requestBudget` avec tous ses arguments au maximum, texte d'un octet de trop refusé
+  par la page puis par C++, segment très long (nom de champ long, désigné par son rang), 64ᵉ niveau et chemin proche
+  de 1 024 octets, opération entière sous le verrou du visiteur, `PagedSource`, chaque genre de la section 4,
+  exécuteur, poignée détruite pendant une lecture, destruction depuis l'opération d'une source propriétaire (état
+  encore vivant à la reprise, même quand la poignée en était le dernier autre propriétaire), formatage borné (chaîne
+  de 100 Mio copiée jusqu'au plafond seulement, formateur qui écrit plus de 1 Gio directement dans l'itérateur de
+  sortie sans allocation de WebFront au-delà de la borne, troncature détectée), passe de milliers de pages avec le
+  budget minimal interrompue par `children`, `fold`, `write` et un nouveau curseur 0 (entrées non servies restaurées,
+  différences retrouvées à la passe suivante, aucune resynchronisation), destruction d'une source propriétaire sous le
+  verrou de la source pendant qu'une opération l'attend (sans interblocage, résultat abandonné, état encore vivant),
+  destruction d'une source à références hors du verrou pendant qu'une opération l'attend (attente puis fin),
+  diagnostic d'une destruction qui attend plus que le délai, `containers` d'une page non admise avec un frontend
+  capable (`secondaryWindow` faux, aucun conteneur), écriture acceptée, refusée par l'analyse, refusée par le mutateur
+  et non permise) ; refus à une connexion non prouvée sans `trustLoopbackClients` ; `containers` pour chaque frontend
+  et chaque réglage de confiance ; absence des fonctions hors environnement et en distribution.
 - Test de processus : destruction de la poignée d'une source à références depuis son visiteur, qui écrit le diagnostic
   puis termine le processus.
 - Test de compilation refusée, comme `FormsReflectionRejects` : une politique de tampons dont `responseBudget` est
