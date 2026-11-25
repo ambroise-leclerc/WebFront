@@ -90,15 +90,34 @@ dans le projet ne demandaient que le contrôle d'origine, qu'un processus local 
 utilisateur de la machine pouvait réécrire un script du projet, attendre que la vue le charge, puis lire les
 inspecteurs et utiliser les services natifs de l'ADR-020 par la connexion de cette vue.
 
-Cette décision ferme cette voie. **Quand le frontend actif transmet la preuve de vue** (WebKitGTK, WKWebView, WebView2,
-CEF, et `NativeOrBrowserFrontend` tant qu'il n'est pas replié sur le navigateur système), les callbacks de
-l'environnement qui modifient ce que la vue exécute ou ce que le serveur sert exigent le même prédicat que les
-inspecteurs (`isLocalClient`), sinon `webfront.inspector.denied` :
+Cette décision ferme cette voie pour **tous les points d'entrée que WebFront fournit**, et fixe le contrat de ceux
+que l'application fournit.
+
+**Points d'entrée de WebFront.** Quand le frontend actif transmet la preuve de vue (WebKitGTK, WKWebView, WebView2,
+CEF, et `NativeOrBrowserFrontend` tant qu'il n'est pas replié sur le navigateur système), les callbacks réservés qui
+modifient ce que la vue exécute ou ce que le serveur sert, **ou qui exécutent du code de l'application capable de le
+faire**, exigent le même prédicat que les inspecteurs (`isLocalClient`), sinon `webfront.inspector.denied` :
 
 - `webfront.developer.begin`, `beginNew`, `write`, `commit`, `commitGroup` et `abort`, c'est-à-dire toute écriture
   dans le projet, dont les sources, le manifeste, le lock, les paquets installés et les publications de
   `.webfront/developer/` (environnement, aperçu, tests) ;
-- tout callback ajouté plus tard qui écrit dans le projet ou change ce que le serveur sert.
+- `webfront.commands.start` et `webfront.commands.cancel` (`Commands.hpp`, ADR-023) : une commande C++ de
+  l'application peut écrire dans le projet ou changer ce que le serveur sert, et WebFront ne sait pas ce qu'elle fait ;
+  la lancer est donc traité comme une écriture. `webfront.commands.list`, qui ne rend que des noms et des aides, garde
+  le contrôle d'origine. Les sorties d'une commande (`webfront.commands.output`, `exit`) vont à la connexion qui l'a
+  lancée, déjà admise ;
+- tout callback réservé ajouté plus tard qui écrit dans le projet, change ce que le serveur sert, ou exécute du code
+  de l'application.
+
+**Callbacks de l'application.** Un `cppFunction` que l'application enregistre sous son propre nom est hors de portée de
+cette garde : WebFront ne sait pas ce qu'il fait, et le garder par défaut casserait toutes les applications servies à
+un navigateur. Son contrat de sécurité est donc celui de l'application, et cette décision l'écrit : **un callback de
+l'application qui écrit dans le projet ou dans ce que le serveur sert, qui lance un processus, ou qui expose un état
+qu'elle ne montrerait pas à un client non prouvé, prend l'appelant en premier paramètre (`UI`) et vérifie
+`ui.isLocalClient()` avant d'agir**. Sans cette vérification, il contourne la frontière ci-dessus, et c'est un défaut
+de l'application, pas de WebFront. La documentation des inspecteurs, `docs/DEVELOPING_WITH_AGENTS.md` et le guide des
+starters le disent ; le registre (#681) affiche, pour chaque `cppFunction`, s'il reçoit l'appelant, ce qui aide à
+repérer les callbacks qui ne peuvent pas faire cette vérification.
 
 Les lectures du projet (`webfront.developer.read`, `list`, `entries`, `digests`, `state`, `config`) gardent le contrôle
 d'origine : elles ne changent rien à ce que la vue exécute. Le terminal et wf tournent dans la vue prouvée, ou dans une
@@ -681,6 +700,8 @@ demanderait un grant et une décision propres.
 | Code à usage unique dans l'URL du navigateur système | Il faudrait une décision de sécurité propre (course avec un autre processus, historique, extensions) ; écarté de ce périmètre. |
 | Laisser les écritures de l'environnement au seul contrôle d'origine | Un client non prouvé réécrirait un script que la vue prouvée charge, et lirait les inspecteurs par elle. |
 | Garder les écritures de l'environnement avec tous les frontends | Avec le navigateur système, qui ne prouve rien, `wf install` ou `wf build` seraient refusés sans `trustLoopbackClients` : le parcours par défaut serait cassé pour un gain nul. |
+| Garder `webfront.developer.*` sans garder les commandes | Une commande C++ peut écrire dans le projet : le scénario de la vue prouvée reste ouvert. |
+| Garder par défaut tous les `cppFunction` de l'application | Toute application servie au navigateur système, ou appelée par un client légitime non prouvé, serait cassée ; WebFront ne sait pas lesquels écrivent. |
 | Option d'accès propre aux inspecteurs | Elle répéterait `trustLoopbackClients` sur un autre périmètre. |
 | Nouveau code de type pour les nœuds ou les arbres | Rompt les deux codecs et l'environnement publié pour un besoin que les listes de tuples couvrent. |
 | Arbre complet envoyé en une fois, ou poussé par C++ | Copie les grands conteneurs, coûte même quand personne ne regarde, et dépasse le tampon de la politique. |
@@ -711,7 +732,8 @@ demanderait un grant et une décision propres.
   l'application ne choisit pas un frontend intégré ou `trustLoopbackClients`. Le menu le dit.
 - **Coût accepté :** la signature publique de `cppFunction` gagne un paramètre par défaut.
 - **Coût accepté :** avec un frontend qui prouve ses vues, un client local non prouvé (script, outil externe) ne peut
-  plus écrire dans le projet par `webfront.developer.*` sans `trustLoopbackClients` ; avec le navigateur système, ces
+  plus écrire dans le projet par `webfront.developer.*` ni lancer une commande par `webfront.commands.start` sans
+  `trustLoopbackClients` ; avec le navigateur système, ces
   écritures restent ouvertes, ce qui est la limite connue de ce frontend.
 - **Coût accepté :** WebFront borne ce qu'il alloue pour une valeur, pas ce qu'alloue un `std::formatter` de
   l'application, ni son temps ; un formateur coûteux s'exécute en entier sous le verrou de l'application.
@@ -724,6 +746,8 @@ demanderait un grant et une décision propres.
 - **Coût accepté :** une page tardive d'un conteneur sans accès aléatoire coûte un parcours linéaire, sous le verrou
   de l'application, sauf si elle fournit une `PagedSource` ; une source qui rend une valeur copie l'objet à chaque
   opération.
+- **Risque :** qu'un callback de l'application qui écrit dans le projet oublie de vérifier `ui.isLocalClient()` et
+  rouvre la voie que la garde ferme ; c'est un contrat documenté de l'application, que WebFront ne peut pas vérifier.
 - **Risque :** qu'un accès qui rend une référence sans exécuteur crée une course ; la documentation et l'exemple Life
   montrent le visiteur sous verrou et l'exécuteur.
 - **Risque :** que les valeurs affichées révèlent des données personnelles dans une capture d'écran ou un partage ;
@@ -782,8 +806,9 @@ demanderait un grant et une décision propres.
   destruction d'une source à références hors du verrou pendant qu'une opération l'attend (attente puis fin),
   diagnostic d'une destruction qui attend plus que le délai, `containers` d'une page non admise avec un frontend
   capable (`secondaryWindow` faux, aucun conteneur), écriture acceptée, refusée par l'analyse, refusée par le mutateur
-  et non permise) ; refus à une connexion non prouvée sans `trustLoopbackClients` ; écritures `webfront.developer.*`
-  refusées à une connexion non prouvée quand le frontend transmet la preuve, acceptées depuis la vue, la fenêtre
+  et non permise) ; refus à une connexion non prouvée sans `trustLoopbackClients` ; écritures `webfront.developer.*`,
+  `webfront.commands.start` et `webfront.commands.cancel` refusées à une connexion non prouvée quand le frontend
+  transmet la preuve (aucune commande lancée), `webfront.commands.list` admis, acceptées depuis la vue, la fenêtre
   secondaire et le pilote `webfront-wf`, inchangées avec le navigateur système ; lectures du projet inchangées ;
   `containers` pour chaque frontend et chaque réglage de confiance ; absence des fonctions hors environnement et en
   distribution.
