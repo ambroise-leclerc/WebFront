@@ -195,8 +195,8 @@ public:
         return webFront->isLocalClient(webLinkId, generation);
     }
 
-    /// The path on which this browser opened its bridge, decoded and normalized as a file request reads it, without the
-    /// query: by default the directory of its page, "/" for a page at the root, "/a/b/" for `/a/b/index.html`. Under a
+    /// The path on which this browser opened its bridge, decoded and normalized as a file request reads it (a '+' stays a
+    /// '+', "%20" is a space), without the query: by default the directory of its page, "/" for a page at the root, "/a/b/" for `/a/b/index.html`. Under a
     /// space, the path within it: "/" for a page of `/s/abc/`, "/sub/" for one of `/s/abc/sub/`. The client chooses it,
     /// so it locates the page and proves nothing. Still known to the closed handlers; empty once the connection is released.
     [[nodiscard]] std::string path() const {

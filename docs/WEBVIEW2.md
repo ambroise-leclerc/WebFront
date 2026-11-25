@@ -56,7 +56,7 @@ The default address is `127.0.0.1`, so the browser reaches the IPv4 loopback lis
 
 The page is a UTF-8 URI reference. `show("index.html?x=1#result")` retains its query and fragment; spaces and non-ASCII bytes are percent-encoded. Already encoded `%XX` sequences are preserved. For a filename containing literal `#`, `?` or `%`, use `%23`, `%3F` or `%25`, for example `show("encoded path %23.html")`. CEF, WebView2 and the system browser share this construction.
 
-A literal `+` in the path is automatically encoded as `%2B`: `show("a+b.html")` serves the filename `a+b.html`. This avoids the server decoder's conversion of an unescaped `+` to a space. Plus signs in the query and fragment retain their original meaning.
+A literal `+` in the path is encoded as `%2B`: `show("a+b.html")` serves the filename `a+b.html`. The server also reads an unescaped `+` of a path as a literal `+` (a space is `%20`). Plus signs in the query and fragment retain their original meaning.
 
 The shared `path-encoding` lifecycle case opens `encoded path %23.html` under every frontend and checks the query and fragment (reaching the page proves the decoded filename); the Jasmine suite, which runs in a frame of the developer environment, serves `a+b.html` through the C++ URL builder. The unit tests also check this path at the system-browser launcher boundary and verifies shell quoting. On Windows the system browser is opened directly with `ShellExecute`, without a command shell; POSIX launches quote the URL as one argument.
 

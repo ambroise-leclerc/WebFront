@@ -894,9 +894,10 @@ private:
 
     // The file a request URI names, or nothing when the URI is not a safe absolute path.
     static std::optional<std::filesystem::path> filePath(const std::string& uri) {
-        // The query is not part of the file name; it is cut before decoding, so "%3F" stays in the name.
+        // The query is not part of the file name; it is cut before decoding, so "%3F" stays in the name. A '+' of a URL path
+        // is literal, as for the routes, the spaces and the path of a WebSocket upgrade (UI::path): "/a+b/" is "a+b/".
         const auto rawPath    = std::string_view(uri).substr(0, uri.find('?'));
-        auto       requestUri = uri::decode(rawPath);
+        auto       requestUri = uri::decode(rawPath, false);
         const bool secret     = routing::mentionsServices(uri) || routing::mentionsServices(requestUri);
         if (!secret)
             log::debug("Request path - raw:'{}' decoded:'{}'", rawPath, requestUri);  // never the query

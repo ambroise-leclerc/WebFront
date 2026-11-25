@@ -22,6 +22,7 @@ these entries stays in the GitHub releases and the Git history.
 ### Changed
 - `WebFront.js` opens its WebSocket on the directory of the page (`ws://host/dir/` instead of `ws://host`), which tells the server a page's space (#671) and lets an application be deployed under a sub-path of a site (#672).
 - A request whose path holds a control character (`%00`...) is refused with 400, as a `..` already was, instead of being looked up as a file (#672).
+- A `+` in the path of a file request is a literal `+`, as for the routes, the spaces and `ui.path()`: `/a+b.html` serves `a+b.html`, no longer `a b.html`, which `/a%20b.html` names (#672).
 
 ### Fixed
 - `DeveloperBrowserIntegration-workspace` gives the relaunched bootstrap page the same 60 s to start as the first one, instead of 10 s, which a loaded runner exceeded while the page verified its cached environment (#660).

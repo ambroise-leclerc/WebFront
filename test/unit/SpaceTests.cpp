@@ -10,6 +10,7 @@
 // Application spaces under a path prefix (#671).
 
 #include "InjectableNetworking.hpp"
+#include "TemporaryDirectory.hpp"
 #include <webfront/networking/TCPNetworkingStdnet.hpp>
 #include <webfront/Space.hpp>
 #include <webfront/system/DefaultFS.hpp>
@@ -25,6 +26,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <fstream>
 #include <future>
 #include <map>
 #include <memory>
@@ -1115,3 +1117,45 @@ const Scenario upgradePath{"The path of a WebSocket upgrade reaches the applicat
                                    }));
                                });
                            }};
+
+const Scenario plusInPath{"A '+' of a path is literal for a file as for the path of the bridge, and \"%2B\" is the same '+' (#672)", {"spaces"}, [] {
+                              test::TemporaryDirectory root;
+                              for (const auto& [directory, text] : {
+                                       std::pair{"a+b",  "file-of-plus"},
+                                       std::pair{"a b", "file-of-space"}
+                              }) {
+                                  std::filesystem::create_directory(root.path() / directory);
+                                  std::ofstream{root.path() / directory / "page.txt"} << text;
+                              }
+                              SpaceApp app{
+                                  WebFrontConfig{.port = "0", .documentRoot = root.path()}
+                              };
+                              std::map<std::string, std::unique_ptr<SpaceApp::Space>> spaces;
+                              app.cppFunction("where", [](SpaceApp::UI ui) {
+                                  return "path=" + ui.path() + ";";
+                              });
+                              app.spaces("/s/", [&](std::string_view segment) -> std::optional<http::RouteReply> {
+                                  spaces.emplace(segment, std::make_unique<SpaceApp::Space>(app, "/s/", segment));
+                                  return std::nullopt;
+                              });
+                              Running                                                                running{app};
+                              const std::array<std::tuple<const char*, const char*, const char*>, 5> cases{
+                                  {
+                                   {"/a+b/", "file-of-plus", "path=/a+b/;"},
+                                   {"/a%2Bb/", "file-of-plus", "path=/a+b/;"},
+                                   {"/a%20b/", "file-of-space", "path=/a b/;"},
+                                   {"/s/alpha/a+b/", "file-of-plus", "path=/a+b/;"},
+                                   {"/s/alpha/a%2Bb/", "file-of-plus", "path=/a+b/;"},
+                                   }
+                              };
+                              then("the file a directory serves and the path its page's bridge reports name the same directory", [&] {
+                                  for (const auto& [directory, file, path] : cases) {
+                                      auto scope = info(directory);
+                                      require(httpGet(app.port(), std::string(directory) + "page.txt").find(file) != std::string::npos);
+                                      Page page{app.port(), directory};
+                                      require(page.upgraded);
+                                      page.call("where", 1);
+                                      require(page.receiveUntil(path));
+                                  }
+                              });
+                          }};
