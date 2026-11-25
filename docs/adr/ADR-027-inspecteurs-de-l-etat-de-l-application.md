@@ -109,9 +109,22 @@ modifiable, sa valeur est-elle complète, a-t-il disparu).
 
 **Bornes effectives.** Chaque champ a une taille maximale en octets : le chemin 1 024, le libellé et la valeur 256,
 le genre 16, plus les deux nombres et les en-têtes du codec. Un nœud encodé tient donc dans `maxNodeBytes` (2 Kio), et
-une page d'un seul nœud, avec son en-tête, dans `minPageBytes` (4 Kio). Un nœud dont le chemin dépasserait 64 segments
-ou 1 024 octets n'est pas refusé : il est envoyé sans enfants, avec le drapeau « profondeur atteinte », et l'inspecteur
-dit pourquoi il ne se déplie pas. Aucun nœud ne peut donc dépasser `maxNodeBytes`.
+une page d'un seul nœud, avec son en-tête, dans `minPageBytes` (4 Kio).
+
+**Chemins bornés par construction.** Un chemin est la suite des segments de ses ancêtres, séparés par un octet, et
+chaque segment a une taille maximale connue avant d'être construit :
+
+- un indice de séquence ou un rang de tableau associatif s'écrit en décimal (20 octets au plus) ;
+- un champ d'un type décrit est désigné par son **rang** dans la description, pas par son nom, qui peut être long (le nom
+  est le libellé) ;
+- une clé stable de `PagedSource` (section 5) fait 128 octets au plus. Un élément dont la clé est plus longue est
+  désigné par sa position, comme sans clé, et n'est pas modifiable, puisque son identité ne peut plus être vérifiée.
+
+Un nœud n'est jamais construit avec un chemin hors limite : c'est son **parent** qui s'arrête. Quand le parent est au
+64ᵉ niveau, ou quand la longueur de son chemin plus un séparateur et le plus long segment possible de ses enfants
+dépasserait 1 024 octets, il est envoyé avec le drapeau « profondeur atteinte ». `children` le refuse alors
+(`webfront.inspector.limit`), et l'inspecteur dit pourquoi il ne se déplie pas. Aucun chemin ne dépasse donc 1 024
+octets, ni aucun nœud `maxNodeBytes`.
 
 **Budget d'une réponse.** Une réponse doit tenir à la fois dans le tampon d'encodage et dans la taille de message :
 toutes les bornes de cette décision se calculent sur `responseBudget = min(functionCallBufferSize, maxMessageSize)`, en
@@ -122,8 +135,21 @@ compilation (`responseHeaderBytes`). L'enregistrement des fonctions `webfront.in
 trop petite ne compile pas avec l'environnement développeur, au lieu d'échouer en cours d'inspection. La politique par
 défaut (32 Kio et 64 Mio) donne un budget de 32 Kio, soit seize pages minimales.
 
-Une requête est bornée de même : le texte d'une écriture fait au plus `responseBudget - responseHeaderBytes` octets.
-L'inspecteur le vérifie avant d'envoyer, et C++ refuse un texte plus long (`webfront.inspector.tooLarge`).
+**Budget d'une requête.** C++ ferme une connexion qui annonce un message plus grand que `maxMessageSize` (ADR-003) :
+une requête doit donc tenir dans `requestBudget = maxMessageSize`, **tous ses arguments encodés compris**. Seule
+l'écriture porte un argument dont la taille dépend de l'utilisateur, le texte saisi ; tous ses autres arguments sont
+bornés : le nom de l'observateur (256 octets au plus, `watch` lève `std::invalid_argument` au-delà), la révision, le
+chemin (1 024 octets), la valeur attendue (256 octets, puisqu'une valeur tronquée n'est pas modifiable), le nom de la
+fonction et les en-têtes du message d'appel. Leur taille maximale encodée est une constante
+(`writeRequestOverheadBytes`), et le texte fait au plus `maxWriteTextBytes = requestBudget - writeRequestOverheadBytes`
+octets. Le `static_assert` de l'enregistrement vérifie aussi que `maxWriteTextBytes` vaut au moins 1 Kio.
+
+La borne est vérifiée des deux côtés. `webfront.inspector.limits()` donne à l'inspecteur `maxWriteTextBytes`, et il
+mesure le texte en octets UTF-8 avant l'envoi, en tenant compte aussi de la limite de son propre codec
+(`maxMessageBytes`) : un texte trop long est refusé dans la page, avec le code `webfront.inspector.tooLarge`, sans rien
+envoyer. C++ vérifie à nouveau la longueur du texte décodé et refuse avec le même code ; ce contrôle couvre un client
+qui n'aurait pas respecté la borne sans dépasser `maxMessageSize`. Les autres requêtes ont toutes leurs arguments
+bornés et tiennent dans `minPageBytes`.
 
 Une **page** est un tuple de premier niveau `(liste de nœuds, suivant, révision, resynchroniser)`, où `suivant` est la
 position ou le curseur de l'appel suivant (0 à la fin) et `resynchroniser` un booléen. L'ADR-003 permet une liste dans
@@ -135,7 +161,9 @@ appels sont :
 - `webfront.inspector.changes(observateur, révision, curseur, nombre)` : une page des différences (ci-dessous).
 - `webfront.inspector.value(observateur, chemin, instantané, décalage)` : un fragment de la valeur complète d'un
   nœud tronqué (ci-dessous) ;
-- `webfront.inspector.fold(observateur, chemin)` : retire de la mémoire un nœud replié et ses descendants.
+- `webfront.inspector.fold(observateur, chemin)` : retire de la mémoire un nœud replié et ses descendants ;
+- `webfront.inspector.reset(observateur)` : vide la mémoire de l'observateur pour cette connexion (ci-dessous) ;
+- `webfront.inspector.limits()` : les bornes de cette section, dont `maxWriteTextBytes`.
 
 Le nombre vaut 200 par défaut et 1 000 au plus. C++ réduit chaque page pour qu'elle tienne dans `responseBudget` et
 rend le `suivant` qui reprend là où elle s'arrête : aucun appel ne lève `BufferOverflowException` ni ne dépasse
@@ -177,8 +205,15 @@ l'adopte.
    l'ensemble rangé, pas dans l'état courant : la passe est cohérente même si l'objet change entre deux pages. Après la
    dernière, l'inspecteur détient R′ ;
 3. une révision ou un curseur qui ne correspondent pas à la passe en cours (page perdue, passe abandonnée, mémoire
-   libérée) donnent une page vide avec `resynchroniser` vrai. L'inspecteur relit alors les nœuds dépliés par
-   `children`, ce qui reconstruit la mémoire.
+   libérée) donnent une page vide avec `resynchroniser` vrai (voir ci-dessous).
+
+**Resynchronisation.** Une réponse avec `resynchroniser` vrai a déjà **vidé** la mémoire de cet observateur pour cette
+connexion, et libéré la passe et son ensemble rangé ; elle porte la révision de la mémoire vide. L'inspecteur jette
+alors tout l'arbre affiché de l'observateur, en ne gardant que la liste des chemins qu'il avait dépliés, puis relit
+depuis la racine par `children`, et ne redéplie que les chemins qui figurent encore dans les pages reçues. Un nœud
+supprimé dont la suppression n'était annoncée que dans une page perdue n'est renvoyé par aucun `children` : il n'est
+donc ni affiché ni gardé en mémoire, et n'occupe rien de la limite de 10 000 nœuds. L'inspecteur peut aussi demander
+cette remise à zéro lui-même avec `webfront.inspector.reset(observateur)`, qui rend la révision de la mémoire vide.
 
 L'ensemble rangé est borné par la mémoire (10 000 nœuds) et libéré au début de la passe suivante ou à la déconnexion.
 
@@ -187,8 +222,8 @@ L'ensemble rangé est borné par la mémoire (10 000 nœuds) et libéré au déb
 interrompue est une page vide avec `resynchroniser` vrai. Les pages restantes ne peuvent donc jamais décrire une vue que
 l'inspecteur n'a plus. Pour éviter ces resynchronisations, l'inspecteur met en file ses dépliements, replis et
 écritures jusqu'à la fin d'une passe en cours ; une passe compte au plus 50 pages de 200 nœuds. Une resynchronisation
-relit les nœuds dépliés : son coût est borné par la mémoire, et elle reste correcte si la file n'est pas respectée
-(onglets multiples d'une même page, client modifié).
+vide la mémoire et relit les nœuds dépliés : son coût est borné par la mémoire, et elle reste correcte si la file n'est
+pas respectée (onglets multiples d'une même page, client modifié).
 
 L'inspecteur interroge à une période choisie, 250 ms par défaut, et peut se mettre en pause. C'est une lecture à
 l'initiative du navigateur (pull) : C++ n'envoie rien sans demande, et un inspecteur fermé ne coûte rien.
@@ -432,14 +467,18 @@ demanderait un grant et une décision propres.
   profondeur atteinte, `value` d'une chaîne plus grande que `maxMessageSize` par fragments (coupure UTF-8, plafond,
   décalage périmé, deux lectures entrelacées dont la suite de la première est refusée), réponses à la taille exacte de
   `responseBudget` avec `maxMessageSize` inférieur au tampon, écriture refusée comme périmée après une insertion avant
-  la cible, un remplacement de la cible ou une révision ancienne, écriture par clé d'une `PagedSource`, opération
-  entière sous le verrou du visiteur, `PagedSource`, chaque genre de la section 4, exécuteur, poignée détruite pendant
-  une lecture et depuis l'accès, écriture acceptée, refusée par l'analyse, refusée par le mutateur et non permise) ;
-  refus à une connexion non prouvée sans `trustLoopbackClients` ; `containers` pour chaque frontend et chaque réglage
-  de confiance ; absence des fonctions hors environnement et en distribution.
+  la cible, un remplacement de la cible ou une révision ancienne, écriture par clé d'une `PagedSource`, suppression
+  annoncée seulement dans une page perdue (absente après la resynchronisation et hors de la mémoire), `reset`, requête
+  d'écriture à la taille exacte de `requestBudget` avec tous ses arguments au maximum, texte d'un octet de trop refusé
+  par la page puis par C++, segment très long (nom de champ long, clé de `PagedSource` de plus de 128 octets), 64ᵉ
+  niveau et chemin proche de 1 024 octets, opération entière sous le verrou du visiteur, `PagedSource`, chaque genre
+  de la section 4, exécuteur, poignée détruite pendant une lecture et depuis l'accès, écriture acceptée, refusée par
+  l'analyse, refusée par le mutateur et non permise) ; refus à une connexion non prouvée sans `trustLoopbackClients` ;
+  `containers` pour chaque frontend et chaque réglage de confiance ; absence des fonctions hors environnement et en
+  distribution.
 - Test de compilation refusée, comme `FormsReflectionRejects` : une politique de tampons dont `responseBudget` est
-  plus petit que `minPageBytes` ne compile pas avec l'environnement développeur, y compris quand seul `maxMessageSize`
-  est trop petit.
+  plus petit que `minPageBytes`, ou dont `maxWriteTextBytes` est plus petit que 1 Kio, ne compile pas avec
+  l'environnement développeur, y compris quand seul `maxMessageSize` est trop petit.
 - Tests d'encodage et de décodage des nœuds et des pages, et test Jasmine dans un vrai navigateur (règles de l'ADR-003),
   dont un dépliement pendant une passe de `changes` et la lecture par fragments d'une valeur plus grande que
   `maxMessageSize`.
