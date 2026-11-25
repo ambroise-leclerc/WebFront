@@ -18,7 +18,10 @@ if(NOT CONFIG)
 endif()
 run_step("Installing the package" "${CMAKE_COMMAND}" --install "${BUILD_DIR}" --config ${CONFIG} --component WebFrontBdd --prefix "${WORK}/prefix")
 set(bdd_cmake_dir "${INSTALL_LIBDIR}/cmake/WebFrontBdd")
-foreach(installed IN ITEMS "${INSTALL_INCLUDEDIR}/webfront/testing/Bdd.hpp" "${bdd_cmake_dir}/WebFrontBddConfig.cmake"
+set(bdd_include_dir "${INSTALL_INCLUDEDIR}/webfront/testing")
+foreach(installed IN ITEMS "${bdd_include_dir}/Bdd.hpp" "${bdd_include_dir}/bdd/Core.hpp" "${bdd_include_dir}/bdd/Matchers.hpp"
+                           "${bdd_include_dir}/bdd/Approx.hpp" "${bdd_include_dir}/bdd/Eventually.hpp" "${bdd_include_dir}/bdd/Runner.hpp"
+                           "${bdd_cmake_dir}/WebFrontBddConfig.cmake"
                            "${bdd_cmake_dir}/WebFrontBddTargets.cmake" "${bdd_cmake_dir}/WebFrontBdd.cmake")
     if(NOT EXISTS "${WORK}/prefix/${installed}")
         message(FATAL_ERROR "The installation lacks ${installed}")

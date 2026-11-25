@@ -28,14 +28,17 @@ if(PREFIX)
 endif()
 # POSIX: a wrapper kills the whole process group at the deadline (execute_process TIMEOUT only kills its direct child).
 # Windows has no process group here: only the direct child is stopped, and a renderer may need manual cleanup.
-# The throwaway XDG roots below reach every program the application starts: keep the real values (empty when unset).
-set(real_xdg_data "")
-set(real_xdg_cache "")
-if(DEFINED ENV{XDG_DATA_HOME})
-    set(real_xdg_data "$ENV{XDG_DATA_HOME}")
-endif()
-if(DEFINED ENV{XDG_CACHE_HOME})
-    set(real_xdg_cache "$ENV{XDG_CACHE_HOME}")
+# The throwaway XDG roots below reach every program the application starts: keep the real values for it first, unless
+# ctest already did when it started (WEBFRONT_TEST_REAL_XDG_DATA_HOME and _CACHE_HOME, absent when unset or empty).
+if(NOT DEFINED ENV{WEBFRONT_TEST_XDG_CAPTURED})
+    foreach(kind DATA CACHE)
+        if(DEFINED ENV{XDG_${kind}_HOME})
+            set(ENV{WEBFRONT_TEST_REAL_XDG_${kind}_HOME} "$ENV{XDG_${kind}_HOME}")
+        else()
+            unset(ENV{WEBFRONT_TEST_REAL_XDG_${kind}_HOME})
+        endif()
+    endforeach()
+    set(ENV{WEBFRONT_TEST_XDG_CAPTURED} 1)
 endif()
 math(EXPR backstop "${LIMIT} + 5")
 set(wrapper "")
@@ -45,7 +48,6 @@ if(NOT CMAKE_HOST_WIN32)
 endif()
 cmake_language(EVAL CODE "execute_process(COMMAND ${wrapper} [==[${CMAKE_COMMAND}]==] -E env
     [==[WEBFRONT_JASMINE_CONFIG=${DIRECTORY}/config.json]==] ${host_environment}
-    [==[WEBFRONT_TEST_REAL_XDG_DATA_HOME=${real_xdg_data}]==] [==[WEBFRONT_TEST_REAL_XDG_CACHE_HOME=${real_xdg_cache}]==]
     [==[XDG_DATA_HOME=${DIRECTORY}/profile/data]==] [==[XDG_CACHE_HOME=${DIRECTORY}/profile/cache]==]
     [==[WEBFRONT_TEST_CEF_PROFILE=${DIRECTORY}/profile/cef]==]
     [==[WEBFRONT_TEST_WEBVIEW2_PROFILE=${DIRECTORY}/profile/webview2]==]

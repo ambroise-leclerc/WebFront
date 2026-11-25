@@ -13,11 +13,12 @@
 | 1.6 | 2026-10-19 | Acceptée | Ambroise Leclerc | Contrôles hors ligne de fraîcheur et de contenu des ressources gzip reproductibles. | [b031ab5](https://github.com/ambroise-leclerc/WebFront/commit/b031ab58ea9cc32290d701094c1333bab455e67f) |
 | 1.7 | 2026-11-14 | Acceptée | Ambroise Leclerc | Catch2 remplacé par `test/unit/Bdd.hpp`, un cadre BDD en un seul en-tête. | [54c0d0f](https://github.com/ambroise-leclerc/WebFront/commit/54c0d0fd35a414e01e2cff0c27882695ca9a4e9d) |
 | 1.8 | 2026-11-23 | Acceptée | Ambroise Leclerc | Le cadre BDD devient une interface publique maintenue : `WebFront::Bdd`, `webfront_bdd_discover_tests` et `docs/BDD.md`. | [1386947](https://github.com/ambroise-leclerc/WebFront/commit/138694770e3849cd089f7a71120a332ed445f496) |
+| 1.9 | 2026-11-25 | Acceptée | Ambroise Leclerc | Le cadre BDD se découpe en un cœur léger et des parties optionnelles ; `checkEqual` rapporte ses opérandes, `approx` compare des flottants. | [4c7a768](https://github.com/ambroise-leclerc/WebFront/commit/4c7a7680feee55bdbd8f0cec54e76f1e6ed06b7f) |
 
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2020-04-19** (version 1.0).
-Dernière révision : **2026-11-23** (version 1.8).
+Dernière révision : **2026-11-25** (version 1.9).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -29,7 +30,9 @@ comme sous-projet constituent elles aussi des contrats observables.
 ## Décision
 
 Que les tests unitaires, sous `test/unit/`, vérifient unités, états et erreurs à l’aide de simulacres déterministes.
-Ils emploient `include/webfront/testing/Bdd.hpp`, un cadre BDD tenant dans un seul en-tête, interface publique maintenue (`docs/BDD.md`) : un
+Ils emploient `include/webfront/testing/Bdd.hpp`, un cadre BDD en en-têtes seuls, interface publique maintenue (`docs/BDD.md`) ;
+`Bdd.hpp` réunit un cœur léger, `bdd/Core.hpp`, que chaque fichier de test peut inclure seul, et des parties optionnelles
+(`Matchers`, `Approx`, `Eventually`, `Runner`) ; le cœur ne tire ni `<chrono>`, ni `<thread>`, ni `<fstream>`. Un
 scénario est un objet `const Scenario` nommé, ses sections `given`/`when`/`then` sont des lambdas, et `require`/`check`
 situent un échec par `std::source_location`. Le cadre rejoue un scénario jusqu’à avoir parcouru chacune de ses
 feuilles, une nouvelle par passe, comme le faisait Catch2, dont seul ce sous-ensemble servait et dont la
@@ -70,6 +73,8 @@ préexistant, ni d’une intervention humaine, ni du réseau public après confi
 - Pour chaque correction, qu’une régression échoue d’abord au niveau pertinent le plus bas.
 - Écrire les scénarios avec `Scenario`, `given`/`when`/`then` et `require`/`check` de `Bdd.hpp` ;
   traiter les Promises dans Jasmine.
+- Comparer deux valeurs avec `requireEqual`/`checkEqual`, dont l’échec rapporte les deux opérandes, plutôt qu’avec
+  `require(a == b)` ; un flottant mesuré avec `approx`, jamais par une égalité exacte.
 - Attendre un état asynchrone avec `requireEventually`/`checkEventually` et `requireReady`/`checkReady` de `Bdd.hpp`
   (30 s par défaut, multiplié par `WEBFRONT_TEST_TIMEOUT_FACTOR`), jamais par une pause fixe ni par un helper local ;
   l’échec indique la ligne de l’attente, le délai et le temps attendu. `waitUntil`/`waitReady` n’enregistrent rien :

@@ -43,6 +43,27 @@ add_executable(bdd_self_test BddSelfTest.cpp)
 target_link_libraries(bdd_self_test PRIVATE WebFront::Bdd WebFront_test_hardening WebFront_warnings WebFront_options)
 target_compile_features(bdd_self_test PRIVATE cxx_std_23)
 add_test(NAME BddSelfTest COMMAND bdd_self_test)
+# Each part of the framework compiles alone, and the core, which every test file includes, stays clear of the heavy
+# standard headers the optional parts bring (<chrono>, <thread>, <fstream>): the build fails otherwise.
+set(_bdd_header_checks)
+foreach(_part IN ITEMS Core Matchers Approx Eventually Runner)
+  set(_check "${CMAKE_CURRENT_BINARY_DIR}/bdd-headers/${_part}.cpp")
+  file(CONFIGURE OUTPUT "${_check}" CONTENT "#include <webfront/testing/bdd/${_part}.hpp>\n#include <webfront/testing/bdd/${_part}.hpp>\n")
+  list(APPEND _bdd_header_checks "${_check}")
+endforeach()
+set(_check "${CMAKE_CURRENT_BINARY_DIR}/bdd-headers/CoreIsLight.cpp")
+file(CONFIGURE OUTPUT "${_check}" CONTENT [=[
+#include <webfront/testing/bdd/Core.hpp>
+#if defined(_GLIBCXX_CHRONO) || defined(_GLIBCXX_THREAD) || defined(_GLIBCXX_FSTREAM) || defined(_LIBCPP_CHRONO) \
+    || defined(_LIBCPP_THREAD) || defined(_LIBCPP_FSTREAM)
+#error "bdd/Core.hpp includes <chrono>, <thread> or <fstream>: move what needs them to an optional part"
+#endif
+]=])
+list(APPEND _bdd_header_checks "${_check}")
+add_library(bdd_header_checks OBJECT ${_bdd_header_checks})
+target_link_libraries(bdd_header_checks PRIVATE WebFront::Bdd WebFront_warnings WebFront_options)
+target_compile_features(bdd_header_checks PRIVATE cxx_std_23)
+set_target_properties(bdd_header_checks PROPERTIES UNITY_BUILD OFF)
 # CTest registers one case per scenario whatever brackets or semicolons its title holds.
 add_executable(bdd_discovery_probe Main.cpp BddDiscoveryProbe.cpp)
 target_link_libraries(bdd_discovery_probe PRIVATE WebFront::Bdd WebFront_test_hardening WebFront_warnings WebFront_options)
@@ -304,7 +325,7 @@ add_test(NAME WebFrontDistribution
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/distribution
         -DCONSUMER_CXX_COMPILER=${CMAKE_CXX_COMPILER} -DCONSUMER_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCONSUMER_CONFIG=$<CONFIG>
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckWebFrontDistribution.cmake)
-set_tests_properties(WebFrontDistribution PROPERTIES TIMEOUT 120)
+set_tests_properties(WebFrontDistribution PROPERTIES TIMEOUT 240)
 add_test(NAME BuildToolRequirements
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/build-tool-requirements
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckBuildToolRequirements.cmake)

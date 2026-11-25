@@ -1,0 +1,10 @@
+# Writes the XDG roots this test sees to ${OUT}, one line each (CheckRealXdg.cmake).
+set(text "")
+foreach(name XDG_DATA_HOME XDG_CACHE_HOME WEBFRONT_TEST_REAL_XDG_DATA_HOME WEBFRONT_TEST_REAL_XDG_CACHE_HOME)
+    if(DEFINED ENV{${name}})
+        string(APPEND text "${name}=[$ENV{${name}}]\n")
+    else()
+        string(APPEND text "${name} absent\n")
+    endif()
+endforeach()
+file(WRITE "${OUT}" "${text}")
