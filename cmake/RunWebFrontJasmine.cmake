@@ -28,6 +28,9 @@ if(PREFIX)
 endif()
 # POSIX: a wrapper kills the whole process group at the deadline (execute_process TIMEOUT only kills its direct child).
 # Windows has no process group here: only the direct child is stopped, and a renderer may need manual cleanup.
+# The throwaway XDG roots below reach every program the application starts: keep the real values for it first, unless
+# ctest already did when it started (WEBFRONT_TEST_REAL_XDG_DATA_HOME and _CACHE_HOME, absent when unset or empty).
+include("${CMAKE_CURRENT_LIST_DIR}/CaptureRealXdg.cmake")
 math(EXPR backstop "${LIMIT} + 5")
 set(wrapper "")
 if(NOT CMAKE_HOST_WIN32)

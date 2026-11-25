@@ -468,6 +468,9 @@ function(webfront_add_browser_tests target frontend assets_directory lifecycle_t
                 list(APPEND shared_tests "${startup_name}")
                 webfront_set_browser_test_properties("${startup_name}" "${assets_directory}" 180)
                 set_property(TEST ${startup_name} APPEND PROPERTY LABELS startup)
+                # Measured alone: tests running beside it on a three-core CI runner delayed the warm macOS window past
+                # its limit by seconds (view created at 3 s instead of 0.5 s), which measured the load, not the start.
+                set_property(TEST ${startup_name} PROPERTY RUN_SERIAL TRUE)
             endforeach()
         endif()
         if(NOT ARG_SKIP_JASMINE)

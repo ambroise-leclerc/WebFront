@@ -142,7 +142,24 @@ profile. Instances within a process and concurrent processes launched from the
 same executable path share these persistent directories; there is no per-instance
 profile isolation or per-application profile option. To isolate separate processes,
 launch each with different absolute XDG roots. CTest explicitly appends private
-data/cache paths inside its build tree to every WebKitGTK test environment.
+data/cache paths inside its build tree to every WebKitGTK test environment. These
+variables are process-wide, so the programs the application under test starts (a
+terminal's shell, a client installing itself under `$XDG_DATA_HOME`) inherit the
+throwaway profile too. The roots of the environment that launches the tests are
+exported as `WEBFRONT_TEST_REAL_XDG_DATA_HOME` and `WEBFRONT_TEST_REAL_XDG_CACHE_HOME`,
+absent when the variable was unset or empty. `cmake/CaptureRealXdg.cmake` records
+them: `ctest` includes it when it starts, for the tests that WebFront's own helpers
+register, and every script that replaces the roots includes it first (the
+`webfront_add_jasmine_test` runner of consuming projects, `RunWfDriver.cmake`,
+`RunStartupTime.cmake`). The capture is made when the tests run, not when the build
+is configured, so a build configured elsewhere (another account, a container) still
+sees the roots of the run. The first capture wins: it sets `WEBFRONT_TEST_XDG_CAPTURED`,
+which the tests and every program they start inherit along with the two roots, so a
+script or a `ctest` started inside a test keeps the values captured at launch instead
+of the throwaway ones. A shell opened by the application under test inherits these
+variables too; unset `WEBFRONT_TEST_XDG_CAPTURED` there to capture again. An
+application can give the roots back to its children: restore `XDG_DATA_HOME` and
+`XDG_CACHE_HOME` from them, or remove the variable when its real counterpart is absent.
 
 The shared content policy blocks unmanaged popups, controls DevTools and context
 menus, and checks main-document HTTP(S) responses before commit, including redirected

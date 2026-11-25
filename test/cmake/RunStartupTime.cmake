@@ -19,6 +19,8 @@ if(NOT TEMPERATURE MATCHES "^(cold|warm)$")
     message(FATAL_ERROR "TEMPERATURE must be cold or warm, not '${TEMPERATURE}'")
 endif()
 
+# The throwaway roots below reach every program the lifecycle program starts: keep the real ones first (docs/WEBKITGTK.md).
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/CaptureRealXdg.cmake")
 file(REMOVE_RECURSE "${SCRATCH}")
 foreach(directory home cache data config)
     file(MAKE_DIRECTORY "${SCRATCH}/${directory}")

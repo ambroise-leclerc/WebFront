@@ -29,7 +29,8 @@ share a process: `test/unit/ScenarioIsolation.cpp` restores the process-wide sta
 `tests` draws a random order and prints its seed, which `tests --rng-seed <seed>` replays.
 
 The `startup` label selects the cases `<Frontend>StartupTime-cold` and `-warm` (#611), which belong to the standard tier:
-`ctest -L startup` runs them alone, and they print the measured times with `-V`. "Cold" means fresh `HOME` and `XDG_*`
+`ctest -L startup` runs them alone, and they print the measured times with `-V`. In a parallel run they are `RUN_SERIAL`:
+CTest starts them when no other test runs, so the load of the suite is not counted as start-up time. "Cold" means fresh `HOME` and `XDG_*`
 directories (Linux: empty GStreamer registry and font cache) and, on Windows, fresh `LOCALAPPDATA` and `APPDATA`; on macOS the
 variables have little effect, so the cold case there only guarantees a new profile directory.
 
