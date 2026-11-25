@@ -387,12 +387,15 @@ const Scenario equalFails{"checkEqual reports its operands", [] {
 
 int runsStarted = 0, runsEnded = 0;
 // The size of the trace when the run ended, -1 before any run, and whether the next run-ending listener throws.
-long tracedAtEnd  = -1;
-bool throwAtEnd   = false;
-bool throwAtStart = false;  // whether the scenario-starting listener throws
+long tracedAtEnd     = -1;
+bool throwAtEnd      = false;
+bool throwAtStart    = false;  // whether the scenario-starting listener throws
+bool throwAtRunStart = false;  // whether the run-starting listener throws
 
 const Listener runListener{[] {
                                ++runsStarted;
+                               if (throwAtRunStart)
+                                   throw std::runtime_error{"cannot reach the device"};
                            },
                            [] {
                                if (throwAtStart)
@@ -531,6 +534,25 @@ int main() {
             ++failures;
             std::cerr << "MISMATCH: a throwing scenario-starting listener: " << trace.size() << " steps, " << runsEnded - before << " run endings, report\n"
                       << xml;
+        }
+        std::remove(report.c_str());
+    }
+    // A run-starting listener that throws: no scenario runs, the run-ending listeners are still called, and the JUnit
+    // report shows that error.
+    {
+        throwAtRunStart    = true;
+        auto        before = runsEnded;
+        std::string report = "bdd_self_test_report.xml";
+        trace.clear();
+        expectExit({"--exact", "approx holds", "--junit", report}, 1);
+        throwAtRunStart = false;
+        auto xml        = readFile(report);
+        if (!trace.empty() || runsEnded != before + 1 || xml.find("tests=\"1\" failures=\"0\" errors=\"1\"") == std::string::npos
+            || xml.find("<testcase classname=\"tests\" name=\"Run starting\" time=\"0.000\">\n      <error "
+                        "message=\"a run-starting listener threw\">cannot reach the device\n</error>")
+                   == std::string::npos) {
+            ++failures;
+            std::cerr << "MISMATCH: a throwing run-starting listener: " << trace.size() << " steps, " << runsEnded - before << " run endings, report\n" << xml;
         }
         std::remove(report.c_str());
     }

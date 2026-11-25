@@ -149,17 +149,28 @@ inline Result runScenario(const Entry& entry) {
     return {&entry, outcome, now() - start, current.report};
 }
 
-/// Calls the run-ending listeners and returns the messages of the exceptions they threw, one per line, which are also
-/// printed; empty when every listener returned.
-inline std::string endRun() {
+/// The exceptions that run-starting or run-ending listeners threw: the name of the JUnit test case that reports them,
+/// and their messages, one per line.
+struct RunError {
+    std::string_view name;
+    std::string_view what;
+    std::string      messages;
+};
+
+/// Calls run listeners and returns the messages of the exceptions they threw, one per line, which are also printed;
+/// empty when every listener returned. The run-starting listeners stop at the first exception, since the run does not
+/// go on; every run-ending listener is called.
+inline std::string callRunListeners(const std::vector<void (*)()>& listeners, std::string_view what, bool stopAtFirst) {
     std::string errors;
-    for (auto listener : listeners().runEnding)
+    for (auto listener : listeners)
         try {
             listener();
         } catch (...) {
             auto message = exceptionMessage(std::current_exception());
             errors      += concat(message, '\n');
-            print(concat("FAILED: a run-ending listener threw: ", message, '\n'));
+            print(concat("FAILED: ", what, ": ", message, '\n'));
+            if (stopAtFirst)
+                break;
         }
     return errors;
 }
@@ -222,10 +233,10 @@ inline std::string xmlEscape(std::string_view text) {
     return escaped;
 }
 
-/// Writes the JUnit report. The exceptions of the run-ending listeners (endRun()), when there are any, are an error of
-/// one more test case, "Run ending", so that the tools that read the report see why the run failed.
-inline bool writeJUnit(std::string_view path, const std::vector<Result>& results, double total, std::string_view endErrors = {}) {
-    std::size_t failed = 0, skipped = 0, errors = endErrors.empty() ? 0 : 1;
+/// Writes the JUnit report. The exceptions of the run listeners, when there are any, are the error of one more test
+/// case ("Run starting", "Run ending"), so that the tools that read the report see why the run failed.
+inline bool writeJUnit(std::string_view path, const std::vector<Result>& results, double total, const std::vector<RunError>& runErrors = {}) {
+    std::size_t failed = 0, skipped = 0, errors = runErrors.size();
     for (const auto& result : results) {
         failed  += result.outcome == Outcome::failed;
         skipped += result.outcome == Outcome::skipped;
@@ -250,10 +261,13 @@ inline bool writeJUnit(std::string_view path, const std::vector<Result>& results
         else
             xml += ">\n      <skipped/>\n    </testcase>\n";
     }
-    if (errors)
-        xml += concat("    <testcase classname=\"tests\" name=\"Run ending\" time=\"0.000\">\n"
-                      "      <error message=\"a run-ending listener threw\">",
-                      xmlEscape(endErrors),
+    for (const auto& error : runErrors)
+        xml += concat("    <testcase classname=\"tests\" name=\"",
+                      error.name,
+                      "\" time=\"0.000\">\n      <error message=\"",
+                      error.what,
+                      "\">",
+                      xmlEscape(error.messages),
                       "</error>\n    </testcase>\n");
     xml += "  </testsuite>\n</testsuites>\n";
     std::string name{path};
@@ -409,16 +423,21 @@ inline int run(int argc, char** argv) {
             std::swap(selection[index - 1], selection[static_cast<std::size_t>(nextRandom(seed) % index)]);
     }
 
-    for (auto listener : listeners().runStarting)
-        listener();
-    std::vector<Result> results;
+    // A run-starting listener that throws leaves the run without its preparation: no scenario runs, but the run-ending
+    // listeners are still called, to finalize what the others prepared.
+    std::vector<RunError> runErrors;
+    std::vector<Result>   results;
     results.reserve(selection.size());
     auto start = now();
-    for (const auto* entry : selection)
-        results.push_back(runScenario(*entry));
-    auto elapsed   = now() - start;
-    auto endErrors = endRun();
-    bool ended     = endErrors.empty();
+    if (auto errors = callRunListeners(listeners().runStarting, "a run-starting listener threw", true); !errors.empty())
+        runErrors.push_back({"Run starting", "a run-starting listener threw", std::move(errors)});
+    else
+        for (const auto* entry : selection)
+            results.push_back(runScenario(*entry));
+    auto elapsed = now() - start;
+    if (auto errors = callRunListeners(listeners().runEnding, "a run-ending listener threw", false); !errors.empty())
+        runErrors.push_back({"Run ending", "a run-ending listener threw", std::move(errors)});
+    bool ended = runErrors.empty();
 
     std::size_t failed = 0, skipped = 0;
     for (const auto& result : results) {
@@ -437,7 +456,7 @@ inline int run(int argc, char** argv) {
                  " failed, ",
                  skipped,
                  " skipped)\n"));
-    if (!options.junit.empty() && !writeJUnit(options.junit, results, elapsed, endErrors)) {
+    if (!options.junit.empty() && !writeJUnit(options.junit, results, elapsed, runErrors)) {
         std::fprintf(stderr, "Cannot write %s\n", std::string{options.junit}.c_str());
         return 1;
     }

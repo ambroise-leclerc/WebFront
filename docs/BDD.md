@@ -156,7 +156,10 @@ runs once the selected scenarios have run, whatever their outcome, before the su
 when `runStarting` did, so a run that selects nothing (or only lists the scenarios) calls neither. An exception it throws
 is reported and makes `run()` return 1; the JUnit report then has one more test case, `Run ending`, whose `<error>`
 holds the message of each exception. A `scenarioStarting` that throws fails its scenario, which does not run, and the
-run goes on, so `runEnding` is still called.
+run goes on, so `runEnding` is still called. A `runStarting` that throws ends the preparation of the run: the following
+`runStarting` are not called and no scenario runs, but every `runEnding` is, so it must accept a run whose preparation
+did not complete; `run()` returns 1 and the JUnit report has a test case `Run starting` whose `<error>` holds the
+message.
 
 `webfront_bdd_discover_tests(<target> ...)`:
 
