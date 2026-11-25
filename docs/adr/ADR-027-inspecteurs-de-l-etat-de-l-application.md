@@ -97,18 +97,26 @@ Un **nœud** est un tuple de six champs, de même forme pour tous les nœuds d'u
 
 | Champ | Type C++ | Rôle |
 | --- | --- | --- |
-| chemin | `std::string` | identifiant opaque du nœud, construit par C++ ; le navigateur le renvoie tel quel et C++ le valide |
+| chemin | `std::string` | identifiant opaque du nœud, construit par C++ ; le navigateur le renvoie tel quel et C++ le valide ; 64 segments et 1 024 octets au plus |
 | genre | `std::string` | vocabulaire fermé : `bool`, `integer`, `real`, `string`, `enum`, `bitset`, `optional`, `variant`, `tuple`, `sequence`, `map`, `described`, `formatted`, `opaque` |
-| libellé | `std::string` | nom du champ, indice ou clé formatée |
+| libellé | `std::string` | nom du champ, indice ou clé formatée, tronqué à 256 octets UTF-8 sans couper un caractère |
 | valeur | `std::string` | valeur formatée, tronquée à 256 octets UTF-8 sans couper un caractère |
 | enfants | `double` | nombre d'enfants, exact jusqu'à 2⁵³ |
-| drapeaux | `double` | bits : modifiable (1), valeur tronquée (2), retiré (4) |
+| drapeaux | `double` | bits : modifiable (1), valeur tronquée (2), retiré (4), profondeur atteinte (8) |
 
 L'épique décrivait cinq champs ; le sixième porte ce que l'inspecteur doit savoir sans nouvel appel (le nœud est-il
 modifiable, sa valeur est-elle complète, a-t-il disparu).
 
-Le libellé est tronqué comme la valeur, et un chemin a 64 segments au plus : un nœud a donc une taille bornée, et toute
-page d'au moins un nœud tient dans le tampon de la politique.
+**Bornes effectives.** Chaque champ a une taille maximale en octets : le chemin 1 024, le libellé et la valeur 256,
+le genre 16, plus les deux nombres et les en-têtes du codec. Un nœud encodé tient donc dans `maxNodeBytes` (2 Kio), et
+une page d'un seul nœud, avec son en-tête, dans `minPageBytes` (4 Kio). Un nœud dont le chemin dépasserait 64 segments
+ou 1 024 octets n'est pas refusé : il est envoyé sans enfants, avec le drapeau « profondeur atteinte », et l'inspecteur
+dit pourquoi il ne se déplie pas. Aucun nœud ne peut donc dépasser `maxNodeBytes`.
+
+Ces bornes s'imposent à la politique de tampons : l'enregistrement des fonctions `webfront.inspector.*` vérifie, par un
+`static_assert` sur les constantes de la politique, que `functionCallBufferSize` et `maxMessageSize` valent au moins
+`minPageBytes`. Une politique trop petite ne compile pas avec l'environnement développeur, au lieu d'échouer en cours
+d'inspection. La politique par défaut (32 Kio et 64 Mio) laisse une marge de seize pages minimales.
 
 Une **page** est un tuple de premier niveau `(liste de nœuds, suivant, révision, resynchroniser)`, où `suivant` est la
 position ou le curseur de l'appel suivant (0 à la fin) et `resynchroniser` un booléen. L'ADR-003 permet une liste dans
@@ -118,17 +126,33 @@ appels sont :
 
 - `webfront.inspector.children(observateur, chemin, position, nombre)` : une page des enfants d'un nœud.
 - `webfront.inspector.changes(observateur, révision, curseur, nombre)` : une page des différences (ci-dessous).
-- `webfront.inspector.value(observateur, chemin)` : la valeur complète d'un nœud tronqué, bornée par la taille de
-  message.
+- `webfront.inspector.value(observateur, chemin, décalage)` : un fragment de la valeur complète d'un nœud tronqué
+  (ci-dessous) ;
+- `webfront.inspector.fold(observateur, chemin)` : retire de la mémoire un nœud replié et ses descendants.
 
 Le nombre vaut 200 par défaut et 1 000 au plus. C++ réduit chaque page pour qu'elle tienne dans le tampon de la
 politique (`functionCallBufferSize`) et rend le `suivant` qui reprend là où elle s'arrête : aucun appel ne lève
-`BufferOverflowException` ni ne dépasse `maxMessageSize`, quel que soit l'état observé.
+`BufferOverflowException` ni ne dépasse `maxMessageSize`, quel que soit l'état observé. Les seuls échecs d'un appel valide sont les refus typés de cette décision
+(`webfront.inspector.*`).
+
+**Valeur complète.** Une valeur formatée peut dépasser `maxMessageSize` : `value` est donc paginé par octets. L'appel au
+décalage 0 formate la valeur en une seule opération (section 5) et la range comme instantané de la connexion ; il rend
+`(fragment, taille totale, décalage suivant, plafonnée)`. Les appels suivants lisent l'instantané, qui reste cohérent
+même si l'objet change entre deux fragments. Un fragment fait au plus `functionCallBufferSize` moins 64 octets et ne
+coupe jamais un caractère UTF-8. L'instantané est plafonné à 16 Mio : au-delà, la valeur est coupée et `plafonnée` est
+vrai, ce que l'inspecteur affiche. Une connexion a au plus un instantané, remplacé par le décalage 0 suivant et libéré
+à la déconnexion. Un décalage qui ne correspond pas à l'instantané courant est refusé (`webfront.inspector.stale`) ;
+l'inspecteur recommence au décalage 0.
 
 **Mémoire par connexion.** C++ garde, pour chaque connexion et chaque observateur, la valeur affichée des nœuds envoyés,
 comme le fait `forms::inspector`, et la révision de cette mémoire. Elle compte 10 000 nœuds au plus : au-delà,
 `children` échoue avec `webfront.inspector.limit` et l'inspecteur propose de replier des nœuds. Elle est libérée à la
-déconnexion, et un nœud replié en sort avec ses descendants.
+déconnexion, et `fold` en retire un nœud et ses descendants.
+
+**Ordre et révision.** Les appels d'une connexion sur un observateur sont traités un à un, dans l'ordre de réception,
+même quand ils s'exécutent sur un exécuteur ; deux Promises en vol ne se croisent donc pas. Tout appel qui modifie la
+mémoire (`children`, `fold`, `write`) lui donne une nouvelle révision, la rend dans sa réponse, et l'inspecteur
+l'adopte.
 
 **Différences paginées.** Une passe de `changes` commence au curseur 0, avec la révision R que l'inspecteur détient :
 
@@ -143,6 +167,14 @@ déconnexion, et un nœud replié en sort avec ses descendants.
    `children`, ce qui reconstruit la mémoire.
 
 L'ensemble rangé est borné par la mémoire (10 000 nœuds) et libéré au début de la passe suivante ou à la déconnexion.
+
+**Entrelacement avec les autres appels.** Un appel qui modifie la mémoire pendant une passe (`children` qui déplie,
+`fold` qui replie, `write`) **termine la passe** : l'ensemble rangé est libéré, et la page suivante de la passe
+interrompue est une page vide avec `resynchroniser` vrai. Les pages restantes ne peuvent donc jamais décrire une vue que
+l'inspecteur n'a plus. Pour éviter ces resynchronisations, l'inspecteur met en file ses dépliements, replis et
+écritures jusqu'à la fin d'une passe en cours ; une passe compte au plus 50 pages de 200 nœuds. Une resynchronisation
+relit les nœuds dépliés : son coût est borné par la mémoire, et elle reste correcte si la file n'est pas respectée
+(onglets multiples d'une même page, client modifié).
 
 L'inspecteur interroge à une période choisie, 250 ms par défaut, et peut se mettre en pause. C'est une lecture à
 l'initiative du navigateur (pull) : C++ n'envoie rien sans demande, et un inspecteur fermé ne coûte rien.
@@ -357,12 +389,20 @@ demanderait un grant et une décision propres.
 ## Validation
 
 - Tests BDD : métadonnées des fonctions et `std::source_location` ; observateurs (pagination, réduction au tampon,
-  différences par connexion, passe de `changes` sur plusieurs pages pendant que l'objet change, résynchronisation après
-  une page perdue, limite de la mémoire, opération entière sous le verrou du visiteur, `PagedSource`, chaque genre de la section 4, exécuteur, poignée détruite pendant une lecture et depuis
-  l'accès, écriture acceptée, refusée par l'analyse, refusée par le mutateur et non permise) ; refus à une connexion non
-  prouvée sans `trustLoopbackClients` ; `containers` pour chaque frontend et chaque réglage de confiance ; absence des
-  fonctions hors environnement et en distribution.
-- Tests d'encodage et de décodage des nœuds et des pages, et test Jasmine dans un vrai navigateur (règles de l'ADR-003).
+  différences par connexion, passe de `changes` sur plusieurs pages pendant que l'objet change, resynchronisation
+  après une page perdue, limite de la mémoire, `children`, `fold` et `write` entrelacés avec une passe (la passe se
+  termine et la page suivante demande la resynchronisation), appels concurrents traités dans l'ordre, nœud de
+  profondeur atteinte, `value` d'une chaîne plus grande que
+  `maxMessageSize` par fragments (coupure UTF-8, plafond, décalage périmé), opération entière sous le verrou du
+  visiteur, `PagedSource`, chaque genre de la section 4, exécuteur, poignée détruite pendant une lecture et depuis
+  l'accès, écriture acceptée, refusée par l'analyse, refusée par le mutateur et non permise) ; refus à une connexion
+  non prouvée sans `trustLoopbackClients` ; `containers` pour chaque frontend et chaque réglage de confiance ; absence
+  des fonctions hors environnement et en distribution.
+- Test de compilation refusée, comme `FormsReflectionRejects` : une politique de tampons plus petite que `minPageBytes`
+  ne compile pas avec l'environnement développeur.
+- Tests d'encodage et de décodage des nœuds et des pages, et test Jasmine dans un vrai navigateur (règles de l'ADR-003),
+  dont un dépliement pendant une passe de `changes` et la lecture par fragments d'une valeur plus grande que
+  `maxMessageSize`.
 - `DeveloperBrowserIntegration` : menu au clavier et à la souris, inspecteur en fenêtre secondaire sous WebKitGTK,
   fenêtre flottante sous CEF par le pont de la page hôte (sans ouverture d'onglet), arbre des paquets du projet Life.
 - `MinimalCoreAssets` inchangé.
