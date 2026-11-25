@@ -188,3 +188,17 @@ foreach(mode no-bridge early-close rejected-ready navigation-failure path-encodi
         endif()
     endforeach()
 endforeach()
+
+# The native windows' start-up measurements run alone, so that the tests beside them never count as start-up time.
+if(CASE MATCHES "^(webkitgtk-linux|wkwebview-macos|webview2-windows)$")
+    foreach(temperature cold warm)
+        set(startup_name "${frontend}StartupTime-${temperature}")
+        if(NOT TEST ${startup_name})
+            message(FATAL_ERROR "Missing start-up measurement ${startup_name}")
+        endif()
+        get_test_property(${startup_name} RUN_SERIAL serial)
+        if(NOT serial)
+            message(FATAL_ERROR "${startup_name} must run alone (RUN_SERIAL), got '${serial}'")
+        endif()
+    endforeach()
+endif()
