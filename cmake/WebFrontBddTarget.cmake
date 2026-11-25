@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0 OR CECILL-B
-# WebFront::Bdd, the public test framework (include/webfront/testing/Bdd.hpp, docs/BDD.md), and its installation as the
-# WebFrontBdd package. The target needs neither WebFront nor stdnet: a project can test with it alone.
+# WebFront::Bdd, the public test framework (include/webfront/testing/Bdd.hpp and its parts in include/webfront/testing/bdd/,
+# docs/BDD.md), and its installation as the WebFrontBdd package. The target needs neither WebFront nor stdnet: a project
+# can test with it alone.
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-# Threads: Bdd.hpp runs the waits of requireEventually and uses <thread>.
+# Threads: bdd/Eventually.hpp runs the waits of requireEventually and uses <thread>.
 find_package(Threads REQUIRED)
 add_library(WebFront_Bdd INTERFACE)
 add_library(WebFront::Bdd ALIAS WebFront_Bdd)
@@ -24,6 +25,8 @@ if(WEBFRONT_IS_TOP_LEVEL)
     install(TARGETS WebFront_Bdd EXPORT WebFrontBddTargets COMPONENT WebFrontBdd)
     install(FILES "${CMAKE_CURRENT_LIST_DIR}/../include/webfront/testing/Bdd.hpp"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/webfront/testing" COMPONENT WebFrontBdd)
+    install(DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/../include/webfront/testing/bdd"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/webfront/testing" COMPONENT WebFrontBdd FILES_MATCHING PATTERN "*.hpp")
     install(EXPORT WebFrontBddTargets NAMESPACE WebFront:: DESTINATION "${_bdd_cmake_dir}" COMPONENT WebFrontBdd)
     configure_package_config_file("${CMAKE_CURRENT_LIST_DIR}/WebFrontBddConfig.cmake.in"
         "${CMAKE_CURRENT_BINARY_DIR}/WebFrontBddConfig.cmake" INSTALL_DESTINATION "${_bdd_cmake_dir}")

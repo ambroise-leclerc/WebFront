@@ -5,9 +5,11 @@
 // WebFront — tests/cmake
 // Role: Scenarios of a project that consumes the public webfront::bdd framework.
 // Thread: ui-loop | Alloc: unrestricted
-// LLM: consumer fixture; verifies the installed Bdd interface from another project
+// LLM: consumer fixture; verifies the installed Bdd interface, part by part, from another project
 
-#include <webfront/testing/Bdd.hpp>
+#include <webfront/testing/bdd/Approx.hpp>
+#include <webfront/testing/bdd/Core.hpp>
+#include <webfront/testing/bdd/Runner.hpp>
 
 using namespace webfront::bdd;
 
@@ -17,7 +19,8 @@ const Scenario addition{"Addition", [] {
                                 when("they are added", [&] {
                                     sum = 2 + 3;
                                     then("the sum is five", [&] {
-                                        require(sum == 5);
+                                        requireEqual(sum, 5);
+                                        require(sum / 3.0 == approx(1.6667).epsilon(1e-4));
                                     });
                                 });
                             });
