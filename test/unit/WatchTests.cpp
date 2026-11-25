@@ -218,6 +218,27 @@ const Scenario watchPages{
                 requireEqual(std::get<0>(registry.page(0, 0, 1, inspect::minPageBytes)).size(), std::size_t{1});
             });
         });
+        given("watches whose names hold control characters", [&] {
+            WatchRegistry registry;
+            static_cast<void>(addWatch(registry, "line\none"));
+            // Its visible form is another name: the names the application gave are what must be unique.
+            static_cast<void>(addWatch(registry, "line\u240Aone"));
+            static_cast<void>(addWatch(registry, std::string(inspect::maxTextBytes - 1, 'n') + "\t"));  // the picture crosses the bound
+            const auto names = namesOf(registry.page(0, 0, 10, 32768));
+            then("the page shows them with their control characters visible", [&] {
+                requireEqual(names[0], std::string{"line\u240Aone"});
+                requireEqual(names[1], std::string{"line\u240Aone"});
+            });
+            then("a name that its visible form makes longer is cut within the bound", [&] {
+                require(names[2].size() <= inspect::maxTextBytes);
+                require(names[2].ends_with("\u2026"));
+            });
+            then("a second watch of the same name is still refused", [&] {
+                checkThrows<std::invalid_argument>([&] {
+                    static_cast<void>(addWatch(registry, "line\none"));
+                });
+            });
+        });
     }};
 
 const Scenario watchHandles{"A watch exists while its handle lives, and the handle outlives the application (ADR-027, section 5)", {"inspector"}, [] {

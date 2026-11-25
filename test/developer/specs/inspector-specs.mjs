@@ -534,6 +534,48 @@ describe('The inspectors', () => {
             } finally { jasmine.clock().uninstall(); }
         });
 
+        it('keep one read at a time when paused and resumed while a read is in progress', async () => {
+            jasmine.clock().install();
+            try {
+                const registry = memoryWatches();
+                registry.add('grid');
+                let hold = null, inFlight = 0, most = 0;
+                const bridge = {cppFunction: () => async (...args) => {
+                    ++inFlight;
+                    most = Math.max(most, inFlight);
+                    try {
+                        if (hold) await hold.promise;
+                        return registry.answer(...args);
+                    } finally { --inFlight; }
+                }};
+                const discovery = createWatchDiscovery({bridge, onChange: () => {}, period: 250});
+                await discovery.start();
+                // The next read waits for its answer; meanwhile the panel is paused and resumed, and time goes on.
+                let release;
+                hold = {promise: new Promise(resolve => { release = resolve; })};
+                jasmine.clock().tick(250);
+                await Promise.resolve();
+                expect(inFlight).toBe(1);
+                discovery.pause();
+                discovery.resume();
+                jasmine.clock().tick(1000);
+                await Promise.resolve();
+                expect(inFlight).toBe(1);
+                hold = null;
+                release();
+                await discovery.settled();
+                // The read that ended schedules the next one: one chain, one read per period.
+                registry.calls.length = 0;
+                jasmine.clock().tick(250);
+                await discovery.settled();
+                jasmine.clock().tick(250);
+                await discovery.settled();
+                expect(registry.calls.length).toBe(2);
+                expect(most).toBe(1);
+                discovery.stop();
+            } finally { jasmine.clock().uninstall(); }
+        });
+
         it('render one item per watch, and remove the item of a watch that disappeared', () => {
             const list = document.createElement('ul');
             renderWatches(list, [{id: 1, name: 'grid', kind: 'sequence', location: 'life.cpp:12', writable: false},

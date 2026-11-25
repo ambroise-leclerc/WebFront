@@ -288,7 +288,8 @@ inline constexpr double maxExactNumber = 9007199254740992.0;
 class WatchRegistry {
 public:
     struct Entry {
-        std::string           name;
+        std::string           name;   // as the application gave it: what makes a watch unique
+        std::string           label;  // the name as the inspectors show it: control characters visible, bounded (boundedText)
         std::string           kind;
         std::string           location;
         bool                  writable = false;
@@ -303,8 +304,9 @@ public:
         for (const auto& [id, entry] : entries)
             if (entry.name == name)
                 throw std::invalid_argument("A watch named '" + name + "' is already registered");
-        const auto id = nextId++;
-        entries.emplace(id, Entry{std::move(name), std::string(kind), std::move(location), writable, std::move(source)});
+        const auto id    = nextId++;
+        auto       label = boundedText(name);
+        entries.emplace(id, Entry{std::move(name), std::move(label), std::string(kind), std::move(location), writable, std::move(source)});
         ++currentRevision;
         return id;
     }
@@ -362,7 +364,7 @@ public:
             }
             used += bytes;
             last  = entry->first;
-            served.emplace_back(static_cast<double>(entry->first), entry->second.name, entry->second.kind, entry->second.location, entry->second.writable);
+            served.emplace_back(static_cast<double>(entry->first), entry->second.label, entry->second.kind, entry->second.location, entry->second.writable);
         }
         const bool changed = known != currentRevision;
         return {std::move(served), more && wanted != 0 ? static_cast<double>(last) : 0.0, static_cast<double>(currentRevision), changed};
@@ -381,7 +383,7 @@ private:
     /// An upper bound of the encoded size of a descriptor: a tuple header, a number, three strings with the longest string
     /// header and a boolean.
     static std::size_t encodedSize(const Entry& entry) noexcept {
-        return 2 + 9 + (3 + entry.name.size()) + (3 + entry.kind.size()) + (3 + entry.location.size()) + 1;
+        return 2 + 9 + (3 + entry.label.size()) + (3 + entry.kind.size()) + (3 + entry.location.size()) + 1;
     }
 
     static std::uint64_t wholeNumber(double value, std::string_view what) {

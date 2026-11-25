@@ -126,8 +126,10 @@ export function createWatchDiscovery({bridge, onChange, onError = () => {}, onRe
         }
         onRead([...known.values()]);
     }
+    // One chain of reads at a time: a read in progress schedules the next one when it ends, so nothing else does meanwhile
+    // (a pause then a resumption during a read would start a second chain, whose results could overtake the first's).
     function schedule() {
-        if (stopped || paused || timer !== null) return;
+        if (stopped || paused || timer !== null || running !== null) return;
         timer = timers.setTimeout(() => {
             timer = null;
             running = poll().catch(onError).finally(() => {
