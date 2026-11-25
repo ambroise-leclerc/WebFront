@@ -49,20 +49,22 @@ struct SpaceState {
 
     mutable std::mutex                                           mutex;  // guards the members below
     std::map<std::string, std::shared_ptr<Handler>, std::less<>> functions;
-    std::function<void(UI)>                                      startedHandler;
-    std::function<void()>                                        lastClosedHandler;
-    std::shared_ptr<http::RouteTable>                            routes = std::make_shared<http::RouteTable>();
+    // Shared, so that each notification calls the very handler that was set (its state persists between calls), outside the
+    // lock, while the handler may replace itself or destroy the space.
+    std::shared_ptr<std::function<void(UI)>> startedHandler;
+    std::shared_ptr<std::function<void()>>   lastClosedHandler;
+    std::shared_ptr<http::RouteTable>        routes = std::make_shared<http::RouteTable>();
 
     [[nodiscard]] std::shared_ptr<Handler> function(std::string_view name) const {
         std::scoped_lock lock{mutex};
         const auto       found = functions.find(name);
         return found == functions.end() ? nullptr : found->second;
     }
-    [[nodiscard]] std::function<void(UI)> onStarted() const {
+    [[nodiscard]] std::shared_ptr<std::function<void(UI)>> onStarted() const {
         std::scoped_lock lock{mutex};
         return startedHandler;
     }
-    [[nodiscard]] std::function<void()> onLastClosed() const {
+    [[nodiscard]] std::shared_ptr<std::function<void()>> onLastClosed() const {
         std::scoped_lock lock{mutex};
         return lastClosedHandler;
     }
@@ -74,8 +76,8 @@ struct SpaceState {
     /// Drops what the application registered; the handlers are destroyed outside the lock, as their captures may take it.
     void release() {
         std::map<std::string, std::shared_ptr<Handler>, std::less<>> droppedFunctions;
-        std::function<void(UI)>                                      droppedStarted;
-        std::function<void()>                                        droppedLastClosed;
+        std::shared_ptr<std::function<void(UI)>>                     droppedStarted;
+        std::shared_ptr<std::function<void()>>                       droppedLastClosed;
         std::shared_ptr<http::RouteTable>                            droppedRoutes;
         std::scoped_lock                                             lock{mutex};
         droppedFunctions.swap(functions);

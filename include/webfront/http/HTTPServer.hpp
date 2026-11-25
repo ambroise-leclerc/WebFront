@@ -1216,20 +1216,22 @@ private:
     std::optional<Mounted> resolveMount(const Request& request) const {
         // The segment is cut in the path as it came, each segment decoded on its own: an encoded separator ("%2F") stays
         // inside its segment, where it names no space, instead of becoming a boundary that would select another one.
-        const auto                           raw      = std::string_view(request.uri).substr(0, request.uri.find('?'));
-        const auto                           segments = routing::decodedSegments(raw);
+        const auto                           raw = std::string_view(request.uri).substr(0, request.uri.find('?'));
+        std::vector<std::string>             segments;
         std::string                          prefix;
         std::shared_ptr<const MountResolver> resolver;
         {
             std::scoped_lock lock{mountsMutex};
             if (mounts.empty())
-                return {};
+                return {};  // an application without mounts pays nothing more per request
+            segments = routing::decodedSegments(raw);
             // A target at or under a prefix, read either way (whole or segment by segment), and even one that is not a safe
             // path, belongs to the mount: nothing there falls through to the application, whose upgrade ignores the path.
+            // The prefix's name without its slash ("/s", or "/WebFront.js" for "/WebFront.js/") is not under it.
             const auto decoded = routing::collapseSegments(uri::decode(raw, false));
             for (const auto& [candidate, found] : mounts) {
                 const auto own = routing::decodedSegments(candidate);
-                if (decoded.starts_with(candidate) || (segments.size() >= own.size() && std::equal(own.begin(), own.end(), segments.begin()))) {
+                if (decoded.starts_with(candidate) || (segments.size() > own.size() && std::equal(own.begin(), own.end(), segments.begin()))) {
                     prefix   = candidate;
                     resolver = found;
                 }

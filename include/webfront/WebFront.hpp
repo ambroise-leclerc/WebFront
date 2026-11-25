@@ -311,7 +311,9 @@ auto makeDeferredHandler(Function&& function) {
                     state->second);
             },
             state->first);
-        return networking::ex::let_value(networking::ex::just(std::move(state)), [sender = std::move(sender)](auto&) mutable {
+        // The callable is kept with the state until the sender completes: its coroutine refers to the callable's captures,
+        // which must outlive a registration released meanwhile (a space destroyed while the call runs).
+        return networking::ex::let_value(networking::ex::just(std::move(state), callable), [sender = std::move(sender)](auto&, auto&) mutable {
             return std::move(sender);
         });
     };
@@ -2016,7 +2018,7 @@ private:
                 uiSubscribers->notify(ui);
                 if (space && space->alive) {
                     if (const auto handler = space->onStarted())
-                        handler(ui);
+                        (*handler)(ui);  // the handler that was set, not a copy: its state persists
                     // A handler may destroy the space: the space's handlers that follow it are then not called.
                     space->started->notifyWhile(ui, [&space] {
                         return space->alive.load();
@@ -2064,7 +2066,7 @@ private:
                 if (spaceEmptied && space->alive) {
                     // The handler may destroy the space: it runs on a copy, and the state is kept by `space`.
                     if (const auto handler = space->onLastClosed())
-                        handler();
+                        (*handler)();
                 }
                 // The link is running this handler: it is released afterwards, by a task on the server context.
                 // During shutdown the task is refused and the link goes with the application.

@@ -7,7 +7,11 @@ functions, handlers, broadcasts and routes, under a path prefix.
 ```cpp
 #include <webfront/WebFront.hpp>
 
-webfront::WebFront app{webfront::WebFrontConfig{.address = "0.0.0.0", .port = "8080"}};
+// Remote browsers: a wildcard bind lets only loopback origins open the bridge, so name the origin the pages come from.
+webfront::WebFront app{webfront::WebFrontConfig{
+    .address       = "0.0.0.0",
+    .port          = "8080",
+    .contentPolicy = {.bridgeAllowedOrigins = {"http://emulator.example:8080"}}}};
 std::map<std::string, std::unique_ptr<webfront::WebFront::Space>, std::less<>> sessions;  // used on the server thread
 
 app.spaces("/s/", [&](std::string_view id) -> std::optional<webfront::http::RouteReply> {
@@ -26,13 +30,16 @@ app.spaces("/s/", [&](std::string_view id) -> std::optional<webfront::http::Rout
 ## Where a page belongs
 
 `app.spaces(prefix, resolver)` declares a family of spaces. An HTTP request or a WebSocket whose path starts with
-`prefix + segment + "/"` belongs to the space `segment`; anything else belongs to the application as before.
+`prefix + segment + "/"` belongs to the space `segment`. Every other path at or under the prefix belongs to the family
+too and names no space: `/s/` alone, an invalid segment or an unsafe path is answered 404 (see below). Paths outside the
+prefix, `/s` without its slash included, belong to the application as before.
 
 - **Files.** The path without `prefix + segment` is served as it would be at the root: `/s/abc/index.html` is
   `index.html` of the document root (or the embedded files), `/s/abc/WebFront.js` the bridge. A page with relative
   URLs works at `/s/abc/` as at `/`. `/s/abc`, without the slash that relative URLs need, is redirected to `/s/abc/`.
-- **The bridge.** `WebFront.js` opens its WebSocket on the directory of the page (`ws://host/s/abc/` for a page of
-  `/s/abc/` or `/s/abc/sub/`): that path tells the server the page's space. Outside the spaces the path is ignored.
+- **The bridge.** `WebFront.js` opens its WebSocket on the directory of the page: `ws://host/s/abc/` for a page of
+  `/s/abc/`, `ws://host/s/abc/sub/` for a page of `/s/abc/sub/`. The server takes the space from the first segment after
+  the prefix, so both pages belong to `abc`. Outside the spaces the path is ignored.
 - **Routes.** `space.addRoute("/data/", handler)` answers `/s/abc/data/...`; the handler receives the path within the
   space (`RouteRequest::path` starts with `/data/`). Under a space, its routes come first, then the application's, then
   the files.
@@ -41,7 +48,10 @@ app.spaces("/s/", [&](std::string_view id) -> std::optional<webfront::http::Rout
 
 The resolver is called on the server context for a segment that has no space yet, for a page as for its WebSocket. It
 either creates the space (`Space{app, prefix, segment}`, which the application owns) and returns nothing, or returns the
-reply that refuses it, which reaches the browser as it is. Returning nothing without creating the space answers 404. A
+reply that refuses it, which reaches the browser as it is. Returning nothing without creating the space answers 404.
+A navigation shows the refusal's body; a refused WebSocket does not, because the `WebSocket` API gives the page neither
+the status nor the body, only a failed connection (`webFront.ready` rejects). A page that must explain a refusal to its
+user asks the server over HTTP (a `fetch` of a route of the application), not through the bridge. A
 space may also be created beforehand, outside the resolver, when the application knows its sessions in advance.
 
 Every target at or under the prefix belongs to the family, the prefix alone (`/s/`) included: none falls through to the
@@ -109,7 +119,9 @@ callback), or at a time when none of its callbacks can run; destroy the spaces b
 - The read grants of `UI::grantRead` and the PTY pages belong to the application: a space has no `addReadRoute`.
 - A space isolates what WebFront dispatches. It is not a security boundary between users of one process: the session
   identifier in the URL is the only thing that selects a space, so an application that must keep sessions private
-  chooses unguessable identifiers or checks the user in its resolver and its callbacks.
+  chooses unguessable identifiers or checks the user in its callbacks and routes. The resolver is no access check: it
+  runs only for a segment that has no space yet, and every later request to an existing space (its pages, its WebSocket,
+  its routes) reaches it without calling the resolver again.
   WebFront's logs show a space's segment masked (`/s/*/index.html`), and never a resolver's error message, which may
   quote it; the application's own logs are its business.
 - `onLastUIClosed` counts connected pages: a space that no page ever reached is not reported, and the application ends

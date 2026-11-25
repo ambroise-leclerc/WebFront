@@ -64,14 +64,18 @@ public:
     BasicSpace& operator=(const BasicSpace&) = delete;
 
     ~BasicSpace() {
+        bool attached = false;
         {
             std::scoped_lock lock{registry->mutex};
-            if (!registry->attached) {
-                state->routeGuard->retire();
-                state->release();
-                return;
-            }
-            registry->spaces.erase(state->path);
+            attached = registry->attached;
+            if (attached)
+                registry->spaces.erase(state->path);
+        }
+        if (!attached) {
+            // Outside the registry's lock: releasing a capture may destroy another space, which takes it.
+            state->routeGuard->retire();
+            state->release();
+            return;
         }
         app.detachSpace(state);
     }
@@ -117,9 +121,9 @@ public:
 
     /// Sets the space's handler for each of its pages, replacing any previous one; called after the application's handlers.
     void onUIStarted(std::function<void(UI)>&& handler) {
-        std::function<void(UI)> previous;  // destroyed outside the lock
-        std::scoped_lock        lock{state->mutex};
-        previous = std::exchange(state->startedHandler, std::move(handler));
+        std::shared_ptr<std::function<void(UI)>> previous;  // destroyed outside the lock
+        std::scoped_lock                         lock{state->mutex};
+        previous = std::exchange(state->startedHandler, handler ? std::make_shared<std::function<void(UI)>>(std::move(handler)) : nullptr);
     }
 
     /// As BasicWF::subscribeUIStarted, for the pages of this space.
@@ -136,9 +140,9 @@ public:
     /// handlers: once each time the space empties, not when it is destroyed nor when the application shuts down. A space
     /// that no page ever reached is not reported. The handler may destroy the space.
     void onLastUIClosed(std::function<void()> handler) {
-        std::function<void()> previous;  // destroyed outside the lock
-        std::scoped_lock      lock{state->mutex};
-        previous = std::exchange(state->lastClosedHandler, std::move(handler));
+        std::shared_ptr<std::function<void()>> previous;  // destroyed outside the lock
+        std::scoped_lock                       lock{state->mutex};
+        previous = std::exchange(state->lastClosedHandler, handler ? std::make_shared<std::function<void()>>(std::move(handler)) : nullptr);
     }
 
     /// As BasicWF::addRoute, with a prefix relative to the space: "/data/" answers `/s/abc/data/...`, and the handler
@@ -150,6 +154,12 @@ public:
         return routes().add(std::move(prefix), guarded(std::move(handler)));
     }
     [[nodiscard]] http::RouteTable::Registration addRoute(std::string prefix, http::RouteHandler handler, http::RouteOptions options) {
+        if (options.harden)
+            options.harden = [guard = state->routeGuard, harden = std::move(options.harden)](http::RouteReply& reply) {
+                guard->run([&] {
+                    harden(reply);  // not once the space is destroyed: the error answer then goes unhardened
+                });
+            };
         return routes().add(std::move(prefix), guarded(std::move(handler)), std::move(options));
     }
 
