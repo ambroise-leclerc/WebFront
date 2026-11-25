@@ -167,7 +167,7 @@ défaut (32 Kio et 64 Mio) donne un budget de 32 Kio, soit seize pages minimales
 **Budget d'une requête.** C++ ferme une connexion qui annonce un message plus grand que `maxMessageSize` (ADR-003) :
 une requête doit donc tenir dans `requestBudget = maxMessageSize`, **tous ses arguments encodés compris**. Seule
 l'écriture porte un argument dont la taille dépend de l'utilisateur, le texte saisi ; tous ses autres arguments sont
-bornés : le nom de l'observateur (256 octets au plus, `watch` lève `std::invalid_argument` au-delà), la révision, le
+bornés : l'identifiant de l'observateur et la révision (des nombres), le
 chemin (1 024 octets), la valeur attendue (256 octets, puisqu'une valeur tronquée n'est pas modifiable), le nom de la
 fonction et les en-têtes du message d'appel. Leur taille maximale encodée est une constante
 (`writeRequestOverheadBytes`), et le texte fait au plus `maxWriteTextBytes = requestBudget - writeRequestOverheadBytes`
@@ -186,6 +186,7 @@ un tuple de premier niveau, pas de liste imbriquée : l'arbre circule donc à pl
 réponse qui porte des nœuds est une page : aucun appel ne rend une liste dont la longueur dépend de l'état observé. Les
 appels sont :
 
+- `webfront.inspector.watches(révision, après, nombre)` : la découverte des observateurs (« Découverte », ci-dessous) ;
 - `webfront.inspector.children(observateur, chemin, révision, suivant, nombre)` : une page des enfants d'un nœud
   (« Cohérence des listes d'enfants », ci-dessous).
 - `webfront.inspector.changes(observateur, révision, curseur, nombre)` : une page des différences (ci-dessous).
@@ -238,6 +239,26 @@ La garantie porte sur **les allocations de WebFront**, et sa portée dépend du 
 WebFront ne restreint pas les formateurs acceptés : il ne peut pas savoir ce qu'un formateur alloue, et refuser
 `std::formatter` priverait l'inspecteur de tous les types de l'application qui n'ont pas de description.
 
+**Découverte.** Dans tous les appels, `observateur` désigne l'**identifiant** d'un observateur, un nombre que WebFront
+attribue à chaque `watch` dans l'ordre d'enregistrement et ne réutilise jamais tant que l'application vit ; le nom
+n'est qu'un libellé. Un observateur retiré puis réenregistré sous le même nom reçoit donc un nouvel identifiant, et
+aucun appel destiné à l'ancien ne peut atteindre le nouveau.
+
+Le registre des observateurs a sa propre **révision**, incrémentée à chaque enregistrement et à chaque retrait.
+`watches(révision, après, nombre)` rend une page `(liste de descripteurs, suivant, révision du registre, changé)`. Un
+descripteur est le tuple `(identifiant, nom, genre de la racine, fichier:ligne du watch, modifiable)`, avec le nom et
+l'emplacement tronqués à 256 octets UTF-8 : sa taille est bornée, et la page suit les règles de budget ci-dessus. La
+page liste les observateurs vivants d'identifiant supérieur à `après`, dans l'ordre des identifiants, et `suivant` est
+le dernier identifiant servi (0 à la fin). Ce curseur par identifiant est stable : un retrait ne décale rien, et un
+enregistrement arrive en fin de liste ; aucun observateur vivant pendant toute la liste n'est sauté ni servi deux fois.
+`changé` est vrai quand la révision fournie n'est plus celle du registre.
+
+La découverte ne lit aucun objet observé et n'appelle aucune source : elle coûte une lecture de la table. L'inspecteur
+l'appelle à chaque période avec `nombre` à 0, ce qui rend seulement la révision du registre et `changé` ; quand le
+registre a changé, il relit la liste depuis `après` = 0, ajoute les nouveaux observateurs, et retire ceux qui ont
+disparu avec leurs arbres. Un appel qui vise un observateur retiré, entre-temps, reçoit `webfront.inspector.unknown`
+(« Réponse terminale », section 5).
+
 **Mémoire par connexion.** C++ garde, pour chaque connexion et chaque observateur, la valeur affichée des nœuds envoyés,
 comme le fait `forms::inspector`, et la révision de cette mémoire. Elle compte 10 000 nœuds au plus : au-delà,
 `children` échoue avec `webfront.inspector.limit` et l'inspecteur propose de replier des nœuds. Elle est libérée à la
@@ -280,12 +301,20 @@ Un appel qui modifie la mémoire s'exécute donc en deux phases :
    ou qui viennent du code de l'application, sont rapportés dans la réponse :
    - pour `write`, la réponse est un tuple `(révision, code, message)` : code vide si l'écriture est appliquée, sinon
      `webfront.inspector.stale` (précondition fausse) ou `webfront.inspector.refused` (refus du mutateur, avec le
-     message de son exception) ; dans les deux cas l'objet est inchangé, mais la révision est celle de la mémoire
+     message de son exception, borné comme ci-dessous) ; dans les deux cas l'objet est inchangé, mais la révision est celle de la mémoire
      après l'interruption, et l'inspecteur l'adopte ;
    - pour `children`, `fold` et `changes`, la page ne peut plus échouer : une exception d'un formateur devient la
      valeur du nœud (`‹exception : message›`, genre `opaque`), et une exception de `key` ou de `find` fait traiter
      l'élément comme sans clé (position, non modifiable). Une exception de la source après le retour du visiteur est
      écrite dans les diagnostics et ignorée.
+
+**Messages bornés.** Tout texte qui vient du code de l'application et entre dans une réponse ou un refus (message de
+l'exception d'un mutateur, d'un formateur, de `key`, de `find` ou de la source) est tronqué à **256 octets UTF-8** sans
+couper un caractère multioctet (on recule jusqu'au début du dernier caractère complet), et ses caractères de contrôle
+sont rendus visibles (section 4) ; un message tronqué se termine par `…`. Le code est l'un des codes fixes de cette
+décision. La réponse de `write` a donc une taille maximale fixe, comptée dans `responseHeaderBytes`, et tient toujours
+dans `responseBudget` ; la révision ne peut pas être perdue faute de place. Les refus qui rejettent une Promise portent
+le même message borné, dans le code `exception` de l'ADR-003.
 
 Un refus d'écriture qui suit une interruption ne fait donc jamais perdre la révision, et ne provoque pas de
 resynchronisation : la promesse qu'une passe interrompue n'en demande pas tient aussi en cas d'échec.
@@ -479,7 +508,8 @@ existent, selon ce que la source capture.
   `std::shared_ptr` vers l'état que la source utilise (l'objet et son mutex, typiquement), et la source ne capture rien
   d'autre par référence. Chaque opération garde une copie du `shared_ptr` le temps de son exécution. La destruction de
   la poignée retire l'observateur et rend la main **sans attendre** : une opération en cours se termine sur un état qui
-  vit encore, et son résultat est abandonné. Détruire la poignée sous le verrou de la source est alors sans danger.
+  vit encore, et sa réponse est remplacée par le refus terminal ci-dessous. Détruire la poignée sous le verrou de la
+  source est alors sans danger.
   C'est la forme à choisir quand l'application ne peut pas garantir l'ordre de destruction.
 
 **Destruction depuis l'opération elle-même** (dans la source, le visiteur ou le mutateur, sur le thread qui exécute
@@ -487,7 +517,7 @@ l'opération) :
 
 - **source propriétaire : permise.** L'opération garde le `shared_ptr` de l'état jusqu'à sa fin : l'objet et son mutex
   vivent encore quand elle reprend, même si la poignée était leur dernier autre propriétaire. L'opération se termine et
-  son résultat est abandonné ;
+  sa réponse est remplacée par le refus terminal ci-dessous ;
 - **source à références : interdite.** Attendre l'opération serait s'attendre soi-même, et ne pas attendre la laisserait
   reprendre sur des objets que l'application peut détruire juste après la poignée. Le destructeur reconnaît ce cas (il
   compare son thread à celui de l'opération en cours, enregistré au début de celle-ci), écrit un diagnostic qui nomme
@@ -496,14 +526,29 @@ l'opération) :
   qu'une corruption silencieuse. Une application qui doit retirer un observateur depuis sa source utilise une source
   propriétaire, ou poste la destruction sur un autre thread.
 
-Un appel qui vise un observateur retiré échoue avec `webfront.inspector.unknown`.
+**Réponse terminale.** Tant que la connexion vit, **toute requête reçue reçoit une réponse**, résolue ou rejetée ;
+aucune Promise ne reste en attente parce qu'un observateur a disparu. Le retrait d'un observateur libère sa mémoire,
+ses passes et ses instantanés pour toutes les connexions, puis :
+
+- une opération déjà commencée se termine (après l'attente du destructeur pour une source à références, sur l'état
+  qu'elle garde pour une source propriétaire), et sa réponse est **remplacée** par le refus
+  `webfront.inspector.unknown` : son résultat porterait une révision d'une mémoire qui n'existe plus ;
+- une opération en file sur l'exécuteur, pas encore commencée, est refusée de même sans appeler la source ;
+- tout appel ultérieur qui vise cet identifiant est refusé de même.
+
+Ce refus est la seule exception à l'atomicité de la section 3, et elle est explicite : la mémoire n'existe plus, donc
+aucune révision n'est perdue, mais une écriture déjà appliquée quand l'observateur est retiré a bien modifié l'objet.
+Son refus porte alors le message « observateur retiré après l'écriture », pour que l'inspecteur sache que la valeur a
+été posée ; dans tous les autres cas, le refus `unknown` garantit que l'objet n'a pas été modifié. À la déconnexion, il n'y a plus personne à qui répondre ; à l'arrêt de l'application, les tâches sont arrêtées
+et jointes (ADR-006) et les connexions fermées, ce qui rejette les Promises en attente côté page (ADR-004).
 
 Comme l'interblocage du premier contrat est silencieux, une destruction qui attend plus de cinq secondes écrit un
 diagnostic (ADR-011) qui nomme l'observateur et le fichier et la ligne de son `watch` (section 7), puis continue
 d'attendre : le diagnostic désigne la cause, il ne change pas le contrat.
 
-Le nom d'un observateur est unique tant que sa poignée vit ; un second `watch` du même nom lève
-`std::invalid_argument`.
+Le nom d'un observateur est unique tant que sa poignée vit et fait 256 octets au plus ; un second `watch` du même nom,
+ou un nom plus long, lève `std::invalid_argument`. Les appels désignent l'observateur par son identifiant
+(« Découverte », section 3).
 
 ### 6. Modification à la demande de l'application
 
@@ -693,34 +738,39 @@ demanderait un grant et une décision propres.
   qui rejettent sans interrompre la passe, `children` qui interrompt une passe avec une mémoire qui serait pleine
   après restauration (refus avant interruption), exception d'un formateur ou de `key` dans une page après une
   interruption (page servie, nœud `opaque` ou sans clé), source qui lève avant le visiteur (rejet sans effet) et après
-  lui (diagnostic, réponse servie), écriture qui interrompt une passe avec la révision de la passe (acceptée si l'état
-  affiché tient, périmée sinon, y compris pour une cible d'une page non servie) et avec une révision plus ancienne
-  (refus `stale` sans effet), liste `[a, b, c, d]` lue en deux pages avec une insertion en tête entre elles (liste
-  recommencée, `d` lu), même cas avec une `PagedSource` à clés et une insertion qui garde le nombre d'enfants (clé du
-  dernier enfant déplacée), passe qui détecte un réordonnancement des clés d'un parent déplié (« enfants modifiés »,
-  positions relues), premier nœud d'une page égal au parent, clé contenant `/`, `%` et des octets non ASCII (encodage
-  réversible), chemin mal formé refusé, clé dont l'encodage dépasse 128 octets (position, non modifiable), clé
-  dupliquée dans une page (position, non modifiable, diagnostic unique), clé que `find` résout vers un élément dont
-  `key` diffère (nœud retiré), clé dupliquée entre deux pages (précondition sur l'état affiché), suppression annoncée
-  seulement dans une page perdue (absente après la resynchronisation et hors de la mémoire), `reset`, requête
-  d'écriture à la taille exacte de `requestBudget` avec tous ses arguments au maximum, texte d'un octet de trop refusé
-  par la page puis par C++, segment très long (nom de champ long, désigné par son rang), 64ᵉ niveau et chemin proche
-  de 1 024 octets, opération entière sous le verrou du visiteur, `PagedSource`, chaque genre de la section 4,
-  exécuteur, poignée détruite pendant une lecture, destruction depuis l'opération d'une source propriétaire (état
-  encore vivant à la reprise, même quand la poignée en était le dernier autre propriétaire), formatage borné (chaîne
-  de 100 Mio copiée jusqu'au plafond seulement, formateur qui écrit plus de 1 Gio directement dans l'itérateur de
-  sortie sans allocation de WebFront au-delà de la borne, troncature détectée), passe de milliers de pages avec le
-  budget minimal interrompue par `children`, `fold`, `write` et un nouveau curseur 0 (entrées non servies restaurées,
-  différences retrouvées à la passe suivante, aucune resynchronisation), destruction d'une source propriétaire sous le
-  verrou de la source pendant qu'une opération l'attend (sans interblocage, résultat abandonné, état encore vivant),
-  destruction d'une source à références hors du verrou pendant qu'une opération l'attend (attente puis fin),
-  diagnostic d'une destruction qui attend plus que le délai, `containers` d'une page non admise avec un frontend
-  capable (`secondaryWindow` faux, aucun conteneur), écriture acceptée, refusée par l'analyse, refusée par le mutateur
-  et non permise) ; refus à une connexion non prouvée sans `trustLoopbackClients` ; écritures `webfront.developer.*`
-  refusées à une connexion non prouvée quand le frontend transmet la preuve, acceptées depuis la vue, la fenêtre
-  secondaire et le pilote `webfront-wf`, inchangées avec le navigateur système ; lectures du projet inchangées ;
-  `containers` pour chaque frontend et chaque réglage de confiance ; absence des fonctions hors environnement et en
-  distribution.
+  lui (diagnostic, réponse servie), mutateur dont le message fait 1 Mio et dont un caractère multioctet chevauche la
+  borne de 256 octets (message tronqué sur une frontière de caractère, réponse dans `responseBudget` avec le budget
+  minimal, révision reçue), `watches` (page bornée, curseur par identifiant stable sous retraits et ajouts pendant la
+  liste, `nombre` à 0, `changé`), observateur retiré puis réenregistré sous le même nom (nouvel identifiant, appels à
+  l'ancien refusés), réponse terminale `unknown` pour une opération en cours d'une source propriétaire détruite, pour
+  une opération en file sur l'exécuteur et pour un appel ultérieur, aucune Promise en attente après le retrait,
+  écriture qui interrompt une passe avec la révision de la passe (acceptée si l'état affiché tient, périmée sinon, y
+  compris pour une cible d'une page non servie) et avec une révision plus ancienne (refus `stale` sans effet), liste
+  `[a, b, c, d]` lue en deux pages avec une insertion en tête entre elles (liste recommencée, `d` lu), même cas avec
+  une `PagedSource` à clés et une insertion qui garde le nombre d'enfants (clé du dernier enfant déplacée), passe qui
+  détecte un réordonnancement des clés d'un parent déplié (« enfants modifiés », positions relues), premier nœud d'une
+  page égal au parent, clé contenant `/`, `%` et des octets non ASCII (encodage réversible), chemin mal formé refusé,
+  clé dont l'encodage dépasse 128 octets (position, non modifiable), clé dupliquée dans une page (position, non
+  modifiable, diagnostic unique), clé que `find` résout vers un élément dont `key` diffère (nœud retiré), clé
+  dupliquée entre deux pages (précondition sur l'état affiché), suppression annoncée seulement dans une page perdue
+  (absente après la resynchronisation et hors de la mémoire), `reset`, requête d'écriture à la taille exacte de
+  `requestBudget` avec tous ses arguments au maximum, texte d'un octet de trop refusé par la page puis par C++,
+  segment très long (nom de champ long, désigné par son rang), 64ᵉ niveau et chemin proche de 1 024 octets, opération
+  entière sous le verrou du visiteur, `PagedSource`, chaque genre de la section 4, exécuteur, poignée détruite pendant
+  une lecture, destruction depuis l'opération d'une source propriétaire (état encore vivant à la reprise, même quand
+  la poignée en était le dernier autre propriétaire), formatage borné (chaîne de 100 Mio copiée jusqu'au plafond
+  seulement, formateur qui écrit plus de 1 Gio directement dans l'itérateur de sortie sans allocation de WebFront
+  au-delà de la borne, troncature détectée), passe de milliers de pages avec le budget minimal interrompue par
+  `children`, `fold`, `write` et un nouveau curseur 0 (entrées non servies restaurées, différences retrouvées à la
+  passe suivante, aucune resynchronisation), destruction d'une source propriétaire sous le verrou de la source pendant
+  qu'une opération l'attend (sans interblocage, réponse `unknown`, état encore vivant), destruction d'une source à
+  références hors du verrou pendant qu'une opération l'attend (attente puis fin), diagnostic d'une destruction qui
+  attend plus que le délai, `containers` d'une page non admise avec un frontend capable (`secondaryWindow` faux, aucun
+  conteneur), écriture acceptée, refusée par l'analyse, refusée par le mutateur et non permise) ; refus à une
+  connexion non prouvée sans `trustLoopbackClients` ; écritures `webfront.developer.*` refusées à une connexion non
+  prouvée quand le frontend transmet la preuve, acceptées depuis la vue, la fenêtre secondaire et le pilote
+  `webfront-wf`, inchangées avec le navigateur système ; lectures du projet inchangées ; `containers` pour chaque
+  frontend et chaque réglage de confiance ; absence des fonctions hors environnement et en distribution.
 - Test de processus : destruction de la poignée d'une source à références depuis son visiteur, qui écrit le diagnostic
   puis termine le processus.
 - Test de compilation refusée, comme `FormsReflectionRejects` : une politique de tampons dont `responseBudget` est
