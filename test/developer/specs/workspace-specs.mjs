@@ -366,6 +366,8 @@ describe('The developer page layout', () => {
                     expect(menu.isOpen).toBeFalse();
                     button.dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true}));
                     field.focus();
+                    // A window without the system's focus moves the focus without sending focusin: the spec sends it.
+                    field.dispatchEvent(new FocusEvent('focusin', {bubbles: true}));
                     expect(menu.isOpen).toBeFalse();
                     expect(document.activeElement).toBe(field);
                 } finally { field.remove(); }
@@ -387,6 +389,24 @@ describe('The developer page layout', () => {
                 expect(items(1).every(item => item.getAttribute('aria-disabled') === 'true' && item.title === 'Gone.')).toBeTrue();
                 expect(panel.querySelector('.webfront-menu-reason').textContent).toBe('Gone.');
                 expect(items(0).some(item => item.hasAttribute('aria-disabled'))).toBeFalse();  // the groups stay available
+            });
+
+            it('leaves the menu with Tab and Shift+Tab, from the tab, in the direction asked', () => {
+                for (const shiftKey of [false, true]) {
+                    for (const depth of [0, 1]) {
+                        button.focus();
+                        key(button, {key: 'ContextMenu'});
+                        if (depth) key(items(0)[1], {key: 'ArrowRight'});
+                        const from = document.activeElement;
+                        const tab = new KeyboardEvent('keydown', {bubbles: true, cancelable: true, key: 'Tab', shiftKey});
+                        from.dispatchEvent(tab);
+                        // The browser moves the focus after the event, from the element that has it then: the tab.
+                        expect(tab.defaultPrevented).withContext(`shift ${shiftKey}, level ${depth}`).toBeFalse();
+                        expect(menu.isOpen).toBeFalse();
+                        expect(document.querySelector('.webfront-menu')).toBeNull();
+                        expect(document.activeElement).toBe(button);
+                    }
+                }
             });
 
             it('takes no key while it is closed', () => {

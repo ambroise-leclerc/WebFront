@@ -295,7 +295,12 @@ export function createTabMenu({button, entries, activate}) {
         case 'Enter': case ' ':
             if (item) choose(item);
             break;
-        case 'Tab': close(); break;
+        case 'Tab':
+            // The menu closes and the focus goes back to the tab before the browser moves it: the default action is kept,
+            // so Tab goes on to the element after the tab and Shift+Tab to the one before, as from the tab itself.
+            close();
+            event.stopPropagation();
+            return;
         default: handled = false;
         }
         if (!handled) return;
