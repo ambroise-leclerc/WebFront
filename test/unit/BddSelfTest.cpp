@@ -377,13 +377,17 @@ const Scenario equalFails{"checkEqual reports its operands", [] {
 
 int runsStarted = 0, runsEnded = 0;
 // The size of the trace when the run ended, -1 before any run, and whether the next run-ending listener throws.
-long tracedAtEnd = -1;
-bool throwAtEnd  = false;
+long tracedAtEnd  = -1;
+bool throwAtEnd   = false;
+bool throwAtStart = false;  // whether the scenario-starting listener throws
 
 const Listener runListener{[] {
                                ++runsStarted;
                            },
-                           nullptr,
+                           [] {
+                               if (throwAtStart)
+                                   throw std::runtime_error{"cannot open the recording"};
+                           },
                            [] {
                                ++runsEnded;
                                tracedAtEnd = static_cast<long>(trace.size());
@@ -502,7 +506,24 @@ int main() {
             }
         std::remove(report.c_str());
     }
-    throwAtEnd     = false;
+    throwAtEnd = false;
+    // A scenario-starting listener that throws fails its scenario, which does not run, and the run still ends.
+    {
+        throwAtStart       = true;
+        auto        before = runsEnded;
+        std::string report = "bdd_self_test_report.xml";
+        trace.clear();
+        expectExit({"--exact", "approx holds", "--junit", report}, 1);
+        throwAtStart = false;
+        auto xml     = readFile(report);
+        if (!trace.empty() || runsEnded != before + 1 || xml.find("failures=\"1\"") == std::string::npos
+            || xml.find("a scenario-starting listener threw: cannot open the recording") == std::string::npos) {
+            ++failures;
+            std::cerr << "MISMATCH: a throwing scenario-starting listener: " << trace.size() << " steps, " << runsEnded - before << " run endings, report\n"
+                      << xml;
+        }
+        std::remove(report.c_str());
+    }
     auto unchanged = runsEnded;
     expectExit({"[unknown]"}, 2);
     if (runsEnded != unchanged) {

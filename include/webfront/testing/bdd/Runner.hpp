@@ -104,18 +104,27 @@ inline bool selected(const Entry& entry, const Options& options) {
     return false;
 }
 
-/// Runs every pass of a scenario.
+/// Runs every pass of a scenario. A scenario-starting listener that throws fails the scenario, which does not run, and
+/// the run goes on, so that the run-ending listeners are still called.
 inline Result runScenario(const Entry& entry) {
     auto& current = state();
-    for (auto listener : listeners().scenarioStarting)
-        listener();
-    Node root;
+    Node  root;
     current.title = entry.title;
     current.report.clear();
+    current.path.clear();
     auto failuresBefore = current.failures.load();
     bool skipped        = false;
+    bool started        = true;
     auto start          = now();
-    for (current.pass = 1;; ++current.pass) {
+    for (auto listener : listeners().scenarioStarting)
+        try {
+            listener();
+        } catch (...) {
+            reportFailure(std::source_location{}, concat("a scenario-starting listener threw: ", exceptionMessage(std::current_exception())));
+            started = false;
+            break;
+        }
+    for (current.pass = 1; started; ++current.pass) {
         current.current   = &root;
         current.unwinding = false;
         current.path.clear();

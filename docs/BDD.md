@@ -151,7 +151,8 @@ const webfront::bdd::Listener recording{
 runs once the selected scenarios have run, whatever their outcome, before the summary and the JUnit report; it runs only
 when `runStarting` did, so a run that selects nothing (or only lists the scenarios) calls neither. An exception it throws
 is reported and makes `run()` return 1; the JUnit report then has one more test case, `Run ending`, whose `<error>`
-holds the message of each exception.
+holds the message of each exception. A `scenarioStarting` that throws fails its scenario, which does not run, and the
+run goes on, so `runEnding` is still called.
 
 `webfront_bdd_discover_tests(<target> ...)`:
 
