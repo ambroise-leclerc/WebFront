@@ -42,9 +42,13 @@ app.spaces("/s/", [&](std::string_view id) -> std::optional<webfront::http::Rout
 The resolver is called on the server context for a segment that has no space yet, for a page as for its WebSocket. It
 either creates the space (`Space{app, prefix, segment}`, which the application owns) and returns nothing, or returns the
 reply that refuses it, which reaches the browser as it is. Returning nothing without creating the space answers 404. A
-space may also be created beforehand, outside the resolver, when the application knows its sessions in advance. A segment
-that cannot name a space (`.`, or a decoded `/`, `\` or control character) is answered 404 without calling the resolver:
-the segment is cut before it is decoded, so `/s/alpha%2Fdata/` names no space and never reaches `alpha`.
+space may also be created beforehand, outside the resolver, when the application knows its sessions in advance.
+
+Every target at or under the prefix belongs to the family, the prefix alone (`/s/`) included: none falls through to the
+application. A segment that cannot name a space (empty, `.`, or holding `..`, a decoded `/`, `\` or control character)
+and a target that is not a safe path are answered 404 without calling the resolver, for a page as for a WebSocket. The
+segment is cut before it is decoded, so `/s/alpha%2Fdata/` names no space and never reaches `alpha`. Creating a space
+applies the same rule, so every space that can be created is reachable.
 
 ## What a space offers
 

@@ -531,9 +531,12 @@ const Scenario withoutSpaces{"An application without spaces behaves as before th
                                      app.spaces("/s/", [](std::string_view) {
                                          return std::optional<http::RouteReply>{};
                                      });
-                                     requireThrows<std::invalid_argument>([&] {
-                                         App::Space space{app, "/s/", "a/b"};
-                                     });
+                                     for (const auto* segment : {"a/b", "a..b", "..", ".", "", "a\\b", "a\x01b"}) {
+                                         auto scope = info(segment);
+                                         requireThrows<std::invalid_argument>([&] {
+                                             App::Space space{app, "/s/", segment};
+                                         });
+                                     }
                                      requireThrows<std::invalid_argument>([&] {
                                          app.spaces("/s/sub/", [](std::string_view) {
                                              return std::optional<http::RouteReply>{};
@@ -582,6 +585,22 @@ const Scenario encodedSeparator{"An encoded separator never selects a space othe
                                         require(!page.upgraded);
                                         std::scoped_lock lock{seenMutex};
                                         require(seen == std::vector<std::string>{"alpha"});
+                                    });
+                                    then("a WebSocket under the prefix whose target is not a safe path is refused, not given to the application", [&] {
+                                        for (const auto* target : {"/s/%00/", "/s/al%00pha/", "/s/alpha/%00/", "/s/a..b/", "/s/", "/s/%2E/"}) {
+                                            Page page{app.port(), target};
+                                            auto scope = info(target);
+                                            require(!page.upgraded);
+                                            require(page.received().starts_with("HTTP/1.1 404"));
+                                        }
+                                        require(app.connectedBrowsers() == 0);
+                                        std::scoped_lock lock{seenMutex};
+                                        require(seen == std::vector<std::string>{"alpha"});
+                                    });
+                                    then("a space of any name its creation accepts is reachable", [&] {
+                                        require(httpGet(app.port(), "/s/a%20b%25c+d.e/data/x").find("a b%c+d.e-data /data/x") != std::string::npos);
+                                        Page page{app.port(), "/s/a%20b%25c+d.e/"};
+                                        require(page.upgraded);
                                     });
                                     then("the encoded prefix separator does not reach a space either", [&] {
                                         require(httpGet(app.port(), "/s%2Falpha/data/x").starts_with("HTTP/1.1 404"));

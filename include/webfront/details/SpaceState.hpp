@@ -95,14 +95,9 @@ struct SpaceRegistry {
     }
 };
 
-/// True for a segment that names a space: not empty, not "." or "..", without '/', '\\' or control characters.
+/// True for a segment that names a space: the rule of the mount, so that every space created is reachable.
 [[nodiscard]] inline bool validSpaceSegment(std::string_view segment) {
-    if (segment.empty() || segment == "." || segment == "..")
-        return false;
-    for (const char c : segment)
-        if (c == '/' || c == '\\' || static_cast<unsigned char>(c) < 32 || c == 127)
-            return false;
-    return true;
+    return http::routing::validSegment(segment);
 }
 }  // namespace detail
 

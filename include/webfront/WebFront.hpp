@@ -1593,7 +1593,7 @@ private:
     std::shared_ptr<SpaceState> attachSpace(std::string_view prefix, std::string_view segment) {
         if (!detail::validSpaceSegment(segment))
             throw std::invalid_argument("'" + std::string(segment)
-                                        + "' cannot name a space: it is empty, '.', '..', or holds '/', '\\' or a control character");
+                                        + "' cannot name a space: it is empty or '.', or holds '..', '/', '\\' or a control character");
         std::scoped_lock lock{spaceRegistry->mutex};
         if (std::ranges::find(spaceRegistry->families, prefix) == spaceRegistry->families.end())
             throw std::invalid_argument("No family of spaces was declared with the prefix '" + std::string(prefix) + "': call spaces() first");

@@ -673,6 +673,16 @@ inline std::optional<std::pair<std::string, std::string>> splitTarget(const std:
     return std::pair{collapseSegments(decoded), mark == std::string::npos ? std::string{} : uri.substr(mark + 1)};
 }
 
+/// The rule of a segment that names something under a mount (an application space): not empty, not ".", without "..",
+/// '/', '\\' or a control character. A path whose decoded segment breaks it is never served (splitTarget refuses "..").
+[[nodiscard]] inline bool validSegment(std::string_view segment) {
+    if (segment.empty() || segment == "." || segment.find("..") != std::string_view::npos)
+        return false;
+    return std::none_of(segment.begin(), segment.end(), [](char c) {
+        return c == '/' || c == '\\' || static_cast<unsigned char>(c) < 32 || c == 127;
+    });
+}
+
 /// The segments of a path as it came, each percent-decoded on its own, without the empty and "." ones (as collapseSegments
 /// drops them): "/s/a%2Fb/./c" gives "s", "a/b" and "c", where decoding the whole path first would give four segments.
 inline std::vector<std::string> decodedSegments(std::string_view raw) {
@@ -1192,40 +1202,44 @@ private:
     };
 
     std::optional<Mounted> resolveMount(const Request& request) const {
-        std::string                                        prefix;
-        std::shared_ptr<const MountResolver>               resolver;
-        std::optional<std::pair<std::string, std::string>> split;
+        // The segment is cut in the path as it came, each segment decoded on its own: an encoded separator ("%2F") stays
+        // inside its segment, where it names no space, instead of becoming a boundary that would select another one.
+        const auto                           raw      = std::string_view(request.uri).substr(0, request.uri.find('?'));
+        const auto                           segments = routing::decodedSegments(raw);
+        std::string                          prefix;
+        std::shared_ptr<const MountResolver> resolver;
         {
             std::scoped_lock lock{mountsMutex};
             if (mounts.empty())
                 return {};
-            split = routing::splitTarget(request.uri);
-            if (!split)
-                return {};
-            for (const auto& [candidate, found] : mounts)
-                if (split->first.starts_with(candidate) && split->first.size() > candidate.size()) {
+            // A target at or under a prefix, read either way (whole or segment by segment), and even one that is not a safe
+            // path, belongs to the mount: nothing there falls through to the application, whose upgrade ignores the path.
+            const auto decoded = routing::collapseSegments(uri::decode(raw, false));
+            for (const auto& [candidate, found] : mounts) {
+                const auto own = routing::decodedSegments(candidate);
+                if (decoded.starts_with(candidate) || (segments.size() >= own.size() && std::equal(own.begin(), own.end(), segments.begin()))) {
                     prefix   = candidate;
                     resolver = found;
                 }
+            }
         }
         if (!resolver)
             return {};
-        const auto& query = split->second;
-        Mounted     mounted;
-        const auto  notFound = [&mounted] {
+        Mounted    mounted;
+        const auto notFound = [&mounted] {
             mounted.reply = textReply(Response::notFound, "Not Found\n");
             return mounted;
         };
-        // The segment is cut in the path as it came, each segment decoded on its own: an encoded separator ("%2F") stays
-        // inside its segment, where it names no space, instead of becoming a boundary that would select another one.
-        const auto raw            = std::string_view(request.uri).substr(0, request.uri.find('?'));
-        const auto segments       = routing::decodedSegments(raw);
-        const auto prefixSegments = routing::decodedSegments(prefix);
-        const auto depth          = prefixSegments.size();
+        const auto split = routing::splitTarget(request.uri);
+        if (!split)
+            return notFound();  // not a safe path (a control character, "..")
+        const auto& query          = split->second;
+        const auto  prefixSegments = routing::decodedSegments(prefix);
+        const auto  depth          = prefixSegments.size();
         if (segments.size() <= depth || !std::equal(prefixSegments.begin(), prefixSegments.end(), segments.begin()))
-            return notFound();  // under the prefix once decoded, but not segment by segment
+            return notFound();  // the prefix alone, or under it once decoded but not segment by segment
         const auto& segment = segments[depth];
-        if (segment.find_first_of("/\\") != std::string::npos || segment == "..")
+        if (!routing::validSegment(segment))
             return notFound();
         const bool trailingSlash = raw.ends_with('/');
         if (segments.size() == depth + 1 && !trailingSlash) {
