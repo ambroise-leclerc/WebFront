@@ -124,11 +124,28 @@ private:
 
 namespace impl {
 
-/// A number approx() compares: any arithmetic type but bool.
+/// A number approx() compares: an arithmetic type but bool whose every value a double holds exactly, so that the
+/// conversion never makes two different values equal (float, double, and the integers of at most 53 bits).
 template <typename T>
-concept Approximable = std::is_arithmetic_v<T> && !std::is_same_v<T, bool>;
+concept Approximable = std::is_arithmetic_v<T> && !std::is_same_v<T, bool> && std::numeric_limits<T>::digits <= std::numeric_limits<double>::digits;
+
+/// A number a double cannot always hold: a 64-bit integer, or a long double wider than a double.
+template <typename T>
+concept Inexact = std::is_arithmetic_v<T> && !std::is_same_v<T, bool> && !Approximable<T>;
 
 }  // namespace impl
+
+// Comparing approx() with a 64-bit integer or a wide long double is refused: beyond 2^53 the conversion to double would
+// accept a different value even with no tolerance. Convert it explicitly (static_cast<double>) to accept the rounding,
+// or compare an integer exactly with checkEqual().
+template <impl::Inexact T>
+ApproxComparison operator==(const T& actual, const Approx& expected) = delete;
+template <impl::Inexact T>
+ApproxComparison operator==(const Approx& expected, const T& actual) = delete;
+template <impl::Inexact T>
+ApproxComparison operator!=(const T& actual, const Approx& expected) = delete;
+template <impl::Inexact T>
+ApproxComparison operator!=(const Approx& expected, const T& actual) = delete;
 
 template <impl::Approximable T>
 ApproxComparison operator==(const T& actual, const Approx& expected) {

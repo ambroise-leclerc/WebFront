@@ -129,6 +129,10 @@ A value is accepted within either tolerance: `|value - expected| <= margin`, or 
 An infinity equals only itself whatever the tolerances, so a computation that overflowed is not accepted as
 `approx(DBL_MAX)`. NaN is never equal. The default epsilon is `Approx::defaultEpsilon`, a hundred times the
 epsilon of a `float` (about 1.19e-5), as in Catch2. A negative or NaN tolerance throws `std::invalid_argument`.
+`approx` compares the numbers a `double` holds exactly: `float`, `double` and the integers of at most 53 bits. A 64-bit
+integer or a `long double` wider than a `double` is refused at compile time, since beyond 2^53 a different value would
+compare equal even with no tolerance: convert it explicitly with `static_cast<double>`, or compare an integer with
+`checkEqual()`.
 The comparison returns an object that converts to `bool` and explains a failed `check()` or `require()`:
 
 ```text
