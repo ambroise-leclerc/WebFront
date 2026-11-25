@@ -157,14 +157,22 @@ struct RunError {
     std::string      messages;
 };
 
-/// Calls run listeners and returns the messages of the exceptions they threw, one per line, which are also printed;
-/// empty when every listener returned. The run-starting listeners stop at the first exception, since the run does not
-/// go on; every run-ending listener is called.
-inline std::string callRunListeners(const std::vector<void (*)()>& listeners, std::string_view what, bool stopAtFirst) {
+/// Calls run listeners and returns the messages of the exceptions they threw, one per line, and the reports of the
+/// failures they recorded (check()), all of which are also printed; empty when every listener returned without a
+/// failure. The run-starting listeners stop at the first exception, since the run does not go on; every run-ending
+/// listener is called.
+inline std::string callRunListeners(const std::vector<void (*)()>& listeners, std::string_view name, std::string_view what, bool stopAtFirst) {
+    auto& current = state();
+    current.title = name;
+    current.path.clear();
+    current.report.clear();
     std::string errors;
     for (auto listener : listeners)
         try {
             listener();
+        } catch (const AssertionFailure&) {
+            if (stopAtFirst)  // require() recorded the failure
+                break;
         } catch (...) {
             auto message = exceptionMessage(std::current_exception());
             errors      += concat(message, '\n');
@@ -172,7 +180,7 @@ inline std::string callRunListeners(const std::vector<void (*)()>& listeners, st
             if (stopAtFirst)
                 break;
         }
-    return errors;
+    return errors + current.report;
 }
 
 /// The length of the UTF-8 sequence that starts a text and that XML 1.0 accepts, or 0.
@@ -429,14 +437,14 @@ inline int run(int argc, char** argv) {
     std::vector<Result>   results;
     results.reserve(selection.size());
     auto start = now();
-    if (auto errors = callRunListeners(listeners().runStarting, "a run-starting listener threw", true); !errors.empty())
-        runErrors.push_back({"Run starting", "a run-starting listener threw", std::move(errors)});
+    if (auto errors = callRunListeners(listeners().runStarting, "Run starting", "a run-starting listener threw", true); !errors.empty())
+        runErrors.push_back({"Run starting", "a run-starting listener failed", std::move(errors)});
     else
         for (const auto* entry : selection)
             results.push_back(runScenario(*entry));
     auto elapsed = now() - start;
-    if (auto errors = callRunListeners(listeners().runEnding, "a run-ending listener threw", false); !errors.empty())
-        runErrors.push_back({"Run ending", "a run-ending listener threw", std::move(errors)});
+    if (auto errors = callRunListeners(listeners().runEnding, "Run ending", "a run-ending listener threw", false); !errors.empty())
+        runErrors.push_back({"Run ending", "a run-ending listener failed", std::move(errors)});
     bool ended = runErrors.empty();
 
     std::size_t failed = 0, skipped = 0;

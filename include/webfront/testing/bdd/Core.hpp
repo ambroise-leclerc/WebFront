@@ -37,7 +37,6 @@
 #pragma once
 
 #include <atomic>
-#include <cfloat>
 #include <charconv>
 #include <clocale>
 #include <concepts>
@@ -45,6 +44,7 @@
 #include <cstdio>
 #include <exception>
 #include <initializer_list>
+#include <limits>
 #include <source_location>
 #include <string>
 #include <string_view>
@@ -155,7 +155,7 @@ void append(std::string& text, const T& value) {
         char buffer[64];
         int  length;
         if constexpr (std::is_same_v<T, long double>)
-            length = std::snprintf(buffer, sizeof buffer, "%.*Lg", LDBL_DECIMAL_DIG, value);
+            length = std::snprintf(buffer, sizeof buffer, "%.*Lg", std::numeric_limits<long double>::max_digits10, value);
         else
             length = std::snprintf(buffer, sizeof buffer, "%.17g", static_cast<double>(value));
         text += withPoint({buffer, length > 0 ? static_cast<std::size_t>(length) : 0});
@@ -298,11 +298,20 @@ inline std::vector<std::string> readLines(const char* name) {
 #endif
     if (!file)
         return lines;
+    // Closes the file also when appending to the content throws.
+    struct Closer {
+        std::FILE* file;
+        ~Closer() {
+            if (file)
+                std::fclose(file);
+        }
+    } closer{file};
     std::string content;
     char        buffer[4096];
     for (std::size_t read; (read = std::fread(buffer, 1, sizeof buffer, file)) != 0;)
         content.append(buffer, read);
     std::fclose(file);
+    closer.file = nullptr;
     for (std::size_t start = 0; start < content.size();) {
         auto end = content.find('\n', start);
         if (end == std::string::npos)
@@ -546,8 +555,9 @@ public:
 
 /// Registers functions, lambdas without captures or null, called before the first scenario, before each scenario and
 /// after the last one. `runEnding` is called once the selected scenarios have run, whatever their outcome, before the
-/// summary and the JUnit report, and only when `runStarting` was called: a run that selects nothing calls neither. An
-/// exception it throws is reported and fails the run.
+/// summary and the JUnit report: a run that selects at least one scenario calls it, even when no listener has a
+/// `runStarting` or when a `runStarting` threw, and a run that selects nothing (or lists the scenarios) calls neither. A
+/// run listener that throws or records a failure (check()) fails the run.
 class Listener {
 public:
     Listener(void (*runStarting)(), void (*scenarioStarting)(), void (*runEnding)() = nullptr) {
@@ -628,9 +638,16 @@ bool check(const T& condition, std::source_location location = std::source_locat
     impl::count();
     if (static_cast<bool>(condition)) [[likely]]
         return true;
-    if constexpr (impl::Explained<T>)
-        impl::reportFailure(location, std::string{condition.explain()});
-    else
+    if constexpr (impl::Explained<T>) {
+        // The failure is recorded here even when the explanation cannot be built.
+        std::string explanation;
+        try {
+            explanation = std::string{condition.explain()};
+        } catch (...) {
+            explanation = impl::concat("(explain() threw: ", impl::exceptionMessage(std::current_exception()), ')');
+        }
+        impl::reportFailure(location, explanation);
+    } else
         impl::reportFailure(location, {});
     return false;
 }

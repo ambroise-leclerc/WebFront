@@ -140,7 +140,8 @@ The comparison returns an object that converts to `bool` and explains a failed `
 ```
 
 More generally, `check()` and `require()` add the text of `condition.explain()` to the failure of any condition whose type
-has a `std::string explain() const`.
+has a `std::string explain() const`. An `explain()` that throws does not hide the failure: it is recorded where the
+condition is checked, with the message of that exception.
 
 ## Listeners
 
@@ -152,10 +153,11 @@ const webfront::bdd::Listener recording{
 ```
 
 `Listener(runStarting, scenarioStarting, runEnding = nullptr)` takes functions without captures, or null. `runEnding`
-runs once the selected scenarios have run, whatever their outcome, before the summary and the JUnit report; it runs only
-when `runStarting` did, so a run that selects nothing (or only lists the scenarios) calls neither. An exception it throws
-is reported and makes `run()` return 1; the JUnit report then has one more test case, `Run ending`, whose `<error>`
-holds the message of each exception. A `scenarioStarting` that throws fails its scenario, which does not run, and the
+runs once the selected scenarios have run, whatever their outcome, before the summary and the JUnit report: a run that
+selects at least one scenario calls it, even when no listener has a `runStarting`, and a run that selects nothing (or
+only lists the scenarios) calls neither. An exception it throws, or a failure it records with `check()`, is reported and
+makes `run()` return 1; the JUnit report then has one more test case, `Run ending`, whose `<error>` holds the message of
+each exception and the report of each failure. A `scenarioStarting` that throws fails its scenario, which does not run, and the
 run goes on, so `runEnding` is still called. A `runStarting` that throws ends the preparation of the run: the following
 `runStarting` are not called and no scenario runs, but every `runEnding` is, so it must accept a run whose preparation
 did not complete; `run()` returns 1 and the JUnit report has a test case `Run starting` whose `<error>` holds the

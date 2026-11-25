@@ -15,6 +15,7 @@
 #include <webfront/testing/bdd/Core.hpp>
 
 #include <chrono>
+#include <cstdlib>
 #include <thread>
 
 namespace webfront::bdd {

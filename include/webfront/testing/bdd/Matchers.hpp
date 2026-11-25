@@ -54,7 +54,7 @@ struct Not {
         return !matcher(value);
     }
     std::string describe() const {
-        return "not " + matcher.describe();
+        return "not " + std::string{matcher.describe()};
     }
 };
 template <Matcher M>
@@ -79,7 +79,7 @@ bool check(const T& value, const M& matcher, std::source_location location = std
     std::string_view text{value};
     if (matcher(text)) [[likely]]
         return true;
-    impl::reportFailure(location, impl::concat('"', text, "\" ", matcher.describe()));
+    impl::reportFailure(location, impl::concat('"', text, "\" ", std::string{matcher.describe()}));
     return false;
 }
 template <typename T, Matcher M>

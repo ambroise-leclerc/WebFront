@@ -329,6 +329,9 @@ const Scenario approxHolds{"approx holds", [] {
                                require(5.0 + 2e-6 != approx(5.0).margin(1e-6).epsilon(0));
                                require(5.01 == approx(5.0).epsilon(0.01));
                                require(0.0 == approx(1e-9).margin(1e-8));
+                               // The difference is compared with the margin, not the rounded bounds expected +/- margin.
+                               require(0x1.0000000000001p0 != approx(1.0).epsilon(0).margin(0x1.8p-53));
+                               require(0x1.0000000000001p0 == approx(1.0).epsilon(0).margin(0x1p-52));
                                require(3 == approx(3.0));
                                require(std::numeric_limits<double>::infinity() == approx(std::numeric_limits<double>::infinity()));
                                require(!(std::numeric_limits<double>::quiet_NaN() == approx(std::numeric_limits<double>::quiet_NaN())));
@@ -379,6 +382,37 @@ const Scenario equalHolds{"checkEqual holds", [] {
                               trace.push_back("equal");
                           }};
 
+// A condition whose explanation cannot be built, and a matcher whose description only converts to std::string.
+struct Unexplained {
+    explicit operator bool() const {
+        return false;
+    }
+    std::string explain() const {
+        throw std::runtime_error{"no explanation"};
+    }
+};
+struct Description {
+    operator std::string() const {
+        return "is abc";
+    }
+};
+struct IsAbc {
+    bool operator()(std::string_view text) const {
+        return text == "abc";
+    }
+    Description describe() const {
+        return {};
+    }
+};
+
+const Scenario explainFails{"a failing explanation", [] {
+                                if (!check(Unexplained{}))
+                                    trace.push_back("after check");
+                                require("abc", IsAbc{});
+                                check("abd", !IsAbc{});
+                                trace.push_back("matched");
+                            }};
+
 const Scenario equalFails{"checkEqual reports its operands", [] {
                               checkEqual(std::vector<int>{1, 2, 3}, std::vector<int>{1, 2, 4});
                               checkEqual(Color::red, Color::blue);
@@ -397,6 +431,7 @@ long tracedAtEnd     = -1;
 bool throwAtEnd      = false;
 bool throwAtStart    = false;  // whether the scenario-starting listener throws
 bool throwAtRunStart = false;  // whether the run-starting listener throws
+bool failAtEnd       = false;  // whether the run-ending listener records a failure with check()
 
 const Listener runListener{[] {
                                ++runsStarted;
@@ -412,6 +447,7 @@ const Listener runListener{[] {
                                tracedAtEnd = static_cast<long>(trace.size());
                                if (throwAtEnd)
                                    throw std::runtime_error{"cannot save the recording"};
+                               check(!failAtEnd);
                            }};
 
 std::string readFile(const std::string& name) {
@@ -425,7 +461,13 @@ void expect(std::string_view title, int code, std::vector<std::string> expectedT
     trace.clear();
     std::string        exact{title};
     std::vector<char*> arguments{const_cast<char*>("bdd_self_test"), const_cast<char*>("--exact"), exact.data()};
+    auto               started = runsStarted, ended = runsEnded;
     auto               result = run(static_cast<int>(arguments.size()), arguments.data());
+    // Each run of a selected scenario notifies its start and its end once.
+    if (runsStarted != started + 1 || runsEnded != ended + 1) {
+        ++failures;
+        std::cerr << "MISMATCH in \"" << title << "\": " << runsStarted - started << " run starts, " << runsEnded - ended << " run endings\n";
+    }
     if (result != code || trace != expectedTrace) {
         ++failures;
         std::cerr << "MISMATCH in \"" << title << "\": exit " << result << " (expected " << code << "), trace";
@@ -501,6 +543,7 @@ int main() {
     expect("approx holds", 0, {"approx"});
     expect("approx reports the tolerance", 1, {"after check"});
     expect("checkEqual holds", 0, {"equal"});
+    expect("a failing explanation", 1, {"after check", "matched"});
     expect("checkEqual reports its operands", 1, {"after check"});
 
     // A run-ending listener runs once per run that started, after the last scenario; one that throws fails the run.
@@ -518,7 +561,7 @@ int main() {
         for (std::string_view part : {"tests=\"2\" failures=\"0\" errors=\"1\"",
                                       "<testcase classname=\"tests\" name=\"Scenario: approx holds\"",
                                       "<testcase classname=\"tests\" name=\"Run ending\" time=\"0.000\">\n      <error "
-                                      "message=\"a run-ending listener threw\">cannot save the recording\n</error>"})
+                                      "message=\"a run-ending listener failed\">cannot save the recording\n</error>"})
             if (xml.find(part) == std::string::npos) {
                 ++failures;
                 std::cerr << "MISMATCH: the report of a failed run ending lacks \"" << part << "\"\n";
@@ -526,6 +569,26 @@ int main() {
         std::remove(report.c_str());
     }
     throwAtEnd = false;
+    // A failure the run-ending listener records with check(), without throwing, also fails the run and is reported;
+    // the failure of a condition whose explain() throws is recorded with the message of that exception.
+    {
+        failAtEnd          = true;
+        std::string report = "bdd_self_test_report.xml";
+        expectExit({"--exact", "approx holds", "--junit", report}, 1);
+        failAtEnd = false;
+        auto xml  = readFile(report);
+        if (xml.find("tests=\"2\" failures=\"0\" errors=\"1\"") == std::string::npos
+            || xml.find("message=\"a run-ending listener failed\">") == std::string::npos || xml.find("in Scenario: Run ending") == std::string::npos) {
+            ++failures;
+            std::cerr << "MISMATCH: the report of a failure recorded by a run-ending listener\n" << xml;
+        }
+        expectExit({"--exact", "a failing explanation", "--junit", report}, 1);
+        if (readFile(report).find("(explain() threw: no explanation)") == std::string::npos) {
+            ++failures;
+            std::cerr << "MISMATCH: the report of a failing explanation\n";
+        }
+        std::remove(report.c_str());
+    }
     // A scenario-starting listener that throws fails its scenario, which does not run, and the run still ends.
     {
         throwAtStart       = true;
@@ -555,7 +618,7 @@ int main() {
         auto xml        = readFile(report);
         if (!trace.empty() || runsEnded != before + 1 || xml.find("tests=\"1\" failures=\"0\" errors=\"1\"") == std::string::npos
             || xml.find("<testcase classname=\"tests\" name=\"Run starting\" time=\"0.000\">\n      <error "
-                        "message=\"a run-starting listener threw\">cannot reach the device\n</error>")
+                        "message=\"a run-starting listener failed\">cannot reach the device\n</error>")
                    == std::string::npos) {
             ++failures;
             std::cerr << "MISMATCH: a throwing run-starting listener: " << trace.size() << " steps, " << runsEnded - before << " run endings, report\n" << xml;
