@@ -8,7 +8,7 @@ file(WRITE "${work}/project/CMakeLists.txt" "cmake_minimum_required(VERSION 3.25
 project(RealXdg NONE)
 enable_testing()
 include(\"${SOURCE_DIR}/test/cmake/WebKitGTKTestEnvironment.cmake\")
-add_test(NAME Child COMMAND \"${CMAKE_COMMAND}\" -DOUT=${work}/seen.txt -P \"${SOURCE_DIR}/test/cmake/real-xdg/Child.cmake\")
+add_test(NAME Child COMMAND \"${CMAKE_COMMAND}\" \"-DOUT=${work}/seen.txt\" -P \"${SOURCE_DIR}/test/cmake/real-xdg/Child.cmake\")
 webfront_configure_webkitgtk_test(Child)
 ")
 # The configure-time environment differs from the run-time one: only the latter must reach the test.
@@ -47,13 +47,9 @@ endfunction()
 
 # Set at run time, with a semicolon: the test sees its throwaway roots and the real ones whole.
 run_ctest("/run/a;b" "/run/cache")
-if(NOT seen MATCHES "WEBFRONT_TEST_REAL_XDG_DATA_HOME=\\[/run/a;b\\]\n" OR NOT seen MATCHES "WEBFRONT_TEST_REAL_XDG_CACHE_HOME=\\[/run/cache\\]\n"
-        OR NOT seen MATCHES "XDG_DATA_HOME=\\[${work}/build/webkitgtk-data\\]\n")
-    message(FATAL_ERROR "The real roots of the run did not reach the test, or the test kept them:\n${seen}")
-endif()
-if(seen MATCHES "configure")
-    message(FATAL_ERROR "A configure-time root reached the test:\n${seen}")
-endif()
+# Exact lines: a root of the configure step (/configure/...) or one lost to a replacement would differ, and a scratch
+# directory with spaces, brackets or the word "configure" in it is not mistaken for either.
+expect_seen("XDG_DATA_HOME=[${work}/build/webkitgtk-data]\nXDG_CACHE_HOME=[${work}/build/webkitgtk-cache]\nWEBFRONT_TEST_REAL_XDG_DATA_HOME=[/run/a;b]\nWEBFRONT_TEST_REAL_XDG_CACHE_HOME=[/run/cache]\n")
 
 # Unset at run time (but set when configuring): the real roots are absent, not the configure-time ones.
 run_ctest("" "")
