@@ -85,7 +85,7 @@ inline constexpr std::string_view reservedPrefix = "webfront.inspector.";
 /// to U+241F, U+2421 for DEL), then the text is cut to `limit` bytes on a character boundary, ending with "…" when cut.
 [[nodiscard]] inline std::string boundedText(std::string_view text, std::size_t limit = maxTextBytes) {
     std::string visible;
-    visible.reserve(std::min(text.size(), limit + 4));
+    visible.reserve((std::min)(text.size(), limit + 4));  // parenthesized: Windows headers may define min
     for (const char c : text) {
         const auto byte = static_cast<unsigned char>(c);
         if (byte < 0x20u || byte == 0x7Fu) {

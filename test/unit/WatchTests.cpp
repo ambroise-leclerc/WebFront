@@ -195,9 +195,9 @@ const Scenario watchPages{
             });
             then("a page holds no more than the budget, and the next one resumes after it", [&] {
                 // Each descriptor takes 2 + 9 + 4 + 10 + 12 + 1 bytes: 38, and the header 64.
-                const auto small = registry.page(revision, 0, 200, inspect::responseHeaderBytes + 80);
-                requireEqual(namesOf(small), std::vector<std::string>{"a", "b"});
-                const auto next = registry.page(revision, std::get<1>(small), 200, inspect::responseHeaderBytes + 80);
+                const auto narrow = registry.page(revision, 0, 200, inspect::responseHeaderBytes + 80);
+                requireEqual(namesOf(narrow), std::vector<std::string>{"a", "b"});
+                const auto next = registry.page(revision, std::get<1>(narrow), 200, inspect::responseHeaderBytes + 80);
                 requireEqual(namesOf(next), std::vector<std::string>{"c", "d"});
             });
             then("a count above 1 000 is read as 1 000, and numbers that are not whole are refused", [&] {
