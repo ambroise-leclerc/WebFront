@@ -859,11 +859,14 @@ try {
                 rightClick: (target, x, y) => target.dispatchEvent(new view.MouseEvent('contextmenu', {bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y})),
             };
         };
-        // The reason the inspector entries give, from what webfront.inspector.containers() answered to the page's bridge:
-        // an admitted page has no inspector to open yet (#680), another one is told how to be admitted (ADR-027, section 8).
-        const inspectorReason = async bridge => {
-            const [, host] = await bridge.cppFunction('webfront.inspector.containers')();
-            return host ? /cannot open the inspectors yet/ : /trustLoopbackClients/;
+        // Opens the submenu of `group` until its entries are available: the page is admitted and the menu read its access.
+        const availableEntries = async (layoutOf, group) => {
+            await until(() => {
+                layoutOf.menus().slice(1).forEach(() => layoutOf.press(layoutOf.entries(1)[0], {key: 'ArrowLeft'}));
+                layoutOf.press(layoutOf.entries(0)[group], {key: 'ArrowRight'});
+                return layoutOf.entries(1).length > 0 && layoutOf.entries(1).every(entry => entry.getAttribute('aria-disabled') !== 'true');
+            }, 'The inspector entries of an admitted page must be available');
+            return layoutOf.entries(1);
         };
         // Opens the submenu of `group` (1: C++ state, 2: TypeScript state) until the menu has read the page's access.
         const inspectorEntries = async (layoutOf, group, expected) => {
@@ -922,13 +925,66 @@ try {
             'A displayed interface must fill the window, with the icon');
         if (part === 'workspace') {
             // This page's own menu: the inspector entries follow what its connection is admitted to.
+            const [secondaryWindow, admitted] = await webFront.cppFunction('webfront.inspector.containers')();
             const tabBox = here.box('.webfront-terminal-toggle');
             here.rightClick(here.button(), tabBox.left + 10, tabBox.top + 10);
-            const entries = await inspectorEntries(here, 1, await inspectorReason(webFront));
-            assert(entries.length === 3 && entries.every(entry => entry.getAttribute('aria-disabled') === 'true'),
-                'Without an inspector to open, the entries of this page must be greyed');
-            here.press(entries[0], {key: 'Escape'});
-            assert(here.menus().length === 0 && document.activeElement === here.button(), 'Escape in a submenu must close the whole menu and give the focus back to the tab');
+            if (!admitted) {
+                const entries = await inspectorEntries(here, 1, /trustLoopbackClients/);
+                assert(entries.length === 3 && entries.every(entry => entry.getAttribute('aria-disabled') === 'true'),
+                    'The inspector entries of a page that is not admitted must be greyed');
+                here.press(entries[0], {key: 'Escape'});
+                assert(document.activeElement === here.button(), 'Escape in a submenu must give the focus back to the tab');
+            } else {
+                // The view of an embedded frontend is admitted: its Watches entry opens the inspector (#680, ADR-027 section 8).
+                const opened = [];
+                const open = window.open;
+                window.open = (...args) => { opened.push(args); return null; };
+                try {
+                    const entries = await availableEntries(here, 1);
+                    here.press(entries[2], {key: 'Enter'});
+                    const floating = () => document.querySelector('.webfront-inspector-window');
+                    await until(() => floating() && !floating().hidden, 'The Watches entry must open the inspector in a floating window');
+                    assert(here.menus().length === 0 && here.inside('.webfront-inspector-window'), 'The inspector window must stay inside the page, with the menu closed');
+                    const frame = floating().querySelector('iframe');
+                    const listed = () => [...(frame.contentDocument?.querySelectorAll('ul.watches li .name') ?? [])].map(item => item.textContent);
+                    await until(() => frame.contentDocument?.querySelector('ul.watches'), 'The floating inspector must show the watches');
+                    // The frame borrows this page's bridge: it opens no connection and loads no WebFront.js of its own.
+                    assert(!Object.hasOwn(frame.contentWindow, 'webFront') && !frame.contentDocument.querySelector('script[src="/WebFront.js"]'),
+                        'The inspector\'s frame must not open a connection of its own');
+                    // A watch registered while the inspector is open appears, and disappears once removed (ADR-027, section 3).
+                    await webFront.cppFunction('test.watch')('integration');
+                    await until(() => listed().includes('integration'), `A registered watch must appear in the inspector: ${listed()}`);
+                    await webFront.cppFunction('test.unwatch')('integration');
+                    await until(() => !listed().includes('integration'), `A removed watch must disappear from the inspector: ${listed()}`);
+                    const detach = floating().querySelector('.webfront-inspector-detach');
+                    if (secondaryWindow) {
+                        // A frontend that opens windows: Detach moves the panel to a native window with its own proven connection.
+                        const views = await webFront.cppFunction('test.views')();
+                        assert(detach.getAttribute('aria-disabled') === 'false', 'A frontend that opens windows must offer to detach the panel');
+                        detach.click();
+                        await until(() => floating().hidden, 'A detached panel must leave the floating window');
+                        await until(async () => await webFront.cppFunction('test.views')() === views + 1,
+                            'The detached inspector must be a secondary window, connected as a proven view');
+                        await window.webfrontInspectorHost.saved();
+                        const kept = JSON.parse(new TextDecoder().decode(await call('read', '.webfront/developer/inspector-window.json', 0)));
+                        assert(kept.detached.includes('cpp.watches'), `The project must remember the detached panel: ${JSON.stringify(kept)}`);
+                        assert(await webFront.cppFunction('webfront.inspector.closeWindow')('cpp.watches') === true, 'The panel\'s window must close');
+                        await until(async () => await webFront.cppFunction('test.views')() === views, 'The closed inspector window must disconnect');
+                        window.webfrontInspectorHost.attach('cpp.watches');
+                        await window.webfrontInspectorHost.saved();
+                    } else {
+                        // CEF, or a view without a secondary window: the floating window is the only container, and Detach says why.
+                        assert(detach.getAttribute('aria-disabled') === 'true' && /No detached window/.test(detach.title),
+                            `Without a detached container, Detach must be greyed with its reason: ${detach.title}`);
+                        detach.click();
+                        assert(!floating().hidden, 'A greyed Detach must leave the panel in the floating window');
+                    }
+                    assert(opened.length === 0, 'An embedded view must never open a tab of the inspectors');
+                    floating().querySelector('.webfront-inspector-close').click();
+                    assert(floating().hidden, 'The inspector window must close');
+                } finally { window.open = open; }
+            }
+            assert(here.menus().length === 0, 'The menu must be closed');
         }
 
         // Launching again: the bootstrap page of the same project, in a window of its own size.

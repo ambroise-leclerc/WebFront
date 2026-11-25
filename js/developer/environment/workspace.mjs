@@ -164,6 +164,48 @@ export function placeStore(bridge, delay = 300) {
     };
 }
 
+// --- Floating window --------------------------------------------------------------------------------------------
+
+/**
+ * Makes `panel` a window that its title `bar` moves: by dragging it (the pointer is captured, so that the interface under
+ * the window does not take the moves), or with the arrow keys on the focused bar, Shift resizing it; the corner handle of
+ * CSS `resize` resizes it with the pointer. A control of the bar (a button) does not start a move. `shown()` is the
+ * displayed rectangle, `choose(rect)` makes a new one the chosen place, `viewport()` gives the room, and `shownNow()`
+ * whether the window is displayed (a hidden one does not take the sizes its element reports). The terminal's window and
+ * the inspector's share it.
+ */
+export function windowControls({view, bar, panel, shown, choose, viewport, shownNow}) {
+    let grip = null;
+    bar.addEventListener('pointerdown', event => {
+        if (event.button !== 0 || event.target.closest?.('button')) return;
+        const rect = shown();
+        grip = {x: event.clientX - rect.x, y: event.clientY - rect.y};
+        try { bar.setPointerCapture(event.pointerId); }
+        catch { /* a pointer that is already gone: the move ends with it */ }
+        event.preventDefault();
+        bar.focus();
+    });
+    bar.addEventListener('pointermove', event => {
+        if (grip) choose({...shown(), x: event.clientX - grip.x, y: event.clientY - grip.y});
+    });
+    const release = () => { grip = null; };
+    bar.addEventListener('pointerup', release);
+    bar.addEventListener('pointercancel', release);
+    bar.addEventListener('keydown', event => {
+        if (event.target !== bar) return;
+        const rect = keyboardRect(shown(), event, viewport());
+        if (!rect) return;
+        event.preventDefault();
+        choose(rect);
+    });
+    // The corner handle (CSS resize) writes the size on the element: it becomes the chosen one.
+    new view.ResizeObserver(() => {
+        if (!shownNow()) return;
+        const rect = shown(), width = panel.offsetWidth, height = panel.offsetHeight;
+        if (width && height && (width !== rect.width || height !== rect.height)) choose({...rect, width, height});
+    }).observe(panel);
+}
+
 // --- Page ------------------------------------------------------------------------------------------------------
 
 // The WebFront swallow, shipped in the environment, in the colours of the tab.
@@ -383,36 +425,7 @@ export async function createWorkspace({bridge, element, frame, openInspector = n
     // is installed ahead of the application's. A frame that the application embeds gets it once it is seen here.
     frame.addEventListener('webfront-preview-window', () => watchWindow(frame.contentWindow));
 
-    // Moving: the pointer is captured, so that the interface under the window does not take the moves.
-    let grip = null;
-    bar.addEventListener('pointerdown', event => {
-        if (event.button !== 0 || event.target === closeButton) return;
-        const rect = shown();
-        grip = {x: event.clientX - rect.x, y: event.clientY - rect.y};
-        try { bar.setPointerCapture(event.pointerId); }
-        catch { /* a pointer that is already gone: the move ends with it */ }
-        event.preventDefault();
-        bar.focus();
-    });
-    bar.addEventListener('pointermove', event => {
-        if (grip) choose({...shown(), x: event.clientX - grip.x, y: event.clientY - grip.y});
-    });
-    const release = () => { grip = null; };
-    bar.addEventListener('pointerup', release);
-    bar.addEventListener('pointercancel', release);
-    bar.addEventListener('keydown', event => {
-        if (event.target !== bar) return;
-        const rect = keyboardRect(shown(), event, viewport());
-        if (!rect) return;
-        event.preventDefault();
-        choose(rect);
-    });
-    // The corner handle (CSS resize) writes the size on the element: it becomes the chosen one.
-    new view.ResizeObserver(() => {
-        if (state !== State.floating) return;
-        const rect = shown(), width = panel.offsetWidth, height = panel.offsetHeight;
-        if (width && height && (width !== rect.width || height !== rect.height)) choose({...rect, width, height});
-    }).observe(panel);
+    windowControls({view, bar, panel, shown, choose, viewport, shownNow: () => state === State.floating});
     view.addEventListener('resize', render);
 
     render();

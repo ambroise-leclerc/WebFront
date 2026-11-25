@@ -18,6 +18,19 @@ export const inspectorMenus = [
     ]},
 ];
 
+/** The inspector panels by id, each with the label of its group. */
+export const inspectorPanels = new Map(inspectorMenus.flatMap(group => group.children.map(panel => [panel.id, {...panel, group: group.label}])));
+
+/** The title of a panel's window: its group and its name ("C++ state: Watches"). */
+export const panelTitle = id => inspectorPanels.has(id) ? `${inspectorPanels.get(id).group}: ${inspectorPanels.get(id).label}` : 'Inspector';
+
+/**
+ * The channel between the page that holds the tab and its detached inspectors, other windows of the same origin
+ * (inspector-host.mjs): a detached inspector asks to be attached again ({type: 'attach', panel, id}), and the page that
+ * takes it answers ({type: 'attached', id}) before the inspector closes its window.
+ */
+export const inspectorChannel = 'webfront-inspector';
+
 // --- Access to the inspectors ----------------------------------------------------------------------------------
 
 /** The reserved function that says which containers would reach the inspectors; the only one that checks no access. */
@@ -29,7 +42,7 @@ export const accessReasons = {
     noContainer: 'The inspectors answer only a view of the application, and this page is not one: use an embedded frontend '
         + '(WebKitGTK, WKWebView, WebView2 or CEF), or set WebFrontConfig::trustLoopbackClients, knowing that any local '
         + 'process can then read the state of the application.',
-    noInspector: 'This version of the developer environment cannot open the inspectors yet.',
+    noInspector: 'This page cannot open the inspectors.',
 };
 
 /**

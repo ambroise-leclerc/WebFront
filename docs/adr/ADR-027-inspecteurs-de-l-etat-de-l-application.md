@@ -4,6 +4,7 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
+| 1.1 | 2026-11-25 | Proposée | Ambroise Leclerc | Hôte détachable (#680) : `webfront.inspector.embedded()` dit à la page hôte si elle est la vue d'un frontend intégré, ce qui décide de l'onglet du navigateur système ; `webfront.inspector.closeWindow(panneau)` ferme la fenêtre d'un panneau rattaché ; une fenêtre par panneau ; choix et place conservés dans `inspector-window.json`. | À renseigner après intégration. |
 | 1.0 | 2026-11-25 | Proposée | Ambroise Leclerc | Décision initiale (#678, épique #677) : inspecteurs réservés à l'environnement développeur, accès réservé aux vues prouvées sauf autorisation explicite, nœuds d'arbre sur les types existants du pont, lecture et différences paginées, opérations entières sous le verrou ou sur l'exécuteur de l'application, modification à la demande de l'application, page unique `inspector.html` dans un conteneur choisi sur l'accès effectif. | À renseigner après intégration. |
 
 ## État et portée
@@ -669,6 +670,15 @@ La page se charge dans le premier conteneur qui convient :
    il emprunte le pont de la page hôte (`window.parent.webFront`), dont l'accès vient d'être constaté.
 4. **Aucun** sinon (navigateur système sans `trustLoopbackClients`) : les entrées du menu sont désactivées et disent
    pourquoi (section 2).
+
+La page hôte ne sait pas d'elle-même si elle tourne dans le navigateur système : `containers()` décrit l'accès, pas la
+vue. Elle le demande à `webfront.inspector.embedded()`, qui vérifie l'accès comme les autres fonctions et rend
+`UI::isEmbeddedView()` de l'appelant ; un échec compte comme une vue intégrée, ce qui n'essaie jamais d'onglet. Chaque
+panneau détaché a sa propre fenêtre, nommée par la page `inspector.html?panel=<id>` : `openWindow(panneau, largeur,
+hauteur)` n'accepte que les panneaux du menu, et `webfront.inspector.closeWindow(panneau)` ferme celle d'un panneau
+rattaché de nouveau. Les deux s'exécutent sur le thread de l'interface, où `openSecondaryWindow` et
+`requestClose(page)` ne retiennent pas le thread du serveur. Une fenêtre détachée demande son rattachement à la page
+hôte par un `BroadcastChannel` de même origine, et ne se ferme qu'après sa réponse.
 
 La même règle désactive « Détacher » quand aucun conteneur détaché ne donnerait l'accès.
 

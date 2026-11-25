@@ -25,6 +25,7 @@
 #include "Task.hpp"
 #include "UISubscribers.hpp"
 #include "ViewAssociation.hpp"
+#include "Watches.hpp"
 #include "weblink/DomBatch.hpp"
 #include "weblink/Messages.hpp"
 #include "weblink/WebLink.hpp"
@@ -40,6 +41,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <source_location>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -1112,9 +1114,81 @@ public:
      * @param functionName
      * @param function
      * @return false when a function of that name was already registered, which stays registered
+     * @throws std::invalid_argument for a name starting with `webfront.inspector.`, reserved to WebFront (ADR-027)
      */
     template <typename R, typename... Args>
     bool cppFunction(std::string functionName, auto&& function) {
+        refuseReservedName(functionName);
+        return registerCppFunction<R, Args...>(std::move(functionName), std::forward<decltype(function)>(function));
+    }
+
+    /**
+     * @brief Registers a function which will be callable from Javascript, deducing its return type
+     * and parameter types from the callable itself.
+     *
+     * Supports ordinary and mutable lambdas, function pointers, and std::function. Generic lambdas,
+     * functors with an overloaded operator(), and other callables that don't have a single concrete
+     * operator() cannot be deduced this way; use the explicit cppFunction<ReturnType, ArgTypes...>
+     * overload for those.
+     *
+     * @param functionName
+     * @param function
+     * @return false when a function of that name was already registered, which stays registered
+     * @throws std::invalid_argument for a name starting with `webfront.inspector.`, reserved to WebFront (ADR-027)
+     */
+    template <typename Function>
+    bool cppFunction(std::string functionName, Function&& function) {
+        using Callable = std::remove_cvref_t<Function>;
+        static_assert(detail::has_callable_traits<Callable>,
+                      "webfront::BasicWF::cppFunction: could not deduce this callable's signature. Generic "
+                      "lambdas, overloaded operator(), and other advanced callables require explicit "
+                      "cppFunction<ReturnType, ArgTypes...>(name, callable).");
+        using Traits = detail::callable_traits<Callable>;
+        using Args   = typename detail::caller_aware_args<UI, typename Traits::RawArgs, typename Traits::DecayedArgs>::type;
+        return detail::ApplyArgs<typename Traits::Return, Args>::invoke(*this, std::move(functionName), std::forward<Function>(function));
+    }
+
+    /**
+     * @brief Declares a watch: an object or a container of the application that the inspectors of the developer environment
+     * show (ADR-027, section 5). The watch exists while the returned handle lives.
+     *
+     * `source` reaches the object. A visitor, `[&](webfront::inspect::Visit<const T> visit) { std::scoped_lock lock{m}; visit(object); }`,
+     * is called by WebFront and calls the visit once with the object under its own lock: it is the form of an object shared
+     * between threads, and `Visit<T>` makes the watch writable. An accessor, `[&] -> const T& { return object; }`, returns a
+     * reference, read on the server thread only (correct only for an object that thread alone touches), or a copy.
+     *
+     * Outside the developer environment (`bootstrap("developer")`), and in a distribution build, nothing is registered and
+     * the handle is empty: declare the watches after bootstrap(). Inside, a watch costs an entry in a table until an
+     * inspector reads it. Callable from any thread.
+     *
+     * @throws std::invalid_argument for an empty name, a name longer than 256 bytes, or the name of a live watch
+     */
+    template <inspect::WatchSource Source>
+    [[nodiscard]] inspect::Watch watch(std::string name, Source&& source, std::source_location location = std::source_location::current()) {
+        using Stored = std::decay_t<Source>;  // a function given by name is kept as a pointer
+        using Shape  = inspect::SourceShape<Stored>;
+        inspect::WatchRegistry::checkName(name);
+        const auto registry = inspectorRegistry();
+        if (!registry)
+            return {};
+        auto       owned = std::make_shared<Stored>(std::forward<Source>(source));
+        const auto id    = registry->add(std::move(name),
+                                         inspect::kindOf<typename Shape::Object>(),
+                                         inspect::locationText(location),
+                                         Shape::writable,
+                                         std::static_pointer_cast<void>(std::move(owned)));
+        return inspect::Watch{registry, id};
+    }
+
+private:
+    /// The names of the inspectors belong to WebFront: an application can neither hide one nor pose as one (ADR-027, section 1).
+    static void refuseReservedName(std::string_view functionName) {
+        if (inspect::isReservedName(functionName))
+            throw std::invalid_argument("webfront::BasicWF::cppFunction(): names starting with 'webfront.inspector.' are reserved to WebFront");
+    }
+
+    template <typename R, typename... Args>
+    bool registerCppFunction(std::string functionName, auto&& function) {
         if constexpr (detail::deferred_result<R>)
             return registerDeferred<R, Args...>(std::move(functionName), std::forward<decltype(function)>(function));
         else if constexpr (detail::takes_caller<UI, Args...>::value)
@@ -1131,31 +1205,7 @@ public:
         }
     }
 
-    /**
-     * @brief Registers a function which will be callable from Javascript, deducing its return type
-     * and parameter types from the callable itself.
-     *
-     * Supports ordinary and mutable lambdas, function pointers, and std::function. Generic lambdas,
-     * functors with an overloaded operator(), and other callables that don't have a single concrete
-     * operator() cannot be deduced this way; use the explicit cppFunction<ReturnType, ArgTypes...>
-     * overload for those.
-     *
-     * @param functionName
-     * @param function
-     * @return false when a function of that name was already registered, which stays registered
-     */
-    template <typename Function>
-    bool cppFunction(std::string functionName, Function&& function) {
-        using Callable = std::remove_cvref_t<Function>;
-        static_assert(detail::has_callable_traits<Callable>,
-                      "webfront::BasicWF::cppFunction: could not deduce this callable's signature. Generic "
-                      "lambdas, overloaded operator(), and other advanced callables require explicit "
-                      "cppFunction<ReturnType, ArgTypes...>(name, callable).");
-        using Traits = detail::callable_traits<Callable>;
-        using Args   = typename detail::caller_aware_args<UI, typename Traits::RawArgs, typename Traits::DecayedArgs>::type;
-        return detail::ApplyArgs<typename Traits::Return, Args>::invoke(*this, std::move(functionName), std::forward<Function>(function));
-    }
-
+public:
     enum class WindowAction { none, closeWindow };
 #ifdef _MSC_VER
     // A Frontend::open() that unconditionally throws (e.g. CEFFrontend::open() when CEF support
@@ -1488,6 +1538,27 @@ protected:
             windowOptions.background = "#141821";
     }
 
+    /// Registers one of WebFront's own reserved functions (`webfront.inspector.*`), which cppFunction refuses to the application.
+    template <typename R, typename... Args>
+    bool reservedCppFunction(std::string functionName, auto&& function) {
+        return registerCppFunction<R, Args...>(std::move(functionName), std::forward<decltype(function)>(function));
+    }
+
+    /// For the developer environment: from now on, watch() registers in the table that the inspectors read (ADR-027).
+    /// Returns that table. A distribution build never calls it.
+    std::shared_ptr<inspect::WatchRegistry> enableInspectors() {
+        std::scoped_lock lock{watchRegistryMutex};
+        if (!watchRegistry)
+            watchRegistry = std::make_shared<inspect::WatchRegistry>();
+        return watchRegistry;
+    }
+
+    /// The table of the watches, null until enableInspectors().
+    [[nodiscard]] std::shared_ptr<inspect::WatchRegistry> inspectorRegistry() const {
+        std::scoped_lock lock{watchRegistryMutex};
+        return watchRegistry;
+    }
+
     /// Whether the application chose WebFrontConfig::trustLoopbackClients: a new connection that is not proven would then
     /// be a local client when its peer is the loopback (the inspectors' containers, ADR-027 section 8).
     [[nodiscard]] bool trustsLoopbackClients() const noexcept {
@@ -1696,24 +1767,26 @@ private:
     }
 
     // Before the server: the routes' handlers use it, and the server drains them before it is destroyed.
-    std::shared_ptr<ReadBinding>          readBinding;
-    http::Server<Net, Filesystem, Policy> httpServer;
-    http::RouteTable::Registration        bindRoute;
-    std::string                           httpAddress;
-    std::string                           httpPort;
-    std::filesystem::path                 httpDocRoot;
-    ContentPolicy                         contentPolicy;
-    WindowOptions                         windowOptions;
-    const std::string                     viewSecret = detail::newViewSecret();  // this launch's proof of an embedded view
-    const bool                            trustLoopbackClients;
-    const bool                            ptyPagesAllowed;
-    bool                                  developerEnvironment = false;
-    std::atomic<bool>                     launched{false};     // start() was called
-    std::atomic<std::thread::id>          showThread{};        // the thread inside this application's Frontend::open(), if any
-    std::atomic<std::uint64_t>            showEpoch{0};        // odd while show() runs its frontend, changes at each entry and exit
-    std::atomic<bool>                     showRunning{false};  // a show() of this application is in progress
-    std::atomic<bool>                     shown{false};        // show() was called, whether or not its server still runs
-    mutable std::mutex                    linksMutex;          // guards webLinks, read from any thread
+    std::shared_ptr<ReadBinding>            readBinding;
+    http::Server<Net, Filesystem, Policy>   httpServer;
+    http::RouteTable::Registration          bindRoute;
+    std::string                             httpAddress;
+    std::string                             httpPort;
+    std::filesystem::path                   httpDocRoot;
+    ContentPolicy                           contentPolicy;
+    WindowOptions                           windowOptions;
+    const std::string                       viewSecret = detail::newViewSecret();  // this launch's proof of an embedded view
+    const bool                              trustLoopbackClients;
+    const bool                              ptyPagesAllowed;
+    bool                                    developerEnvironment = false;
+    mutable std::mutex                      watchRegistryMutex;
+    std::shared_ptr<inspect::WatchRegistry> watchRegistry;       // set once by enableInspectors(), read by watch() from any thread
+    std::atomic<bool>                       launched{false};     // start() was called
+    std::atomic<std::thread::id>            showThread{};        // the thread inside this application's Frontend::open(), if any
+    std::atomic<std::uint64_t>              showEpoch{0};        // odd while show() runs its frontend, changes at each entry and exit
+    std::atomic<bool>                       showRunning{false};  // a show() of this application is in progress
+    std::atomic<bool>                       shown{false};        // show() was called, whether or not its server still runs
+    mutable std::mutex                      linksMutex;          // guards webLinks, read from any thread
     struct Connection {
         std::shared_ptr<WebLink<Net, Policy>> link;
         WebLinkGeneration                     generation;

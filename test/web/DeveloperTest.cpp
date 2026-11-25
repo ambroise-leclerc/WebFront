@@ -291,7 +291,25 @@ public:
         app.cppFunction("test.browsers", [this] {
             return static_cast<double>(app.connectedBrowsers());
         });
+        // The connections that proved they are a view of the application: the window of show() and its secondary windows.
+        app.cppFunction("test.views", [this] {
+            double views = 0;
+            app.forEachUI([&views](App::UI ui) {
+                if (ui.isEmbeddedView())
+                    ++views;
+            });
+            return views;
+        });
         bootstrapApp(app, mode, readIntegrity(project.path() / "fixtures/provision.json"));
+        // A watch that the page declares and removes while an inspector shows the watches (#680): it appears, then disappears.
+        app.cppFunction("test.watch", [this](std::string name) {
+            watches.insert_or_assign(name, app.watch(name, [this]() -> const std::string& {
+                return mode.part;
+            }));
+        });
+        app.cppFunction("test.unwatch", [this](std::string name) {
+            watches.erase(name);
+        });
         subscription = app.subscribeUIStarted([injected = false](App::UI ui) mutable {
             if (!std::exchange(injected, true))
                 ui.addScript(runScript);
@@ -299,6 +317,7 @@ public:
     }
 
     ~Part() {
+        watches.clear();
         states->releaseAll();
         app.stop();
         // Drain while the commands, callback state and project are still alive.
@@ -351,12 +370,13 @@ private:
         return config;
     }
 
-    std::atomic<bool>              passed{false};
-    bool                           reported = false;
-    std::mutex                     reportMutex;
-    std::shared_ptr<CommandStates> states;
-    webfront::Commands<App>        commands;
-    webfront::UISubscription       subscription;
+    std::atomic<bool>                               passed{false};
+    bool                                            reported = false;
+    std::mutex                                      reportMutex;
+    std::shared_ptr<CommandStates>                  states;
+    webfront::Commands<App>                         commands;
+    webfront::UISubscription                        subscription;
+    std::map<std::string, webfront::inspect::Watch> watches;  // used on the server thread only
 };
 }  // namespace
 

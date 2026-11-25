@@ -18,6 +18,7 @@ import {generateProvider, applicationPage} from './embed.mjs';
 import {typescriptPackage, parseCheckOptions, checkHost} from './typecheck.mjs';
 import {pinnedStarters} from './bootstrap.mjs';
 import {createWorkspace, isManaged, layoutState, State} from './workspace.mjs';
+import {createInspectorHost} from './inspector-host.mjs';
 import {connectAutomation as connectAgent, clipText, automationHelp, onAutomationNotice} from './automation.mjs';
 import {ls, cat, tree, mounts, fileCommandHelp, withheld, withheldReason} from './files.mjs';
 import {dependencyTree, why as whyInstalled, info as packageInfo} from './dependencies.mjs';
@@ -665,7 +666,14 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
     terminal.unicode.activeVersion = unicodeProvider.version;
     const fit = new FitAddon();
     terminal.loadAddon(fit);
-    const workspace = layout && preview && !isManaged(preview) ? await createWorkspace({bridge, element, frame: preview}) : null;
+    // The inspectors (#680) open from the tab's menu, in the container that reaches C++: their host is made at the first use.
+    let inspectors = null;
+    const openInspector = panel => {
+        inspectors ??= createInspectorHost({bridge, page: element.ownerDocument, access: workspace.inspectorAccess,
+            inspectorUrl: new URL('./inspector.html', import.meta.url).href});
+        return inspectors.then(host => host.open(panel));
+    };
+    const workspace = layout && preview && !isManaged(preview) ? await createWorkspace({bridge, element, frame: preview, openInspector}) : null;
     terminal.open(element);
     fit.fit();
     const write = text => terminal.write(text);
@@ -744,5 +752,5 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
         if (workspace.interfaceExists) showPreview(preview);
         workspace.attach({focus: () => terminal.focus(), fit: fitToElement ? fitTerminal : undefined});
     } else terminal.focus();
-    return {terminal, editor, workspace};
+    return {terminal, editor, workspace, inspectors: () => inspectors};
 }

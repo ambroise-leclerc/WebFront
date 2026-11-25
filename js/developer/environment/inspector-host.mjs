@@ -1,0 +1,328 @@
+// The host of the inspectors (#680, ADR-027 section 8): opens the page inspector.html of the environment in the container that
+// gives it access to C++. One page serves every container: a native secondary window (its own proven connection), a tab of
+// the system browser (its own connection, admitted only by trustLoopbackClients), or a floating window of this page whose
+// frame opens no connection and borrows this page's bridge. Each panel can be detached and attached again; the choice and
+// the floating window's place are kept in the project, as the terminal's place is.
+import {readProject, publish} from './io.mjs';
+import {clampRect, step, minimumSize, windowControls} from './workspace.mjs';
+import {inspectorPanels as panels, panelTitle, inspectorChannel} from './menu.mjs';
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+export {panels, panelTitle};
+
+// --- Containers ------------------------------------------------------------------------------------------------
+
+/**
+ * Where a detached panel can go, from what webfront.inspector.containers() allowed (`containers`, null when nothing reaches
+ * the inspectors) and whether this page is the view of an embedded frontend (`embedded`): a native secondary window when the
+ * frontend opens one for this admitted page; else a tab of the system browser when new loopback connections are admitted
+ * and this page is not an embedded view, where window.open() would open a frame without the proof; else null (ADR-027,
+ * section 8).
+ */
+export function detachedContainer(containers, {embedded = true} = {}) {
+    if (!containers?.host) return null;
+    if (containers.secondaryWindow) return 'window';
+    if (containers.newConnections && !embedded) return 'tab';
+    return null;
+}
+
+export const hostReasons = {
+    noDetached: 'No detached window can reach the inspectors from this page: this frontend opens no secondary window, '
+        + 'and a tab of the system browser would be refused (it needs the system browser and WebFrontConfig::trustLoopbackClients).',
+    blocked: 'The browser blocked the inspector\'s tab: allow pop-ups for this page, then try again.',
+    windowFailed: 'The inspector\'s window could not open',
+};
+
+/**
+ * The container a panel opens in: its detached container when the project remembers it detached and one is available, else
+ * the floating window of this page. Null when nothing reaches the inspectors.
+ */
+export function containerFor(panel, {containers, embedded, detached}) {
+    if (!containers?.host) return null;
+    const away = detachedContainer(containers, {embedded});
+    return detached.has(panel) && away ? away : 'floating';
+}
+
+// --- Remembered choices ----------------------------------------------------------------------------------------
+
+/** The panels kept detached and the floating window's place, kept in the project like the terminal's place. */
+export const preferencesPath = '.webfront/developer/inspector-window.json';
+
+/** The choices of a file's text: {detached: Set of panel ids, rect or null}; empty ones when it is not one. */
+export function parsePreferences(text) {
+    const empty = {detached: new Set(), rect: null};
+    try {
+        const {format, detached = [], rect = null} = JSON.parse(text);
+        if (format !== 1 || !Array.isArray(detached)) return empty;
+        const valid = rect && ['x', 'y', 'width', 'height'].every(key => Number.isFinite(rect[key]) && Math.abs(rect[key]) < 1e6)
+            && rect.width > 0 && rect.height > 0;
+        return {detached: new Set(detached.filter(id => panels.has(id))),
+            rect: valid ? {x: rect.x, y: rect.y, width: rect.width, height: rect.height} : null};
+    } catch { return empty; }
+}
+
+export const formatPreferences = ({detached, rect}) =>
+    JSON.stringify({format: 1, detached: [...detached].sort(), rect: rect ?? null}) + '\n';
+
+export async function readPreferences(bridge) {
+    try { return parsePreferences(decoder.decode(await readProject(bridge, preferencesPath))); }
+    catch { return parsePreferences(''); }
+}
+
+/** Writes the choices shortly after they stop changing; a failed write keeps the inspector usable. */
+export function preferencesStore(bridge, delay = 300) {
+    let timer = null, pending = null, writes = Promise.resolve(), written = null;
+    const flush = () => {
+        clearTimeout(timer);
+        timer = null;
+        if (!pending) return writes;
+        const text = formatPreferences(pending);
+        pending = null;
+        writes = writes.then(async () => {
+            if (text === written) return;
+            await publish(bridge, preferencesPath, new Map([['output', encoder.encode(text)]]), {directory: false});
+            written = text;
+        }).catch(() => {});
+        return writes;
+    };
+    return {
+        remember(preferences) {
+            pending = {detached: new Set(preferences.detached), rect: preferences.rect};
+            clearTimeout(timer);
+            timer = setTimeout(flush, delay);
+        },
+        saved: () => flush(),
+    };
+}
+
+/** Where the floating window opens without a remembered place: on the left of the terminal's default place. */
+export function defaultInspectorRect(viewport) {
+    const width = Math.min(560, viewport.width - 2 * step), height = Math.min(480, viewport.height - 2 * step);
+    return clampRect({x: step, y: step, width, height}, viewport);
+}
+
+const styles = `
+.webfront-inspector-window{position:fixed;z-index:2147483645;display:flex;flex-direction:column;box-sizing:border-box;background:#141821;border:1px solid #46536a;border-radius:8px;box-shadow:0 8px 32px #000a;resize:both;overflow:hidden;max-width:100vw;max-height:100vh;min-width:min(${minimumSize.width}px,100vw);min-height:min(${minimumSize.height}px,100vh)}
+.webfront-inspector-window[hidden]{display:none}
+.webfront-inspector-bar{display:flex;flex:none;align-items:center;gap:4px;padding:0 4px 0 12px;background:#202737;color:#e8edf4;font:13px system-ui;cursor:move;user-select:none;touch-action:none}
+.webfront-inspector-bar>span{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.webfront-inspector-bar:focus-visible,.webfront-inspector-bar button:focus-visible{outline:2px solid #d7fa85;outline-offset:-2px}
+.webfront-inspector-bar button{margin:0;min-width:32px;height:32px;padding:0 8px;border:0;border-radius:4px;background:none;color:inherit;font:13px system-ui;cursor:pointer}
+.webfront-inspector-bar button:hover:not([aria-disabled=true]){background:#2f3a50}
+.webfront-inspector-bar button[aria-disabled=true]{color:#8d97aa;cursor:default}
+.webfront-inspector-close{font-size:20px!important;line-height:1}
+.webfront-inspector-notice{display:flex;gap:8px;align-items:center;padding:6px 12px;background:#3a2f12;color:#f4e3b5;font:12px system-ui}
+.webfront-inspector-notice[hidden]{display:none}
+.webfront-inspector-notice button{margin:0 0 0 auto;padding:4px 8px;border:1px solid #f4e3b5;border-radius:4px;background:none;color:inherit;font:inherit;cursor:pointer}
+.webfront-inspector-frame{flex:1 1 auto;min-height:0;width:100%;border:0;background:#141821}`;
+
+/**
+ * The inspectors' host for the page that holds the tab. `inspectorUrl` is the URL of inspector.html, `access` resolves to what
+ * the menu read (menu.mjs, inspectorAccess), and `embedded` to whether this page is an embedded view (by default asked to
+ * webfront.inspector.embedded(); an error counts as embedded, which never offers a tab). `open(panel)` shows a panel in its
+ * container, `detach(panel)` and `attach(panel)` move it, and `reason(panel)` says why it cannot be detached ('' when it
+ * can). `windowOpen` replaces window.open (tests).
+ */
+export async function createInspectorHost({bridge, page, inspectorUrl, access, embedded = null, windowOpen = null}) {
+    const view = page.defaultView, root = page.documentElement;
+    const viewport = () => ({width: root.clientWidth, height: root.clientHeight});
+    const [preferences, containers, isEmbedded] = await Promise.all([
+        readPreferences(bridge),
+        Promise.resolve(access).then(result => result?.containers ?? null),
+        Promise.resolve(embedded ?? bridge.cppFunction('webfront.inspector.embedded')()).then(Boolean, () => true),
+    ]);
+    const store = preferencesStore(bridge);
+    const remember = () => store.remember(preferences);
+    const openTab = windowOpen ?? ((url, name) => view.open(url, name));
+    const urlOf = (panel, extra = {}) => {
+        const url = new URL(inspectorUrl, view.location.href);
+        url.searchParams.set('panel', panel);
+        for (const [key, value] of Object.entries(extra)) url.searchParams.set(key, value);
+        return url.href;
+    };
+
+    // The floating window: one per page, showing one panel at a time.
+    const style = page.createElement('style');
+    style.textContent = styles;
+    page.head.append(style);
+    const panel = page.createElement('section');
+    panel.className = 'webfront-inspector-window';
+    panel.hidden = true;
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'false');
+    const bar = page.createElement('div');
+    bar.className = 'webfront-inspector-bar';
+    bar.tabIndex = 0;
+    bar.setAttribute('role', 'group');
+    bar.setAttribute('aria-label', 'Inspector window: drag it, or use the arrow keys to move it and Shift with the arrow keys to resize it');
+    const title = page.createElement('span');
+    const detachButton = page.createElement('button');
+    detachButton.type = 'button';
+    detachButton.className = 'webfront-inspector-detach';
+    detachButton.textContent = 'Detach';
+    const closeButton = page.createElement('button');
+    closeButton.type = 'button';
+    closeButton.className = 'webfront-inspector-close';
+    closeButton.setAttribute('aria-label', 'Close the inspector');
+    closeButton.title = 'Close the inspector';
+    closeButton.textContent = '×';
+    bar.append(title, detachButton, closeButton);
+    const notice = page.createElement('div');
+    notice.className = 'webfront-inspector-notice';
+    notice.setAttribute('role', 'status');
+    notice.hidden = true;
+    const noticeText = page.createElement('span');
+    const retry = page.createElement('button');
+    retry.type = 'button';
+    retry.textContent = 'Try again';
+    notice.append(noticeText, retry);
+    // A frame is made for each panel shown, its address set before it enters the page: navigating a frame that is already
+    // in the page adds an entry to the window's history, and a window with a history may no longer close itself.
+    let frame = page.createElement('iframe');
+    frame.className = 'webfront-inspector-frame';
+    frame.title = 'Inspector';
+    panel.append(bar, notice, frame);
+    page.body.append(panel);
+
+    let shownPanel = null, retryPanel = null;
+    const shown = () => clampRect(preferences.rect ?? defaultInspectorRect(viewport()), viewport());
+    function render() {
+        if (panel.hidden) return;
+        const rect = shown();
+        Object.assign(panel.style, {left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px`});
+    }
+    function choose(rect) {
+        preferences.rect = clampRect(rect, viewport());
+        remember();
+        render();
+    }
+    windowControls({view, bar, panel, shown, choose, viewport, shownNow: () => !panel.hidden});
+    view.addEventListener('resize', render);
+
+    const reason = () => detachedContainer(containers, {embedded: isEmbedded}) ? '' : hostReasons.noDetached;
+    function say(text, again = null) {
+        noticeText.textContent = text;
+        retryPanel = again;
+        retry.hidden = !again;
+        notice.hidden = !text;
+    }
+    function showFloating(id, message = '') {
+        shownPanel = id;
+        title.textContent = panelTitle(id);
+        panel.setAttribute('aria-label', `WebFront inspector: ${panelTitle(id)}`);
+        const why = reason();
+        detachButton.setAttribute('aria-disabled', String(Boolean(why)));
+        detachButton.title = why || 'Open this panel in a window of its own';
+        // The frame opens no connection of its own: the page reads ?frame and borrows this page's bridge.
+        const url = urlOf(id, {frame: '1'});
+        if (frame.getAttribute('src') !== url) {
+            const next = page.createElement('iframe');
+            next.className = 'webfront-inspector-frame';
+            next.title = `Inspector: ${panelTitle(id)}`;
+            next.setAttribute('src', url);
+            frame.replaceWith(next);
+            frame = next;
+        }
+        say(message, message && retryPanel);
+        panel.hidden = false;
+        render();
+    }
+    function hideFloating() {
+        panel.hidden = true;
+        shownPanel = null;
+        const empty = page.createElement('iframe');  // unloads the panel without navigating
+        empty.className = 'webfront-inspector-frame';
+        empty.title = 'Inspector';
+        frame.replaceWith(empty);
+        frame = empty;
+    }
+
+    /** Opens `id` in its detached container; resolves with whether it did. A failure leaves it in the floating window. */
+    async function openDetached(id, container) {
+        if (container === 'window') {
+            const rect = shown();
+            try {
+                await bridge.cppFunction('webfront.inspector.openWindow')(id, rect.width, rect.height);
+                return true;
+            } catch (error) {
+                retryPanel = id;
+                showFloating(id, `${hostReasons.windowFailed}: ${error?.message ?? error}`);
+                return false;
+            }
+        }
+        const tab = openTab(urlOf(id), `webfront-inspector-${id.replace('.', '-')}`);
+        if (tab) return true;
+        retryPanel = id;
+        showFloating(id, hostReasons.blocked);
+        return false;
+    }
+
+    const host = {
+        get containers() { return containers; },
+        get embedded() { return isEmbedded; },
+        get shownPanel() { return shownPanel; },
+        get frame() { return frame; },
+        panel, bar, detachButton, closeButton, notice,
+        reason,
+        /** Shows `id` where the project keeps it: its detached container, or this page's floating window. */
+        async open(id) {
+            if (!panels.has(id)) throw new Error(`Unknown inspector panel ${id}`);
+            const container = containerFor(id, {containers, embedded: isEmbedded, detached: preferences.detached});
+            if (!container) return null;
+            if (container === 'floating') {
+                retryPanel = null;
+                showFloating(id);
+                return 'floating';
+            }
+            if (await openDetached(id, container)) {
+                if (shownPanel === id) hideFloating();
+                return container;
+            }
+            return 'floating';
+        },
+        /** Moves `id` to its detached container, and remembers it there. */
+        async detach(id) {
+            const container = detachedContainer(containers, {embedded: isEmbedded});
+            if (!container) return null;
+            preferences.detached.add(id);
+            remember();
+            if (await openDetached(id, container)) {
+                if (shownPanel === id) hideFloating();
+                return container;
+            }
+            return 'floating';
+        },
+        /** Moves `id` back to this page's floating window, and remembers it there. */
+        attach(id) {
+            preferences.detached.delete(id);
+            remember();
+            retryPanel = null;
+            showFloating(id);
+        },
+        close: hideFloating,
+        saved: () => store.saved(),
+        get preferences() { return {detached: new Set(preferences.detached), rect: preferences.rect}; },
+    };
+
+    detachButton.addEventListener('click', () => {
+        if (shownPanel && !reason()) host.detach(shownPanel);
+    });
+    closeButton.addEventListener('click', hideFloating);
+    retry.addEventListener('click', () => { if (retryPanel) host.detach(retryPanel); });
+
+    // A detached inspector asks to come back: the first host that takes it answers, so that the inspector closes its window.
+    if (typeof view.BroadcastChannel === 'function') {
+        const channel = new view.BroadcastChannel(inspectorChannel);
+        channel.addEventListener('message', ({data}) => {
+            if (data?.type !== 'attach' || !panels.has(data.panel) || !containers?.host) return;
+            host.attach(data.panel);
+            channel.postMessage({type: 'attached', id: data.id});
+        });
+        host.channel = channel;
+    }
+    // The frame of the floating window reaches its host here: the same origin, and no connection of its own.
+    view.webfrontInspectorHost = host;
+    return host;
+}

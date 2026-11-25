@@ -33,7 +33,19 @@ const Scenario inspectorsAbsent{"A distribution build registers no inspector fun
                                         app.bootstrap("developer", {.environment = "https://example.test/env.tgz", .integrity = "sha512-abc"});
                                         then("the environment's callbacks exist, and no webfront.inspector.* function", [&] {
                                             require(app.hasCppFunction("webfront.developer.config"));
-                                            require(!app.hasCppFunction("webfront.inspector.containers"));
+                                            for (const auto* name : {"webfront.inspector.containers",
+                                                                     "webfront.inspector.embedded",
+                                                                     "webfront.inspector.watches",
+                                                                     "webfront.inspector.openWindow",
+                                                                     "webfront.inspector.closeWindow"})
+                                                require(!app.hasCppFunction(name));
+                                        });
+                                        then("a watch registers nothing: its handle is empty", [&] {
+                                            int  value = 0;
+                                            auto watch = app.watch("value", [&value]() -> const int& {
+                                                return value;
+                                            });
+                                            require(!watch);
                                         });
                                     });
                                 }};

@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebFront inspector</title>
+<style>body{margin:0;background:#141821;color:#e8edf4;font:14px system-ui}</style>
+<body><p>Starting the inspector…</p>
+<!-- The page loads WebFront.js itself when it needs a connection of its own: the frame of a floating window borrows the
+     bridge of its host page instead (inspector.mjs, ADR-027 section 8). -->
+<script type="module">
+import {main} from './inspector.mjs';
+main().catch(error => { document.body.textContent = `The inspector failed: ${error?.message ?? error}`; });
+</script>
+</html>
