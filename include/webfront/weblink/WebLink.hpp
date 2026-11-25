@@ -192,6 +192,12 @@ public:
     void start() {
         ws->start();
     }
+
+    /// Closes the connection from this side, from any thread: its reads and writes are cancelled and the socket closes once
+    /// they have ended. No closed event follows: the owner, who asked for it, releases what the connection held.
+    void stop() {
+        ws->stop();
+    }
     WebLink(const WebLink&)            = delete;
     WebLink(WebLink&&)                 = delete;
     WebLink& operator=(const WebLink&) = delete;

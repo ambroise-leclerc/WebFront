@@ -172,6 +172,7 @@ public:
         registerHostLoop(app);
         registerMediaRoute(app);
         registerReadRoute(app);
+        registerSpaces(app);
         streamRoute = app.addRoute("/webfront/services/test-stream/", [](const http::RouteRequest& request) {
             if (request.query.find("fail=1") != std::string_view::npos)
                 throw std::runtime_error("route failure requested by the spec");
@@ -190,6 +191,20 @@ public:
                 return count;
             };
             return reply;
+        });
+    }
+
+    /// The spaces of spaces-specs.mjs (#671): a page loaded under /s/<name>/ reaches the function of its own space only.
+    void registerSpaces(TestWF& app) {
+        app.spaces("/s/", [this, &app](std::string_view segment) -> std::optional<http::RouteReply> {
+            if (segment != "alpha" && segment != "beta")
+                return http::textReply(http::Response::notFound, "Unknown session\n");
+            auto space = std::make_unique<TestWF::Space>(app, "/s/", segment);
+            space->cppFunction("spaceName", [name = std::string(segment)] {
+                return name;
+            });
+            spaces.emplace(segment, std::move(space));
+            return std::nullopt;
         });
     }
 
@@ -225,6 +240,8 @@ private:
     optional<RejectedWebSocketServer> rejectedWebSocket;
     optional<TaskHandle>              cancelledTask;
     TestState                         state;
+    // The spaces of spaces-specs.mjs, created by the resolver on the server context; destroyed after the application.
+    std::map<std::string, std::unique_ptr<TestWF::Space>, std::less<>> spaces;
     // Accessed only by callbacks on the server context. finish() runs after WfDriver joins app.shutdown().
     std::map<std::uint32_t, std::string> domRejections;
     std::array<std::uint32_t, 6>         domEventCounts{};

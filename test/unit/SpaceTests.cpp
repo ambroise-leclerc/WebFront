@@ -1,0 +1,1056 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
+// Author: Ambroise Leclerc
+// Created: 2026-11-25
+//
+// WebFront — tests/unit
+// Role: Application spaces under a path prefix: isolation of functions, pages and broadcasts, resolver, last page, release.
+// Thread: bridge-io | Alloc: unrestricted
+// LLM: pins the contracts of Space.hpp and BasicWF::spaces with pages connected over loopback
+
+// Application spaces under a path prefix (#671).
+
+#include "InjectableNetworking.hpp"
+#include <webfront/networking/TCPNetworkingStdnet.hpp>
+#include <webfront/Space.hpp>
+#include <webfront/system/DefaultFS.hpp>
+#include <webfront/testing/Bdd.hpp>
+#include <webfront/WebFront.hpp>
+
+#ifdef _WIN32
+    #include <webfront/system/WindowsCompat.hpp>
+#else
+    #include <poll.h>
+#endif
+
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <future>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <span>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <utility>
+
+using namespace webfront::bdd;
+using namespace webfront;
+using namespace std::chrono_literals;
+
+namespace {
+using Stdnet   = networking::TCPStdnet;
+using SpaceApp = BasicWF<Stdnet, fs::DefaultFS>;
+
+bool spaceWaitUntil(auto condition, std::chrono::milliseconds timeout = 5s) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (!condition()) {
+        if (std::chrono::steady_clock::now() > deadline)
+            return false;
+        std::this_thread::sleep_for(5ms);
+    }
+    return true;
+}
+
+/// A loopback connection that records what the server sends.
+class LoopbackConnection {
+public:
+    explicit LoopbackConnection(std::string_view port) : socket(context) {
+        socket.connect(Stdnet::Resolve("127.0.0.1", port));
+    }
+
+    void send(std::span<const std::byte> data) {
+        socket.send(Stdnet::ConstBuffer(data.data(), data.size()));
+    }
+    void send(std::string_view text) {
+        send(std::as_bytes(std::span(text)));
+    }
+
+    /// True once the server sent these bytes, false after the deadline or when it closed the connection first.
+    bool receiveUntil(std::string_view text, std::chrono::milliseconds timeout = 5s) {
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        while (bytes.find(text) == std::string::npos)
+            if (!receiveSome(deadline))
+                return false;
+        return true;
+    }
+
+    /// True once the server closed the connection, false after the deadline.
+    bool receiveUntilClosed(std::chrono::milliseconds timeout = 5s) {
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        while (!closed)
+            if (!receiveSome(deadline))
+                return closed;
+        return true;
+    }
+
+    [[nodiscard]] const std::string& received() const {
+        return bytes;
+    }
+
+private:
+    bool receiveSome(std::chrono::steady_clock::time_point deadline) {
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
+        if (remaining <= 0 || closed)
+            return false;
+        ::pollfd descriptor{};
+        descriptor.fd     = socket.native_handle();
+        descriptor.events = POLLIN;
+#ifdef _WIN32
+        const int ready = ::WSAPoll(&descriptor, 1, static_cast<int>(remaining));
+#else
+        const int ready = ::poll(&descriptor, 1, static_cast<int>(remaining));
+#endif
+        if (ready <= 0)
+            return false;
+        std::array<char, 4096> buffer{};
+        std::size_t            size = 0;
+        try {
+            size = socket.receive(Stdnet::Buffer(buffer));
+        } catch (const std::system_error&) {
+            size = 0;  // reset by the server
+        }
+        if (size == 0) {
+            closed = true;
+            return false;
+        }
+        bytes.append(buffer.data(), size);
+        return true;
+    }
+
+    Stdnet::IoContext context;
+    Stdnet::Socket    socket;
+    std::string       bytes;
+    bool              closed = false;
+};
+
+/// The whole answer of the server to one HTTP request.
+std::string httpGet(std::string_view port, std::string_view target) {
+    LoopbackConnection connection{port};
+    connection.send("GET " + std::string(target) + " HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    connection.receiveUntilClosed();
+    return connection.received();
+}
+
+/// The payload of a browser's call to a C++ function; a call identifier other than 0 asks for an answer.
+std::vector<std::byte> callPayload(const std::string& name, msg::CallId callId) {
+    msg::FunctionCall<> message;
+    message.setCallId(callId);
+    websocket::Frame<Stdnet> frame{std::span(reinterpret_cast<const std::byte*>(message.header().data()), message.header().size())};
+    message.encodeParameter(name, frame);
+    frame.freeze();
+    std::vector<std::byte> payload;
+    const auto             buffers = frame.toBuffers();
+    for (auto buffer = std::next(buffers.begin()); buffer != buffers.end(); ++buffer) {
+        const auto* first = static_cast<const std::byte*>(buffer->data());
+        payload.insert(payload.end(), first, first + buffer->size());
+    }
+    return payload;
+}
+
+/// A masked binary frame from the browser.
+std::vector<std::byte> clientFrame(std::span<const std::byte> payload) {
+    require(payload.size() < 126);
+    constexpr std::array<std::byte, 4> mask{std::byte{0x12}, std::byte{0x34}, std::byte{0x56}, std::byte{0x78}};
+    std::vector<std::byte>             frame{std::byte{0x82}, std::byte{static_cast<std::uint8_t>(0x80u | payload.size())}};
+    frame.insert(frame.end(), mask.begin(), mask.end());
+    for (std::size_t index = 0; index < payload.size(); ++index)
+        frame.push_back(payload[index] ^ mask[index % mask.size()]);
+    return frame;
+}
+
+/// A page whose bridge connected from `path`, as WebFront.js does from the page's directory.
+class Page : public LoopbackConnection {
+public:
+    Page(std::string_view port, std::string_view path) : LoopbackConnection(port) {
+        send("GET " + std::string(path)
+             + " HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+               "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n");
+        upgraded = receiveUntil("\r\n\r\n") && received().starts_with("HTTP/1.1 101");
+        if (upgraded) {
+            // A masked binary frame of two bytes, with a zero mask: the handshake and the browser's byte order.
+            const std::array<unsigned char, 8>
+                handshake{0x82, 0x82, 0, 0, 0, 0, static_cast<unsigned char>(msg::Command::handshake), static_cast<unsigned char>(msg::JSEndian::little)};
+            send(std::as_bytes(std::span(handshake)));
+        }
+    }
+
+    void call(const std::string& name, msg::CallId callId = 0) {
+        send(clientFrame(callPayload(name, callId)));
+    }
+
+    bool upgraded = false;
+};
+
+/// Runs the application's server on its own thread until destroyed.
+struct Running {
+    explicit Running(SpaceApp& application)
+        : app(application), thread([&application] {
+              application.run();
+          }) { }
+    ~Running() {
+        app.stop();
+        thread.join();
+        app.shutdown();
+    }
+    SpaceApp&   app;
+    std::thread thread;
+};
+
+/// Code templated on the application type, attached here to a space.
+template <typename Application>
+struct Bridge {
+    explicit Bridge(Application& application) {
+        application.cppFunction("bridged", [](typename Application::UI ui) {
+            ui.jsFunction("bridgedBack")(std::string{"bridged-back"});
+        });
+    }
+};
+
+Task destroyLater(std::unique_ptr<SpaceApp::Space>& space, std::atomic<bool>& destroyed) {
+    space.reset();
+    destroyed = true;
+    co_return;
+}
+}  // namespace
+
+const Scenario twoSpaces{"Two spaces with a function of the same name answer independently", {"spaces"}, [] {
+                             SpaceApp                                                app{WebFrontConfig{.port = "0"}};
+                             std::map<std::string, std::unique_ptr<SpaceApp::Space>> spaces;
+                             std::optional<Bridge<SpaceApp::Space>>                  bridge;
+                             app.cppFunction("shared", [] {
+                                 return std::string{"from-application"};
+                             });
+                             app.spaces("/s/", [&](std::string_view segment) -> std::optional<http::RouteReply> {
+                                 auto space = std::make_unique<SpaceApp::Space>(app, "/s/", segment);
+                                 space->cppFunction("whoAmI", [name = std::string(segment)] {
+                                     return "space-" + name;
+                                 });
+                                 if (segment == "alpha") {
+                                     space->cppFunction("shared", [] {
+                                         return std::string{"alpha-own"};
+                                     });
+                                     bridge.emplace(*space);
+                                 }
+                                 spaces.emplace(segment, std::move(space));
+                                 return std::nullopt;
+                             });
+                             Running running{app};
+                             Page    alpha{app.port(), "/s/alpha/"};
+                             Page    beta{app.port(), "/s/beta/"};
+                             Page    root{app.port(), "/"};
+                             require(alpha.upgraded && beta.upgraded && root.upgraded);
+
+                             when("each page calls the function of the same name", [&] {
+                                 alpha.call("whoAmI", 1);
+                                 beta.call("whoAmI", 1);
+                                 root.call("whoAmI", 1);
+                                 then("each answers from its own space, and a page outside the spaces finds none", [&] {
+                                     require(alpha.receiveUntil("space-alpha"));
+                                     require(beta.receiveUntil("space-beta"));
+                                     require(root.receiveUntil("was not found"));
+                                     require(alpha.received().find("space-beta") == std::string::npos);
+                                     require(beta.received().find("space-alpha") == std::string::npos);
+                                 });
+                             });
+                             when("each page calls a function of the application that one space also registered", [&] {
+                                 alpha.call("shared", 2);
+                                 beta.call("shared", 2);
+                                 then("the space's own takes precedence, and the application's is visible to the others", [&] {
+                                     require(alpha.receiveUntil("alpha-own"));
+                                     require(beta.receiveUntil("from-application"));
+                                     require(alpha.received().find("from-application") == std::string::npos);
+                                 });
+                             });
+                             when("a page calls the function of code templated on the application type, attached to its space", [&] {
+                                 alpha.call("bridged");
+                                 beta.call("bridged", 3);
+                                 then("the space's page reaches it, and another space's does not", [&] {
+                                     require(alpha.receiveUntil("bridged-back"));
+                                     require(beta.receiveUntil("was not found"));
+                                 });
+                             });
+                         }};
+
+const Scenario pageOf{"A page of one space never receives a call or a broadcast of another", {"spaces"}, [] {
+                          SpaceApp                                                app{WebFrontConfig{.port = "0"}};
+                          std::map<std::string, std::unique_ptr<SpaceApp::Space>> spaces;
+                          std::atomic<int>                                        applicationStarted{0}, alphaStarted{0}, betaStarted{0};
+                          std::vector<UISubscription>                             subscriptions;
+                          app.onUIStarted([&](SpaceApp::UI) {
+                              ++applicationStarted;
+                          });
+                          app.spaces("/s/", [&](std::string_view segment) -> std::optional<http::RouteReply> {
+                              auto  space   = std::make_unique<SpaceApp::Space>(app, "/s/", segment);
+                              auto& counter = segment == "alpha" ? alphaStarted : betaStarted;
+                              space->onUIStarted([&counter](SpaceApp::UI ui) {
+                                  ++counter;
+                                  ui.jsFunction("welcome")(std::string{"welcome-to-own-space"});
+                              });
+                              spaces.emplace(segment, std::move(space));
+                              return std::nullopt;
+                          });
+                          Running running{app};
+                          Page    alpha{app.port(), "/s/alpha/"};
+                          Page    beta{app.port(), "/s/beta/"};
+                          require(spaceWaitUntil([&] {
+                              return alphaStarted == 1 && betaStarted == 1 && applicationStarted == 2;
+                          }));
+                          SpaceApp::Space& alphaSpace = *spaces.at("alpha");
+                          SpaceApp::Space& betaSpace  = *spaces.at("beta");
+
+                          then("each space's handler saw its own page only, and the application's saw both", [&] {
+                              require(alphaStarted == 1);
+                              require(betaStarted == 1);
+                              require(applicationStarted == 2);
+                              require(alphaSpace.connectedBrowsers() == 1);
+                              require(app.connectedBrowsers() == 2);
+                          });
+                          when("each space broadcasts and calls its pages, then the application broadcasts to every page", [&] {
+                              betaSpace.broadcast("onState")(std::string{"beta-state"});
+                              alphaSpace.broadcast("onState", {.maxPendingWrites = 1})(std::string{"alpha-state"});
+                              std::size_t visited = 0;
+                              alphaSpace.forEachUI([&](SpaceApp::UI ui) {
+                                  ++visited;
+                                  ui.jsFunction("each")(std::string{"alpha-each"});
+                              });
+                              app.broadcast("onAll")(std::string{"application-done"});
+                              then("each page received its space's calls before the application's, and nothing of the other space", [&] {
+                                  require(visited == 1);
+                                  require(alpha.receiveUntil("application-done"));
+                                  require(beta.receiveUntil("application-done"));
+                                  require(alpha.received().find("alpha-state") != std::string::npos);
+                                  require(alpha.received().find("alpha-each") != std::string::npos);
+                                  require(alpha.received().find("beta-state") == std::string::npos);
+                                  require(beta.received().find("beta-state") != std::string::npos);
+                                  require(beta.received().find("alpha-state") == std::string::npos);
+                                  require(beta.received().find("alpha-each") == std::string::npos);
+                              });
+                          });
+                      }};
+
+const Scenario resolverRefusal{"The resolver's refusal reaches the browser", {"spaces"}, [] {
+                                   SpaceApp         app{WebFrontConfig{.port = "0"}};
+                                   std::atomic<int> resolved{0};
+                                   app.spaces("/s/", [&](std::string_view segment) -> std::optional<http::RouteReply> {
+                                       ++resolved;
+                                       if (segment == "full")
+                                           return http::textReply(http::Response::serviceUnavailable, "The server is full");
+                                       return std::nullopt;  // neither created nor refused: unknown
+                                   });
+                                   Running running{app};
+
+                                   then("a page of a refused space receives the resolver's reply", [&] {
+                                       const auto answer = httpGet(app.port(), "/s/full/index.html");
+                                       require(answer.starts_with("HTTP/1.1 503"));
+                                       require(answer.find("The server is full") != std::string::npos);
+                                   });
+                                   then("a segment the resolver neither creates nor refuses is not found", [&] {
+                                       require(httpGet(app.port(), "/s/ghost/").starts_with("HTTP/1.1 404"));
+                                   });
+                                   then("a WebSocket of a refused space is not upgraded and connects no browser", [&] {
+                                       Page page{app.port(), "/s/full/"};
+                                       require(!page.upgraded);
+                                       require(page.received().starts_with("HTTP/1.1 503"));
+                                       require(page.receiveUntil("The server is full"));  // the body is sent too; JavaScript sees neither
+                                       require(app.connectedBrowsers() == 0);
+                                   });
+                                   then("paths outside the prefix never reach the resolver", [&] {
+                                       require(httpGet(app.port(), "/WebFront.js").starts_with("HTTP/1.1 200"));
+                                       require(httpGet(app.port(), "/s/").starts_with("HTTP/1.1 404"));
+                                       require(resolved == 0);
+                                   });
+                               }};
+
+const Scenario lastPageNotice{"The last-page notice fires once each time a space empties, after the closed handlers", {"spaces"}, [] {
+                                  SpaceApp                         app{WebFrontConfig{.port = "0"}};
+                                  std::unique_ptr<SpaceApp::Space> space;
+                                  std::atomic<int>                 started{0}, notices{0};
+                                  std::mutex                       eventsMutex;
+                                  std::vector<std::string>         events;  // in the order the callbacks ran
+                                  const auto                       record = [&](std::string event) {
+                                      std::scoped_lock lock{eventsMutex};
+                                      events.push_back(std::move(event));
+                                  };
+                                  const auto recorded = [&] {
+                                      std::scoped_lock lock{eventsMutex};
+                                      return events;
+                                  };
+                                  std::optional<UISubscription> spaceSubscription;
+                                  app.spaces("/s/", [](std::string_view) -> std::optional<http::RouteReply> {
+                                      return http::textReply(http::Response::notFound, "Unknown session");
+                                  });
+                                  space = std::make_unique<SpaceApp::Space>(app, "/s/", "alpha");  // created beforehand, outside the resolver
+                                  // Counters held by the handlers themselves: each call must reach the very handler that was set.
+                                  space->onUIStarted([&, count = 0](SpaceApp::UI) mutable {
+                                      started = ++count;
+                                  });
+                                  space->onLastUIClosed([&, count = 0]() mutable {
+                                      record("notice-" + std::to_string(++count));
+                                      notices = count;
+                                  });
+                                  spaceSubscription.emplace(space->subscribeUIClosed([&](SpaceApp::UI) {
+                                      record("space-closed");
+                                  }));
+                                  auto    applicationSubscription = app.subscribeUIClosed([&](SpaceApp::UI) {
+                                      record("application-closed");
+                                  });
+                                  Running running{app};
+                                  auto    first  = std::make_unique<Page>(app.port(), "/s/alpha/");
+                                  auto    second = std::make_unique<Page>(app.port(), "/s/alpha/sub/");  // a page of a subdirectory
+                                  require(spaceWaitUntil([&] {
+                                      return started == 2;
+                                  }));
+
+                                  when("the two pages close one after the other", [&] {
+                                      first.reset();
+                                      require(spaceWaitUntil([&] {
+                                          return recorded().size() == 2;
+                                      }));
+                                      second.reset();
+                                      require(spaceWaitUntil([&] {
+                                          return notices == 1;
+                                      }));
+                                      then("one notice follows the closed handlers of the last page, none the first", [&] {
+                                          requireEqual(
+                                              recorded(),
+                                              std::vector<std::string>{"space-closed", "application-closed", "space-closed", "application-closed", "notice-1"});
+                                      });
+                                      andWhen("a page joins the emptied space and closes", [&] {
+                                          auto again = std::make_unique<Page>(app.port(), "/s/alpha/");
+                                          require(spaceWaitUntil([&] {
+                                              return started == 3;
+                                          }));
+                                          again.reset();
+                                          then("the same handler reports the space empty again", [&] {
+                                              require(spaceWaitUntil([&] {
+                                                  return notices == 2;
+                                              }));
+                                              require(recorded().back() == "notice-2");
+                                          });
+                                      });
+                                  });
+                              }};
+
+const Scenario destroyedSpace{"A destroyed space releases its functions and routes, and closes its pages", {"spaces"}, [] {
+                                  SpaceApp                         app{WebFrontConfig{.port = "0"}};
+                                  std::unique_ptr<SpaceApp::Space> space;
+                                  http::RouteTable::Registration   route;
+                                  auto                             captured = std::make_shared<int>(0);
+                                  std::weak_ptr<int>               observed = captured;
+                                  std::atomic<int>                 started{0}, applicationClosed{0}, resolved{0};
+                                  app.spaces("/s/", [&](std::string_view) -> std::optional<http::RouteReply> {
+                                      ++resolved;
+                                      return http::textReply(http::Response::notFound, "The session has ended");
+                                  });
+                                  space = std::make_unique<SpaceApp::Space>(app, "/s/", "alpha");
+                                  space->cppFunction("hold", [captured = std::move(captured)] {
+                                      return *captured;
+                                  });
+                                  space->onUIStarted([&](SpaceApp::UI) {
+                                      ++started;
+                                  });
+                                  route          = space->addRoute("/data/", [](const http::RouteRequest& request) {
+                                      return http::textReply(http::Response::ok, "space-data " + std::string(request.path));
+                                  });
+                                  auto    closed = app.subscribeUIClosed([&](SpaceApp::UI) {
+                                      ++applicationClosed;
+                                  });
+                                  Running running{app};
+                                  Page    page{app.port(), "/s/alpha/"};
+                                  require(spaceWaitUntil([&] {
+                                      return started == 1;
+                                  }));
+                                  require(httpGet(app.port(), "/s/alpha/data/x").find("space-data /data/x") != std::string::npos);
+                                  require(route);
+
+                                  when("the application destroys the space on the server thread", [&] {
+                                      std::atomic<bool> destroyed{false};
+                                      static_cast<void>(app.spawn(destroyLater(space, destroyed)));
+                                      require(spaceWaitUntil([&] {
+                                          return destroyed.load();
+                                      }));
+                                      then("its page is closed, and the application is told", [&] {
+                                          require(page.receiveUntilClosed());
+                                          require(spaceWaitUntil([&] {
+                                              return applicationClosed == 1 && app.connectedBrowsers() == 0;
+                                          }));
+                                      });
+                                      then("its functions and routes are released", [&] {
+                                          require(observed.expired());
+                                          require(!route);
+                                      });
+                                      then("its paths go to the resolver again", [&] {
+                                          const auto answer = httpGet(app.port(), "/s/alpha/data/x");
+                                          require(answer.starts_with("HTTP/1.1 404"));
+                                          require(answer.find("The session has ended") != std::string::npos);
+                                          require(resolved == 1);
+                                      });
+                                  });
+                              }};
+
+const Scenario servedUnder{"A space serves the application's files and routes under its prefix, its own routes first", {"spaces"}, [] {
+                               SpaceApp                                                app{WebFrontConfig{.port = "0"}};
+                               std::map<std::string, std::unique_ptr<SpaceApp::Space>> spaces;
+                               std::vector<http::RouteTable::Registration>             routes;
+                               routes.push_back(app.addRoute("/api/", [](const http::RouteRequest&) {
+                                   return http::textReply(http::Response::ok, "application-api");
+                               }));
+                               app.spaces("/s/", [&](std::string_view segment) -> std::optional<http::RouteReply> {
+                                   auto space = std::make_unique<SpaceApp::Space>(app, "/s/", segment);
+                                   if (segment == "alpha")
+                                       routes.push_back(space->addRoute("/api/", [](const http::RouteRequest& request) {
+                                           return http::textReply(http::Response::ok, "alpha-api " + std::string(request.path));
+                                       }));
+                                   spaces.emplace(segment, std::move(space));
+                                   return std::nullopt;
+                               });
+                               Running running{app};
+
+                               then("the embedded files are served under the prefix as at the root", [&] {
+                                   const auto atRoot  = httpGet(app.port(), "/WebFront.js");
+                                   const auto inSpace = httpGet(app.port(), "/s/alpha/WebFront.js");
+                                   require(inSpace.starts_with("HTTP/1.1 200"));
+                                   requireEqual(inSpace.size(), atRoot.size());
+                               });
+                               then("a space's own route answers with the path within the space, before the application's", [&] {
+                                   require(httpGet(app.port(), "/s/alpha/api/v1").find("alpha-api /api/v1") != std::string::npos);
+                                   require(httpGet(app.port(), "/s/beta/api/v1").find("application-api") != std::string::npos);
+                                   require(httpGet(app.port(), "/api/v1").find("application-api") != std::string::npos);
+                               });
+                               then("the space without its final slash is redirected to it, its query kept", [&] {
+                                   const auto answer = httpGet(app.port(), "/s/alpha?x=1");
+                                   require(answer.starts_with("HTTP/1.1 301"));
+                                   require(answer.find("Location: /s/alpha/?x=1\r\n") != std::string::npos);
+                               });
+                           }};
+
+const Scenario withoutSpaces{"An application without spaces behaves as before them", {"spaces"}, [] {
+                                 SpaceApp app{WebFrontConfig{.port = "0"}};
+                                 app.cppFunction("ping", [] {
+                                     return std::string{"pong-from-application"};
+                                 });
+
+                                 then("a space cannot be created without its family, nor with a segment that cannot name one", [&] {
+                                     requireThrows<std::invalid_argument>([&] {
+                                         SpaceApp::Space space{app, "/s/", "alpha"};
+                                     });
+                                     app.spaces("/s/", [](std::string_view) {
+                                         return std::optional<http::RouteReply>{};
+                                     });
+                                     for (const auto* segment : {"a/b", "a..b", "..", ".", "", "a\\b", "a\x01b"}) {
+                                         auto scope = info(segment);
+                                         requireThrows<std::invalid_argument>([&] {
+                                             SpaceApp::Space space{app, "/s/", segment};
+                                         });
+                                     }
+                                     requireThrows<std::invalid_argument>([&] {
+                                         app.spaces("/s/sub/", [](std::string_view) {
+                                             return std::optional<http::RouteReply>{};
+                                         });
+                                     });
+                                     SpaceApp::Space space{app, "/s/", "alpha"};
+                                     requireThrows<std::logic_error>([&] {
+                                         SpaceApp::Space twin{app, "/s/", "alpha"};
+                                     });
+                                 });
+                                 then("a family named like the bridge script never masks it", [&] {
+                                     app.spaces("/WebFront.js/", [](std::string_view) {
+                                         return std::optional<http::RouteReply>{};
+                                     });
+                                     Running running{app};
+                                     require(httpGet(app.port(), "/WebFront.js").starts_with("HTTP/1.1 200"));
+                                 });
+                                 then("a page connected from any directory reaches the application's functions", [&] {
+                                     Running running{app};
+                                     Page    page{app.port(), "/s/alpha/"};
+                                     require(page.upgraded);
+                                     page.call("ping", 1);
+                                     require(page.receiveUntil("pong-from-application"));
+                                 });
+                             }};
+
+const Scenario encodedSeparator{
+    "An encoded separator never selects a space other than the one its segment names",
+    {"spaces"},
+    [] {
+        SpaceApp                                                app{WebFrontConfig{.port = "0"}};
+        std::map<std::string, std::unique_ptr<SpaceApp::Space>> spaces;
+        std::vector<http::RouteTable::Registration>             routes;
+        std::mutex                                              seenMutex;
+        std::vector<std::string>                                seen;
+        app.spaces("/s/", [&](std::string_view segment) -> std::optional<http::RouteReply> {
+            {
+                std::scoped_lock lock{seenMutex};
+                seen.emplace_back(segment);
+            }
+            auto space = std::make_unique<SpaceApp::Space>(app, "/s/", segment);
+            routes.push_back(space->addRoute("/data/", [name = std::string(segment)](const http::RouteRequest& request) {
+                return http::textReply(http::Response::ok, name + "-data " + std::string(request.path));
+            }));
+            spaces.emplace(segment, std::move(space));
+            return std::nullopt;
+        });
+        Running running{app};
+        require(httpGet(app.port(), "/s/alpha/data/x").find("alpha-data /data/x") != std::string::npos);
+
+        then("a segment holding an encoded '/' is not found, and never reaches the resolver", [&] {
+            const auto answer = httpGet(app.port(), "/s/alpha%2Fdata/x");
+            require(answer.starts_with("HTTP/1.1 404"));
+            require(answer.find("alpha-data") == std::string::npos);
+            Page page{app.port(), "/s/alpha%2Fdata/"};
+            require(!page.upgraded);
+            std::scoped_lock lock{seenMutex};
+            require(seen == std::vector<std::string>{"alpha"});
+        });
+        then("a WebSocket under the prefix whose target is not a safe path is refused, not given to the application", [&] {
+            for (const auto* target :
+                 {"/s/%00/", "/s/al%00pha/", "/s/alpha/%00/", "/s/a..b/", "/s/", "/s/%2E/", "/s/./alpha/", "/s//alpha/", "/s/%2E/alpha/"}) {
+                Page page{app.port(), target};
+                auto scope = info(target);
+                require(!page.upgraded);
+                require(page.received().starts_with("HTTP/1.1 404"));
+            }
+            require(app.connectedBrowsers() == 0);
+            std::scoped_lock lock{seenMutex};
+            require(seen == std::vector<std::string>{"alpha"});
+        });
+        then("a space of any name its creation accepts is reachable", [&] {
+            require(httpGet(app.port(), "/s/a%20b%25c+d.e/data/x").find("a b%c+d.e-data /data/x") != std::string::npos);
+            Page page{app.port(), "/s/a%20b%25c+d.e/"};
+            require(page.upgraded);
+        });
+        then("the encoded prefix separator does not reach a space either", [&] {
+            require(httpGet(app.port(), "/s%2Falpha/data/x").starts_with("HTTP/1.1 404"));
+        });
+        then("an empty or \".\" segment names no space, where the rest of the path is normalized as at the root", [&] {
+            require(httpGet(app.port(), "/s/./alpha/data/x").starts_with("HTTP/1.1 404"));
+            require(httpGet(app.port(), "/s//alpha/data/x").starts_with("HTTP/1.1 404"));
+            require(httpGet(app.port(), "/s/alpha//data/./x").find("alpha-data /data/x") != std::string::npos);
+            require(httpGet(app.port(), "//s/alpha/data/x").find("alpha-data /data/x") != std::string::npos);
+        });
+        then("other encoded characters of the segment and the rest are decoded as at the root", [&] {
+            require(httpGet(app.port(), "/s/%61lpha/data/x").find("alpha-data /data/x") != std::string::npos);
+            require(httpGet(app.port(), "/s/alpha/data/a%2Fb").find("alpha-data /data/a/b") != std::string::npos);
+        });
+    }};
+
+const Scenario destroyedBy{"A space destroyed by one of its handlers calls none of the handlers that follow", {"spaces"}, [] {
+                               SpaceApp                         app{WebFrontConfig{.port = "0"}};
+                               std::unique_ptr<SpaceApp::Space> space;
+                               std::atomic<int>                 before{0}, after{0}, applicationClosed{0};
+                               std::optional<UISubscription>    first, second;
+                               app.spaces("/s/", [](std::string_view) -> std::optional<http::RouteReply> {
+                                   return http::textReply(http::Response::notFound, "Unknown session");
+                               });
+                               auto closed = app.subscribeUIClosed([&](SpaceApp::UI) {
+                                   ++applicationClosed;
+                               });
+                               space       = std::make_unique<SpaceApp::Space>(app, "/s/", "alpha");
+
+                               when("the first of two started handlers destroys the space", [&] {
+                                   first.emplace(space->subscribeUIStarted([&](SpaceApp::UI) {
+                                       ++before;
+                                       space.reset();
+                                   }));
+                                   second.emplace(space->subscribeUIStarted([&](SpaceApp::UI) {
+                                       ++after;
+                                   }));
+                                   Running running{app};
+                                   Page    page{app.port(), "/s/alpha/"};
+                                   then("the second is not called, and the page is closed", [&] {
+                                       require(page.receiveUntilClosed());
+                                       require(before == 1);
+                                       require(after == 0);
+                                   });
+                               });
+                               when("the first of two closed handlers destroys the space", [&] {
+                                   std::atomic<int> started{0};
+                                   space->onUIStarted([&](SpaceApp::UI) {
+                                       ++started;
+                                   });
+                                   first.emplace(space->subscribeUIClosed([&](SpaceApp::UI) {
+                                       ++before;
+                                       space.reset();
+                                   }));
+                                   second.emplace(space->subscribeUIClosed([&](SpaceApp::UI) {
+                                       ++after;
+                                   }));
+                                   std::atomic<int> notices{0};
+                                   space->onLastUIClosed([&] {
+                                       ++notices;
+                                   });
+                                   Running running{app};
+                                   auto    page = std::make_unique<Page>(app.port(), "/s/alpha/");
+                                   require(spaceWaitUntil([&] {
+                                       return started == 1;
+                                   }));
+                                   page.reset();
+                                   then("neither the second nor the last-page notice is called; the application is still told", [&] {
+                                       require(spaceWaitUntil([&] {
+                                           return applicationClosed == 1;
+                                       }));
+                                       require(before == 1);
+                                       require(after == 0);
+                                       require(notices == 0);
+                                   });
+                               });
+                           }};
+
+const Scenario logsMask{"The logs never show the segment of a space, which can be a session's secret", {"spaces"}, [] {
+                            constexpr std::string_view secret = "s3cr3t-session-1d";
+                            std::mutex                 logMutex;
+                            std::string                logged;
+                            // Removes the sink and restores the level on every exit, a failed require included.
+                            struct Capture {
+                                decltype(log::addSinks(std::function<void(std::string_view)>{})) sink;  // the handle of either logger
+                                ~Capture() {
+                                    log::removeSinks(sink);
+                                    log::setLogLevel(log::Error);
+                                }
+                            };
+                            log::setLogLevel(log::Debug);
+                            const Capture capture{log::addSinks([&](std::string_view line) {
+                                std::scoped_lock lock{logMutex};
+                                logged.append(line).push_back('\n');
+                            })};
+                            {
+                                SpaceApp                                                app{WebFrontConfig{.port = "0"}};
+                                std::map<std::string, std::unique_ptr<SpaceApp::Space>> spaces;
+                                std::vector<http::RouteTable::Registration>             routes;
+                                app.spaces("/s/", [&](std::string_view segment) -> std::optional<http::RouteReply> {
+                                    if (segment.starts_with("throwing"))
+                                        throw std::runtime_error("no session " + std::string(segment));
+                                    if (segment.starts_with("refused"))
+                                        return http::textReply(http::Response::notFound, "Unknown session");
+                                    auto space = std::make_unique<SpaceApp::Space>(app, "/s/", segment);
+                                    space->cppFunction("ping", [] {
+                                        return std::string{"pong"};
+                                    });
+                                    routes.push_back(space->addRoute("/data/", [](const http::RouteRequest&) {
+                                        return http::textReply(http::Response::ok, "space-data");
+                                    }));
+                                    spaces.emplace(segment, std::move(space));
+                                    return std::nullopt;
+                                });
+                                Running    running{app};
+                                const auto session = std::string(secret);
+                                require(httpGet(app.port(), "/s/" + session + "/WebFront.js").starts_with("HTTP/1.1 200"));
+                                require(httpGet(app.port(), "/s/" + session + "/data/x").find("space-data") != std::string::npos);
+                                require(httpGet(app.port(), "/s/" + session + "?q=1").starts_with("HTTP/1.1 301"));
+                                require(httpGet(app.port(), "/s/throwing-" + session + "/").starts_with("HTTP/1.1 500"));
+                                require(httpGet(app.port(), "/s/refused-" + session + "/").starts_with("HTTP/1.1 404"));
+                                Page page{app.port(), "/s/" + session + "/"};
+                                require(page.upgraded);
+                                page.call("ping", 1);
+                                require(page.receiveUntil("pong"));
+                            }
+                            std::scoped_lock lock{logMutex};
+                            then("the requests are logged with the segment masked", [&] {
+                                require(logged.find("on /s/*/data/x") != std::string::npos);
+                                require(logged.find("on /s/*/WebFront.js") != std::string::npos);
+                            });
+                            then("no line quotes the segment, not even a resolver's error", [&] {
+                                const auto found = logged.find(secret);
+                                auto       scope = info(found == std::string::npos ? std::string{} : logged.substr(found < 120 ? 0 : found - 120, 240));
+                                require(found == std::string::npos);
+                            });
+                        }};
+
+const Scenario routeWait{"Destroying a space waits for its route handlers and bodies running on the workers", {"spaces"}, [] {
+                             SpaceApp                         app{WebFrontConfig{.port = "0"}};
+                             http::RouteTable::Registration   route;
+                             std::unique_ptr<SpaceApp::Space> space;
+                             std::promise<void>               entered, release;
+                             const auto                       gate = release.get_future().share();
+                             app.spaces("/s/", [](std::string_view) -> std::optional<http::RouteReply> {
+                                 return http::textReply(http::Response::notFound, "Unknown session");
+                             });
+                             space = std::make_unique<SpaceApp::Space>(app, "/s/", "alpha");
+                             std::atomic<bool> destroyed{false};
+                             // Starts the request, waits for the route to block in it, destroys the space on the server thread.
+                             const auto destroyWhileBlocked = [&](std::string target) {
+                                 auto answer = std::async(std::launch::async, [&app, target] {
+                                     return httpGet(app.port(), target);
+                                 });
+                                 // Destroyed before `answer`, whose destructor waits for the request: a failed require
+                                 // must not leave the route blocked, nor the server's drain waiting for it.
+                                 struct Release {
+                                     std::promise<void>& promise;
+                                     bool                done = false;
+                                     void                now() {
+                                         if (!std::exchange(done, true))
+                                             promise.set_value();
+                                     }
+                                     ~Release() {
+                                         now();
+                                     }
+                                 } releasing{release};
+                                 require(entered.get_future().wait_for(5s) == std::future_status::ready);
+                                 static_cast<void>(app.spawn(destroyLater(space, destroyed)));
+                                 std::this_thread::sleep_for(100ms);
+                                 const bool waited = !destroyed;
+                                 releasing.now();
+                                 require(spaceWaitUntil([&] {
+                                     return destroyed.load();
+                                 }));
+                                 require(answer.wait_for(5s) == std::future_status::ready);
+                                 return std::pair{waited, answer.get()};
+                             };
+
+                             when("a route handler is running", [&] {
+                                 route = space->addRoute("/slow/", [&](const http::RouteRequest&) {
+                                     entered.set_value();
+                                     gate.wait();
+                                     return http::textReply(http::Response::ok, "slow-answer");
+                                 });
+                                 Running running{app};
+                                 const auto [waited, answer] = destroyWhileBlocked("/s/alpha/slow/");
+                                 then("the destruction waits for it, whose answer is sent; its body, read afterwards, is cut", [&] {
+                                     require(waited);
+                                     require(answer.starts_with("HTTP/1.1 200"));
+                                     require(answer.find("slow-answer") == std::string::npos);
+                                     require(spaceWaitUntil([&] {
+                                         return !route;  // once the request that held the space's routes has ended
+                                     }));
+                                 });
+                             });
+                             std::atomic<int> hardened{0};
+                             const auto       brokenRoute = [&](bool block) {
+                                 return space->addRoute(
+                                     "/broken/",
+                                     [&, block](const http::RouteRequest&) {
+                                         if (block) {
+                                             entered.set_value();
+                                             gate.wait();
+                                         }
+                                         http::RouteReply reply;
+                                         reply.headers.emplace_back("bad header", "refused by the server");  // a 500, hardened
+                                         return reply;
+                                     },
+                                     http::RouteOptions{.secretPath = false,
+                                                        .harden =
+                                                            [&](http::RouteReply&) {
+                                                                ++hardened;
+                                                            },
+                                                        .postBodyLimit = {}});
+                             };
+                             when("a route of a living space fails", [&] {
+                                 route = brokenRoute(false);
+                                 Running running{app};
+                                 then("its error answer is hardened", [&] {
+                                     require(httpGet(app.port(), "/s/alpha/broken/").starts_with("HTTP/1.1 500"));
+                                     require(hardened == 1);
+                                 });
+                             });
+                             when("a route fails once the space that waited for it is destroyed", [&] {
+                                 route = brokenRoute(true);
+                                 Running running{app};
+                                 const auto [waited, answer] = destroyWhileBlocked("/s/alpha/broken/");
+                                 then("its hardening, which belongs to the space, is not called", [&] {
+                                     require(waited);
+                                     require(answer.starts_with("HTTP/1.1 500"));
+                                     require(hardened == 0);
+                                 });
+                             });
+                             when("the body of a route's reply is being read", [&] {
+                                 route = space->addRoute("/stream/", [&](const http::RouteRequest&) {
+                                     http::RouteReply reply;
+                                     reply.contentLength = 10;
+                                     reply.body          = [&, calls = 0](std::span<char> out) mutable {
+                                         const std::string_view part = calls++ == 0 ? "part1" : "part2";
+                                         if (part == "part1") {
+                                             entered.set_value();
+                                             gate.wait();
+                                         }
+                                         std::copy(part.begin(), part.end(), out.begin());
+                                         return part.size();
+                                     };
+                                     return reply;
+                                 });
+                                 Running running{app};
+                                 const auto [waited, answer] = destroyWhileBlocked("/s/alpha/stream/");
+                                 then("the destruction waits for the chunk being read, and the body ends early", [&] {
+                                     require(waited);
+                                     require(answer.find("part1") != std::string::npos);
+                                     require(answer.find("part2") == std::string::npos);
+                                 });
+                             });
+                         }};
+
+namespace {
+/// One connection, whose network the test drives: its writes complete only when the test says so.
+struct OnePageNet : webfront::testing::InjectableNetworking {
+    static inline bool accepted{};
+    static auto        Accept(Acceptor&) {
+        return networking::ex::then(networking::ex::just(), []() -> Socket {
+            if (std::exchange(accepted, true))
+                throw std::system_error(std::make_error_code(std::errc::operation_canceled));
+            return Socket{};
+        });
+    }
+};
+}  // namespace
+
+const Scenario upgradeJoins{"A WebSocket joins the space resolved for its request, never a later one of the same segment", {"spaces"}, [] {
+                                using Socket   = webfront::testing::InjectableSocket;
+                                using Injected = BasicWF<OnePageNet, fs::DefaultFS>;
+                                Socket::reset();
+                                OnePageNet::accepted = false;
+                                Injected app{WebFrontConfig{.port = "0"}};
+                                app.spaces("/s/", [](std::string_view) -> std::optional<http::RouteReply> {
+                                    return http::textReply(http::Response::notFound, "Unknown session");
+                                });
+                                auto resolved = std::make_unique<Injected::Space>(app, "/s/", "alpha");
+                                Socket::deferWrites();
+                                const std::string upgrade = "GET /s/alpha/ HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                                                            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+                                Socket::receive(std::as_bytes(std::span(upgrade)));
+                                require(Socket::hasDeferredWrites());  // the 101 is being written: the upgrade has not completed
+
+                                when("the space is destroyed and another takes its segment before the upgrade completes", [&] {
+                                    resolved.reset();
+                                    auto replacement = std::make_unique<Injected::Space>(app, "/s/", "alpha");
+                                    while (Socket::completeDeferredWrites() != 0) { }
+                                    then("the connection joins neither the replacement nor the application", [&] {
+                                        require(replacement->connectedBrowsers() == 0);
+                                        require(app.connectedBrowsers() == 0);
+                                    });
+                                });
+                                when("the space lives until the upgrade completes", [&] {
+                                    while (Socket::completeDeferredWrites() != 0) { }
+                                    then("the connection joins it", [&] {
+                                        require(resolved->connectedBrowsers() == 1);
+                                    });
+                                });
+                                Socket::deferWrites(false);
+                                app.shutdown();
+                                resolved.reset();
+                                Socket::reset();
+                            }};
+
+namespace {
+using GraceSessions = std::map<std::string, std::unique_ptr<SpaceApp::Space>, std::less<>>;
+using GraceTimers   = std::map<std::string, TaskHandle, std::less<>>;
+
+// The grace delay of docs/SPACES.md, with a delay a test can wait for.
+Task endAfterGrace(SpaceApp& app, GraceSessions& sessions, GraceTimers& timers, std::string id, std::chrono::milliseconds grace, std::atomic<bool>& ended) {
+    co_await app.resumeAfter(grace);
+    timers.erase(id);
+    if (auto found = sessions.find(id); found != sessions.end() && found->second->connectedBrowsers() == 0) {
+        sessions.erase(found);
+        ended = true;
+    }
+}
+
+std::chrono::steady_clock::time_point graceNow() {
+    return std::chrono::steady_clock::now();
+}
+}  // namespace
+
+const Scenario graceDelay{"The documented grace delay counts from the last closure, not from the first", {"spaces"}, [] {
+                              constexpr auto                                     grace = 1000ms;
+                              SpaceApp                                           app{WebFrontConfig{.port = "0"}};
+                              GraceSessions                                      sessions;
+                              GraceTimers                                        timers;
+                              std::atomic<bool>                                  ended{false};
+                              std::atomic<int>                                   started{0}, emptied{0};
+                              std::mutex                                         timesMutex;
+                              std::vector<std::chrono::steady_clock::time_point> emptiedAt;
+                              app.spaces("/s/", [](std::string_view) -> std::optional<http::RouteReply> {
+                                  return http::textReply(http::Response::notFound, "Unknown session");
+                              });
+                              auto space = std::make_unique<SpaceApp::Space>(app, "/s/", "alpha");
+                              space->onUIStarted([&](SpaceApp::UI) {
+                                  ++started;
+                              });
+                              space->onLastUIClosed([&] {
+                                  {
+                                      std::scoped_lock lock{timesMutex};
+                                      emptiedAt.push_back(graceNow());
+                                  }
+                                  if (auto previous = timers.find("alpha"); previous != timers.end())
+                                      previous->second.requestStop();
+                                  timers["alpha"] = app.spawn(endAfterGrace(app, sessions, timers, "alpha", grace, ended));
+                                  ++emptied;
+                              });
+                              sessions.emplace("alpha", std::move(space));
+                              Running running{app};
+
+                              when("the page closes, comes back before the delay, and closes again", [&] {
+                                  auto page = std::make_unique<Page>(app.port(), "/s/alpha/");
+                                  require(spaceWaitUntil([&] {
+                                      return started == 1;
+                                  }));
+                                  page.reset();
+                                  require(spaceWaitUntil([&] {
+                                      return emptied == 1;
+                                  }));
+                                  std::this_thread::sleep_for(400ms);
+                                  page = std::make_unique<Page>(app.port(), "/s/alpha/");
+                                  require(spaceWaitUntil([&] {
+                                      return started == 2;
+                                  }));
+                                  page.reset();
+                                  require(spaceWaitUntil([&] {
+                                      return emptied == 2;
+                                  }));
+                                  std::chrono::steady_clock::time_point first, second;
+                                  {
+                                      std::scoped_lock lock{timesMutex};
+                                      first  = emptiedAt.at(0);
+                                      second = emptiedAt.at(1);
+                                  }
+                                  std::this_thread::sleep_until(first + grace + 200ms);
+                                  const bool beforeSecondExpiry = graceNow() < second + grace;
+                                  then("the space outlives the first delay, and ends a full delay after the last closure", [&] {
+                                      // Only a run that reached this point before the second delay expired can tell.
+                                      if (beforeSecondExpiry)
+                                          require(!ended);
+                                      else
+                                          warn("the machine was too slow to observe the space between the two delays");
+                                      require(spaceWaitUntil([&] {
+                                          return ended.load();
+                                      }));
+                                  });
+                              });
+                          }};
+
+namespace {
+// Reached without a capture: the callable under test may be destroyed while its coroutine reads them.
+std::unique_ptr<SpaceApp::Space>* deferredSpace = nullptr;
+std::weak_ptr<int>                deferredCapture;
+std::atomic<int>                  deferredOutcome{-1};
+}  // namespace
+
+const Scenario deferredKeeps{"A deferred function of a space keeps its callable while its call runs, even if it destroys the space", {"spaces"}, [] {
+                                 SpaceApp                         app{WebFrontConfig{.port = "0"}};
+                                 std::unique_ptr<SpaceApp::Space> space;
+                                 deferredSpace   = &space;
+                                 deferredOutcome = -1;
+                                 app.spaces("/s/", [](std::string_view) -> std::optional<http::RouteReply> {
+                                     return http::textReply(http::Response::notFound, "Unknown session");
+                                 });
+                                 space           = std::make_unique<SpaceApp::Space>(app, "/s/", "alpha");
+                                 auto capture    = std::make_shared<int>(7);
+                                 deferredCapture = capture;
+                                 space->cppFunction("finish", [capture = std::move(capture)]() -> ResultTask<int> {
+                                     deferredSpace->reset();  // releases this function's registration
+                                     deferredOutcome = deferredCapture.expired() ? 0 : 1;
+                                     co_return 0;
+                                 });
+                                 Running running{app};
+                                 Page    page{app.port(), "/s/alpha/"};
+                                 require(page.upgraded);
+                                 page.call("finish", 1);
+                                 then("the call still owns the callable's captures after the registration is released", [&] {
+                                     require(spaceWaitUntil([] {
+                                         return deferredOutcome != -1;
+                                     }));
+                                     require(deferredOutcome == 1);
+                                     require(page.receiveUntilClosed());
+                                 });
+                             }};
