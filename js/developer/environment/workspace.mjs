@@ -235,7 +235,6 @@ export async function createWorkspace({bridge, element, frame, openInspector = n
     const session = {command: false, dev: null};
     // Asked once: whether this page may reach the inspectors does not change while its connection lives.
     let access = null;
-    const inspectorAccess = readInspectorAccess(bridge).then(result => { access = result; return result; });
 
     const style = page.createElement('style');
     style.textContent = styles;
@@ -321,6 +320,11 @@ export async function createWorkspace({bridge, element, frame, openInspector = n
         },
     });
 
+    const inspectorAccess = readInspectorAccess(bridge).then(result => {
+        access = result;
+        menu.refresh();  // a submenu opened while C++ was asked still says it is checking
+        return result;
+    });
     // A long press that opened the menu ends with a click: it does not also toggle the terminal.
     button.addEventListener('click', () => { if (!menu.consumeClick()) apply('toggle'); });
     closeButton.addEventListener('click', () => apply('close'));

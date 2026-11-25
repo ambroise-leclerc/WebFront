@@ -102,7 +102,8 @@ let menus = 0;
 /**
  * The menu of the tab `button`. `entries` are {id, label, hint?, children?, reason?()}: an entry with children opens a
  * submenu, the others call `activate(id)`; `reason()` gives why an entry is unavailable ('' when it is available), read
- * each time the menu or the submenu opens. `menu.consumeClick()` tells the tab's click handler that a long press opened
+ * each time the menu or the submenu opens, and again by `menu.refresh()` when what it depends on changes while a panel
+ * is open. `menu.consumeClick()` tells the tab's click handler that a long press opened
  * the menu, so that the click that ends it does not also toggle the terminal.
  */
 export function createTabMenu({button, entries, activate}) {
@@ -151,19 +152,32 @@ export function createTabMenu({button, entries, activate}) {
                 item.append(hint);
                 if (entry.keys) item.setAttribute('aria-keyshortcuts', entry.keys);
             }
-            const reason = entry.children ? '' : reasonOf(entry);
+            return item;
+        });
+        menu.append(...items);
+        panel.append(menu, note);
+        const level = {panel, menu, note, items, entries: list, parent: parentItem};
+        applyReasons(level);
+        return level;
+    }
+
+    /** Greys the entries of a panel that are unavailable, with their reason, and enables the others. */
+    function applyReasons({note, items, entries: list}) {
+        const reasons = [];
+        list.forEach((entry, index) => {
+            const item = items[index], reason = entry.children ? '' : reasonOf(entry);
             if (reason) {
                 item.setAttribute('aria-disabled', 'true');
                 item.setAttribute('aria-describedby', note.id);
                 item.title = reason;
                 if (!reasons.includes(reason)) reasons.push(reason);
+            } else {
+                item.removeAttribute('aria-disabled');
+                item.removeAttribute('aria-describedby');
+                item.removeAttribute('title');
             }
-            return item;
         });
         note.textContent = reasons.join(' ');
-        menu.append(...items);
-        panel.append(menu, note);
-        return {panel, menu, items, entries: list, parent: parentItem};
     }
 
     function place(level, anchor) {
@@ -358,6 +372,8 @@ export function createTabMenu({button, entries, activate}) {
 
     return {
         open, close,
+        /** Reads the reasons again for the panels that are open, which keep their place and their focus. */
+        refresh() { levels.forEach(applyReasons); },
         get isOpen() { return isOpen(); },
         /** The panels shown, the root first. */
         get panels() { return levels.map(level => level.panel); },

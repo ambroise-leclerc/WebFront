@@ -1,7 +1,8 @@
 // Specs of the developer page's layout (workspace.mjs): what counts as an existing interface, the states of the display,
 // and the place of the floating terminal window. The page itself is checked in test/web/developer-specs.mjs.
 import {hasInterface, previewDirectory, State, initialState, nextState, clampRect, defaultRect, keyboardRect, minimumSize, step,
-    isToggleKey, Status, tabStatus, statusText, defaultShortcut, shortcutText, readShortcut, parsePlace, formatPlace, readPlace, placeStore, placePath} from '../../../js/developer/environment/workspace.mjs';
+    isToggleKey, Status, tabStatus, statusText, defaultShortcut, shortcutText, readShortcut, parsePlace, formatPlace, readPlace, placeStore, placePath,
+    createWorkspace} from '../../../js/developer/environment/workspace.mjs';
 import {publish} from '../../../js/developer/environment/io.mjs';
 import {inspectorAccess, readInspectorAccess, accessReasons, containersFunction, placeMenu, createTabMenu, longPress, inspectorMenus,
     menuStyles} from '../../../js/developer/environment/menu.mjs';
@@ -370,6 +371,24 @@ describe('The developer page layout', () => {
                 } finally { field.remove(); }
             });
 
+            it('reads the reasons again on refresh, in the panels already open', () => {
+                button.dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true}));
+                key(items(0)[1], {key: 'ArrowRight'});
+                const [panel, first] = [menu.panels[1], items(1)[0]];
+                expect(first.getAttribute('aria-disabled')).toBe('true');
+                reason = '';
+                menu.refresh();
+                expect(menu.panels[1]).toBe(panel);
+                expect(document.activeElement).toBe(first);
+                expect(items(1).some(item => item.hasAttribute('aria-disabled') || item.hasAttribute('aria-describedby') || item.title)).toBeFalse();
+                expect(panel.querySelector('.webfront-menu-reason').textContent).toBe('');
+                reason = 'Gone.';
+                menu.refresh();
+                expect(items(1).every(item => item.getAttribute('aria-disabled') === 'true' && item.title === 'Gone.')).toBeTrue();
+                expect(panel.querySelector('.webfront-menu-reason').textContent).toBe('Gone.');
+                expect(items(0).some(item => item.hasAttribute('aria-disabled'))).toBeFalse();  // the groups stay available
+            });
+
             it('takes no key while it is closed', () => {
                 const seen = [];
                 const listener = event => seen.push(event.key);
@@ -404,6 +423,36 @@ describe('The developer page layout', () => {
                     expect(menu.isOpen).toBeFalse();
                 } finally { jasmine.clock().uninstall(); }
             });
+        });
+
+        it('updates a submenu opened before C++ said which containers reach the inspectors', async () => {
+            const {bridge: projectBridge} = memoryBridge();
+            let answer;
+            const asked = new Promise(resolve => { answer = resolve; });
+            const bridge = {cppFunction: name => name === containersFunction ? () => asked : projectBridge.cppFunction(name)};
+            const element = document.createElement('div'), frame = document.createElement('iframe');
+            frame.hidden = true;
+            document.body.append(element, frame);
+            const workspace = await createWorkspace({bridge, element, frame, openInspector: () => {}});
+            const press = (target, init) => target.dispatchEvent(new KeyboardEvent('keydown', {bubbles: true, cancelable: true, ...init}));
+            try {
+                workspace.menu.open();
+                const [, cpp] = workspace.menu.panels[0].querySelectorAll('[role=menuitem]');
+                press(cpp, {key: 'ArrowRight'});
+                const submenu = workspace.menu.panels[1], entries = [...submenu.querySelectorAll('[role=menuitem]')];
+                expect(submenu.querySelector('.webfront-menu-reason').textContent).toBe(accessReasons.checking);
+                expect(entries.every(entry => entry.getAttribute('aria-disabled') === 'true')).toBeTrue();
+                answer([false, true, false]);
+                await workspace.inspectorAccess;
+                expect(workspace.menu.panels[1]).toBe(submenu);
+                expect(submenu.querySelector('.webfront-menu-reason').textContent).toBe('');
+                expect(entries.some(entry => entry.hasAttribute('aria-disabled'))).toBeFalse();
+            } finally {
+                workspace.menu.close({focus: false});
+                [workspace.panel, workspace.button, frame].forEach(node => node.remove());
+                document.head.querySelectorAll('style').forEach(style => { if (style.textContent.includes('.webfront-terminal-toggle')) style.remove(); });
+                document.documentElement.removeAttribute('data-webfront-workspace');
+            }
         });
     });
 });
