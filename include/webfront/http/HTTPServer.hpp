@@ -265,6 +265,7 @@ struct Response : Headers {
         ok                    = 200,
         accepted              = 202,
         partialContent        = 206,
+        movedPermanently      = 301,
         badRequest            = 400,
         unauthorized          = 401,
         forbidden             = 403,
@@ -323,12 +324,13 @@ private:
     mutable std::string httpStatus;
 
     [[nodiscard]] static std::string toString(StatusCode code) {
-        static constexpr std::array<std::pair<StatusCode, std::string_view>, 18> names{
+        static constexpr std::array<std::pair<StatusCode, std::string_view>, 19> names{
             {{continue_, "Continue"},
              {switchingProtocols, "Switching Protocols"},
              {ok, "OK"},
              {accepted, "Accepted"},
              {partialContent, "Partial Content"},
+             {movedPermanently, "Moved Permanently"},
              {badRequest, "Bad Request"},
              {unauthorized, "Unauthorized"},
              {forbidden, "Forbidden"},
@@ -486,10 +488,8 @@ public:
         return {};
     }
 
-private:
-    std::shared_ptr<State> state = std::make_shared<State>();
-
-    static bool validPrefix(std::string_view prefix) {
+    /// True for an absolute path ending with '/', other than "/", without "..", "//", "/./", control or reserved characters.
+    [[nodiscard]] static bool validPrefix(std::string_view prefix) {
         if (prefix.size() < 2 || !prefix.starts_with('/') || !prefix.ends_with('/'))
             return false;
         if (prefix.find("..") != std::string_view::npos || prefix.find("//") != std::string_view::npos || prefix.find("/./") != std::string_view::npos)
@@ -498,7 +498,45 @@ private:
             return static_cast<unsigned char>(c) <= 32 || c == 127 || c == '?' || c == '#' || c == '%' || c == '\\';
         });
     }
+
+private:
+    std::shared_ptr<State> state = std::make_shared<State>();
 };
+
+/// What the resolver of a mount answers for a segment (see Server::mount).
+struct MountAnswer {
+    /// The routes of the space that the segment names, consulted before the server's own; null when it has none.
+    std::shared_ptr<const RouteTable> routes{};
+    /// Set, the request is answered with this reply, and nothing of the space is served (unknown space, full server...).
+    std::optional<RouteReply> refusal{};
+    /// What the resolver resolved, handed unchanged to the upgrade handler of a WebSocket of this request (UpgradeSpace):
+    /// the connection then joins that very space, not whichever has the segment once the upgrade completes.
+    std::shared_ptr<void> target{};
+};
+
+/// The space of a connection upgraded to a WebSocket, as its mount resolved it for the upgrade request; empty outside mounts.
+struct UpgradeSpace {
+    std::string           path;    ///< The path of the mount and segment, "/s/abc/".
+    std::shared_ptr<void> target;  ///< MountAnswer::target.
+};
+
+/// Called on the server context with the decoded segment that follows the prefix of a mount: `/s/abc/x` gives "abc".
+using MountResolver = std::function<MountAnswer(std::string_view segment)>;
+
+/// A reply with a short text body, for a refusal for instance.
+[[nodiscard]] inline RouteReply textReply(Response::StatusCode status, std::string text, std::string contentType = "text/plain; charset=utf-8") {
+    RouteReply reply;
+    reply.status = status;
+    reply.headers.emplace_back("Content-Type", std::move(contentType));
+    reply.contentLength = text.size();
+    reply.body          = [text = std::move(text), sent = std::size_t{0}](std::span<char> out) mutable {
+        const auto count = std::min(out.size(), text.size() - sent);
+        std::copy_n(text.data() + sent, count, out.data());
+        sent += count;
+        return count;
+    };
+    return reply;
+}
 
 namespace routing {
 
@@ -642,6 +680,35 @@ inline std::optional<std::pair<std::string, std::string>> splitTarget(const std:
         }))
         return {};
     return std::pair{collapseSegments(decoded), mark == std::string::npos ? std::string{} : uri.substr(mark + 1)};
+}
+
+/// The rule of a segment that names something under a mount (an application space): not empty, not ".", without "..",
+/// '/', '\\' or a control character. A path whose decoded segment breaks it is never served (splitTarget refuses "..").
+[[nodiscard]] inline bool validSegment(std::string_view segment) {
+    if (segment.empty() || segment == "." || segment.find("..") != std::string_view::npos)
+        return false;
+    return std::none_of(segment.begin(), segment.end(), [](char c) {
+        return c == '/' || c == '\\' || static_cast<unsigned char>(c) < 32 || c == 127;
+    });
+}
+
+/// The segments of a path as it came, each percent-decoded on its own, without the empty and "." ones (as collapseSegments
+/// drops them) unless `keepAll`: "/s/a%2Fb/./c" gives "s", "a/b" and "c", where decoding the whole path first would give
+/// four segments; with `keepAll`, "", "s", "a/b", "." and "c".
+inline std::vector<std::string> decodedSegments(std::string_view raw, bool keepAll = false) {
+    std::vector<std::string> segments;
+    for (std::size_t start = 0; start <= raw.size();) {
+#ifdef _WIN32
+        const auto end = std::min(raw.find_first_of("/\\", start), raw.size());  // a separator for the providers there
+#else
+        const auto end = std::min(raw.find('/', start), raw.size());
+#endif
+        auto decoded = uri::decode(raw.substr(start, end - start), false);
+        if (keepAll || (!decoded.empty() && decoded != "."))
+            segments.push_back(std::move(decoded));
+        start = end + 1;
+    }
+    return segments;
 }
 
 /// Refuses what could split a response or contradict the framing the server owns.
@@ -1080,9 +1147,35 @@ public:
         return routes.add(std::move(prefix), std::move(handler), std::move(options));
     }
 
-    /// Called, on the context's thread, with the socket of a connection upgraded to a WebSocket.
-    void onUpgrade(std::function<void(typename Net::Socket&&)>&& handler) {
-        upgradeHandler = std::move(handler);
+    /// Called, on the context's thread, with the socket of a connection upgraded to a WebSocket. A handler that also takes a
+    /// `const UpgradeSpace&` receives the space of the upgrade, as its mount resolved it; empty outside the mounts.
+    template <typename Handler>
+    void onUpgrade(Handler&& handler) {
+        if constexpr (std::invocable<Handler&, typename Net::Socket&&, const UpgradeSpace&>)
+            upgradeHandler = std::forward<Handler>(handler);
+        else
+            upgradeHandler = [forward = std::forward<Handler>(handler)](typename Net::Socket&& socket, const UpgradeSpace&) mutable {
+                forward(std::move(socket));
+            };
+    }
+
+    /** @brief Serves the paths under `prefix` (absolute, ending with '/', as a route prefix) as a family of spaces: a request
+     * for `prefix + segment + "/" + rest`, a WebSocket upgrade included, belongs to the space `segment`. `resolver` is
+     * called on the server context with the decoded segment of each such request; unless it refuses, the request is
+     * served as `"/" + rest` would be at the root (the space's routes, then the server's, then the file providers), and an
+     * upgrade hands its socket to the onUpgrade handler with the space's path. `prefix + segment`, without the slash that
+     * relative URLs need, is redirected to it. Prefixes of two mounts never overlap (std::invalid_argument). Thread-safe.
+     */
+    void mount(std::string prefix, MountResolver resolver) {
+        if (!resolver)
+            throw std::invalid_argument("A mount needs a resolver");
+        if (!RouteTable::validPrefix(prefix))
+            throw std::invalid_argument("Invalid mount prefix '" + prefix + "'");
+        std::scoped_lock lock{mountsMutex};
+        for (const auto& other : mounts)
+            if (other.first.starts_with(prefix) || prefix.starts_with(other.first))
+                throw std::invalid_argument("Mount prefix '" + prefix + "' collides with '" + other.first + "'");
+        mounts.emplace_back(std::move(prefix), std::make_shared<const MountResolver>(std::move(resolver)));
     }
 
     [[nodiscard]] auto fallbackDecodeStatistics() const {
@@ -1104,9 +1197,137 @@ private:
     RouteTable                      routes;
     // Route handlers may block for as long as they like: they get their own threads, so that the files of the
     // providers (WebFront.js, pages) keep flowing for the other browsers.
-    BlockingWorker                              routeWorker{4};
-    BlockingWorker                              fileWorker{2};
-    std::function<void(typename Net::Socket&&)> upgradeHandler;
+    BlockingWorker                                                            routeWorker{4};
+    BlockingWorker                                                            fileWorker{2};
+    std::function<void(typename Net::Socket&&, const UpgradeSpace&)>          upgradeHandler;
+    mutable std::mutex                                                        mountsMutex;  // guards mounts, added from any thread
+    std::vector<std::pair<std::string, std::shared_ptr<const MountResolver>>> mounts;
+
+    /// A request under a mount: the reply that answers it instead (refusal, redirection), or what it is served as.
+    struct Mounted {
+        std::optional<RouteReply>         reply;
+        std::string                       space;   ///< The path of the mount and segment, "/s/abc/".
+        std::string                       logged;  ///< What the logs show of it: the segment, a session's secret, masked ("/s/*").
+        std::string                       uri;     ///< The target within the space, encoded again: "/rest?query".
+        std::shared_ptr<const RouteTable> routes;
+        std::shared_ptr<void>             target;  ///< MountAnswer::target.
+    };
+
+    std::optional<Mounted> resolveMount(const Request& request) const {
+        // The segment is cut in the path as it came, each segment decoded on its own: an encoded separator ("%2F") stays
+        // inside its segment, where it names no space, instead of becoming a boundary that would select another one.
+        const auto                           raw = std::string_view(request.uri).substr(0, request.uri.find('?'));
+        std::vector<std::string>             segments;
+        std::string                          prefix;
+        std::shared_ptr<const MountResolver> resolver;
+        {
+            std::scoped_lock lock{mountsMutex};
+            if (mounts.empty())
+                return {};  // an application without mounts pays nothing more per request
+            segments = routing::decodedSegments(raw);
+            // A target at or under a prefix, read either way (whole or segment by segment), and even one that is not a safe
+            // path, belongs to the mount: nothing there falls through to the application, whose upgrade ignores the path.
+            // The prefix's name without its slash ("/s", or "/WebFront.js" for "/WebFront.js/") is not under it.
+            const auto decoded = routing::collapseSegments(uri::decode(raw, false));
+            for (const auto& [candidate, found] : mounts) {
+                const auto own = routing::decodedSegments(candidate);
+                if (decoded.starts_with(candidate) || (segments.size() > own.size() && std::equal(own.begin(), own.end(), segments.begin()))) {
+                    prefix   = candidate;
+                    resolver = found;
+                }
+            }
+        }
+        if (!resolver)
+            return {};
+        Mounted    mounted;
+        const auto notFound = [&mounted] {
+            mounted.reply = textReply(Response::notFound, "Not Found\n");
+            return mounted;
+        };
+        const auto split = routing::splitTarget(request.uri);
+        if (!split)
+            return notFound();  // not a safe path (a control character, "..")
+        const auto& query = split->second;
+        // The prefix is read as the root reads a path (its empty and "." segments dropped), but the segment is the very piece
+        // that follows it: an empty or "." one names no space, where normalizing would let the next piece take its place.
+        const auto  prefixSegments = routing::decodedSegments(prefix);
+        const auto  pieces         = routing::decodedSegments(raw, true);
+        std::size_t index = 0, matched = 0;
+        for (; index < pieces.size() && matched < prefixSegments.size(); ++index) {
+            if (pieces[index].empty() || pieces[index] == ".")
+                continue;
+            if (pieces[index] != prefixSegments[matched])
+                return notFound();  // under the prefix once decoded, but not segment by segment
+            ++matched;
+        }
+        if (matched < prefixSegments.size() || index >= pieces.size())
+            return notFound();  // the prefix alone
+        const auto& segment = pieces[index];
+        if (!routing::validSegment(segment))
+            return notFound();
+        std::vector<std::string_view> within;  // the segments after the space's, normalized as at the root
+        for (auto next = index + 1; next < pieces.size(); ++next)
+            if (!pieces[next].empty() && pieces[next] != ".")
+                within.push_back(pieces[next]);
+        const bool trailingSlash = raw.ends_with('/');
+        if (index + 1 == pieces.size()) {
+            // The relative URLs of a page resolve against its directory: "/s/abc" must become "/s/abc/".
+            if (request.isUpgradeRequest("websocket"))
+                return notFound();
+            mounted.reply = textReply(Response::movedPermanently, "");
+            mounted.reply->headers.emplace_back("Location", prefix + uri::encode(segment) + "/" + (query.empty() ? "" : "?" + query));
+            return mounted;
+        }
+        std::string rest = "/";
+        for (std::size_t part = 0; part < within.size(); ++part)
+            rest += uri::encode(within[part]) + (part + 1 < within.size() || trailingSlash ? "/" : "");
+        MountAnswer answer;
+        try {
+            answer = (*resolver)(segment);
+        } catch (const std::exception&) {
+            // The message may quote the segment, which can be a session's secret.
+            log::warn("The resolver of the mount {} failed (the error is not logged: it may quote the segment)", prefix);
+            answer.refusal = textReply(Response::internalServerError, "Internal Server Error\n");
+        } catch (...) {
+            log::warn("The resolver of the mount {} failed with an exception which is not a std::exception", prefix);
+            answer.refusal = textReply(Response::internalServerError, "Internal Server Error\n");
+        }
+        if (answer.refusal) {
+            mounted.reply = std::move(answer.refusal);
+            return mounted;
+        }
+        mounted.space  = prefix + segment + "/";
+        mounted.logged = prefix + "*";
+        mounted.uri    = rest + (query.empty() ? "" : "?" + query);
+        mounted.routes = std::move(answer.routes);
+        mounted.target = std::move(answer.target);
+        return mounted;
+    }
+
+    // Sends a reply the server did not get from a route (a mount's refusal or redirection), then closes the connection.
+    networking::Task sendReply(typename Net::Socket& socket, bool head, RouteReply reply) {
+        Response response;
+        try {
+            routing::validateReply(reply);
+            response.statusCode = reply.status;
+            for (auto& [name, value] : reply.headers)
+                response.headers.emplace_back(name, value);
+            if (reply.contentLength)
+                response.headers.emplace_back("Content-Length", std::to_string(*reply.contentLength));
+            else if (!reply.body)
+                response.headers.emplace_back("Content-Length", "0");
+        } catch (const std::exception& error) {
+            log::warn("A mount's reply is invalid: {}", error.what());
+            response   = Response::getStatusResponse(Response::internalServerError);
+            reply.body = nullptr;
+        }
+        if (head)
+            response.content.clear();
+        co_await Net::Send(socket, response.toBuffers<Net>());
+        if (!head && reply.body)
+            co_await streamBody(routeWorker, socket, std::move(reply.body), reply.contentLength, "Mount reply", true);
+        co_await closeResponse(socket);
+    }
 
     void configureTransport(std::shared_ptr<tls::Credentials> credentials) {
         if constexpr (networking::secureTransport<Net>) {
@@ -1196,13 +1417,16 @@ private:
 
     // A request, other than a WebSocket upgrade, under a registered prefix. Every method under a prefix
     // belongs to the route (405 for those it does not serve): its URLs never fall through to the providers.
-    std::optional<RouteMatch> matchRoute(const Request& request) const {
+    // The routes of a space (`own`) come before the server's.
+    std::optional<RouteMatch> matchRoute(const Request& request, const RouteTable* own = nullptr) const {
         if (request.isUpgradeRequest("websocket"))
             return {};
         auto split = routing::splitTarget(request.uri);
         if (!split)
             return {};
-        auto route = routes.find(split->first);
+        auto route = own ? own->find(split->first) : nullptr;
+        if (!route)
+            route = routes.find(split->first);
         if (!route)
             return {};
         return RouteMatch{std::move(route), std::move(split->first), std::move(split->second)};
@@ -1397,6 +1621,7 @@ private:
         bool                                                        head           = false;
         bool                                                        servicesTarget = false;
         Response                                                    response;
+        UpgradeSpace                                                space;  // the space resolved for a request under a mount
         try {
             std::array<char, Policy::receptionBufferSize> buffer;
             std::string_view                              rest;  // received after the headers, still in `buffer`: the start of a body
@@ -1409,14 +1634,30 @@ private:
                 if (request.completed())
                     rest = std::string_view(stop, end);
             }
-            auto match = matchRoute(request);
+            std::shared_ptr<const RouteTable> spaceRoutes;
+            std::string                       within;  // the space of a request under a mount, as the logs show it
+            if (auto mounted = resolveMount(request)) {
+                if (mounted->reply) {
+                    log::info("Received request {} under a mount: answered by its resolver ({})",
+                              request.getMethodName(),
+                              static_cast<int>(mounted->reply->status));
+                    co_await sendReply(socket, request.method == Request::Method::Head, std::move(*mounted->reply));
+                    co_return;
+                }
+                space       = UpgradeSpace{std::move(mounted->space), std::move(mounted->target)};
+                within      = std::move(mounted->logged);
+                spaceRoutes = std::move(mounted->routes);
+                request.uri = std::move(mounted->uri);
+            }
+            auto match = matchRoute(request, spaceRoutes.get());
             if (match && match->route->secretPath)
-                log::info("Received request {} on {}...", request.getMethodName(), match->route->prefix);  // the rest is a secret
+                log::info("Received request {} on {}{}...", request.getMethodName(), within, match->route->prefix);  // the rest is a secret
             else if (routing::mentionsServices(request.uri))
                 log::info("Received request {} on a services path (not logged)", request.getMethodName());
             else
-                log::info("Received request {} on {}",
+                log::info("Received request {} on {}{}",
                           request.getMethodName(),
+                          within,
                           std::string_view(request.uri).substr(0, request.uri.find('?')));  // the query may quote a URL
             if (match) {
                 co_await serveRoute(socket, std::move(request), std::move(*match), rest, buffer);
@@ -1485,7 +1726,7 @@ private:
         if (response.statusCode != Response::switchingProtocols || tasks.stopRequested())
             co_await closeResponse(socket);  // a stopped server hands nothing over: its drain would never end
         else if (upgradeHandler)
-            upgradeHandler(std::move(socket));
+            upgradeHandler(std::move(socket), space);
     }
 };
 

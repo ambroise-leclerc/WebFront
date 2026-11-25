@@ -12,6 +12,7 @@
 #include "BridgeError.hpp"
 #include "Broadcast.hpp"
 #include "DeferredCalls.hpp"
+#include "details/SpaceState.hpp"
 #include "dom/Document.hpp"
 #include "frontend/Frontend.hpp"
 #include "http/HTTPServer.hpp"
@@ -57,6 +58,9 @@ namespace webfront {
 namespace pty::detail {
 struct PageRegistration;
 }  // namespace pty::detail
+
+template <typename App>
+class BasicSpace;
 
 inline constexpr std::string_view version = "1.2.0";
 
@@ -309,7 +313,9 @@ auto makeDeferredHandler(Function&& function) {
                     state->second);
             },
             state->first);
-        return networking::ex::let_value(networking::ex::just(std::move(state)), [sender = std::move(sender)](auto&) mutable {
+        // The callable is kept with the state until the sender completes: its coroutine refers to the callable's captures,
+        // which must outlive a registration released meanwhile (a space destroyed while the call runs).
+        return networking::ex::let_value(networking::ex::just(std::move(state), callable), [sender = std::move(sender)](auto&, auto&) mutable {
             return std::move(sender);
         });
     };
@@ -728,12 +734,26 @@ template <typename NetProvider,
           http::BuffersPolicyType Policy   = http::DefaultBuffersPolicy,
           frontend::FrontendType  Frontend = frontend::DefaultFrontend>
 class BasicWF {
+    template <typename>
+    friend class BasicSpace;
+
 public:
     using Net              = NetProvider;
     using BufferPolicy     = Policy;
     using FrontendProvider = Frontend;
     using UI               = BasicUI<BasicWF<Net, Filesystem, Policy, Frontend>>;
+    /// The part of the application that one user's pages see when it serves several (see spaces()).
+    using Space = BasicSpace<BasicWF>;
+    /// Decides, for a segment under a family's prefix that has no space, to create it (`Space{app, prefix, segment}`) and
+    /// return nothing, or to refuse it with the reply returned (404 for an unknown session, 503 for a full server...).
+    using SpaceResolver = std::function<std::optional<http::RouteReply>(std::string_view segment)>;
 
+private:
+    using CppHandler        = std::function<void(std::span<const std::byte>, WebLink<Net, Policy>&, msg::CallId, UI)>;
+    using SpaceState        = detail::SpaceState<UI, CppHandler>;
+    using SpaceRegistryType = detail::SpaceRegistry<SpaceState>;
+
+public:
     // Newcomer-friendly defaults: loopback address, port 9002 (a free one when it is taken), no local document root.
     BasicWF() : BasicWF(WebFrontConfig{}) { }
 
@@ -753,11 +773,18 @@ private:
           ptyPagesAllowed(config.allowPtyPages),
           idsCounter(0) {
         // Links are created on the server thread, outside the lock: identifiers are only assigned here.
-        httpServer.onUpgrade([this](typename Net::Socket&& socket) {
+        httpServer.onUpgrade([this](typename Net::Socket&& socket, const http::UpgradeSpace& resolved) {
             WebLinkId         id{};
             WebLinkGeneration generation{};
+            // The very space resolved for the upgrade request, never another that took its segment since: one destroyed
+            // meanwhile (checked below, under the lock its destruction takes) leaves the socket to close.
+            auto space = std::static_pointer_cast<SpaceState>(resolved.target);
+            if (!resolved.path.empty() && !space)
+                return;
             {
                 std::scoped_lock lock{linksMutex};
+                if (space && !space->alive)
+                    return;
                 while (webLinks.contains(idsCounter))
                     ++idsCounter;
                 id         = idsCounter++;
@@ -781,6 +808,11 @@ private:
                 false);
             {
                 std::scoped_lock lock{linksMutex};
+                if (space) {
+                    if (!space->alive)
+                        return;  // destroyed meanwhile: the link, never started, closes the socket
+                    ++space->pages;
+                }
                 webLinks.emplace(id,
                                  Connection{.link           = link,
                                             .generation     = generation,
@@ -789,7 +821,8 @@ private:
                                             .stage          = Connection::Stage::handshaking,
                                             .deferred       = {},
                                             .viewAssociated = false,
-                                            .loopbackPeer   = loopbackPeer});
+                                            .loopbackPeer   = loopbackPeer,
+                                            .space          = std::move(space)});
             }
             link->start();  // registered first: every event it dispatches finds it
         });
@@ -818,6 +851,11 @@ public:
     }
 
     ~BasicWF() noexcept {
+        {
+            // A space destroyed after its application only releases what it holds.
+            std::scoped_lock lock{spaceRegistry->mutex};
+            spaceRegistry->attached = false;
+        }
         stopAndJoinServer();
         // Coroutine cleanup may use its UI, so links stay alive through the join.
         httpServer.drainUntilJoined();
@@ -859,6 +897,42 @@ public:
      */
     [[nodiscard]] http::RouteTable::Registration addRoute(std::string prefix, http::RouteHandler handler, http::RouteOptions options) {
         return httpServer.addRoute(std::move(prefix), std::move(handler), std::move(options));
+    }
+
+    /** @brief Declares a family of spaces under `prefix` (absolute, ending with '/', such as "/s/"): an HTTP request or a
+     * WebSocket whose path starts with `prefix + segment + "/"` belongs to the space `segment` (see BasicSpace), and is
+     * served as its path without that start would be at the root: a page with relative URLs works at `/s/abc/` as at `/`.
+     *
+     * `resolver` is called on the server context for a segment that has no space: it creates the space, which the
+     * application owns (`std::make_unique<Space>(app, prefix, segment)`), and returns nothing, or returns the reply that
+     * refuses it, which reaches the browser; returning nothing without creating the space answers 404. A space may also be
+     * created beforehand, outside the resolver. Without a call to spaces(), nothing changes for the application. Throws
+     * std::invalid_argument for a malformed prefix, a prefix that overlaps another family's, or an empty resolver.
+     * Thread-safe; declare the families before the pages can request them.
+     */
+    void spaces(std::string prefix, SpaceResolver resolver) {
+        if (!resolver)
+            throw std::invalid_argument("A family of spaces needs a resolver");
+        httpServer.mount(prefix,
+                         [this, prefix, resolve = std::make_shared<const SpaceResolver>(std::move(resolver))](std::string_view segment) -> http::MountAnswer {
+                             const auto path   = prefix + std::string(segment) + "/";
+                             const auto routes = [&]() -> std::optional<http::MountAnswer> {
+                                 if (const auto found = spaceRegistry->find(path))
+                                     return http::MountAnswer{.routes = found->routeTable(), .refusal = {}, .target = found};
+                                 return std::nullopt;
+                             };
+                             if (auto existing = routes())
+                                 return std::move(*existing);
+                             if (!detail::validSpaceSegment(segment))
+                                 return {.routes = nullptr, .refusal = http::textReply(http::Response::notFound, "Not Found\n"), .target = nullptr};
+                             if (auto refusal = (*resolve)(segment))
+                                 return {.routes = nullptr, .refusal = std::move(refusal), .target = nullptr};
+                             if (auto created = routes())
+                                 return std::move(*created);
+                             return {.routes = nullptr, .refusal = http::textReply(http::Response::notFound, "Not Found\n"), .target = nullptr};
+                         });
+        std::scoped_lock lock{spaceRegistry->mutex};
+        spaceRegistry->families.push_back(std::move(prefix));
     }
 
     /** @brief Registers a route whose URLs are read grants (UI::grantRead): `handler` is called only for a request that
@@ -971,13 +1045,14 @@ private:
     /// Returns once `call` is queued or kept for every browser: a call that follows it (same thread, or synchronized
     /// after it) comes after it. Overlapping calls are not ordered: holding linksMutex while writing would not order
     /// them either, and would hold a WebFront lock while the write starts.
-    void sendToStartedLinks(const detail::BroadcastCall<Net>& call) {
+    /// With `only`, the browsers of that space alone.
+    void sendToStartedLinks(const detail::BroadcastCall<Net>& call, const SpaceState* only = nullptr) {
         std::vector<std::shared_ptr<WebLink<Net, Policy>>> started;
         {
             std::scoped_lock lock{linksMutex};
             started.reserve(webLinks.size());
             for (auto& [id, connection] : webLinks) {
-                if (connection.closed)
+                if (connection.closed || (only && connection.space.get() != only))
                     continue;
                 if (connection.stage == Connection::Stage::started)
                     started.push_back(connection.link);
@@ -1081,15 +1156,7 @@ public:
     /// A starting browser that is skipped misses the call: send states that every browser must follow with broadcast().
     template <std::invocable<UI> Function>
     void forEachUI(Function&& function) {
-        std::vector<UI> started;
-        {
-            std::scoped_lock lock{linksMutex};
-            for (const auto& [id, connection] : webLinks)
-                if (!connection.closed && connection.stage == Connection::Stage::started)
-                    started.emplace_back(*this, id, connection.generation);
-        }
-        for (const auto& ui : started)
-            std::invoke(function, ui);
+        forEachUIIn(nullptr, std::forward<Function>(function));
     }
 
     /// A function object calling `functionName` on every started browser, fire-and-forget, from any thread; see
@@ -1189,20 +1256,7 @@ private:
 
     template <typename R, typename... Args>
     bool registerCppFunction(std::string functionName, auto&& function) {
-        if constexpr (detail::deferred_result<R>)
-            return registerDeferred<R, Args...>(std::move(functionName), std::forward<decltype(function)>(function));
-        else if constexpr (detail::takes_caller<UI, Args...>::value)
-            return registerWithCaller<R, Args...>(std::move(functionName), std::forward<decltype(function)>(function));
-        else {
-            auto callable  = detail::makeCppFunctionHandler<Policy, R, Args...>(std::forward<decltype(function)>(function));
-            auto responder = detail::makeCppFunctionResponder<Net, Policy, R>(std::move(callable));
-            return cppFunctions
-                .try_emplace(std::move(functionName),
-                             [responder](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI) mutable {
-                                 responder(data, link, callId);
-                             })
-                .second;
-        }
+        return cppFunctions.try_emplace(std::move(functionName), makeCppHandler<R, Args...>(std::forward<decltype(function)>(function))).second;
     }
 
 public:
@@ -1591,6 +1645,96 @@ private:
             serverThread.join();
     }
 
+    /// forEachUI, restricted to the browsers of the space `only` when it is given.
+    template <typename Function>
+    void forEachUIIn(const SpaceState* only, Function&& function) {
+        std::vector<UI> started;
+        {
+            std::scoped_lock lock{linksMutex};
+            for (const auto& [id, connection] : webLinks)
+                if (!connection.closed && connection.stage == Connection::Stage::started && (!only || connection.space.get() == only))
+                    started.emplace_back(*this, id, connection.generation);
+        }
+        for (const auto& ui : started)
+            std::invoke(function, ui);
+    }
+
+    [[nodiscard]] std::size_t browsersIn(const SpaceState* space) const {
+        std::scoped_lock lock{linksMutex};
+        return static_cast<std::size_t>(std::ranges::count_if(webLinks, [space](const auto& entry) {
+            return !entry.second.closed && entry.second.space.get() == space;
+        }));
+    }
+
+    /// Registers the space `segment` of the family `prefix` (BasicSpace's constructor).
+    std::shared_ptr<SpaceState> attachSpace(std::string_view prefix, std::string_view segment) {
+        if (!detail::validSpaceSegment(segment))
+            throw std::invalid_argument("'" + std::string(segment)
+                                        + "' cannot name a space: it is empty or '.', or holds '..', '/', '\\' or a control character");
+        std::scoped_lock lock{spaceRegistry->mutex};
+        if (std::ranges::find(spaceRegistry->families, prefix) == spaceRegistry->families.end())
+            throw std::invalid_argument("No family of spaces was declared with the prefix '" + std::string(prefix) + "': call spaces() first");
+        auto path = std::string(prefix) + std::string(segment) + "/";
+        if (spaceRegistry->spaces.contains(path))
+            throw std::logic_error("The space '" + path + "' exists already");
+        auto state = std::make_shared<SpaceState>(path, std::string(segment));
+        spaceRegistry->spaces.emplace(std::move(path), state);
+        return state;
+    }
+
+    /// Closes the pages of a space being destroyed, already removed from the registry, and releases what it registered.
+    /// Its pages are cut at once (no call reaches a function any more, no broadcast reaches them); their connections are
+    /// released on the server context, where the application's closed handlers are told.
+    void detachSpace(const std::shared_ptr<SpaceState>& space) {
+        std::vector<std::pair<WebLinkId, WebLinkGeneration>> pages;
+        std::vector<std::shared_ptr<WebLink<Net, Policy>>>   links;
+        {
+            std::scoped_lock lock{linksMutex};
+            space->alive = false;
+            for (auto& [id, connection] : webLinks)
+                if (connection.space == space && !connection.closed) {
+                    connection.closed = true;
+                    connection.deferred.clear();
+                    pages.emplace_back(id, connection.generation);
+                    links.push_back(connection.link);
+                }
+        }
+        // Route handlers run on the server's workers, not on this thread: the space waits for those running, and none starts.
+        space->routeGuard->retire();
+        space->release();
+        for (const auto& link : links)
+            link->stop();  // a stopped link reports no closure: closeSpacePages does what the closed event would
+        if (!pages.empty())
+            static_cast<void>(httpServer.startTask(closeSpacePages(std::move(pages))));  // refused during shutdown, which releases them
+    }
+
+    Task closeSpacePages(std::vector<std::pair<WebLinkId, WebLinkGeneration>> pages) {
+        for (const auto& [id, generation] : pages) {
+            std::shared_ptr<detail::DeferredCalls> stoppedCalls;
+            {
+                std::scoped_lock lock{linksMutex};
+                const auto       found = webLinks.find(id);
+                if (found == webLinks.end() || found->second.generation != generation)
+                    continue;
+                stoppedCalls = found->second.deferredCalls;
+            }
+            stoppedCalls->close();
+            readBinding->close(generation);
+            if (auto found = domDocuments.find(id); found != domDocuments.end()) {
+                found->second->close();
+                domDocuments.erase(found);
+            }
+            uiClosedSubscribers->notify(UI{*this, id, generation});
+            std::shared_ptr<WebLink<Net, Policy>> released;  // destroyed outside the lock
+            std::scoped_lock                      lock{linksMutex};
+            if (auto found = webLinks.find(id); found != webLinks.end() && found->second.generation == generation) {
+                released = std::move(found->second.link);
+                webLinks.erase(found);
+            }
+        }
+        co_return;
+    }
+
     // A released link is destroyed outside the lock, by its last owner: a call on another thread may still use it.
     Task releaseLink(WebLinkId id) {
         std::shared_ptr<WebLink<Net, Policy>> released;
@@ -1614,11 +1758,27 @@ private:
         released.swap(webLinks);
     }
 
+    /// The type-erased handler of a C++ function, as cppFunction<R, Args...> registers it.
+    template <typename R, typename... Args>
+    CppHandler makeCppHandler(auto&& function) {
+        if constexpr (detail::deferred_result<R>)
+            return makeDeferredHandler<R, Args...>(std::forward<decltype(function)>(function));
+        else if constexpr (detail::takes_caller<UI, Args...>::value)
+            return makeCallerHandler<R, Args...>(std::forward<decltype(function)>(function));
+        else {
+            auto callable  = detail::makeCppFunctionHandler<Policy, R, Args...>(std::forward<decltype(function)>(function));
+            auto responder = detail::makeCppFunctionResponder<Net, Policy, R>(std::move(callable));
+            return [responder](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI) mutable {
+                responder(data, link, callId);
+            };
+        }
+    }
+
     /// A callback that returns a sender (a ResultTask<R> among them) answers when it completes, not when it returns: the
     /// call is owned by the connection (its closure stops the work and drops the late answer) and by the server scope
     /// (shutdown stops and joins it). The answer is sent on the server context.
     template <typename R, typename... Args>
-    bool registerDeferred(std::string functionName, auto&& function) {
+    CppHandler makeDeferredHandler(auto&& function) {
         // Naming the value type checks the contract at registration: one value at most, one kind of value completion.
         using DeferredValue [[maybe_unused]] = detail::deferred_value_t<R>;
         const auto start                     = [this](auto invoke, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) {
@@ -1626,32 +1786,26 @@ private:
         };
         if constexpr (detail::takes_caller<UI, Args...>::value) {
             auto handler = registerDeferredHandler<Args...>(std::forward<decltype(function)>(function));
-            return cppFunctions
-                .try_emplace(std::move(functionName),
-                             [start, handler](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) mutable {
-                                 start(
-                                     [&] {
-                                         return handler(data, caller);
-                                     },
-                                     link,
-                                     callId,
-                                     caller);
-                             })
-                .second;
+            return [start, handler](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) mutable {
+                start(
+                    [&] {
+                        return handler(data, caller);
+                    },
+                    link,
+                    callId,
+                    caller);
+            };
         } else {
             auto handler = detail::makeDeferredHandler<Policy, Args...>(std::forward<decltype(function)>(function));
-            return cppFunctions
-                .try_emplace(std::move(functionName),
-                             [start, handler](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) mutable {
-                                 start(
-                                     [&] {
-                                         return handler(data);
-                                     },
-                                     link,
-                                     callId,
-                                     caller);
-                             })
-                .second;
+            return [start, handler](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) mutable {
+                start(
+                    [&] {
+                        return handler(data);
+                    },
+                    link,
+                    callId,
+                    caller);
+            };
         }
     }
 
@@ -1754,16 +1908,13 @@ private:
     }
 
     template <typename R, typename Caller, typename... Args>
-    bool registerWithCaller(std::string functionName, auto&& function) {
+    CppHandler makeCallerHandler(auto&& function) {
         auto adapted   = detail::adaptCaller<Caller>(std::forward<decltype(function)>(function));
         auto callable  = detail::makeCppFunctionHandler<Policy, R, Args...>(std::move(adapted));
         auto responder = detail::makeCppFunctionResponder<Net, Policy, R>(std::move(callable));
-        return cppFunctions
-            .try_emplace(std::move(functionName),
-                         [responder](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) mutable {
-                             responder(data, link, callId, caller);
-                         })
-            .second;
+        return [responder](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) mutable {
+            responder(data, link, callId, caller);
+        };
     }
 
     // Before the server: the routes' handlers use it, and the server drains them before it is destroyed.
@@ -1798,14 +1949,16 @@ private:
         bool                                    viewAssociated = false;      // presented the launch secret of an embedded view
         bool                                    loopbackPeer   = false;      // peer address was the loopback (read only with trustLoopbackClients)
         std::shared_ptr<detail::DeferredCalls>  deferredCalls  = std::make_shared<detail::DeferredCalls>();  // calls a callback answers later
+        std::shared_ptr<SpaceState>             space{};  // the space the page was loaded in; null outside the spaces
     };
-    std::map<WebLinkId, Connection>            webLinks;
-    WebLinkId                                  idsCounter{0};
-    WebLinkGeneration                          generationCounter{0};  // guarded by linksMutex; the first connection is 1
-    std::function<void(UI)>                    uiStartedHandler;
-    std::shared_ptr<detail::UISubscribers<UI>> uiSubscribers       = std::make_shared<detail::UISubscribers<UI>>();
-    std::shared_ptr<detail::UISubscribers<UI>> uiClosedSubscribers = std::make_shared<detail::UISubscribers<UI>>();
-    std::map<std::string, std::function<void(std::span<const std::byte>, WebLink<Net, Policy>&, msg::CallId, UI)>, std::less<>> cppFunctions;
+    std::map<WebLinkId, Connection>                webLinks;
+    WebLinkId                                      idsCounter{0};
+    WebLinkGeneration                              generationCounter{0};  // guarded by linksMutex; the first connection is 1
+    std::function<void(UI)>                        uiStartedHandler;
+    std::shared_ptr<detail::UISubscribers<UI>>     uiSubscribers       = std::make_shared<detail::UISubscribers<UI>>();
+    std::shared_ptr<detail::UISubscribers<UI>>     uiClosedSubscribers = std::make_shared<detail::UISubscribers<UI>>();
+    std::map<std::string, CppHandler, std::less<>> cppFunctions;
+    std::shared_ptr<SpaceRegistryType>             spaceRegistry = std::make_shared<SpaceRegistryType>();
     // Keyed by identifier alone: a document is closed and erased on its connection's closed event, before the link is
     // released and its identifier can be reused, so two connections never share an entry.
     std::map<WebLinkId, std::shared_ptr<dom::detail::State>> domDocuments;
@@ -1910,10 +2063,12 @@ private:
             case WebLinkEvent::Code::linked: {
                 std::optional<WebLinkGeneration> bindKey;
                 bool                             local = false;
+                std::shared_ptr<SpaceState>      space;
                 {
                     std::scoped_lock lock{linksMutex};
                     if (auto found = webLinks.find(event.webLinkId); found != webLinks.end()) {
                         found->second.stage = Connection::Stage::starting;
+                        space               = found->second.space;
                         // Raised once, never lowered: the secret is judged at the single handshake WebLink dispatches.
                         found->second.viewAssociated = found->second.viewAssociated || detail::viewSecretMatches(viewSecret, event.text);
                         bindKey                      = found->second.generation;
@@ -1940,6 +2095,14 @@ private:
                 if (uiStartedHandler)
                     uiStartedHandler(ui);
                 uiSubscribers->notify(ui);
+                if (space && space->alive) {
+                    if (const auto handler = space->onStarted())
+                        (*handler)(ui);  // the handler that was set, not a copy: its state persists
+                    // A handler may destroy the space: the space's handlers that follow it are then not called.
+                    space->started->notifyWhile(ui, [&space] {
+                        return space->alive.load();
+                    });
+                }
                 break;
             }
             case WebLinkEvent::Code::closed: {
@@ -1948,9 +2111,14 @@ private:
                     break;
                 std::optional<WebLinkGeneration>       closedGeneration;
                 std::shared_ptr<detail::DeferredCalls> stoppedCalls;
+                std::shared_ptr<SpaceState>            space;
+                bool                                   spaceEmptied = false;
                 {
                     std::scoped_lock lock{linksMutex};
                     if (auto found = webLinks.find(event.webLinkId); found != webLinks.end()) {
+                        space = found->second.space;
+                        if (space && !found->second.closed)
+                            spaceEmptied = --space->pages == 0 && space->alive;
                         found->second.closed = true;
                         found->second.deferred.clear();
                         closedGeneration = found->second.generation;
@@ -1968,7 +2136,17 @@ private:
                     found->second->close();
                     domDocuments.erase(found);
                 }
-                uiClosedSubscribers->notify(uiOf(event.webLinkId));
+                const auto ui = uiOf(event.webLinkId);
+                if (space)
+                    space->closed->notifyWhile(ui, [&space] {
+                        return space->alive.load();
+                    });
+                uiClosedSubscribers->notify(ui);
+                if (spaceEmptied && space->alive) {
+                    // The handler may destroy the space: it runs on a copy, and the state is kept by `space`.
+                    if (const auto handler = space->onLastClosed())
+                        (*handler)();
+                }
                 // The link is running this handler: it is released afterwards, by a task on the server context.
                 // During shutdown the task is refused and the link goes with the application.
                 static_cast<void>(httpServer.startTask(releaseLink(event.webLinkId)));
@@ -1976,9 +2154,19 @@ private:
             }
             case WebLinkEvent::Code::cppFunctionCalled: {
                 // Links are registered before they read, and released after their closure: the caller is registered.
-                const auto [link, generation] = linkAndGeneration(event.webLinkId);
-                if (!link)
-                    break;
+                std::shared_ptr<WebLink<Net, Policy>> link;
+                WebLinkGeneration                     generation{0};
+                std::shared_ptr<SpaceState>           space;
+                {
+                    std::scoped_lock lock{linksMutex};
+                    const auto       found = webLinks.find(event.webLinkId);
+                    // A page of a destroyed space is closed before its link is released: its calls reach nothing.
+                    if (found == webLinks.end() || found->second.closed)
+                        break;
+                    link       = found->second.link;
+                    generation = found->second.generation;
+                    space      = found->second.space;
+                }
                 // A browser that reuses the identifier of a call a callback has not answered yet breaks the protocol (its own
                 // calls never do). Whatever the function, no second call and no answer with that identifier: an answer could
                 // settle the first call's Promise, and the first call's own answer a later call that reuses the identifier.
@@ -1993,7 +2181,10 @@ private:
                     link->sendError(event.callId, "DOM API requires Net::ResumeAfter");
                     break;
                 }
-                if (auto function = cppFunctions.find(event.text); function != cppFunctions.end())
+                // The space's own functions first, then the application's, which every space sees.
+                if (const auto own = space ? space->function(event.text) : nullptr)
+                    (*own)(event.data, *link, event.callId, UI{*this, event.webLinkId, generation});
+                else if (auto function = cppFunctions.find(event.text); function != cppFunctions.end())
                     function->second(event.data, *link, event.callId, UI{*this, event.webLinkId, generation});
                 else
                     detail::rejectWithBridgeCode<Net, Policy>(*link, event.callId, bridge_code::notFound, "C++ function '" + event.text + "' was not found");
@@ -2058,3 +2249,5 @@ using EmbeddedWebFront = WebFrontWithFrontend<detail::EmbeddedFrontendType>;
 
 // Optional templates instantiate only when the developer/native facade is selected.
 #include "DeveloperApp.hpp"
+// Spaces use the callable traits above; BasicWF only names BasicSpace.
+#include "Space.hpp"

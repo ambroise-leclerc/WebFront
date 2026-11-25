@@ -79,6 +79,17 @@ public:
             (*handler)(ui);
     }
 
+    /// Like notify, but stops before the next handler once `proceed()` is false: a handler that ends what the others
+    /// belong to (an application space) keeps them from running on destroyed objects.
+    template <typename Predicate>
+    void notifyWhile(const UI& ui, Predicate proceed) const {
+        for (const auto& handler : snapshot()) {
+            if (!proceed())
+                return;
+            (*handler)(ui);
+        }
+    }
+
     [[nodiscard]] std::size_t size() const {
         std::scoped_lock lock{mutex};
         return handlers.size();

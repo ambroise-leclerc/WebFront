@@ -215,9 +215,11 @@
 
     class WebFrontBridge {
         /// The WebSocket address of the page that serves this script: wss:// on an https:// page, where a browser blocks ws://
-        /// as mixed content.
+        /// as mixed content. Its path is the page's directory, which tells the server the space of a page loaded under one
+        /// (BasicWF::spaces: a page of /s/abc/ connects to ws://host/s/abc/); the server ignores it otherwise.
         static defaultUrl(location = global.location) {
-            return `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}`;
+            const path = typeof location.pathname === "string" ? location.pathname.slice(0, location.pathname.lastIndexOf("/") + 1) : "";
+            return `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${path}`;
         }
 
         /// The largest message the C++ side accepts by default (http::defaultMaxMessageSize): a policy with another

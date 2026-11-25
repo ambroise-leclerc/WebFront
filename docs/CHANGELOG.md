@@ -13,6 +13,7 @@ these entries stays in the GitHub releases and the Git history.
 ### Added
 - Open the inspectors from the WebFront tab's menu of the developer environment: each panel shows in a floating window of the page and can be detached to a native secondary window (WebKitGTK, WKWebView, WebView2) or, with `trustLoopbackClients`, a tab of the system browser; the choice and the place are kept per project (#680, ADR-027, `docs/DEVELOPER_ENVIRONMENT.md`).
 - Declare what the inspectors show with `app.watch(name, source)`, whose handle removes the watch when it is destroyed; the Watches panel follows their registrations and removals. Outside the developer environment and in a distribution build, `watch` registers nothing (#680, ADR-027).
+- Serve several independent users from one process with application spaces: `app.spaces("/s/", resolver)` gives each `/s/<id>/` its own `cppFunction`s, page handlers, broadcasts and relative routes (`WebFront::Space`), serves the files under the prefix, lets the resolver refuse a space with its own reply, and tells the application when a space's last page closes (#671, `docs/SPACES.md`).
 - Compile test files faster: include `<webfront/testing/bdd/Core.hpp>`, free of `<chrono>`, `<thread>` and `<fstream>`, and only the parts a file uses (`bdd/Matchers.hpp`, `bdd/Approx.hpp`, `bdd/Eventually.hpp`, `bdd/Runner.hpp` for `main()`); `Bdd.hpp` still includes them all (#669, `docs/BDD.md`).
 - See both operands of a failed comparison with `checkEqual(a, b)`/`requireEqual(a, b)`, and write your own types in reports by specializing `webfront::bdd::Printer` (#669, `docs/BDD.md`).
 - Compare floating-point values within a tolerance with `approx(v)`, `.epsilon()` and `.margin()`, Catch2's `Approx` semantics, with the expected value and tolerances in the failure (#669, `docs/BDD.md`).
@@ -21,6 +22,7 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Changed
 - `cppFunction` refuses the names starting with `webfront.inspector.`, which belong to the inspectors, with `std::invalid_argument` (#680, ADR-027).
+- `WebFront.js` opens its WebSocket on the directory of the page (`ws://host/dir/` instead of `ws://host`), which tells the server a page's space; the server still ignores that path outside the spaces (#671).
 
 ### Fixed
 - `DeveloperBrowserIntegration-workspace` gives the relaunched bootstrap page the same 60 s to start as the first one, instead of 10 s, which a loaded runner exceeded while the page verified its cached environment (#660).
