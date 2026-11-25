@@ -39,7 +39,9 @@ prefix, `/s` without its slash included, belong to the application as before.
   URLs works at `/s/abc/` as at `/`. `/s/abc`, without the slash that relative URLs need, is redirected to `/s/abc/`.
 - **The bridge.** `WebFront.js` opens its WebSocket on the directory of the page: `ws://host/s/abc/` for a page of
   `/s/abc/`, `ws://host/s/abc/sub/` for a page of `/s/abc/sub/`. The server takes the space from the first segment after
-  the prefix, so both pages belong to `abc`. Outside the spaces the path is ignored.
+  the prefix, so both pages belong to `abc`. `ui.path()` gives the path of the WebSocket within the space (`/` and
+  `/sub/` here); outside the spaces, the whole path (`/` for a page at the root, `/app/` for one of `/app/`). The client
+  chooses that path: it locates the page and proves nothing.
 - **Routes.** `space.addRoute("/data/", handler)` answers `/s/abc/data/...`; the handler receives the path within the
   space (`RouteRequest::path` starts with `/data/`). Under a space, its routes come first, then the application's, then
   the files.
