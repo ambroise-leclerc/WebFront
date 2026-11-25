@@ -10,6 +10,12 @@ these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
+### Added
+- Compile test files faster: include `<webfront/testing/bdd/Core.hpp>`, free of `<chrono>`, `<thread>` and `<fstream>`, and only the parts a file uses (`bdd/Matchers.hpp`, `bdd/Approx.hpp`, `bdd/Eventually.hpp`, `bdd/Runner.hpp` for `main()`); `Bdd.hpp` still includes them all (#669, `docs/BDD.md`).
+- See both operands of a failed comparison with `checkEqual(a, b)`/`requireEqual(a, b)`, and write your own types in reports by specializing `webfront::bdd::Printer` (#669, `docs/BDD.md`).
+- Compare floating-point values within a tolerance with `approx(v)`, `.epsilon()` and `.margin()`, Catch2's `Approx` semantics, with the expected value and tolerances in the failure (#669, `docs/BDD.md`).
+- Run code after the last scenario with the third, optional `runEnding` function of `webfront::bdd::Listener`, called before the summary and the JUnit report whatever the outcome (#669, `docs/BDD.md`).
+
 ### Fixed
 - Applications started from the terminal of a Snap-packaged editor (VSCodium) now run on WebKitGTK without cleaning the environment by hand; `WEBFRONT_KEEP_SNAP_ENVIRONMENT=1` opts out (#662, `docs/WEBKITGTK.md`).
 

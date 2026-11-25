@@ -3,11 +3,12 @@
 // Created: 2026-11-14
 //
 // WebFront — tests/unit
-// Role: Tests of Bdd.hpp: section order, the outcome of each kind of failure, filters and the report.
+// Role: Tests of Bdd.hpp: section order, the outcome of each kind of failure, filters, listeners, approx, checkEqual and the report.
 // Thread: worker-safe | Alloc: unrestricted
 // LLM: some scenarios fail on purpose, main() compares what each did with what is expected
 
-// Tests Bdd.hpp: the order of the sections, the outcome of each kind of failure, the filters and the exit codes.
+// Tests Bdd.hpp: the order of the sections, the outcome of each kind of failure, the filters and the exit codes, the
+// listeners, approx() and the operands checkEqual() reports.
 // Some scenarios fail on purpose: main() runs each one and compares what it did with what is expected.
 
 #include <webfront/testing/Bdd.hpp>
@@ -19,6 +20,7 @@
 #include <future>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -287,6 +289,94 @@ const Scenario timeoutReport{"a timeout in a section", [] {
                                  });
                              }};
 
+enum class Color { red, blue };
+struct Opaque {
+    int  value;
+    bool operator==(const Opaque&) const = default;
+};
+
+}  // namespace
+
+template <>
+struct webfront::bdd::Printer<Color> {
+    static void append(std::string& text, Color color) {
+        text += color == Color::red ? "red" : "blue";
+    }
+};
+
+namespace {
+
+const Scenario approxHolds{"approx holds", [] {
+                               require(5.0 + 1e-6 == approx(5.0));
+                               require(approx(5.0) == 5.0 + 1e-6);
+                               require(5.1 != approx(5.0));
+                               require(5.0 + 1e-7 == approx(5.0).margin(1e-6).epsilon(0));
+                               require(5.0 + 2e-6 != approx(5.0).margin(1e-6).epsilon(0));
+                               require(5.01 == approx(5.0).epsilon(0.01));
+                               require(0.0 == approx(1e-9).margin(1e-8));
+                               require(3 == approx(3.0));
+                               require(std::numeric_limits<double>::infinity() == approx(std::numeric_limits<double>::infinity()));
+                               require(!(std::numeric_limits<double>::quiet_NaN() == approx(std::numeric_limits<double>::quiet_NaN())));
+                               require(Approx::defaultEpsilon > 1.1e-5 && Approx::defaultEpsilon < 1.2e-5);
+                               requireEqual(5.0 + 1e-6, approx(5.0));
+                               requireThrows<std::invalid_argument>([] {
+                                   (void)approx(1.0).margin(-1.0);
+                               });
+                               requireThrows<std::invalid_argument>([] {
+                                   (void)approx(1.0).epsilon(std::numeric_limits<double>::quiet_NaN());
+                               });
+                               trace.push_back("approx");
+                           }};
+
+const Scenario approxFails{"approx reports the tolerance", [] {
+                               check(5.5 == approx(5.0).margin(0.25));
+                               trace.push_back("after check");
+                           }};
+
+const Scenario equalHolds{"checkEqual holds", [] {
+                              std::vector<int> items{1, 2, 3};
+                              requireEqual(items.size(), 3);
+                              requireEqual(std::string{"abc"}, "abc");
+                              requireEqual(Color::blue, Color::blue);
+                              requireEqual(Opaque{1}, Opaque{1});
+                              requireEqual(items, std::vector<int>{1, 2, 3});
+                              require(!webfront::bdd::impl::equal(-1, 4294967295u));  // compared by value, not converted
+                              char text[] = "abc";
+                              requireEqual(static_cast<const char*>(text), "abc");    // by characters, not as pointers
+                              trace.push_back("equal");
+                          }};
+
+const Scenario equalFails{"checkEqual reports its operands", [] {
+                              checkEqual(std::vector<int>{1, 2, 3}, std::vector<int>{1, 2, 4});
+                              checkEqual(Color::red, Color::blue);
+                              checkEqual(Opaque{1}, Opaque{2});
+                              checkEqual(std::string{"left text"}, "right text");
+                              trace.push_back("after check");
+                              requireEqual(2, 3);
+                              trace.push_back("not reached");
+                          }};
+
+int runsStarted = 0, runsEnded = 0;
+// The size of the trace when the run ended, -1 before any run, and whether the next run-ending listener throws.
+long tracedAtEnd = -1;
+bool throwAtEnd  = false;
+
+const Listener runListener{[] {
+                               ++runsStarted;
+                           },
+                           nullptr,
+                           [] {
+                               ++runsEnded;
+                               tracedAtEnd = static_cast<long>(trace.size());
+                               if (throwAtEnd)
+                                   throw std::runtime_error{"cannot save the recording"};
+                           }};
+
+std::string readFile(const std::string& name) {
+    std::ifstream file{name};
+    return {std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
+}
+
 int failures = 0;
 
 void expect(std::string_view title, int code, std::vector<std::string> expectedTrace) {
@@ -365,6 +455,49 @@ int main() {
                 ++failures;
                 std::cerr << "MISMATCH: parseFactor(" << (text ? text : "null") << ")\n";
             }
+    }
+    expect("approx holds", 0, {"approx"});
+    expect("approx reports the tolerance", 1, {"after check"});
+    expect("checkEqual holds", 0, {"equal"});
+    expect("checkEqual reports its operands", 1, {"after check"});
+
+    // A run-ending listener runs once per run that started, after the last scenario; one that throws fails the run.
+    if (runsStarted == 0 || runsEnded != runsStarted || tracedAtEnd != 1) {
+        ++failures;
+        std::cerr << "MISMATCH: " << runsStarted << " runs started, " << runsEnded << " ended, " << tracedAtEnd << " steps traced at the end\n";
+    }
+    throwAtEnd = true;
+    expect("approx holds", 1, {"approx"});
+    throwAtEnd     = false;
+    auto unchanged = runsEnded;
+    expectExit({"[unknown]"}, 2);
+    if (runsEnded != unchanged) {
+        ++failures;
+        std::cerr << "MISMATCH: a run that selects nothing called the run-ending listener\n";
+    }
+
+    // A failure names the expected value, the tolerances and the difference, and the operands of checkEqual.
+    {
+        std::string report = "bdd_self_test_report.xml";
+        expectExit({"--exact", "approx reports the tolerance", "--junit", report}, 1);
+        auto xml = readFile(report);
+        for (std::string_view part : {"5.5 == approx(5) (margin 0.25, epsilon 1.19209e-05): the difference is 0.5"})
+            if (xml.find(part) == std::string::npos) {
+                ++failures;
+                std::cerr << "MISMATCH: the report of approx lacks \"" << part << "\"\n";
+            }
+        expectExit({"--exact", "checkEqual reports its operands", "--junit", report}, 1);
+        xml = readFile(report);
+        for (std::string_view part : {"left:  {1, 2, 3}\n  right: {1, 2, 4}",
+                                      "left:  red\n  right: blue",
+                                      "left:  {?}\n  right: {?}",
+                                      "left:  left text\n  right: right text",
+                                      "left:  2\n  right: 3"})
+            if (xml.find(part) == std::string::npos) {
+                ++failures;
+                std::cerr << "MISMATCH: the report of checkEqual lacks \"" << part << "\"\n";
+            }
+        std::remove(report.c_str());
     }
     expectExit({"[passing]"}, 0);
     expectExit({"[passing][tagged]"}, 0);

@@ -1,12 +1,12 @@
 # Testing with `webfront::bdd`
 
 `webfront::bdd` is the behaviour-driven test framework that WebFront's own C++ tests use (#647). It is a public interface:
-a project that consumes WebFront can write its scenarios with it and have CTest discover them, in place of Catch2. It is a
-single header that includes only the standard library, with a CMake function that registers the scenarios.
+a project that consumes WebFront can write its scenarios with it and have CTest discover them, in place of Catch2. It is
+header-only and includes only the standard library, with a CMake function that registers the scenarios.
 
 | What | Name |
 | --- | --- |
-| Header | `<webfront/testing/Bdd.hpp>` |
+| Headers | `<webfront/testing/Bdd.hpp>` (everything), or `<webfront/testing/bdd/Core.hpp>` and the [optional parts](#headers-and-compilation-time) |
 | Namespace | `webfront::bdd` |
 | CMake target | `WebFront::Bdd` (`INTERFACE`: the header, C++23 and threads; it needs neither WebFront nor stdnet) |
 | CMake function | `webfront_bdd_discover_tests()`, the counterpart of `catch_discover_tests` |
@@ -56,7 +56,99 @@ webfront_bdd_discover_tests(my_tests TEST_PREFIX "My." PROPERTIES TIMEOUT 30 LAB
 
 As in Catch2, a scenario runs again from its start until each leaf section has run once. `require` ends the scenario at the
 first failure, `check` records it and goes on, and `requireEventually`, `checkEventually`, `requireReady` and `checkReady`
-wait for an asynchronous state. The header documents each of them (Doxygen).
+wait for an asynchronous state. The headers document each of them (Doxygen).
+
+## Headers and compilation time
+
+`Bdd.hpp` includes the whole framework. Every test file pays for what it includes, so a project with many test files can
+include the light core and only the parts each file uses; the assertions are the same:
+
+| Header | Adds | Standard headers it brings |
+| --- | --- | --- |
+| `bdd/Core.hpp` | `Scenario`, the sections, `require`/`check`, `requireEqual`/`checkEqual`, `requireThrows`/`checkThrows`, `requireNothrow`/`checkNothrow`, `info`, `fail`, `skip`, `warn`, `succeed`, `Listener`, `Printer` | light ones only: no `<chrono>`, `<thread>` or `<fstream>` |
+| `bdd/Matchers.hpp` | `contains`, `endsWith`, `equals`, `!matcher`, `require(text, matcher)` | none beyond the core |
+| `bdd/Approx.hpp` | `approx`, `Approx` | `<limits>`, `<stdexcept>` |
+| `bdd/Eventually.hpp` | `requireEventually`/`checkEventually`, `requireReady`/`checkReady`, `waitUntil`, `waitReady`, `WEBFRONT_TEST_TIMEOUT_FACTOR` | `<chrono>`, `<thread>` |
+| `bdd/Runner.hpp` | `run()`: the options, filters, order, shards, summary and JUnit report | `<ctime>` |
+
+Only the file that defines `main()` needs `bdd/Runner.hpp`:
+
+```cpp
+#include <webfront/testing/bdd/Runner.hpp>
+
+int main(int argc, char** argv) { return webfront::bdd::run(argc, argv); }
+```
+
+With GCC 16 at `-O2`, a file of one scenario compiles in about 1.2 s with `bdd/Core.hpp` and 2.0 s with `Bdd.hpp`, half of
+which is `<chrono>` and `<thread>` (about 50,000 preprocessed lines instead of 100,000). A test file that includes
+heavier headers of its own gains less. The `bdd_header_checks` target compiles each part alone and fails if the core
+brings `<chrono>`, `<thread>` or `<fstream>` (libstdc++ and libc++).
+
+## Comparing values
+
+`check(a == b)` receives a `bool`: its failure shows the source line and nothing of `a` and `b`. `checkEqual(a, b)` and
+`requireEqual(a, b)` report both operands:
+
+```text
+tests/Meter.cpp:42: FAILED
+    checkEqual(reading.channels(), expected);
+  left:  {1, 2, 3}
+  right: {1, 2, 4}
+```
+
+They write strings, characters, booleans, numbers, enumerations (as their value) and ranges of these (`{a, b, c}`); a type
+they cannot write appears as `{?}`, and the comparison still works. Two integers are compared by value whatever their
+signedness, so `checkEqual(items.size(), 3)` neither warns nor equates `-1` with `4294967295u`, and two strings by their
+characters (two `const char*` are not compared as pointers); any other pair uses `left == right`.
+
+To write a project type, in these reports and in `info()`, `fail()` and composed section names, specialize
+`webfront::bdd::Printer`:
+
+```cpp
+template <>
+struct webfront::bdd::Printer<Opcode> {
+    static void append(std::string& text, Opcode opcode) { text += name(opcode); }
+};
+```
+
+A specialization takes precedence over the built-in forms (an enumeration can be written by name rather than as a number).
+
+## Floating-point values
+
+`approx(expected)` (`bdd/Approx.hpp`) compares a measured value with an expected one within a tolerance, with the semantics
+of Catch2's `Approx`:
+
+```cpp
+check(voltage == approx(5.0));                       // relative epsilon, about 1.2e-5 by default
+check(current == approx(0.0).margin(1e-9));          // absolute margin, 0 by default
+requireEqual(frequency, approx(50.0).epsilon(1e-3)); // the report shows both operands
+```
+
+A value is accepted within either tolerance: `|value - expected| <= margin`, or `|value - expected| <= epsilon * |expected|`
+(`0` when `expected` is infinite). NaN is never equal. The default epsilon is `Approx::defaultEpsilon`, a hundred times the
+epsilon of a `float` (about 1.19e-5), as in Catch2. A negative or NaN tolerance throws `std::invalid_argument`.
+The comparison returns an object that converts to `bool` and explains a failed `check()` or `require()`:
+
+```text
+  5.5 == approx(5) (margin 0.25, epsilon 1.19209e-05): the difference is 0.5
+```
+
+More generally, `check()` and `require()` add the text of `condition.explain()` to the failure of any condition whose type
+has a `std::string explain() const`.
+
+## Listeners
+
+```cpp
+const webfront::bdd::Listener recording{
+    [] { session.emplace(); },  // before the first scenario
+    nullptr,                    // before each scenario
+    [] { session->save(); }};   // after the last scenario
+```
+
+`Listener(runStarting, scenarioStarting, runEnding = nullptr)` takes functions without captures, or null. `runEnding`
+runs once the selected scenarios have run, whatever their outcome, before the summary and the JUnit report; it runs only
+when `runStarting` did, so a run that selects nothing (or only lists the scenarios) calls neither. An exception it throws
+is reported and makes `run()` return 1.
 
 `webfront_bdd_discover_tests(<target> ...)`:
 
@@ -92,11 +184,11 @@ and the name filters; run it with `--help`.
 
 ## Compatibility
 
-The header, the namespace `webfront::bdd` and its names, the semantics above, the `WebFront::Bdd` target and
+The headers (`Bdd.hpp` and the parts under `bdd/`), the namespace `webfront::bdd` and its names, the semantics above, the `WebFront::Bdd` target and
 `webfront_bdd_discover_tests` with its options follow WebFront's semantic versions: an incompatible change waits for a
 major version and is listed under `Breaking` in the [changelog](CHANGELOG.md); the framework's additions appear under
-`Added`. The installed package accepts a WebFront of the same major version (`SameMajorVersion`). What the header
-documents is the interface; the contents of `webfront::bdd::impl` is not.
+`Added`. The installed package accepts a WebFront of the same major version (`SameMajorVersion`). What the headers
+document is the interface; the contents of `webfront::bdd::impl` is not.
 `BddSelfTest`, `BddDiscovery` and `BddConsumer` (a project that finds the installed package) pin it.
 
-The header compiles as C++23 and, in a C++26 translation unit, as C++26; an executable must not mix the two standards.
+The headers compile as C++23 and, in a C++26 translation unit, as C++26; an executable must not mix the two standards.
