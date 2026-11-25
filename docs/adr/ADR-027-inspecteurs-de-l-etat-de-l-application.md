@@ -193,8 +193,7 @@ appels sont :
   nœud tronqué (ci-dessous) ;
 - `webfront.inspector.fold(observateur, chemin, révision)` : retire de la mémoire un nœud replié et ses descendants,
   et rend la nouvelle révision. Comme tout appel qui modifie la mémoire, il porte la révision que l'inspecteur détient,
-  validée avant toute interruption de passe : une révision plus ancienne fait répondre une page vide avec
-  `resynchroniser` vrai, sans rien replier ni interrompre ;
+  validée avant toute interruption de passe (« Révision périmée », ci-dessous) ;
 - `webfront.inspector.reset(observateur)` : vide la mémoire de l'observateur pour cette connexion (ci-dessous) ;
 - `webfront.inspector.limits()` : les bornes de cette section, dont `maxWriteTextBytes`.
 
@@ -246,8 +245,25 @@ déconnexion, et `fold` en retire un nœud et ses descendants.
 
 **Ordre et révision.** Les appels d'une connexion sur un observateur sont traités un à un, dans l'ordre de réception,
 même quand ils s'exécutent sur un exécuteur ; deux Promises en vol ne se croisent donc pas. Tout appel qui modifie la
-mémoire (`children`, `fold`, `write`) lui donne une nouvelle révision, la rend dans sa réponse, et l'inspecteur
-l'adopte.
+mémoire (`children`, `fold`, `write`, et `changes` au curseur 0) lui donne une nouvelle révision, la rend dans sa
+réponse, et l'inspecteur l'adopte. L'inspecteur n'envoie donc un appel qui modifie la mémoire d'un observateur
+qu'après la réponse du précédent : envoyés à la suite sans attendre, le second porterait une révision que le premier
+vient de rendre périmée. Les lectures qui ne modifient pas la mémoire (`value`, `limits`, `containers`) peuvent être
+envoyées à tout moment.
+
+**Révision périmée.** Une révision qui n'est pas celle de la mémoire signifie que la vue de l'inspecteur et la mémoire
+ont divergé : l'inspecteur a manqué une réponse, ou n'a pas respecté l'ordre ci-dessus. Le contrat est unique pour
+tous les appels qui portent une révision, et il est vérifié **avant** tout autre effet :
+
+- `children`, `fold` et `changes` répondent par une resynchronisation : la mémoire de l'observateur pour cette
+  connexion est vidée, une passe en cours est **libérée** avec son ensemble rangé, sans restauration ni interruption
+  ordinaire, et rien n'est déplié ni replié ;
+- `write`, qui ne rend pas de page, est refusé avec `webfront.inspector.stale` **sans aucun effet** : ni la mémoire,
+  ni une passe en cours, ni l'objet ne changent. L'appel suivant de l'inspecteur, qui porte la même révision périmée,
+  reçoit alors la resynchronisation.
+
+Une révision périmée ne préserve donc jamais une passe en cours, sauf pour `write`, qui ne touche à rien ; et une
+resynchronisation libère toujours la passe.
 
 **Différences paginées.** Une passe de `changes` commence au curseur 0, avec la révision R que l'inspecteur détient :
 
@@ -281,8 +297,8 @@ l'inspecteur fait quand il veut repartir de l'état courant.
 
 La **révision** que porte l'appel interrompant est validée **avant** l'interruption : elle doit être celle de la mémoire
 à cet instant, c'est-à-dire R′, la révision de la passe en cours, que l'inspecteur détient depuis la première page.
-Une révision plus ancienne est refusée (`webfront.inspector.stale` pour `write`, resynchronisation pour les autres), et
-rien n'est interrompu. Une fois validée, l'appel ne compare plus de révision : une écriture vérifie le reste de sa
+Une révision plus ancienne suit le contrat « Révision périmée » : resynchronisation, qui libère la passe, pour
+`children`, `fold` et `changes` ; refus sans effet, qui laisse la passe en cours, pour `write`. Une fois validée, l'appel ne compare plus de révision : une écriture vérifie le reste de sa
 précondition (section 6) contre la mémoire restaurée, qui est exactement ce que l'inspecteur a reçu. Une écriture qui
 vise un nœud d'une page non servie est donc comparée à l'ancienne valeur, celle que l'utilisateur voit : si l'objet a
 changé depuis, elle est refusée comme périmée, et c'est le résultat attendu.
@@ -295,8 +311,8 @@ de la partie non servie y met sa valeur fraîche, et un `fold` retire aussi les 
 Les différences non servies ne sont pas perdues : la passe suivante les retrouve en comparant la mémoire restaurée à
 l'objet.
 
-L'inspecteur n'a donc rien à mettre en file : un dépliement, un repli ou une écriture partent aussitôt, et la passe
-interrompue reprend à la période suivante. La resynchronisation (mémoire vidée) ne sert plus qu'aux incohérences
+L'inspecteur n'attend donc pas la fin d'une passe : un dépliement, un repli ou une écriture partent dès la réponse à
+l'appel précédent qui modifiait la mémoire, et la passe interrompue reprend à la période suivante. La resynchronisation (mémoire vidée) ne sert plus qu'aux incohérences
 réelles : une révision ou un curseur qui ne correspondent à rien de ce que C++ a servi.
 
 L'inspecteur interroge à une période choisie, 250 ms par défaut, et peut se mettre en pause. C'est une lecture à
@@ -637,10 +653,13 @@ demanderait un grant et une décision propres.
   inférieur au tampon, écriture refusée comme périmée après une insertion avant la cible, un remplacement de la cible
   ou une révision ancienne, écriture par clé d'une `PagedSource`, `fold` avec la révision courante (nœud et
   descendants retirés, nouvelle révision), avec la révision d'une passe en cours (passe interrompue puis repli) et
-  avec une révision ancienne (resynchronisation, rien replié ni interrompu), écriture qui interrompt une passe avec la
-  révision de la passe (acceptée si l'état affiché tient, périmée sinon, y compris pour une cible d'une page non
-  servie) et avec une révision plus ancienne (refusée sans interrompre), liste `[a, b, c, d]` lue en deux pages avec
-  une insertion en tête entre elles (liste recommencée, `d` lu), même cas avec une `PagedSource` à clés et une
+  avec une révision ancienne (resynchronisation : rien replié, mémoire vidée, passe en cours libérée), `children` et
+  `changes` avec une révision ancienne pendant une passe (même résultat), `write` avec une révision ancienne pendant
+  une passe (refus `stale` sans effet : mémoire, passe et objet inchangés, puis resynchronisation à l'appel suivant),
+  deux appels qui modifient la mémoire envoyés sans attendre (le second périmé), écriture qui interrompt une passe
+  avec la révision de la passe (acceptée si l'état affiché tient, périmée sinon, y compris pour une cible d'une page
+  non servie) et avec une révision plus ancienne (refus `stale` sans effet), liste `[a, b, c, d]` lue en deux pages
+  avec une insertion en tête entre elles (liste recommencée, `d` lu), même cas avec une `PagedSource` à clés et une
   insertion qui garde le nombre d'enfants (clé du dernier enfant déplacée), passe qui détecte un réordonnancement des
   clés d'un parent déplié (« enfants modifiés », positions relues), premier nœud d'une page égal au parent, clé
   contenant `/`, `%` et des octets non ASCII (encodage réversible), chemin mal formé refusé, clé dont l'encodage
