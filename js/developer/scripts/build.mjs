@@ -64,8 +64,10 @@ export default async function (context) {
     const read = async path => written.get(path) ?? await project.read(path);
 
     const files = new Map();
-    for (const name of ['runtime', 'compiler', 'script-worker', 'typecheck-worker'])
+    for (const name of ['runtime', 'compiler', 'script-worker', 'typecheck-worker', 'inspector'])
         files.set(`${name}.mjs`, await write(`${output}/${name}.mjs`, await bundle(`js/developer/environment/${name}.mjs`)));
+    // The page of the inspectors (#680): a window, a tab or the frame of a floating window loads it beside runtime.mjs.
+    files.set('inspector.html', await write(`${output}/inspector.html`, await project.read('js/developer/environment/inspector.html')));
     files.set('esbuild.wasm', await write(`${output}/esbuild.wasm`, await project.read(lockedFile(lock, 'esbuild-wasm', 'esbuild.wasm'))));
     files.set('xterm.css', await write(`${output}/xterm.css`, await project.read(lockedFile(lock, '@xterm/xterm', 'css/xterm.css'))));
 
@@ -111,7 +113,8 @@ export default async function (context) {
     files.set('package.json', await write(`${output}/package.json`, JSON.stringify({name: '@webfront/developer-environment', version,
         description: 'Browser-powered WebFront developer environment', type: 'module',
         license: '(Apache-2.0 OR CECILL-B)',
-        files: ['runtime.mjs', 'compiler.mjs', 'script-worker.mjs', 'typecheck-worker.mjs', 'esbuild.wasm', 'xterm.css', 'environment.json', 'LICENSES.txt']}, null, 2) + '\n'));
+        files: ['runtime.mjs', 'compiler.mjs', 'script-worker.mjs', 'typecheck-worker.mjs', 'inspector.mjs', 'inspector.html', 'esbuild.wasm',
+            'xterm.css', 'environment.json', 'LICENSES.txt']}, null, 2) + '\n'));
 
     const bytes = compress(tar(new Map([...files].map(([name, content]) => [`package/${name}`, content]))));
     await write(`${output}/environment.tgz`, bytes);

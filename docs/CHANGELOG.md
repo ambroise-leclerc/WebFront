@@ -10,7 +10,13 @@ these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
+### Breaking
+- A custom frontend whose `open()` takes `const ViewLaunch&` declares `static bool providesViewProof()`, `true` when it gives the proof to its view and `false` otherwise, or the developer environment no longer compiles with it: undeclared, its proven view would leave project writes and C++ commands unguarded (#680, ADR-027, `docs/FRONTENDS.md`).
+- `cppFunction` (and `Space::cppFunction`) refuses the names starting with `webfront.inspector.`, reserved to the inspectors, with `std::invalid_argument`: rename such a function, and its `webFront.cppFunction(...)` calls in the page, to a name of your own (#680, ADR-027).
+
 ### Added
+- Open the inspectors from the WebFront tab's menu of the developer environment: each panel shows in a floating window of the page and can be detached to a native secondary window (WebKitGTK, WKWebView, WebView2) or, with `trustLoopbackClients`, a tab of the system browser; the choice and the place are kept per project (#680, ADR-027, `docs/DEVELOPER_ENVIRONMENT.md`).
+- Declare what the inspectors show with `app.watch(name, source)`, whose handle removes the watch when it is destroyed; the Watches panel follows their registrations and removals. Outside the developer environment and in a distribution build, `watch` registers nothing (#680, ADR-027).
 - Embed a plain interface directory (HTML, JavaScript, CSS, vendored files) from CMake with `webfront_embed_directory(app ui CLASS AppUI)`, without the developer environment: the build regenerates the provider when a file changes, and `fs::DocumentRootFirstFSWith<AppUI>` lets a development root serve in front of it (#675, `docs/EMBEDDED_ASSETS.md`).
 - Set from the configuration `Referrer-Policy` (`contentPolicy.referrerPolicy`: `"no-referrer"` forbids explicitly that a capability in your URLs leaves in `Referer`), `X-Content-Type-Options: nosniff` (`noSniff`) and the `Cache-Control` of HTML pages (`htmlCacheControl`), on files, route and generated replies unless a reply sets its own (#674, `docs/CONTENT_POLICY.md`).
 - Keep a capability carried by your URLs out of WebFront's logs with `app.addSecretPrefix("/s/")`: the segment after the prefix is logged as `*` (`/s/*/index.html`) for files, routes, WebSocket upgrades and their failures, whose error messages are not logged (#673, `docs/HTTP_ASSETS.md`).
@@ -31,6 +37,9 @@ these entries stays in the GitHub releases and the Git history.
 - An invalid content policy (an origin of `bridgeAllowedOrigins` or `navigationAllowedOrigins`, a `referrerPolicy`, a `htmlCacheControl`) throws `std::invalid_argument` before the server binds its port, as documented, instead of an "address already in use" error when that port is taken (#674).
 - `DeveloperBrowserIntegration-workspace` gives the relaunched bootstrap page the same 60 s to start as the first one, instead of 10 s, which a loaded runner exceeded while the page verified its cached environment (#660).
 - Applications started from the terminal of a Snap-packaged editor (VSCodium) now run on WebKitGTK without cleaning the environment by hand; `WEBFRONT_KEEP_SNAP_ENVIRONMENT=1` opts out (#662, `docs/WEBKITGTK.md`).
+
+### Security
+- Require an admitted client for developer project writes and native terminal commands when the frontend proves its view (ADR-027, #680).
 
 ## [1.2.0] - 2026-11-24
 

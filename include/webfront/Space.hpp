@@ -94,8 +94,12 @@ public:
 
     /// As BasicWF::cppFunction, for the pages of this space only; a function of the application of the same name is hidden
     /// from them. Thread-safe. @return false when the space already has a function of that name, which stays registered
+    /// @throws std::invalid_argument for a name starting with `webfront.inspector.`: a space can neither hide a function of
+    /// the inspectors from its pages nor pose as one (ADR-027, section 1)
     template <typename R, typename... Args>
     bool cppFunction(std::string functionName, auto&& function) {
+        if (inspect::isReservedName(functionName))
+            throw std::invalid_argument("webfront::BasicSpace::cppFunction(): names starting with 'webfront.inspector.' are reserved to WebFront");
         auto handler = std::make_shared<typename App::CppHandler>(app.template makeCppHandler<R, Args...>(std::forward<decltype(function)>(function)));
         std::scoped_lock lock{state->mutex};
         return state->functions.try_emplace(std::move(functionName), std::move(handler)).second;

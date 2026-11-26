@@ -17,7 +17,8 @@ export function memoryBridge(storage = new Map()) {
             const prefix = directory ? directory + '/' : '';
             const names = new Set([...storage.keys()].filter(key => key.startsWith(prefix))
                 .map(key => key.slice(prefix.length)).map(rest => rest.includes('/') ? rest.split('/')[0] + '/' : rest));
-            if (!names.size) throw new Error('Cannot list project directory: ' + directory);
+            // The project root always exists, even empty; another directory exists only through the files it holds.
+            if (!names.size && directory) throw new Error('Cannot list project directory: ' + directory);
             return new TextEncoder().encode(JSON.stringify([...names].sort()));
         },
         // Like Store::entries: the same entries with their type and size; the memory project keeps no dates.
@@ -55,6 +56,20 @@ export function memoryBridge(storage = new Map()) {
             }
         },
     };
-    const bridge = {cppFunction: name => async (...args) => operations[name.replace('webfront.developer.', '')](...args)};
+    const bridge = {cppFunction: name => async (...args) => {
+        if (name === 'webfront.inspector.readPreferences') {
+            // Like Store::readWithState: the file and the token of exactly those bytes.
+            const path = '.webfront/developer/inspector-window.json';
+            return [storage.has(path), storage.get(path) ?? new Uint8Array(), stateOf([path])];
+        }
+        if (name === 'webfront.inspector.savePreferences') {
+            const path = '.webfront/developer/inspector-window.json';
+            const [expected, bytes] = args;
+            if (stateOf([path]) !== expected) throw new Error('The project changed since it was read; run the command again');
+            storage.set(path, bytes);
+            return;
+        }
+        return operations[name.replace('webfront.developer.', '')](...args);
+    }};
     return {bridge, storage, pending: () => transactions.size};
 }

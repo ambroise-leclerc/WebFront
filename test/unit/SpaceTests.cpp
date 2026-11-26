@@ -1057,6 +1057,34 @@ const Scenario deferredKeeps{"A deferred function of a space keeps its callable 
                                  });
                              }};
 
+const Scenario spaceReservedNames{
+    "A space refuses the names reserved to the inspectors (ADR-027, section 1)",
+    {"spaces", "inspector"},
+    [] {
+        SpaceApp app{WebFrontConfig{.port = "0"}};
+        app.spaces("/s/", [](std::string_view) -> std::optional<http::RouteReply> {
+            return std::nullopt;
+        });
+        SpaceApp::Space space{app, "/s/", "alpha"};
+        then("its pages cannot be given a function that hides or poses as one of the inspectors", [&] {
+            checkThrows<std::invalid_argument>([&] {
+                space.cppFunction("webfront.inspector.watches", [] {
+                    return true;
+                });
+            });
+            checkThrows<std::invalid_argument>([&] {
+                space.cppFunction<bool>("webfront.inspector.containers", [] {
+                    return true;
+                });
+            });
+            require(!space.hasCppFunction("webfront.inspector.watches"));
+            require(space.cppFunction("whoAmI", [] {
+                return true;
+            }));
+        });
+      }
+};
+
 const Scenario upgradePath{"The path of a WebSocket upgrade reaches the application, and a target a file request refuses is refused (#672)", {"spaces"}, [] {
                                SpaceApp                                                app{WebFrontConfig{.port = "0"}};
                                std::map<std::string, std::unique_ptr<SpaceApp::Space>> spaces;

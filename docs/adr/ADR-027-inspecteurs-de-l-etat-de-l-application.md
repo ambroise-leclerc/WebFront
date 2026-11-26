@@ -4,6 +4,7 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
+| 1.1 | 2026-11-25 | Proposée | Ambroise Leclerc | Hôte détachable (#680) : `webfront.inspector.embedded()` dit à la page hôte si elle peut tourner dans un frontend intégré (vue prouvée, ou frontend actif qui transmet la preuve), ce qui décide de l'onglet du navigateur système ; `webfront.inspector.closeWindow(panneau, hôte)` ferme la fenêtre d'un panneau rattaché ; une fenêtre par panneau et par page hôte, qui seule le rattache ; choix et place conservés dans `inspector-window.json`, lus avec le jeton de leurs octets par `webfront.inspector.readPreferences()`. | À renseigner après intégration. |
 | 1.0 | 2026-11-25 | Proposée | Ambroise Leclerc | Décision initiale (#678, épique #677) : inspecteurs réservés à l'environnement développeur, accès réservé aux vues prouvées sauf autorisation explicite, nœuds d'arbre sur les types existants du pont, lecture et différences paginées, opérations entières sous le verrou ou sur l'exécuteur de l'application, modification à la demande de l'application, page unique `inspector.html` dans un conteneur choisi sur l'accès effectif. | À renseigner après intégration. |
 
 ## État et portée
@@ -218,7 +219,8 @@ appels sont :
 - `webfront.inspector.reset(observateur)` : vide la mémoire de l'observateur pour cette connexion (ci-dessous) ;
 - `webfront.inspector.limits()` : les bornes de cette section, dont `maxWriteTextBytes`.
 
-Le nombre vaut 200 par défaut et 1 000 au plus. C++ réduit chaque page pour qu'elle tienne dans `responseBudget` et
+Le nombre est un argument de chaque appel, puisque le pont n'a pas d'argument facultatif : l'inspecteur demande 200
+par défaut, et C++ le ramène à 1 000 au plus (0 ne demande que la révision, pour `watches`). C++ réduit chaque page pour qu'elle tienne dans `responseBudget` et
 rend le `suivant` qui reprend là où elle s'arrête : aucun appel ne lève `BufferOverflowException` ni ne dépasse
 `maxMessageSize`, quel que soit l'état observé. Les seuls échecs d'un appel valide sont les refus typés de cette
 décision (`webfront.inspector.*`).
@@ -652,7 +654,9 @@ booléens, et aucun état de l'application.
 | `host` | la connexion de la page hôte est admise (section 2) |
 | `newConnections` | une nouvelle connexion non prouvée serait admise : l'application a choisi `trustLoopbackClients` |
 
-La page se charge dans le premier conteneur qui convient :
+Un panneau s'ouvre là où le projet le garde : dans la fenêtre flottante tant qu'il est rattaché, ce qui est son état
+initial, et dans son conteneur détaché une fois détaché, tant que ce conteneur reste disponible (sinon la fenêtre
+flottante sert de repli). L'ordre qui suit choisit le conteneur d'un panneau **détaché** :
 
 1. **Fenêtre native secondaire** si `secondaryWindow`, donc seulement depuis une page hôte admise (WebKitGTK,
    WKWebView, WebView2). La fonction réservée `webfront.inspector.openWindow` appelle `openSecondaryWindow`, qui
@@ -669,6 +673,43 @@ La page se charge dans le premier conteneur qui convient :
    il emprunte le pont de la page hôte (`window.parent.webFront`), dont l'accès vient d'être constaté.
 4. **Aucun** sinon (navigateur système sans `trustLoopbackClients`) : les entrées du menu sont désactivées et disent
    pourquoi (section 2).
+
+La page hôte ne sait pas d'elle-même si elle tourne dans le navigateur système : `containers()` décrit l'accès, pas la
+vue. Elle le demande à `webfront.inspector.embedded()`, qui vérifie l'accès comme les autres fonctions et répond vrai
+quand l'appelant est une vue prouvée (`UI::isEmbeddedView()`) **ou** quand le frontend actif transmet la preuve à ses
+vues. La preuve désigne une vue prouvée, pas l'endroit où tourne une page qui ne l'a pas : sous un tel frontend, une page
+admise sans preuve (un cadre d'une vue intégrée, avec `trustLoopbackClients`) peut se trouver dans une vue intégrée, et
+on ne lui propose pas d'onglet. Un échec compte aussi comme une vue intégrée, ce qui n'essaie jamais d'onglet.
+
+Chaque page hôte a un **identifiant** (1 à 64 lettres, chiffres, `-` ou `_`), gardé dans le stockage de session de son
+onglet pour qu'un rechargement le garde. Ce stockage étant copié dans une page qu'elle ouvre, l'identifiant n'est repris
+que par la page qui en détient le verrou (Web Locks, exclusif pour l'origine, libéré quand la page disparaît) ; sans
+Web Locks, chaque chargement en tire un nouveau. Le nom de l'onglet d'un panneau détaché nomme aussi l'hôte, pour qu'une
+autre page du même groupe de navigation ne réutilise pas son onglet. Un panneau détaché a sa propre fenêtre, nommée par la page `inspector.html?panel=<id>&host=<hôte>` :
+`openWindow(panneau, hôte, largeur, hauteur)` n'accepte que les panneaux du menu et un identifiant valide, et
+`webfront.inspector.closeWindow(panneau, hôte)` ferme celle d'un panneau rattaché de nouveau. Les deux s'exécutent sur
+le thread de l'interface, où `openSecondaryWindow` et `requestClose(page)` ne retiennent pas le thread du serveur. Une
+fenêtre détachée demande son rattachement par un `BroadcastChannel` de même origine, en nommant son hôte : seule la page
+qui l'a détachée le prend, les autres pages de l'application ouvertes sur la même origine l'ignorent. C'est cette page
+qui ferme la fenêtre, quand elle le peut : une fenêtre native par `closeWindow` sur sa propre connexion, et un nouveau
+détachement n'ouvre la fenêtre qu'une fois cette fermeture terminée ; un onglet qu'elle a ouvert, par sa référence. Une
+fermeture demandée par la fenêtre elle-même pourrait sinon refermer celle qu'un détachement fait entre-temps vient de
+réutiliser. Un onglet dont elle n'a pas la référence (ouvert avant un rechargement) se ferme lui-même après la réponse,
+et le détachement suivant ouvre un onglet sous un autre nom plutôt que de réutiliser celui-ci.
+
+La liste des observateurs se lit page après page sous la révision de la première ; une page qui répond `changé` fait
+recommencer la liste, pour qu'un observateur retiré entre deux pages ne reste pas affiché sous la nouvelle révision.
+
+Le choix de chaque panneau et la place de la fenêtre flottante sont écrits comme des **changements** du fichier du
+projet, relu au moment de l'écriture et validé seulement s'il n'a pas changé depuis (sinon l'écriture recommence) :
+plusieurs pages d'un même projet ne défont pas leurs choix. `webfront.inspector.readPreferences()` lit le fichier et
+son jeton sous un même verrou du store, le jeton étant calculé sur les octets rendus : un contenu qui change puis revient
+entre la lecture et la sauvegarde ne valide pas des choix lus sur un autre contenu. Un fichier absent donne des choix
+vides avec le jeton de son absence ; un fichier présent mais illisible fait échouer l'écriture plutôt que de l'écraser.
+Un détachement ou un rattachement est écrit aussitôt, la place après une courte pause. Un seul appel admis à
+`webfront.inspector.savePreferences` écrit la version conditionnelle, et C++ libère sa transaction en cas d'échec ; un
+changement non écrit est repris par l'écriture suivante, après les changements plus récents du même panneau ou de la
+place, qui l'emportent. Si la page ferme avant que cet appel arrive, le dernier changement peut être perdu.
 
 La même règle désactive « Détacher » quand aucun conteneur détaché ne donnerait l'accès.
 

@@ -859,11 +859,14 @@ try {
                 rightClick: (target, x, y) => target.dispatchEvent(new view.MouseEvent('contextmenu', {bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y})),
             };
         };
-        // The reason the inspector entries give, from what webfront.inspector.containers() answered to the page's bridge:
-        // an admitted page has no inspector to open yet (#680), another one is told how to be admitted (ADR-027, section 8).
-        const inspectorReason = async bridge => {
-            const [, host] = await bridge.cppFunction('webfront.inspector.containers')();
-            return host ? /cannot open the inspectors yet/ : /trustLoopbackClients/;
+        // Opens the submenu of `group` until its entries are available: the page is admitted and the menu read its access.
+        const availableEntries = async (layoutOf, group) => {
+            await until(() => {
+                layoutOf.menus().slice(1).forEach(() => layoutOf.press(layoutOf.entries(1)[0], {key: 'ArrowLeft'}));
+                layoutOf.press(layoutOf.entries(0)[group], {key: 'ArrowRight'});
+                return layoutOf.entries(1).length > 0 && layoutOf.entries(1).every(entry => entry.getAttribute('aria-disabled') !== 'true');
+            }, 'The inspector entries of an admitted page must be available');
+            return layoutOf.entries(1);
         };
         // Opens the submenu of `group` (1: C++ state, 2: TypeScript state) until the menu has read the page's access.
         const inspectorEntries = async (layoutOf, group, expected) => {
@@ -922,13 +925,80 @@ try {
             'A displayed interface must fill the window, with the icon');
         if (part === 'workspace') {
             // This page's own menu: the inspector entries follow what its connection is admitted to.
+            // The containers come from the frontend type, known to the test program: a containers() that wrongly answered
+            // no window, or no admission, would otherwise run a shorter path and still pass.
+            const [secondaryWindow, admitted] = await webFront.cppFunction('test.expectedContainers')();
+            const [offeredWindow, offeredAdmission] = await webFront.cppFunction('webfront.inspector.containers')();
+            assert(offeredWindow === secondaryWindow && offeredAdmission === admitted,
+                `The inspectors must offer what the frontend gives: ${[offeredWindow, offeredAdmission]} instead of ${[secondaryWindow, admitted]}`);
             const tabBox = here.box('.webfront-terminal-toggle');
             here.rightClick(here.button(), tabBox.left + 10, tabBox.top + 10);
-            const entries = await inspectorEntries(here, 1, await inspectorReason(webFront));
-            assert(entries.length === 3 && entries.every(entry => entry.getAttribute('aria-disabled') === 'true'),
-                'Without an inspector to open, the entries of this page must be greyed');
-            here.press(entries[0], {key: 'Escape'});
-            assert(here.menus().length === 0 && document.activeElement === here.button(), 'Escape in a submenu must close the whole menu and give the focus back to the tab');
+            if (!admitted) {
+                const entries = await inspectorEntries(here, 1, /trustLoopbackClients/);
+                assert(entries.length === 3 && entries.every(entry => entry.getAttribute('aria-disabled') === 'true'),
+                    'The inspector entries of a page that is not admitted must be greyed');
+                here.press(entries[0], {key: 'Escape'});
+                assert(document.activeElement === here.button(), 'Escape in a submenu must give the focus back to the tab');
+            } else {
+                // The view of an embedded frontend is admitted: its Watches entry opens the inspector (#680, ADR-027 section 8).
+                const opened = [];
+                const open = window.open;
+                window.open = (...args) => { opened.push(args); return null; };
+                try {
+                    const entries = await availableEntries(here, 1);
+                    here.press(entries[2], {key: 'Enter'});
+                    const floating = () => document.querySelector('.webfront-inspector-window');
+                    await until(() => floating() && !floating().hidden, 'The Watches entry must open the inspector in a floating window');
+                    assert(here.menus().length === 0 && here.inside('.webfront-inspector-window'), 'The inspector window must stay inside the page, with the menu closed');
+                    const frame = floating().querySelector('iframe');
+                    const listed = () => [...(frame.contentDocument?.querySelectorAll('ul.watches li .name') ?? [])].map(item => item.textContent);
+                    await until(() => frame.contentDocument?.querySelector('ul.watches'), 'The floating inspector must show the watches');
+                    // The frame borrows this page's bridge: it opens no connection and loads no WebFront.js of its own.
+                    assert(!Object.hasOwn(frame.contentWindow, 'webFront') && !frame.contentDocument.querySelector('script[src="/WebFront.js"]'),
+                        'The inspector\'s frame must not open a connection of its own');
+                    // A watch registered while the inspector is open appears, and disappears once removed (ADR-027, section 3).
+                    await webFront.cppFunction('test.watch')('integration');
+                    await until(() => listed().includes('integration'), `A registered watch must appear in the inspector: ${listed()}`);
+                    // The list that showed it must be the one that loses it: the same document, still shown.
+                    const shownDocument = frame.contentDocument, shownList = shownDocument.querySelector('ul.watches');
+                    const inShownList = () => [...shownList.querySelectorAll('li .name')].map(item => item.textContent).includes('integration');
+                    await webFront.cppFunction('test.unwatch')('integration');
+                    await until(() => !inShownList(), `A removed watch must disappear from the inspector: ${listed()}`);
+                    assert(shownList.isConnected && frame.isConnected && frame.contentDocument === shownDocument,
+                        'The watch must have disappeared from the list that showed it, still in the inspector');
+                    const detach = floating().querySelector('.webfront-inspector-detach');
+                    if (secondaryWindow) {
+                        // A frontend that opens windows: Detach moves the panel to a native window with its own proven connection.
+                        const views = await webFront.cppFunction('test.views')();
+                        assert(detach.getAttribute('aria-disabled') === 'false', 'A frontend that opens windows must offer to detach the panel');
+                        detach.click();
+                        await until(() => floating().hidden, 'A detached panel must leave the floating window');
+                        await until(async () => await webFront.cppFunction('test.views')() === views + 1,
+                            'The detached inspector must be a secondary window, connected as a proven view');
+                        await window.webfrontInspectorHost.saved();
+                        const kept = JSON.parse(new TextDecoder().decode(await call('read', '.webfront/developer/inspector-window.json', 0)));
+                        assert(kept.detached.includes('cpp.watches'), `The project must remember the detached panel: ${JSON.stringify(kept)}`);
+                        assert(await webFront.cppFunction('webfront.inspector.closeWindow')('cpp.watches', window.webfrontInspectorHost.id) === true, 'The panel\'s window must close');
+                        assert(await webFront.cppFunction('webfront.inspector.closeWindow')('cpp.watches', window.webfrontInspectorHost.id) === false,
+                            'The closed inspector window must be gone');
+                        // A closed view's connection ends when its engine releases the page: WKWebView may take seconds.
+                        await eventually(async () => await webFront.cppFunction('test.views')() === views, 'The closed inspector window must disconnect',
+                            {attempts: 1200});
+                        window.webfrontInspectorHost.attach('cpp.watches');
+                        await window.webfrontInspectorHost.saved();
+                    } else {
+                        // CEF, or a view without a secondary window: the floating window is the only container, and Detach says why.
+                        assert(detach.getAttribute('aria-disabled') === 'true' && /No detached window/.test(detach.title),
+                            `Without a detached container, Detach must be greyed with its reason: ${detach.title}`);
+                        detach.click();
+                        assert(!floating().hidden, 'A greyed Detach must leave the panel in the floating window');
+                    }
+                    assert(opened.length === 0, 'An embedded view must never open a tab of the inspectors');
+                    floating().querySelector('.webfront-inspector-close').click();
+                    assert(floating().hidden, 'The inspector window must close');
+                } finally { window.open = open; }
+            }
+            assert(here.menus().length === 0, 'The menu must be closed');
         }
 
         // Launching again: the bootstrap page of the same project, in a window of its own size.
@@ -1042,12 +1112,25 @@ try {
         assert(again.inside('.webfront-terminal-window') && again.box('.webfront-terminal-window').right > again.viewport().width - 1, 'A drag must stay inside the window');
         pointer('pointermove', 0, 0);
         assert(left() > 0, 'A released bar must not follow the pointer');
-        // The place is remembered in the project.
+        // The unproven bootstrap frame can move its terminal, and its project writes are refused.
+        const framePlace = {x: left(), y: top()};
         const placePath = '.webfront/developer/terminal-window.json';
+        const frameWrite = await failure(relaunched.contentWindow.webFront.cppFunction('webfront.developer.begin')(placePath, false));
+        assert(frameWrite?.code === 'webfront.inspector.denied', 'An unproven bootstrap frame must not publish its terminal place');
+
+        // Move the proven main view's terminal and check that a later session will read its place.
+        if (here.state() === 'interface') here.button().click();
+        for (let count = 0; count < 100; ++count) {
+            key(here.bar(), {key: 'ArrowLeft'});
+            key(here.bar(), {key: 'ArrowUp'});
+        }
+        key(here.bar(), {key: 'ArrowRight'});
+        key(here.bar(), {key: 'ArrowDown'});
+        const mainPlace = here.box('.webfront-terminal-window');
         const place = async () => { try { return JSON.parse(new TextDecoder().decode(await readFile(placePath))); } catch { return null; } };
-        await until(async () => (await place())?.x === left(), 'The place of the terminal window must be remembered in the project');
+        await until(async () => (await place())?.x === mainPlace.x, 'The place of the proven view must be remembered in the project');
         const remembered = await place();
-        assert(remembered.format === 1 && remembered.width === again.box('.webfront-terminal-window').width, `The size must be remembered too: ${JSON.stringify(remembered)}`);
+        assert(remembered.format === 1 && remembered.width === mainPlace.width, `The size must be remembered too: ${JSON.stringify(remembered)}`);
 
         // A smaller window keeps the icon and the terminal window; the remembered place comes back with the room.
         const columns = () => Math.round(page.querySelector('#terminal .xterm-screen')?.getBoundingClientRect().width ?? 0);
@@ -1064,7 +1147,7 @@ try {
         assert(again.inside('.webfront-terminal-window') && again.inside('.webfront-terminal-toggle'), 'A small window must keep the icon and the terminal window');
         await until(() => columns() < wideScreen, 'xterm.js must be fitted to a smaller terminal window');
         resize(900, 600);
-        await until(() => left() === remembered.x && top() === remembered.y, 'A window enlarged again must give the terminal window its place back');
+        await until(() => left() === framePlace.x && top() === framePlace.y, 'A window enlarged again must give the terminal window its place back');
         await until(() => columns() === wideScreen, 'xterm.js must be fitted to the terminal window again');
 
         // The close button and the shortcut collapse and open it, wherever the focus is.

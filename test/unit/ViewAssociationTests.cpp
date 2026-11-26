@@ -11,6 +11,7 @@
 
 #include "InjectableNetworking.hpp"
 #include "TemporaryDirectory.hpp"
+#include <webfront/Commands.hpp>
 #include <webfront/DeveloperApp.hpp>
 #include <webfront/networking/TCPNetworkingStdnet.hpp>
 #include <webfront/system/DefaultFS.hpp>
@@ -391,3 +392,270 @@ const Scenario inspectorContainersScenario{"The inspectors' containers follow th
                                                    });
                                                });
                                            }};
+
+namespace {
+/// A frontend that opens secondary windows (WebKitGTK, WKWebView, WebView2 in this respect), counting the windows it opens.
+struct InspectorWindowFrontend {
+    static constexpr bool providesViewProof() noexcept {
+        return true;
+    }
+    static constexpr frontend::Action action{frontend::Action::keepServerRunning};
+    static void                       initialize() { }
+    static void                       open(std::string_view, std::string_view) { }
+    static inline int                 opened = 0;
+    static void openSecondaryWindow(std::string_view, std::string_view, std::string_view, const ContentPolicy&, const WindowOptions&, const ViewLaunch&) {
+        ++opened;
+    }
+    [[nodiscard]] static frontend::UIExecutor uiExecutor() {
+        return {};
+    }
+};
+using InspectorWindowApp = DeveloperAppWithNetwork<ViewOneBrowserNet, InspectorWindowFrontend>;
+
+/// The browser calls `name` with `arguments`; the answer is among the socket's writes.
+template <typename... Arguments>
+void callWith(const std::string& name, msg::CallId callId, Arguments... arguments) {
+    msg::FunctionCall<> message;
+    message.setCallId(callId);
+    websocket::Frame<ViewOneBrowserNet> frame{std::span(reinterpret_cast<const std::byte*>(message.header().data()), message.header().size())};
+    message.encodeParameter(name, frame);
+    (message.encodeParameter(arguments, frame), ...);
+    frame.freeze();
+    ViewSocket::receive(testing::clientFrame(testing::messagePayload(frame)));
+}
+
+/// The encoded answer of a call that returns a boolean: the header of the return, then the boolean.
+std::string booleanAnswer(msg::CallId callId, bool value) {
+    const msg::FunctionCallHeader<msg::Command::functionReturn> header{.parametersCount = 1, .callId = callId, .parametersDataSize = 1};
+    std::string                                                 bytes(reinterpret_cast<const char*>(&header), sizeof header);
+    bytes += static_cast<char>(value ? msg::CodedType::booleanTrue : msg::CodedType::booleanFalse);
+    return bytes;
+}
+
+/// A bootstrapped developer application of `Frontend`, with one browser that presented `proof` (or not).
+template <typename Application>
+struct AdmittedBrowser {
+    AdmittedBrowser(bool trustLoopback, bool proven) : app(project.path(), inspectorConfig(trustLoopback)) {
+        app.bootstrap("developer", {.environment = "https://example.test/env.tgz", .integrity = "sha512-abc"});
+        connect(app, proven ? testing::LaunchSecret<Application>::of(app) : std::string{}, inspectorUpgradeRequest);
+    }
+    webfront::test::TemporaryDirectory project;
+    Application                        app;
+};
+}  // namespace
+
+const Scenario inspectorContainersWithWindows{
+    "A frontend that opens windows offers one only to an admitted page (ADR-027, section 8)",
+    {"view-association", "inspector"},
+    [] {
+        given("the proven view", [&] {
+            freshNetwork();
+            AdmittedBrowser<InspectorWindowApp> browser{false, true};
+            callWithoutArgument("webfront.inspector.containers", 7);
+            then("a secondary window and the page are admitted, no new connection", [&] {
+                require(ViewSocket::wrote(containersAnswer(true, true, false)));
+            });
+        });
+        given("a page that is not proven, on the loopback, without trustLoopbackClients", [&] {
+            freshNetwork();
+            ViewSocket::peerIsLoopback = true;
+            AdmittedBrowser<InspectorWindowApp> browser{false, false};
+            callWithoutArgument("webfront.inspector.containers", 7);
+            then("no container: the window would be opened by a page that is refused", [&] {
+                require(ViewSocket::wrote(containersAnswer(false, false, false)));
+            });
+        });
+        given("a page that is not proven, on the loopback, with trustLoopbackClients", [&] {
+            freshNetwork();
+            ViewSocket::peerIsLoopback = true;
+            AdmittedBrowser<InspectorWindowApp> browser{true, false};
+            callWithoutArgument("webfront.inspector.containers", 7);
+            then("the trusted page may open a window, and new connections are admitted", [&] {
+                require(ViewSocket::wrote(containersAnswer(true, true, true)));
+            });
+        });
+      }
+};
+
+const Scenario developerWriteAccess{
+    "Developer writes and commands require an admitted client when the frontend proves its view",
+    {"view-association", "inspector"},
+    [] {
+        const std::string               path = "protected.txt";
+        const std::vector<std::uint8_t> bytes{'o', 'k'};
+        given("an unproven client of an embedded frontend", [&] {
+            freshNetwork();
+            AdmittedBrowser<InspectorWindowApp> browser{false, false};
+            Commands                            commands{browser.app};
+            const auto                          denied = [&](auto name, auto... arguments) {
+                const auto offset = ViewSocket::writtenText().size();
+                callWith(name, 7, arguments...);
+                require(ViewSocket::writtenText().find(inspect::code::denied, offset) != std::string::npos);
+            };
+            denied("webfront.developer.begin", path, false);
+            denied("webfront.developer.beginNew", path, false);
+            denied("webfront.developer.write", path, std::string{"output"}, std::uint64_t{0}, bytes);
+            denied("webfront.developer.commit", path);
+            denied("webfront.developer.abort", path);
+            denied("webfront.developer.commitGroup", path, path, path);
+            denied("webfront.commands.start", std::uint32_t{1}, path, std::string{"[]"});
+            denied("webfront.commands.cancel", std::uint32_t{1});
+            denied("webfront.inspector.savePreferences", path, bytes);
+            const auto offset = ViewSocket::writtenText().size();
+            callWith("webfront.developer.state", 7, path);
+            const auto response = ViewSocket::writtenText().substr(offset);
+            require(!response.empty() && !response.contains(inspect::code::denied));
+            require(!std::filesystem::exists(browser.project.path() / ".webfront/developer/staging"));
+        });
+        given("a proven client", [&] {
+            freshNetwork();
+            AdmittedBrowser<InspectorWindowApp> browser{false, true};
+            callWith("webfront.developer.begin", 7, path, false);
+            require(!ViewSocket::wrote(inspect::code::denied));
+            require(std::filesystem::is_directory(browser.project.path() / ".webfront/developer/staging"));
+        });
+        given("a system browser with the default trust policy", [&] {
+            freshNetwork();
+            AdmittedBrowser<InspectorApp> browser{false, false};
+            callWith("webfront.developer.begin", 7, path, false);
+            require(!ViewSocket::wrote(inspect::code::denied));
+            require(std::filesystem::is_directory(browser.project.path() / ".webfront/developer/staging"));
+        });
+      }
+};
+
+const Scenario inspectorWindowAccess{
+    "webfront.inspector.openWindow opens a panel's window only for an admitted page (ADR-027, sections 2 and 8)",
+    {"view-association", "inspector"},
+    [] {
+        given("a page that is not admitted, with a frontend that opens windows", [&] {
+            freshNetwork();
+            InspectorWindowFrontend::opened = 0;
+            AdmittedBrowser<InspectorWindowApp> browser{false, false};
+            callWith("webfront.inspector.openWindow", 9, std::string{"cpp.watches"}, std::string{"host-1"}, 720.0, 560.0);
+            then("the call is refused as denied, and no window opens", [&] {
+                require(ViewSocket::wrote(inspect::code::denied));
+                requireEqual(InspectorWindowFrontend::opened, 0);
+            });
+        });
+        given("the proven view and an unknown panel", [&] {
+            freshNetwork();
+            InspectorWindowFrontend::opened = 0;
+            AdmittedBrowser<InspectorWindowApp> browser{false, true};
+            callWith("webfront.inspector.openWindow", 9, std::string{"../../etc/passwd"}, std::string{"host-1"}, 720.0, 560.0);
+            then("the call is refused before any window", [&] {
+                require(ViewSocket::wrote("Unknown inspector panel"));
+                requireEqual(InspectorWindowFrontend::opened, 0);
+            });
+        });
+        given("the proven view of a frontend that opens no secondary window", [&] {
+            freshNetwork();
+            AdmittedBrowser<InspectorApp> browser{false, true};
+            callWith("webfront.inspector.openWindow", 9, std::string{"cpp.watches"}, std::string{"host-1"}, 720.0, 560.0);
+            then("the call is refused as unavailable", [&] {
+                require(ViewSocket::wrote(inspect::code::unavailable));
+            });
+        });
+        given("the pages of a panel", [&] {
+            then("each panel of each host page has its own window, and only the panels of the menu have one", [&] {
+                requireEqual(developer::inspectorPage("cpp.watches", "a1_b-2"),
+                             std::string{"webfront/developer/environment/inspector.html?panel=cpp.watches&host=a1_b-2"});
+                checkThrows<std::invalid_argument>([] {
+                    static_cast<void>(developer::inspectorPage("cpp", "host"));
+                });
+                // The host page names itself in the window's address: no other text reaches the page string.
+                for (const auto* host : {"", "a/b", "a&panel=x", "é", "x x"})
+                    checkThrows<std::invalid_argument>([host] {
+                        static_cast<void>(developer::inspectorPage("cpp.watches", host));
+                    });
+                require(developer::inspectorHostIdentifier(std::string(64, 'a')) && !developer::inspectorHostIdentifier(std::string(65, 'a')));
+                requireEqual(developer::inspectorWindowExtent(10.0, 720), 720);
+                requireEqual(developer::inspectorWindowExtent(800.5, 720), 800);
+            });
+        });
+      }
+};
+
+const Scenario inspectorWatchesAccess{
+    "webfront.inspector.watches lists the application's watches to an admitted page only (ADR-027, sections 2 and 3)",
+    {"view-association", "inspector"},
+    [] {
+        std::vector<int> grid{1, 2, 3};
+        given("the proven view and a watch declared after bootstrap", [&] {
+            freshNetwork();
+            AdmittedBrowser<InspectorApp> browser{false, true};
+            auto                          watch = browser.app.watch("grid", [&grid]() -> const std::vector<int>& {
+                return grid;
+            });
+            require(static_cast<bool>(watch));
+            callWith("webfront.inspector.watches", 11, 0.0, 0.0, 200.0);
+            then("the page names the watch, its kind and where it was declared", [&] {
+                require(ViewSocket::wrote("grid"));
+                require(ViewSocket::wrote("sequence"));
+                require(ViewSocket::wrote("ViewAssociationTests.cpp:"));
+            });
+            then("the proven view is told that it is an embedded view, which never offers it a tab", [&] {
+                callWithoutArgument("webfront.inspector.embedded", 12);
+                require(ViewSocket::wrote(booleanAnswer(12, true)));
+            });
+            then("a second watch of the same name is refused while the first lives", [&] {
+                checkThrows<std::invalid_argument>([&] {
+                    static_cast<void>(browser.app.watch("grid", [&grid]() -> const std::vector<int>& {
+                        return grid;
+                    }));
+                });
+            });
+        });
+        given("a page that is not admitted", [&] {
+            freshNetwork();
+            AdmittedBrowser<InspectorApp> browser{false, false};
+            auto                          watch = browser.app.watch("secret", [&grid]() -> const std::vector<int>& {
+                return grid;
+            });
+            callWith("webfront.inspector.watches", 11, 0.0, 0.0, 200.0);
+            then("the call is refused as denied, before any read of the table", [&] {
+                require(ViewSocket::wrote(inspect::code::denied));
+                require(!ViewSocket::wrote("secret"));
+            });
+        });
+        given("a page that is not admitted asks whether it is an embedded view", [&] {
+            freshNetwork();
+            AdmittedBrowser<InspectorApp> browser{false, false};
+            callWithoutArgument("webfront.inspector.embedded", 12);
+            then("the call is refused as denied, without an answer", [&] {
+                require(ViewSocket::wrote(inspect::code::denied));
+                require(!ViewSocket::wrote(booleanAnswer(12, false)) && !ViewSocket::wrote(booleanAnswer(12, true)));
+            });
+        });
+        given("a trusted loopback page that is not proven asks whether it is an embedded view", [&] {
+            freshNetwork();
+            ViewSocket::peerIsLoopback = true;
+            AdmittedBrowser<InspectorApp> browser{true, false};
+            callWithoutArgument("webfront.inspector.embedded", 12);
+            then("under a frontend without the proof, it is told that it is not one: a tab of the system browser may be offered", [&] {
+                require(ViewSocket::wrote(booleanAnswer(12, false)));
+            });
+        });
+        given("a trusted loopback page that is not proven, under a frontend that gives its views the proof", [&] {
+            freshNetwork();
+            ViewSocket::peerIsLoopback = true;
+            AdmittedBrowser<InspectorWindowApp> browser{true, false};
+            callWithoutArgument("webfront.inspector.embedded", 12);
+            then("it is told that it may be one (a frame of an embedded view), which never offers it a tab", [&] {
+                require(ViewSocket::wrote(booleanAnswer(12, true)));
+            });
+        });
+        given("a trusted loopback page", [&] {
+            freshNetwork();
+            ViewSocket::peerIsLoopback = true;
+            AdmittedBrowser<InspectorApp> browser{true, false};
+            auto                          watch = browser.app.watch("trusted", [&grid]() -> const std::vector<int>& {
+                return grid;
+            });
+            callWith("webfront.inspector.watches", 11, 0.0, 0.0, 200.0);
+            then("it is admitted by trustLoopbackClients", [&] {
+                require(ViewSocket::wrote("trusted"));
+            });
+        });
+      }
+};

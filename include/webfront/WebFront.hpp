@@ -26,6 +26,7 @@
 #include "Task.hpp"
 #include "UISubscribers.hpp"
 #include "ViewAssociation.hpp"
+#include "Watches.hpp"
 #include "weblink/DomBatch.hpp"
 #include "weblink/Messages.hpp"
 #include "weblink/WebLink.hpp"
@@ -41,6 +42,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <source_location>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -1055,6 +1057,17 @@ private:
     friend struct testing::ConnectionIds;  // lets a test start the identifiers near their wrap
     template <typename>
     friend struct testing::LaunchSecret;   // lets a test present the secret an embedded view would
+    template <typename Network, frontend::FrontendType DeveloperFrontend, fs::Provider... Extra>
+    friend class DeveloperAppWithNetwork;  // installs the inspectors' reserved functions (reservedCppFunction)
+
+    /// Registers one of WebFront's own reserved functions (`webfront.inspector.*`), which cppFunction refuses to the
+    /// application. Only the developer environment calls it, and a name already taken is an error, never ignored: the
+    /// inspectors' callbacks are WebFront's or none (ADR-027, section 1).
+    template <typename R, typename... Args>
+    void reservedCppFunction(std::string functionName, auto&& function) {
+        if (!registerCppFunction<R, Args...>(functionName, std::forward<decltype(function)>(function)))
+            throw std::logic_error("webfront: the reserved function " + functionName + " is already registered");
+    }
 
     /// Sends `call` to each browser not reported closed whose onUIStarted handlers have returned: at once, on the
     /// calling thread and outside every lock. For a browser whose handlers are running, `call` is kept, within its
@@ -1204,10 +1217,12 @@ public:
      * @param functionName
      * @param function
      * @return false when a function of that name was already registered, which stays registered
+     * @throws std::invalid_argument for a name starting with `webfront.inspector.`, reserved to WebFront (ADR-027)
      */
     template <typename R, typename... Args>
     bool cppFunction(std::string functionName, auto&& function) {
-        return cppFunctions.try_emplace(std::move(functionName), makeCppHandler<R, Args...>(std::forward<decltype(function)>(function))).second;
+        refuseReservedName(functionName);
+        return registerCppFunction<R, Args...>(std::move(functionName), std::forward<decltype(function)>(function));
     }
 
     /**
@@ -1222,6 +1237,7 @@ public:
      * @param functionName
      * @param function
      * @return false when a function of that name was already registered, which stays registered
+     * @throws std::invalid_argument for a name starting with `webfront.inspector.`, reserved to WebFront (ADR-027)
      */
     template <typename Function>
     bool cppFunction(std::string functionName, Function&& function) {
@@ -1235,6 +1251,51 @@ public:
         return detail::ApplyArgs<typename Traits::Return, Args>::invoke(*this, std::move(functionName), std::forward<Function>(function));
     }
 
+    /**
+     * @brief Declares a watch: an object or a container of the application that the inspectors of the developer environment
+     * show (ADR-027, section 5). The watch exists while the returned handle lives.
+     *
+     * `source` reaches the object. A visitor, `[&](webfront::inspect::Visit<const T> visit) { std::scoped_lock lock{m}; visit(object); }`,
+     * is called by WebFront and calls the visit once with the object under its own lock: it is the form of an object shared
+     * between threads, and `Visit<T>` makes the watch writable. An accessor, `[&] -> const T& { return object; }`, returns a
+     * reference, read on the server thread only (correct only for an object that thread alone touches), or a copy.
+     *
+     * Outside the developer environment (`bootstrap("developer")`), and in a distribution build, nothing is registered and
+     * the handle is empty: declare the watches after bootstrap(). Inside, a watch costs an entry in a table until an
+     * inspector reads it. Callable from any thread.
+     *
+     * @throws std::invalid_argument for an empty name, a name longer than 256 bytes, or the name of a live watch
+     */
+    template <inspect::WatchSource Source>
+    [[nodiscard]] inspect::Watch watch(std::string name, Source&& source, std::source_location location = std::source_location::current()) {
+        using Stored = std::decay_t<Source>;  // a function given by name is kept as a pointer
+        using Shape  = inspect::SourceShape<Stored>;
+        inspect::WatchRegistry::checkName(name);
+        const auto registry = inspectorRegistry();
+        if (!registry)
+            return {};
+        auto       owned = std::make_shared<Stored>(std::forward<Source>(source));
+        const auto id    = registry->add(std::move(name),
+                                         inspect::kindOf<typename Shape::Object>(),
+                                         inspect::locationText(location),
+                                         Shape::writable,
+                                         std::static_pointer_cast<void>(std::move(owned)));
+        return inspect::Watch{registry, id};
+    }
+
+private:
+    /// The names of the inspectors belong to WebFront: an application can neither hide one nor pose as one (ADR-027, section 1).
+    static void refuseReservedName(std::string_view functionName) {
+        if (inspect::isReservedName(functionName))
+            throw std::invalid_argument("webfront::BasicWF::cppFunction(): names starting with 'webfront.inspector.' are reserved to WebFront");
+    }
+
+    template <typename R, typename... Args>
+    bool registerCppFunction(std::string functionName, auto&& function) {
+        return cppFunctions.try_emplace(std::move(functionName), makeCppHandler<R, Args...>(std::forward<decltype(function)>(function))).second;
+    }
+
+public:
     enum class WindowAction { none, closeWindow };
 #ifdef _MSC_VER
     // A Frontend::open() that unconditionally throws (e.g. CEFFrontend::open() when CEF support
@@ -1567,6 +1628,12 @@ protected:
             windowOptions.background = "#141821";
     }
 
+    /// The table of the watches, null until the developer bootstrap enabled it.
+    [[nodiscard]] std::shared_ptr<inspect::WatchRegistry> inspectorRegistry() const {
+        std::scoped_lock lock{watchRegistryMutex};
+        return watchRegistry;
+    }
+
     /// Whether the application chose WebFrontConfig::trustLoopbackClients: a new connection that is not proven would then
     /// be a local client when its peer is the loopback (the inspectors' containers, ADR-027 section 8).
     [[nodiscard]] bool trustsLoopbackClients() const noexcept {
@@ -1574,6 +1641,43 @@ protected:
     }
 
 private:
+    /// The run of show() that owns the interface: its epoch and the interface loop's session, empty when none runs. Read when a
+    /// request is admitted (DeveloperAppWithNetwork, a friend), then checked on the interface thread with isCurrentShowSession():
+    /// a request admitted for one run never opens or closes a window of the next one.
+    struct ShowSession {
+        std::uint64_t                       epoch{};
+        std::optional<frontend::UISession> session;
+    };
+    [[nodiscard]] ShowSession currentShowSession() const {
+        if constexpr (supportsSecondaryWindow) {
+            const auto epoch = showEpoch.load();
+            if (epoch % 2 == 0)
+                return {};
+            auto session = Frontend::uiExecutor().session();
+            if (!session || session->thread != showThread.load() || showEpoch.load() != epoch)
+                return {};
+            return {epoch, std::move(session)};
+        } else {
+            return {};
+        }
+    }
+    [[nodiscard]] bool isCurrentShowSession(const ShowSession& bound) const {
+        if (!bound.session)
+            return false;
+        const auto now = currentShowSession();
+        return now.epoch == bound.epoch && now.session == bound.session;
+    }
+
+    /// For the developer environment's bootstrap only (DeveloperAppWithNetwork, a friend): from now on, watch() registers in
+    /// the table that the inspectors read (ADR-027). Returns that table. Private, so that no other subclass gives watch() a
+    /// table without the bootstrap or in a distribution build, where the handle must stay empty (section 1).
+    std::shared_ptr<inspect::WatchRegistry> enableInspectors() {
+        std::scoped_lock lock{watchRegistryMutex};
+        if (!watchRegistry)
+            watchRegistry = std::make_shared<inspect::WatchRegistry>();
+        return watchRegistry;
+    }
+
     // The constructor has already bound and listened; this thread services the queued I/O.
     // Launch server only once or restart if previous thread ended
     void startServerThread() {
@@ -1872,24 +1976,26 @@ private:
     }
 
     // Before the server: the routes' handlers use it, and the server drains them before it is destroyed.
-    std::shared_ptr<ReadBinding>          readBinding;
-    http::Server<Net, Filesystem, Policy> httpServer;
-    http::RouteTable::Registration        bindRoute;
-    std::string                           httpAddress;
-    std::string                           httpPort;
-    std::filesystem::path                 httpDocRoot;
-    ContentPolicy                         contentPolicy;
-    WindowOptions                         windowOptions;
-    const std::string                     viewSecret = detail::newViewSecret();  // this launch's proof of an embedded view
-    const bool                            trustLoopbackClients;
-    const bool                            ptyPagesAllowed;
-    bool                                  developerEnvironment = false;
-    std::atomic<bool>                     launched{false};     // start() was called
-    std::atomic<std::thread::id>          showThread{};        // the thread inside this application's Frontend::open(), if any
-    std::atomic<std::uint64_t>            showEpoch{0};        // odd while show() runs its frontend, changes at each entry and exit
-    std::atomic<bool>                     showRunning{false};  // a show() of this application is in progress
-    std::atomic<bool>                     shown{false};        // show() was called, whether or not its server still runs
-    mutable std::mutex                    linksMutex;          // guards webLinks, read from any thread
+    std::shared_ptr<ReadBinding>            readBinding;
+    http::Server<Net, Filesystem, Policy>   httpServer;
+    http::RouteTable::Registration          bindRoute;
+    std::string                             httpAddress;
+    std::string                             httpPort;
+    std::filesystem::path                   httpDocRoot;
+    ContentPolicy                           contentPolicy;
+    WindowOptions                           windowOptions;
+    const std::string                       viewSecret = detail::newViewSecret();  // this launch's proof of an embedded view
+    const bool                              trustLoopbackClients;
+    const bool                              ptyPagesAllowed;
+    bool                                    developerEnvironment = false;
+    mutable std::mutex                      watchRegistryMutex;
+    std::shared_ptr<inspect::WatchRegistry> watchRegistry;       // set once by enableInspectors(), read by watch() from any thread
+    std::atomic<bool>                       launched{false};     // start() was called
+    std::atomic<std::thread::id>            showThread{};        // the thread inside this application's Frontend::open(), if any
+    std::atomic<std::uint64_t>              showEpoch{0};        // odd while show() runs its frontend, changes at each entry and exit
+    std::atomic<bool>                       showRunning{false};  // a show() of this application is in progress
+    std::atomic<bool>                       shown{false};        // show() was called, whether or not its server still runs
+    mutable std::mutex                      linksMutex;          // guards webLinks, read from any thread
     struct Connection {
         std::shared_ptr<WebLink<Net, Policy>> link;
         WebLinkGeneration                     generation;

@@ -1,7 +1,7 @@
 // Specs of the developer page's layout (workspace.mjs): what counts as an existing interface, the states of the display,
 // and the place of the floating terminal window. The page itself is checked in test/web/developer-specs.mjs.
 import {hasInterface, previewDirectory, State, initialState, nextState, clampRect, defaultRect, keyboardRect, minimumSize, step,
-    isToggleKey, Status, tabStatus, statusText, defaultShortcut, shortcutText, readShortcut, parsePlace, formatPlace, readPlace, placeStore, placePath,
+    windowControls, isToggleKey, Status, tabStatus, statusText, defaultShortcut, shortcutText, readShortcut, parsePlace, formatPlace, readPlace, placeStore, placePath,
     createWorkspace} from '../../../js/developer/environment/workspace.mjs';
 import {publish} from '../../../js/developer/environment/io.mjs';
 import {inspectorAccess, readInspectorAccess, accessReasons, containersFunction, placeMenu, createTabMenu, longPress, inspectorMenus,
@@ -11,6 +11,31 @@ import {memoryBridge} from '../memory-bridge.mjs';
 describe('The developer page layout', () => {
     const encode = text => new TextEncoder().encode(text);
     const page = text => new Map([['index.html', encode(text)], ['app.js', encode('')]]);
+
+    describe('window controls', () => {
+        it('move the window by the pointer that started the move only', () => {
+            const bar = document.createElement('div'), panel = document.createElement('div');
+            document.body.append(bar, panel);
+            try {
+                let rect = {x: 100, y: 100, width: 400, height: 200};
+                windowControls({view: window, bar, panel, shown: () => rect, choose: next => { rect = next; }, viewport: () => ({width: 2000, height: 2000}),
+                    shownNow: () => false});
+                const pointer = (type, pointerId, x, y) => bar.dispatchEvent(new PointerEvent(type, {bubbles: true, cancelable: true, pointerId, clientX: x, clientY: y, button: 0}));
+                pointer('pointerdown', 1, 110, 110);
+                pointer('pointerdown', 2, 300, 110);  // a second finger: ignored
+                pointer('pointermove', 1, 160, 130);
+                expect([rect.x, rect.y]).toEqual([150, 120]);
+                pointer('pointermove', 2, 900, 900);  // the second finger does not move the window
+                expect([rect.x, rect.y]).toEqual([150, 120]);
+                pointer('pointerup', 2, 900, 900);    // nor does lifting it end the move
+                pointer('pointermove', 1, 170, 140);
+                expect([rect.x, rect.y]).toEqual([160, 130]);
+                pointer('pointerup', 1, 170, 140);
+                pointer('pointermove', 1, 500, 500);
+                expect([rect.x, rect.y]).toEqual([160, 130]);
+            } finally { bar.remove(); panel.remove(); }
+        });
+    });
 
     describe('existing interface', () => {
         it('is a published preview page, which wf create and wf build do not produce', async () => {

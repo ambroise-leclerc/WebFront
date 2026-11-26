@@ -442,8 +442,34 @@ environment's `mount`, not to the embedded bootstrap page):
   embedded frontend (WebKitGTK, WKWebView, WebView2, CEF), which proves itself at the handshake, or any loopback page when
   the application sets `WebFrontConfig::trustLoopbackClients`. With the system browser, which never receives that proof,
   the entries are therefore unavailable by default, and the menu says to choose an embedded frontend or to set
-  `trustLoopbackClients`, knowing that any local process can then read the state of the application. The inspector panels
-  themselves come with the next versions of the environment; until then an admitted page's entries say so.
+  `trustLoopbackClients`, knowing that any local process can then read the state of the application.
+
+  **The inspector** is one page of the environment, `/webfront/developer/environment/inspector.html?panel=<id>`, that talks
+  to C++ through the bridge. An entry of the menu opens its panel where the project keeps it: at first, and whenever its
+  detached container is unavailable, in a **floating window** of the page (moved and resized like the terminal's window,
+  with the mouse or with the arrow keys on its title bar), whose frame opens no connection of its own and borrows the page's
+  bridge, since the adapters give the proof of the view to the main frame only. **Detach** moves the panel to a window of its
+  own, and the next opening of that panel goes there again; **Attach**, in that window, brings it back to the floating
+  window, where it then opens:
+
+  | Frontend of the page | Detached container |
+  | --- | --- |
+  | WebKitGTK, WKWebView, WebView2 | a native secondary window (`webfront.inspector.openWindow`, `openSecondaryWindow`), which carries the proof of the view; opening the panel again brings it to the front, and closing the main window closes it |
+  | System browser with `trustLoopbackClients` | a tab of the system browser (`window.open`), with its own loopback connection; when the pop-up blocker refuses it, the panel stays in the floating window and a message offers to try again; the tab closes when the page that opened it is gone |
+  | CEF, or an embedded view without secondary windows | none: Detach is greyed, with the reason in its tooltip (`window.open` there would open a frame without the proof) |
+
+  Attach brings the panel back to the page that detached it only, even when other pages of the application are open on
+  the same origin. A page keeps its identifier across a reload through Web Locks; in a browser without them, a reloaded
+  page has a new one, and a tab detached before the reload asks the old page in vain: it says that the main page did not
+  answer. Close that tab, open the panel from the menu of the reloaded page, then use Attach in the window it opens. The project keeps the detached panels and the floating window's place in
+  `.webfront/developer/inspector-window.json`. A save that reaches C++ completes or releases its transaction there,
+  even when its page closes. A page closed before the save reaches C++ may lose its latest choice.
+  With a frontend that proves its view, developer file writes and starting or cancelling native terminal commands
+  also require an admitted page. The system browser keeps origin-based access to those operations.
+  The **Watches** panel lists the application's watches (`app.watch(name, source)`, declared after `bootstrap()`): their
+  name, the kind of their root and where they were declared. It asks C++ for the revision of their table every 250 ms
+  (Pause stops it), reads the list again when it changed, and adds or removes the watches that appeared or disappeared.
+  Their contents, and the other panels, come with the next versions of the environment.
 
 The tab is a button (`aria-expanded`, `aria-haspopup="menu"`, 44 px target), its menu a `menu` of `menuitem`s of 44 px,
 and the window a non-modal dialog. The interface stays in the preview

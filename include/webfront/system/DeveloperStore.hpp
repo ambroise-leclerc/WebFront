@@ -15,6 +15,7 @@
 #include "DeveloperJournal.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cstddef>
@@ -32,6 +33,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -189,6 +191,33 @@ public:
         return fingerprint(root, paths);
     }
 
+    /// A small project file and the state() of its path, read under one lock: (present, bytes, token). The token is computed
+    /// from the bytes returned, so that a publication conditioned on it applies only to the content these bytes came from.
+    /// An absent file gives (false, {}, the token of its absence). Throws when the file exists but cannot be read, or is
+    /// larger than `limit` bytes.
+    std::tuple<bool, std::vector<std::uint8_t>, std::string> readWithState(const std::string& path, std::size_t limit) {
+        std::scoped_lock lock(mutex);
+        recover();
+        const auto      file = projectPath(root, path);
+        std::error_code error;
+        if (!std::filesystem::is_regular_file(file, error))
+            return {false, {}, fingerprintOfContent(std::nullopt)};
+        std::ifstream stream(file, std::ios::binary);
+        if (!stream)
+            throw std::runtime_error("Cannot read project file: " + path);
+        std::vector<std::uint8_t> bytes;
+        std::array<char, 4096>    block{};
+        while (stream.read(block.data(), static_cast<std::streamsize>(block.size())) || stream.gcount() > 0) {
+            bytes.insert(bytes.end(), block.begin(), block.begin() + stream.gcount());
+            if (bytes.size() > limit)
+                throw std::length_error("Project file is too large: " + path);
+        }
+        if (stream.bad())
+            throw std::runtime_error("Cannot read project file: " + path);
+        auto token = fingerprintOfContent(std::span<const std::uint8_t>(bytes));
+        return {true, std::move(bytes), std::move(token)};
+    }
+
     /// Why a committed publication could not be completed, if it still cannot.
     std::optional<std::string> recoveryFailure() const {
         std::scoped_lock lock(mutex);
@@ -252,6 +281,23 @@ public:
     }
     void commitGroupLines(std::string ids, std::string paths, std::string expected) {
         commitGroup(lines(ids), lines(paths), expected);
+    }
+
+    /// A conditional publication of one small file, completed or aborted within one server call.
+    void publishFile(std::string destination, std::vector<std::uint8_t> bytes, const std::string& expected) {
+        const auto id = beginReplacing(destination, false);
+        try {
+            write(id, "output", 0, std::move(bytes));
+            commitGroup({id}, {destination}, expected);
+        } catch (...) {
+            std::scoped_lock lock(mutex);
+            if (const auto found = transactions.find(id); found != transactions.end()) {
+                std::error_code ignored;
+                std::filesystem::remove_all(found->second.staging, ignored);
+                transactions.erase(found);
+            }
+            throw;
+        }
     }
 
     void abort(std::string id) {

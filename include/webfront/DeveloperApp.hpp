@@ -14,6 +14,9 @@
 #include "system/SafePath.hpp"
 #include "WebFront.hpp"
 
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <optional>
 #include <tuple>
 
@@ -80,6 +83,38 @@ inline constexpr std::tuple<bool, bool, bool> inspectorContainers(bool frontendO
     return {frontendOpensWindows && hostAdmitted, hostAdmitted, trustLoopback};
 }
 
+/// The inspector panels a detached window can show (the entries of the tab's menu, js/developer/environment/menu.mjs).
+inline constexpr std::array<std::string_view, 5> inspectorPanels{"cpp.functions", "cpp.browsers", "cpp.watches", "typescript.packages", "typescript.bridge"};
+
+/// The identifier of the page that holds the tab (the inspectors' host): 1 to 64 letters, digits, `-` or `_`. It names the
+/// host in the page of a detached panel, so that the panel is attached again to the page that detached it only.
+inline bool inspectorHostIdentifier(std::string_view host) noexcept {
+    return !host.empty() && host.size() <= 64 && std::ranges::all_of(host, [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+    });
+}
+
+/// Where the inspectors keep the detached panels and the floating window's place, in the project (inspector-host.mjs).
+inline constexpr std::string_view inspectorPreferencesPath = ".webfront/developer/inspector-window.json";
+
+/// The page of the environment that shows an inspector panel for a host page, as openSecondaryWindow() names its window:
+/// one window per panel and host, so that the same host opening a panel again brings its window to the front. Throws
+/// std::invalid_argument for an unknown panel or an invalid host identifier.
+inline std::string inspectorPage(std::string_view panel, std::string_view host) {
+    if (std::ranges::find(inspectorPanels, panel) == inspectorPanels.end())
+        throw std::invalid_argument("Unknown inspector panel");
+    if (!inspectorHostIdentifier(host))
+        throw std::invalid_argument("Invalid inspector host identifier");
+    return "webfront/developer/environment/inspector.html?panel=" + std::string(panel) + "&host=" + std::string(host);
+}
+
+/// A window size asked by the page, as a whole number of pixels within what a screen can show.
+inline int inspectorWindowExtent(double value, int fallback) {
+    if (!std::isfinite(value) || value < 320 || value > 8192)
+        return fallback;
+    return static_cast<int>(value);
+}
+
 /// The configuration the environment reads. "registry" always names a usable registry, for environments
 /// that predate "registryExplicit"; the latter tells whether the application chose it.
 inline std::string bootstrapConfig(const DeveloperBootstrapOptions& options) {
@@ -133,27 +168,125 @@ private:
         expose<&Store::entries, Bytes, std::string>("webfront.developer.entries");
         // For the bootstrap shipped with this C++: it republishes the environment only when a published file differs.
         expose<&Store::digests, Bytes, std::string>("webfront.developer.digests");
-        expose<&Store::beginReplacing, std::string, std::string, bool>("webfront.developer.begin");
-        expose<&Store::beginNew, std::string, std::string, bool>("webfront.developer.beginNew");
-        expose<&Store::write, void, std::string, std::string, std::uint64_t, Bytes>("webfront.developer.write");
-        expose<&Store::commit, void, std::string>("webfront.developer.commit");
-        expose<&Store::abort, void, std::string>("webfront.developer.abort");
+        exposeWrite<&Store::beginReplacing, std::string, std::string, bool>("webfront.developer.begin");
+        exposeWrite<&Store::beginNew, std::string, std::string, bool>("webfront.developer.beginNew");
+        exposeWrite<&Store::write, void, std::string, std::string, std::uint64_t, Bytes>("webfront.developer.write");
+        exposeWrite<&Store::commit, void, std::string>("webfront.developer.commit");
+        exposeWrite<&Store::abort, void, std::string>("webfront.developer.abort");
         expose<&Store::stateOfLines, std::string, std::string>("webfront.developer.state");
-        expose<&Store::commitGroupLines, void, std::string, std::string, std::string>("webfront.developer.commitGroup");
+        exposeWrite<&Store::commitGroupLines, void, std::string, std::string, std::string>("webfront.developer.commitGroup");
 #if !(defined(WEBFRONT_DISTRIBUTION) && WEBFRONT_DISTRIBUTION)
-        // The inspectors exist only in the developer environment and never in a distribution build (ADR-027, section 1).
-        // The menu of the environment's tab asks it first: an environment that does not find it says the library is too old.
-        using Caller = typename Base::UI;
-        this->template cppFunction<std::tuple<bool, bool, bool>, Caller>("webfront.inspector.containers", [trust = this->trustsLoopbackClients()](Caller ui) {
-            return developer::inspectorContainers(Base::canShowSecondaryWindow(), ui.isLocalClient(), trust);
-        });
+        registerInspectors();
 #endif
+    }
+
+#if !(defined(WEBFRONT_DISTRIBUTION) && WEBFRONT_DISTRIBUTION)
+    /// The inspectors exist only in the developer environment and never in a distribution build (ADR-027, section 1). Every
+    /// function but containers() answers only an admitted page (UI::isLocalClient, section 2).
+    void registerInspectors() {
+        using Policy = http::DefaultBuffersPolicy;
+        static_assert(inspect::responseBudget<Policy> >= inspect::minPageBytes,
+                      "The buffers policy is too small for the inspectors: an answer must hold a page of one node (ADR-027)");
+        using Caller        = typename Base::UI;
+        const auto registry = this->enableInspectors();
+        // The menu of the environment's tab asks it first: an environment that does not find it says the library is too old.
+        this->template reservedCppFunction<std::tuple<bool, bool, bool>, Caller>(
+            "webfront.inspector.containers",
+            [trust = this->trustsLoopbackClients()](Caller ui) {
+                return developer::inspectorContainers(Base::canShowSecondaryWindow(), ui.isLocalClient(), trust);
+            });
+        // Whether the calling page may run in an embedded frontend: a tab of the system browser is offered only to a page
+        // that cannot (ADR-027, section 8), since window.open() in an embedded view would open a frame without the proof.
+        // The proof tells a proven view, not where an unproven page runs: while the active frontend gives its views the
+        // proof, an admitted page without it (a frame of such a view, under trustLoopbackClients) may be inside one too.
+        this->template reservedCppFunction<bool, Caller>("webfront.inspector.embedded", [](Caller ui) {
+            admit(ui);
+            return ui.isEmbeddedView() || frontend::providesViewProof<Frontend>();
+        });
+        // The inspectors' choices, read with the token of exactly the bytes returned, then written only if the file still has
+        // that content: a page applies its changes to what it read, never to a content that changed and came back meanwhile.
+        this->template reservedCppFunction<std::tuple<bool, std::vector<std::uint8_t>, std::string>, Caller>(
+            "webfront.inspector.readPreferences",
+            [owned = store](Caller ui) {
+                admit(ui);
+                return owned->readWithState(std::string{developer::inspectorPreferencesPath}, 64 * 1024);
+            });
+        this->template reservedCppFunction<void, Caller, std::string, std::vector<std::uint8_t>>(
+            "webfront.inspector.savePreferences",
+            [owned = store](Caller ui, std::string expected, std::vector<std::uint8_t> bytes) {
+                admit(ui);
+                owned->publishFile(std::string{developer::inspectorPreferencesPath}, std::move(bytes), expected);
+            });
+        // The discovery of the watches (section 3): a read of the table, without calling any source.
+        this->template reservedCppFunction<inspect::WatchPage, Caller, double, double, double>(
+            "webfront.inspector.watches",
+            [registry](Caller ui, double revision, double after, double count) {
+                admit(ui);
+                return registry->page(revision, after, count, inspect::responseBudget<Policy>);
+            });
+        // A secondary window of the panel for the host page, with the proof of the view (section 8); opening it again brings it to the front.
+        // The window is opened on the interface thread, where openSecondaryWindow() does not hold the server's thread.
+        this->template reservedCppFunction<ResultTask<void>, Caller, std::string, std::string, double, double>(
+            "webfront.inspector.openWindow",
+            [this](Caller ui, std::string panel, std::string host, double width, double height) -> ResultTask<void> {
+                admit(ui);
+                auto page = developer::inspectorPage(panel, host);
+                if (!Base::canShowSecondaryWindow())
+                    throw webfront::detail::makeBridgeError(inspect::code::unavailable, "This frontend cannot open a secondary window");
+                WindowOptions options{.title  = "WebFront inspector",
+                                      .width  = developer::inspectorWindowExtent(width, 720),
+                                      .height = developer::inspectorWindowExtent(height, 560)};
+                // Bound to the interface session that runs when the request is admitted: if that loop ends before the work
+                // reaches the interface thread, a loop started since is not given a window it was not asked for.
+                const auto bound = this->currentShowSession();
+                // The continuation of then() runs on the interface thread; the task itself resumes on the server's.
+                co_await networking::ex::then(this->uiExecutor().schedule(), [&] {
+                    if (!this->isCurrentShowSession(bound))
+                        throw webfront::detail::makeBridgeError(inspect::code::unavailable, "The interface session has ended");
+                    this->openSecondaryWindow(page, std::move(options));
+                });
+            });
+        // Closes the panel's secondary window of that host, when it is attached again; false when none is open.
+        this->template reservedCppFunction<ResultTask<bool>, Caller, std::string, std::string>(
+            "webfront.inspector.closeWindow",
+            [this](Caller ui, std::string panel, std::string host) -> ResultTask<bool> {
+                admit(ui);
+                auto page = developer::inspectorPage(panel, host);
+                if (!Base::canShowSecondaryWindow())
+                    co_return false;
+                const auto bound = this->currentShowSession();  // as openWindow: never a window of a later session
+                co_return co_await networking::ex::then(this->uiExecutor().schedule(), [&] {
+                    return this->isCurrentShowSession(bound) && this->requestClose(page);
+                });
+            });
+    }
+
+#endif
+
+    /// Refuses a page that is neither the proven view nor, with trustLoopbackClients, a loopback page (ADR-027, section 2).
+    static void admit(const typename Base::UI& ui) {
+        if (!ui.isLocalClient())
+            throw webfront::detail::makeBridgeError(inspect::code::denied,
+                                                    "The inspectors answer only a view of the application (or a loopback page with trustLoopbackClients)");
     }
 
     /// Registers a store operation as a bridge callback; the store stays alive as long as the callback.
     template <auto Member, typename Result, typename... Args>
     void expose(std::string name) {
         this->template cppFunction<Result, Args...>(std::move(name), [owned = store](Args... arguments) -> Result {
+            return ((*owned).*Member)(std::move(arguments)...);
+        });
+    }
+
+    /// Writes are restricted when the active frontend proves the application's view (ADR-027, section 2).
+    template <auto Member, typename Result, typename... Args>
+    void exposeWrite(std::string name) {
+        using Caller = typename Base::UI;
+        this->template cppFunction<Result, Caller, Args...>(std::move(name), [owned = store](Caller ui, Args... arguments) -> Result {
+            // The inspectors' code (ADR-027, section 2), with a message that names what was refused.
+            if (frontend::providesViewProof<Frontend>() && !ui.isLocalClient())
+                throw webfront::detail::makeBridgeError(inspect::code::denied,
+                                                        "Project writes require an admitted application view (or a loopback page with trustLoopbackClients)");
             return ((*owned).*Member)(std::move(arguments)...);
         });
     }

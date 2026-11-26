@@ -829,9 +829,9 @@ private:
             const std::size_t header = type == CodedType::string ? 3 : 5;
             need(header);
             if (type == CodedType::string) {
-                std::uint16_t small;
-                std::memcpy(&small, data.data() + 1, sizeof(small));
-                size = small;
+                std::uint16_t shortSize;
+                std::memcpy(&shortSize, data.data() + 1, sizeof(shortSize));
+                size = shortSize;
             } else
                 std::memcpy(&size, data.data() + 1, sizeof(size));
             need(header);
@@ -841,10 +841,10 @@ private:
             return header + size;
         }
         if (isNumericArrayCode(type)) {
-            const bool        small  = type == CodedType::smallArrayU8;
-            const std::size_t header = small ? 2 : 5;
+            const bool        compact = type == CodedType::smallArrayU8;
+            const std::size_t header  = compact ? 2 : 5;
             need(header);
-            if (small)
+            if (compact)
                 size = static_cast<std::uint8_t>(data[1]);
             else
                 std::memcpy(&size, data.data() + 1, sizeof(size));
@@ -852,7 +852,7 @@ private:
             if (data.size() - header < bytes)
                 throw std::runtime_error("Truncated list element");
             shape += 'a';
-            shape += std::to_string(static_cast<int>(small ? CodedType::arrayU8 : type));
+            shape += std::to_string(static_cast<int>(compact ? CodedType::arrayU8 : type));
             return header + bytes;
         }
         if (type == CodedType::tuple) {
