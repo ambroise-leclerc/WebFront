@@ -183,7 +183,12 @@ message(STATUS "similar_targets: ${dashed_generator} and ${underscored_generator
 
 # The directory's path is not a glob pattern: ui[1] must not embed nothing, nor the sibling ui1 that [1] matches, and a
 # parent with * and ? must not widen the search. Every case lists the files of the directory it names.
-foreach(case "brackets|ui[1]" "parent|pa[r]e*n?t/ui" "nested|ui[[a]b]")
+# Windows forbids * and ? in a name: there the parent keeps its brackets only.
+set(parent_case "parent|pa[r]e*n?t/ui")
+if(CMAKE_HOST_WIN32)
+    set(parent_case "parent|pa[r]ent/ui")
+endif()
+foreach(case "brackets|ui[1]" "${parent_case}" "nested|ui[[a]b]")
     string(REPLACE "|" ";" case "${case}")
     list(GET case 0 label)
     list(GET case 1 relative)
