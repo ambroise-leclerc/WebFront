@@ -62,17 +62,39 @@ class TaskScope {
         }
     };
 
+    /// Counts a task from its spawn until its operation state is destroyed, as the scope tracks it: it lives in the
+    /// task's sender. Move-only.
+    class Counted {
+    public:
+        explicit Counted(std::atomic<std::size_t>& active) noexcept : count(&active) {
+            count->fetch_add(1, std::memory_order_relaxed);
+        }
+        Counted(Counted&& other) noexcept : count(std::exchange(other.count, nullptr)) { }
+        Counted(const Counted&)            = delete;
+        Counted& operator=(const Counted&) = delete;
+        Counted& operator=(Counted&&)      = delete;
+        ~Counted() {
+            if (count)
+                count->fetch_sub(1, std::memory_order_relaxed);
+        }
+        void operator()() const noexcept { }
+
+    private:
+        std::atomic<std::size_t>* count;
+    };
+
     ex::counting_scope tasks;
     using JoinOperation = ex::connect_result_t<decltype(ex::starts_on(ex::inline_scheduler{}, std::declval<ex::counting_scope&>().join())), Joined>;
     std::atomic_bool               joined{false};
     std::unique_ptr<JoinOperation> joining;
     // A connection has its own stop source. This token links it to server shutdown
     // using standard stop callbacks, without relying on an implementation's fused tokens.
-    ex::inplace_stop_source stopSource;
-    std::mutex              spawningMutex;
-    std::condition_variable spawningFinished;
-    std::size_t             activeSpawns = 0;
-    bool                    closed       = false;
+    ex::inplace_stop_source  stopSource;
+    std::mutex               spawningMutex;
+    std::condition_variable  spawningFinished;
+    std::size_t              activeSpawns = 0;
+    bool                     closed       = false;
+    std::atomic<std::size_t> running{0};
 
 public:
     /** @brief Prevents any further task from associating with this scope. */
@@ -92,8 +114,14 @@ public:
         // spawn associates synchronously. Observe that decision so a close
         // racing this call cannot leave the caller with an apparently live handle.
         bool associated = false;
-        ex::spawn(std::move(sender), SpawnToken{tasks.get_token(), &associated});
+        ex::spawn(ex::then(std::move(sender), Counted{running}), SpawnToken{tasks.get_token(), &associated});
         return associated;
+    }
+
+    /// The tasks spawned in this scope whose operation has not been destroyed yet: what a join would wait for. A count
+    /// read at one moment, for diagnostics (the inspectors, ADR-027).
+    [[nodiscard]] std::size_t activeTasks() const noexcept {
+        return running.load(std::memory_order_relaxed);
     }
     /** @brief Cancels all associated tasks and each connection linked to this scope. */
     void requestStop() noexcept {

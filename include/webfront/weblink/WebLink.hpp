@@ -9,6 +9,7 @@
 
 #pragma once
 #include "../http/WebSocket.hpp"
+#include "../Introspection.hpp"
 #include "../tooling/Logger.hpp"
 #include "Messages.hpp"
 #include "PendingCalls.hpp"
@@ -264,14 +265,19 @@ public:
         ws->writeLatest(std::move(frame), key, maxPending);
     }
 
+    /// `counter`, when the inspectors count the calls of that function, is told a call whose future fails (ADR-027, section 7).
     template <typename Result>
-    std::pair<msg::CallId, std::future<Result>> expectResult() {
+    std::pair<msg::CallId, std::future<Result>> expectResult(std::shared_ptr<inspect::JsCallCounter> counter = {}) {
         auto        promise = std::make_shared<std::promise<Result>>();
         auto        future  = promise->get_future();
         msg::CallId callId{};
+        const auto  failed = [counter = std::move(counter)]() noexcept {
+            if (counter)
+                counter->failed();
+        };
         try {
             callId = pending->add({.complete =
-                                       [promise](const msg::FunctionReturn<Policy>& result) {
+                                       [promise, failed](const msg::FunctionReturn<Policy>& result) {
                                            try {
                                                if constexpr (std::is_void_v<Result>) {
                                                    detail::decodeReturn<void>(result);
@@ -279,17 +285,25 @@ public:
                                                } else
                                                    promise->set_value(detail::decodeReturn<Result>(result));
                                            } catch (...) {
+                                               failed();
                                                promise->set_exception(std::current_exception());
                                            }
                                        },
                                    .reject =
-                                       [promise](std::exception_ptr error) {
+                                       [promise, failed](std::exception_ptr error) {
+                                           failed();
                                            promise->set_exception(std::move(error));
                                        }});
         } catch (...) {
+            failed();
             promise->set_exception(std::current_exception());
         }
         return {callId, std::move(future)};
+    }
+
+    /// The typed calls of C++ whose result this browser has not returned yet.
+    [[nodiscard]] std::size_t pendingResultCount() const {
+        return pending->size();
     }
 
     auto pendingResults() const noexcept {

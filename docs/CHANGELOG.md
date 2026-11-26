@@ -16,6 +16,9 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Added
 - Open the inspectors from the WebFront tab's menu of the developer environment: each panel shows in a floating window of the page and can be detached to a native secondary window (WebKitGTK, WKWebView, WebView2) or, with `trustLoopbackClients`, a tab of the system browser; the choice and the place are kept per project (#680, ADR-027, `docs/DEVELOPER_ENVIRONMENT.md`).
+- See in the **Functions** panel of the inspectors what the application registered: each `cppFunction` with its signature written in TypeScript, the file and line of its registration, whether it receives the calling `UI`, its calls, failures, last error and durations, then the JavaScript functions that C++ calls; sort, search, and choose the refresh period (#681, ADR-027, `docs/DEVELOPER_ENVIRONMENT.md`).
+- See in the **Browsers and tasks** panel the connected browsers (embedded view or external browser, local client, pending writes and calls), the running tasks of the server and the application's terminal commands (#681, ADR-027).
+- Read the same registry from C++ with `app.registeredFunctions()` (#681, ADR-027).
 - Declare what the inspectors show with `app.watch(name, source)`, whose handle removes the watch when it is destroyed; the Watches panel follows their registrations and removals. Outside the developer environment and in a distribution build, `watch` registers nothing (#680, ADR-027).
 - Embed a plain interface directory (HTML, JavaScript, CSS, vendored files) from CMake with `webfront_embed_directory(app ui CLASS AppUI)`, without the developer environment: the build regenerates the provider when a file changes, and `fs::DocumentRootFirstFSWith<AppUI>` lets a development root serve in front of it (#675, `docs/EMBEDDED_ASSETS.md`).
 - Set from the configuration `Referrer-Policy` (`contentPolicy.referrerPolicy`: `"no-referrer"` forbids explicitly that a capability in your URLs leaves in `Referer`), `X-Content-Type-Options: nosniff` (`noSniff`) and the `Cache-Control` of HTML pages (`htmlCacheControl`), on files, route and generated replies unless a reply sets its own (#674, `docs/CONTENT_POLICY.md`).
@@ -29,11 +32,13 @@ these entries stays in the GitHub releases and the Git history.
 - The test helpers, `webfront_add_jasmine_test` included, export the real `XDG_DATA_HOME` and `XDG_CACHE_HOME` as `WEBFRONT_TEST_REAL_XDG_DATA_HOME` and `WEBFRONT_TEST_REAL_XDG_CACHE_HOME`, so an application under test can keep the throwaway WebKitGTK profile away from the programs it starts ([#664](https://github.com/ambroise-leclerc/WebFront/issues/664), `docs/CONSUMER_TESTING.md`).
 
 ### Changed
+- The inspectors show where each `cppFunction` was registered; existing calls of `cppFunction` and `Space::cppFunction` compile unchanged (#681, ADR-027).
 - `WebFront.js` opens its WebSocket on the directory of the page (`ws://host/dir/` instead of `ws://host`), which tells the server a page's space (#671) and lets an application be deployed under a sub-path of a site (#672).
 - A request whose path holds a control character (`%00`...) is refused with 400, as a `..` already was, instead of being looked up as a file (#672).
 - A `+` in the path of a file request is a literal `+`, as for the routes, the spaces and `ui.path()`: `/a+b.html` serves `a+b.html`, no longer `a b.html`, which `/a%20b.html` names (#672).
 
 ### Fixed
+- A closed WKWebView secondary window, or one that another window covered, no longer leaves its page suspended and connected to the application: on macOS 14+ a secondary window is never suspended while inactive (#681, `docs/WKWEBVIEW.md`).
 - An invalid content policy (an origin of `bridgeAllowedOrigins` or `navigationAllowedOrigins`, a `referrerPolicy`, a `htmlCacheControl`) throws `std::invalid_argument` before the server binds its port, as documented, instead of an "address already in use" error when that port is taken (#674).
 - `DeveloperBrowserIntegration-workspace` gives the relaunched bootstrap page the same 60 s to start as the first one, instead of 10 s, which a loaded runner exceeded while the page verified its cached environment (#660).
 - Applications started from the terminal of a Snap-packaged editor (VSCodium) now run on WebKitGTK without cleaning the environment by hand; `WEBFRONT_KEEP_SNAP_ENVIRONMENT=1` opts out (#662, `docs/WEBKITGTK.md`).

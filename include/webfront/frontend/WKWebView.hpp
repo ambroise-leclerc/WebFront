@@ -522,12 +522,16 @@ struct Session {
         send<void>(configuration.get(), "setWebsiteDataStore:", sharedDataStore ? sharedDataStore : send(type("WKWebsiteDataStore"), "nonPersistentDataStore"));
         // Hidden content otherwise suspends once its load event completes. Use the public macOS 14+ preference
         // so asynchronous bridge/Worker work and close requests keep progressing without a visible native window.
-        if (!options.visible) {
+        // A secondary window too: closing it hides it before its view is released, and an occluded one is inactive all
+        // along; suspended, its page would not end when the view is released, and its connection would outlive the window.
+        if (!options.visible || secondary) {
             const auto preferences = send(configuration.get(), "preferences");
             const auto selector    = sel_registerName("setInactiveSchedulingPolicy:");
-            if (!send<BOOL>(preferences, "respondsToSelector:", selector))
+            if (send<BOOL>(preferences, "respondsToSelector:", selector))
+                send<void>(preferences, "setInactiveSchedulingPolicy:", 2L);  // WKInactiveSchedulingPolicyNone
+            else if (!options.visible)
                 throw std::runtime_error("WKWebView: hidden sessions require macOS 14 or later (inactiveSchedulingPolicy)");
-            send<void>(preferences, "setInactiveSchedulingPolicy:", 2L);  // WKInactiveSchedulingPolicyNone
+            // A visible secondary window on macOS 13 keeps the default policy, the only one that system has.
         }
         if (!options.launch.secret.empty()) {
             // At the start of every document, in the main frame only: the script itself checks the origin.
@@ -1172,6 +1176,10 @@ struct WindowHooks {
             dispatch_get_main_queue(),
             nullptr,
             +[](void*) {
+                // A block of the main queue has no autorelease pool of its own: without an event, the loop's pool is not
+                // drained, and what the window's closure autoreleased would keep its view, hence its page and its
+                // connection, until the next event of the application.
+                Object pool(send(type("NSAutoreleasePool"), "new"));
                 reapSecondaryWindows();
             });
     }
@@ -1249,6 +1257,9 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
                                                                          dispatch_get_main_queue(),
                                                                          &host,
                                                                          +[](void* context) {
+                                                                             // Its own pool, as for the reaping above: the work posted to the interface
+                                                                             // thread (closing a secondary window) releases what it autoreleased when it ends.
+                                                                             Object pool(send(type("NSAutoreleasePool"), "new"));
                                                                              static_cast<UIExecutorHost*>(context)->drain();
                                                                          });
                                                                  },

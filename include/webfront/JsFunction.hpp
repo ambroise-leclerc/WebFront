@@ -9,6 +9,7 @@
 
 #pragma once
 #include "http/WebSocket.hpp"
+#include "Introspection.hpp"
 #include "tooling/HexDump.hpp"
 #include "weblink/CallFrame.hpp"
 #include "weblink/WebLink.hpp"
@@ -43,16 +44,24 @@ public:
         // A browser whose connection closed is gone: a call to it is dropped, and a typed call fails.
         // The link is shared while used: a release on the server thread cannot destroy it meanwhile.
         const auto link = webFront.findLink(webLinkId, generation);
+        // Counted for the inspectors while the developer environment is mounted (ADR-027, section 7); null otherwise.
+        std::shared_ptr<inspect::JsCallCounter> counter;
+        if constexpr (requires { webFront.jsCallCounter(name); })
+            counter = webFront.jsCallCounter(name);
+        if (counter)
+            counter->called();
         if constexpr (std::is_same_v<Result, detail::IgnoreJsResult>) {
             if (link)
                 link->sendFrame(std::move(frame));
         } else {
             if (!link) {
+                if (counter)
+                    counter->failed();
                 std::promise<Result> closed;
                 closed.set_exception(std::make_exception_ptr(detail::disconnectedError()));
                 return closed.get_future();
             }
-            auto [callId, result] = link->template expectResult<Result>();
+            auto [callId, result] = link->template expectResult<Result>(std::move(counter));
             command.setCallId(callId);
             if (callId != 0)
                 link->sendFrame(std::move(frame));

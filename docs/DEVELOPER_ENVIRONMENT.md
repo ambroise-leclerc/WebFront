@@ -469,7 +469,31 @@ environment's `mount`, not to the embedded bootstrap page):
   The **Watches** panel lists the application's watches (`app.watch(name, source)`, declared after `bootstrap()`): their
   name, the kind of their root and where they were declared. It asks C++ for the revision of their table every 250 ms
   (Pause stops it), reads the list again when it changed, and adds or removes the watches that appeared or disappeared.
-  Their contents, and the other panels, come with the next versions of the environment.
+  Their contents come with the next versions of the environment.
+
+  The **Functions** panel lists what the application registered with `cppFunction`, the functions of its spaces included
+  (with the path of their space): the name, the signature as TypeScript declares it (`(a: number, b: string) =>
+  Promise<string>`; the calling `UI` is not a parameter of JavaScript), the file and line of the registration, the number
+  of calls and of failures, the last error, and the mean and longest duration. **Caller** tells whether the function
+  receives the calling `UI`: one that does not cannot check `ui.isLocalClient()`, which a callback that writes the project,
+  starts a process or exposes a sensitive state must do itself (ADR-027, section 2). **Answer** tells a function that
+  returns a task (`ResultTask`), whose Promise settles when the task completes. A second table lists the JavaScript
+  functions that C++ called (`jsFunction`, `jsFunctionSender`, `broadcast`, a broadcast counting once) with the failures
+  of the typed calls. WebFront's own functions (`webfront.developer.*`, `webfront.commands.*`) are hidden until the
+  checkbox asks for them. A header sorts by its column (a second click reverses), the search field keeps the rows that
+  hold every word typed, and the values are read again every 250 ms, 1 s or 5 s, as chosen, until Pause.
+
+  The counters cost an atomic increment per call whether or not an inspector is open (about 12 ns measured, see
+  `introspection_benchmark`); the durations are measured only while this panel reads, and for five seconds after its
+  last read, so a function shows `–` until one of its calls was timed. A distribution build records nothing.
+  `app.registeredFunctions()` gives the same registry to C++ code.
+
+  The **Browsers and tasks** panel lists the connected browsers: whether each is an embedded view or an external browser,
+  whether it is a local client (`ui.isLocalClient()`), its state, the path its bridge was opened from and its space, the
+  frames not yet written to it, the typed calls of C++ whose result it has not returned, and its calls that a C++
+  callback has not answered yet. It also gives the number of running tasks of the server's scope (connections, bridge
+  loops and the application's coroutines) and the application's terminal commands (`webfront::Commands`). The other
+  panels come with the next versions of the environment.
 
 The tab is a button (`aria-expanded`, `aria-haspopup="menu"`, 44 px target), its menu a `menu` of `menuitem`s of 44 px,
 and the window a non-modal dialog. The interface stays in the preview

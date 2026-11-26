@@ -21,8 +21,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <future>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -487,7 +489,12 @@ const Scenario developerWriteAccess{
             freshNetwork();
             AdmittedBrowser<InspectorWindowApp> browser{false, false};
             Commands                            commands{browser.app};
-            const auto                          denied = [&](auto name, auto... arguments) {
+            bool                                ran = false;
+            commands.add("deploy", "writes the project", [&ran](Commands<InspectorWindowApp>::Context) -> Task {
+                ran = true;
+                co_return;
+            });
+            const auto denied = [&](auto name, auto... arguments) {
                 const auto offset = ViewSocket::writtenText().size();
                 callWith(name, 7, arguments...);
                 require(ViewSocket::writtenText().find(inspect::code::denied, offset) != std::string::npos);
@@ -501,18 +508,36 @@ const Scenario developerWriteAccess{
             denied("webfront.commands.start", std::uint32_t{1}, path, std::string{"[]"});
             denied("webfront.commands.cancel", std::uint32_t{1});
             denied("webfront.inspector.savePreferences", path, bytes);
+            // A command that exists is refused like one that does not: it is neither started nor left running.
+            denied("webfront.commands.start", std::uint32_t{2}, std::string{"deploy"}, std::string{"[]"});
+            require(!ran);
+            requireEqual(commands.running(), std::size_t{0});
             const auto offset = ViewSocket::writtenText().size();
             callWith("webfront.developer.state", 7, path);
             const auto response = ViewSocket::writtenText().substr(offset);
             require(!response.empty() && !response.contains(inspect::code::denied));
             require(!std::filesystem::exists(browser.project.path() / ".webfront/developer/staging"));
+            // The names and the helps of the commands stay readable: they change nothing (ADR-027, section 2).
+            const auto listed = ViewSocket::writtenText().size();
+            callWithoutArgument("webfront.commands.list", 8);
+            const auto list = ViewSocket::writtenText().substr(listed);
+            require(list.contains("deploy") && !list.contains(inspect::code::denied));
         });
         given("a proven client", [&] {
             freshNetwork();
             AdmittedBrowser<InspectorWindowApp> browser{false, true};
+            Commands                            commands{browser.app};
+            bool                                ran = false;
+            commands.add("deploy", "writes the project", [&ran](Commands<InspectorWindowApp>::Context) -> Task {
+                ran = true;
+                co_return;
+            });
             callWith("webfront.developer.begin", 7, path, false);
             require(!ViewSocket::wrote(inspect::code::denied));
             require(std::filesystem::is_directory(browser.project.path() / ".webfront/developer/staging"));
+            callWith("webfront.commands.start", 8, std::uint32_t{1}, std::string{"deploy"}, std::string{"[]"});
+            require(ran);
+            require(!ViewSocket::wrote(inspect::code::denied));
         });
         given("a system browser with the default trust policy", [&] {
             freshNetwork();
@@ -655,6 +680,207 @@ const Scenario inspectorWatchesAccess{
             callWith("webfront.inspector.watches", 11, 0.0, 0.0, 200.0);
             then("it is admitted by trustLoopbackClients", [&] {
                 require(ViewSocket::wrote("trusted"));
+            });
+        });
+      }
+};
+
+namespace {
+/// A value as the bridge encodes it in an answer: what a page of the inspectors holds for it.
+template <typename Value>
+std::string encodedValue(const Value& value) {
+    msg::FunctionReturn<>               message;
+    websocket::Frame<ViewOneBrowserNet> frame{std::span(reinterpret_cast<const std::byte*>(message.header().data()), message.header().size())};
+    message.encodeParameter(value, frame);
+    frame.freeze();
+    const auto  bytes = testing::messagePayload(frame);
+    std::string text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    return text.substr(message.header().size());
+}
+
+/// A receiver that drops what a typed call completes with: the test reads the inspectors' counters instead.
+struct IgnoringReceiver {
+    using receiver_concept = networking::ex::receiver_tag;
+    void set_value(int) noexcept { }
+    void set_error(std::exception_ptr) noexcept { }
+    void set_stopped() noexcept { }
+};
+
+/// What the socket wrote in answer to `ask`.
+template <typename Ask>
+std::string answerOf(Ask ask) {
+    const auto offset = ViewSocket::writtenText().size();
+    ask();
+    return ViewSocket::writtenText().substr(offset);
+}
+}  // namespace
+
+const Scenario inspectorRegistryAccess{
+    "The functions, the JavaScript calls and the browsers are told to an admitted page only (ADR-027, sections 2 and 7)",
+    {"view-association", "inspector"},
+    [] {
+        given("the proven view of an application that registered a function", [&] {
+            freshNetwork();
+            AdmittedBrowser<InspectorApp> browser{false, true};
+            browser.app.cppFunction("ping", [](int) {
+                return std::string{"pong"};
+            });
+            then("the three functions exist once the environment is bootstrapped", [&] {
+                for (const auto* name : {"webfront.inspector.functions", "webfront.inspector.jsFunctions", "webfront.inspector.browsers"})
+                    require(browser.app.hasCppFunction(name));
+            });
+            when("it asks for the functions", [&] {
+                const auto answer = answerOf([] {
+                    callWith("webfront.inspector.functions", 11, 0.0, 200.0);
+                });
+                then("the page names the function, its signature and where it was registered", [&] {
+                    require(answer.contains("ping"));
+                    require(answer.contains("(a: number) => Promise<string>"));
+                    require(answer.contains("ViewAssociationTests.cpp:"));
+                });
+                then("the environment's own callbacks are listed, the inspectors' are not", [&] {
+                    require(answer.contains("webfront.developer.begin"));
+                    require(!answer.contains("webfront.inspector."));
+                });
+            });
+            when("a call is made before any inspector read the functions, then one after", [&] {
+                const auto ping = [&] {
+                    for (const auto& info : browser.app.registeredFunctions())
+                        if (info.name == "ping")
+                            return info;
+                    throw std::logic_error("ping is not registered");
+                };
+                callWith("ping", 3, 1);
+                then("the first is counted, not timed", [&] {
+                    requireEqual(ping().calls, std::uint64_t{1});
+                    requireEqual(ping().timedCalls, std::uint64_t{0});
+                });
+                callWith("webfront.inspector.functions", 11, 0.0, 200.0);
+                callWith("ping", 4, 1);
+                then("the second is timed: an inspector is reading", [&] {
+                    requireEqual(ping().calls, std::uint64_t{2});
+                    requireEqual(ping().timedCalls, std::uint64_t{1});
+                });
+            });
+            when("it asks for the JavaScript functions that C++ called", [&] {
+                browser.app.forEachUI([](InspectorApp::UI ui) {
+                    ui.jsFunction("draw")(1);
+                    ui.jsFunction("draw")(2);
+                    static_cast<void>(ui.template jsFunction<int>("measure")());
+                });
+                const auto answer = answerOf([] {
+                    callWith("webfront.inspector.jsFunctions", 12, 0.0, 200.0);
+                });
+                then("each is listed with the number of its calls", [&] {
+                    require(answer.contains(encodedValue(std::tuple{std::string{"draw"}, 2.0, 0.0}).substr(2)));
+                    require(answer.contains(encodedValue(std::tuple{std::string{"measure"}, 1.0, 0.0}).substr(2)));
+                });
+            });
+            when("it asks for the browsers", [&] {
+                const auto answer = answerOf([] {
+                    callWith("webfront.inspector.browsers", 13, 0.0, 200.0);
+                });
+                then("it finds itself: an embedded view, local, started, at the root", [&] {
+                    using namespace inspect::browser_flag;
+                    const auto row = encodedValue(std::tuple{0.0, double{embeddedView | localClient | started | caller}, std::string{"/"}});
+                    require(answer.contains(row.substr(2)));
+                    require(!answer.contains(inspect::code::denied));
+                });
+            });
+        });
+        given("the typed call of a browser that fails", [&] {
+            freshNetwork();
+            AdmittedBrowser<InspectorApp> browser{false, true};
+            std::future<int>              result;
+            browser.app.forEachUI([&](InspectorApp::UI ui) {
+                result = ui.template jsFunction<int>("measure")();
+            });
+            ViewSocket::fail(std::make_error_code(std::errc::connection_reset));
+            then("its future fails, and the failure is counted for that function", [&] {
+                checkThrows<std::exception>([&] {
+                    static_cast<void>(result.get());
+                });
+                const auto counter = browser.app.jsCallCounter("measure");
+                require(counter != nullptr);
+                requireEqual(counter->calls.load(), std::uint64_t{1});
+                requireEqual(counter->failures.load(), std::uint64_t{1});
+            });
+        });
+        given("a sender built before the developer environment is mounted, and started after", [&] {
+            freshNetwork();
+            webfront::test::TemporaryDirectory project;
+            InspectorApp                       app(project.path(), inspectorConfig(false));
+            connect(app, testing::LaunchSecret<InspectorApp>::of(app), inspectorUpgradeRequest);
+            std::optional<decltype(std::declval<InspectorApp::UI>().jsFunctionSender<int>(""))> early;
+            app.forEachUI([&](InspectorApp::UI ui) {
+                early.emplace(ui.template jsFunctionSender<int>("measureLater"));
+            });
+            require(early.has_value());
+            require(app.jsCallCounter("measureLater") == nullptr);
+            app.bootstrap("developer", {.environment = "https://example.test/env.tgz", .integrity = "sha512-abc"});
+            auto operation = networking::ex::connect((*early)(), IgnoringReceiver{});
+            networking::ex::start(operation);
+            then("the call it starts is counted: the counter is looked for when the call starts", [&] {
+                const auto counter = app.jsCallCounter("measureLater");
+                require(counter != nullptr);
+                requireEqual(counter->calls.load(), std::uint64_t{1});
+                requireEqual(counter->failures.load(), std::uint64_t{0});
+            });
+            andWhen("the browser disconnects before it answers", [&] {
+                ViewSocket::fail(std::make_error_code(std::errc::connection_reset));
+                then("the failure of the call is counted too", [&] {
+                    requireEqual(app.jsCallCounter("measureLater")->failures.load(), std::uint64_t{1});
+                });
+            });
+        });
+        given("a page that is not admitted, such as an external browser's", [&] {
+            freshNetwork();
+            AdmittedBrowser<InspectorApp> browser{false, false};
+            browser.app.cppFunction("ping", [](int) {
+                return std::string{"pong"};
+            });
+            for (const auto* name : {"webfront.inspector.functions", "webfront.inspector.jsFunctions", "webfront.inspector.browsers"}) {
+                const auto answer = answerOf([name] {
+                    callWith(name, 11, 0.0, 200.0);
+                });
+                then(std::string(name) + " is refused as denied, before any read", [&] {
+                    require(answer.contains(inspect::code::denied));
+                    require(!answer.contains("ping"));
+                });
+            }
+            then("no duration is measured for a page that was refused", [&] {
+                callWith("ping", 3, 1);
+                for (const auto& info : browser.app.registeredFunctions())
+                    requireEqual(info.timedCalls, std::uint64_t{0});
+            });
+        });
+        given("a loopback page that is not proven, with trustLoopbackClients", [&] {
+            freshNetwork();
+            ViewSocket::peerIsLoopback = true;
+            AdmittedBrowser<InspectorApp> browser{true, false};
+            browser.app.cppFunction("ping", [](int) {
+                return std::string{"pong"};
+            });
+            const auto answer = answerOf([] {
+                callWith("webfront.inspector.functions", 11, 0.0, 200.0);
+            });
+            then("it is admitted, and is told that it is a local client that is not an embedded view", [&] {
+                require(answer.contains("ping"));
+                const auto browsers = answerOf([] {
+                    callWith("webfront.inspector.browsers", 13, 0.0, 200.0);
+                });
+                using namespace inspect::browser_flag;
+                require(browsers.contains(encodedValue(std::tuple{0.0, double{localClient | started | caller}, std::string{"/"}}).substr(2)));
+            });
+        });
+        given("a developer application that is not bootstrapped", [&] {
+            freshNetwork();
+            webfront::test::TemporaryDirectory project;
+            InspectorApp                       app(project.path(), WebFrontConfig{.port = "0"});
+            then("it has none of these functions, and counts no call to JavaScript", [&] {
+                for (const auto* name : {"webfront.inspector.functions", "webfront.inspector.jsFunctions", "webfront.inspector.browsers"})
+                    require(!app.hasCppFunction(name));
+                require(app.jsCallCounter("draw") == nullptr);
             });
         });
       }

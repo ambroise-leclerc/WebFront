@@ -295,6 +295,31 @@ void hiddenSecondary() {
     require(!send<BOOL>(found->second->window, "isVisible"), "Opening the same page again showed a hidden window");
 }
 
+// A secondary window of a visible application is never suspended while inactive: closing it hides it before its view is
+// released, and an occluded window is inactive all along. Suspended, its page would not end when the view is released and
+// its connection would outlive the window (the closed inspector window of the developer journey stayed connected, #681).
+void secondaryScheduling() {
+    Object pool(send(type("NSAutoreleasePool"), "new"));
+    Object configuration(send(type("WKWebViewConfiguration"), "new"));
+    if (!send<BOOL>(send(configuration.get(), "preferences"), "respondsToSelector:", sel_registerName("setInactiveSchedulingPolicy:")))
+        return;  // macOS 13 has no policy but the default one
+    Session primary("http://127.0.0.1:0/", {.visible = webfront::testdriver::visibleWindows});
+    primary.create();
+    auto& windows   = Windows::instance();
+    windows.primary = &primary;
+    struct Clear {
+        Windows& windows;
+        ~Clear() {
+            windows.clear();
+        }
+    } clear{windows};
+    openSecondary("127.0.0.1", "0", "inspector.html", {});
+    const auto found = windows.secondary.find("inspector.html");
+    require(found != windows.secondary.end(), "The secondary window was not opened");
+    require(send<long>(send(send(found->second->view, "configuration"), "preferences"), "inactiveSchedulingPolicy") == 2L,
+            "An inactive secondary window would suspend, and its closed page keep its connection");
+}
+
 void missingResponse() {
     Object  pool(send(type("NSAutoreleasePool"), "new"));
     Session session("http://127.0.0.1:0/", {.visible = webfront::testdriver::visibleWindows});
@@ -711,6 +736,7 @@ int main(int argc, char** argv) {
             {                "settings",              settings},
             {       "hidden-scheduling",      hiddenScheduling},
             {        "hidden-secondary",       hiddenSecondary},
+            {    "secondary-scheduling",   secondaryScheduling},
             {  "translucent-background", translucentBackground},
             {   "navigation-diagnostic",  navigationDiagnostic},
             {        "missing-response",       missingResponse},

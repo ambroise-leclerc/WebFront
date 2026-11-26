@@ -36,11 +36,22 @@ const Scenario inspectorsAbsent{"A distribution build registers no inspector fun
                                             for (const auto* name : {"webfront.inspector.containers",
                                                                      "webfront.inspector.embedded",
                                                                      "webfront.inspector.watches",
+                                                                     "webfront.inspector.functions",
+                                                                     "webfront.inspector.jsFunctions",
+                                                                     "webfront.inspector.browsers",
                                                                      "webfront.inspector.readPreferences",
                                                                      "webfront.inspector.savePreferences",
                                                                      "webfront.inspector.openWindow",
                                                                      "webfront.inspector.closeWindow"})
                                                 require(!app.hasCppFunction(name));
+                                        });
+                                        then("nothing is recorded of the functions or of the calls to JavaScript", [&] {
+                                            app.cppFunction("ping", [](int value) {
+                                                return value;
+                                            });
+                                            require(app.hasCppFunction("ping"));
+                                            require(app.registeredFunctions().empty());
+                                            require(app.jsCallCounter("draw") == nullptr);
                                         });
                                         then("a watch registers nothing: its handle is empty", [&] {
                                             int  value = 0;

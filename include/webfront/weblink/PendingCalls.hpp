@@ -140,6 +140,12 @@ public:
         }
     }
 
+    /// The calls whose result the browser has not returned yet (a cancelled call counts until its late reply).
+    [[nodiscard]] std::size_t size() const {
+        std::lock_guard lock(mutex);
+        return pending.size();
+    }
+
 private:
     // The wire reserves zero for calls without a result, including at counter wrap.
     msg::CallId takeNextId() noexcept {
@@ -149,7 +155,7 @@ private:
         return candidate;
     }
 
-    std::mutex                  mutex;
+    mutable std::mutex          mutex;
     std::map<msg::CallId, Call> pending;
     msg::CallId                 nextCallId{1};
     bool                        closed{};

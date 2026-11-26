@@ -224,6 +224,25 @@ private:
                 admit(ui);
                 return registry->page(revision, after, count, inspect::responseBudget<Policy>);
             });
+        // What the application registered and runs (section 7): pages of rows, each within the answer's budget.
+        this->template reservedCppFunction<inspect::FunctionPage, Caller, double, double>(
+            "webfront.inspector.functions",
+            [functions = this->inspectedFunctions()](Caller ui, double after, double count) {
+                admit(ui);
+                return functions->page(after, count, inspect::responseBudget<Policy>);
+            });
+        this->template reservedCppFunction<inspect::JsFunctionPage, Caller, double, double>(
+            "webfront.inspector.jsFunctions",
+            [calls = this->inspectedJsCalls()](Caller ui, double after, double count) {
+                admit(ui);
+                return calls->page(after, count, inspect::responseBudget<Policy>);
+            });
+        this->template reservedCppFunction<inspect::BrowserPage, Caller, double, double>(
+            "webfront.inspector.browsers",
+            [this](Caller ui, double from, double count) {
+                admit(ui);
+                return inspect::browserPage(this->inspectedBrowsers(ui), from, count, this->inspectedTasks(), inspect::responseBudget<Policy>);
+            });
         // A secondary window of the panel for the host page, with the proof of the view (section 8); opening it again brings it to the front.
         // The window is opened on the interface thread, where openSecondaryWindow() does not hold the server's thread.
         this->template reservedCppFunction<ResultTask<void>, Caller, std::string, std::string, double, double>(

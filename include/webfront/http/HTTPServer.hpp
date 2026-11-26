@@ -1267,6 +1267,9 @@ public:
     networking::TaskScope& taskScope() noexcept {
         return tasks;
     }
+    [[nodiscard]] const networking::TaskScope& taskScope() const noexcept {
+        return tasks;
+    }
 
     /** @brief Starts an application coroutine on the server context and owns it through shutdown. */
     TaskHandle startTask(Task task) {
