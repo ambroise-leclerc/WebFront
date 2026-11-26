@@ -51,7 +51,7 @@ inline void appendPercentEncodedByte(std::string& encoded, unsigned char byte) {
     return encoded;
 }
 
-// @param plusAsSpace the form-encoding rule, which the file providers keep; a URL path leaves '+' literal.
+// @param plusAsSpace the form-encoding rule, for a query; a URL path (files, routes, spaces, WebSocket upgrades) leaves '+' literal.
 [[nodiscard]] inline std::string decode(std::string_view uri, bool plusAsSpace = true) {
     std::string decoded;
     decoded.reserve(uri.size());

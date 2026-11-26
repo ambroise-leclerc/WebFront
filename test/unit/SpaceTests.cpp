@@ -3,13 +3,14 @@
 // Created: 2026-11-25
 //
 // WebFront — tests/unit
-// Role: Application spaces under a path prefix: isolation of functions, pages and broadcasts, resolver, last page, release.
+// Role: Application spaces under a path prefix: isolation of functions, pages and broadcasts, resolver, last page, release, path of the bridge.
 // Thread: bridge-io | Alloc: unrestricted
 // LLM: pins the contracts of Space.hpp and BasicWF::spaces with pages connected over loopback
 
 // Application spaces under a path prefix (#671).
 
 #include "InjectableNetworking.hpp"
+#include "TemporaryDirectory.hpp"
 #include <webfront/networking/TCPNetworkingStdnet.hpp>
 #include <webfront/Space.hpp>
 #include <webfront/system/DefaultFS.hpp>
@@ -25,6 +26,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <fstream>
 #include <future>
 #include <map>
 #include <memory>
@@ -1082,3 +1084,106 @@ const Scenario spaceReservedNames{
         });
       }
 };
+
+const Scenario upgradePath{"The path of a WebSocket upgrade reaches the application, and a target a file request refuses is refused (#672)", {"spaces"}, [] {
+                               SpaceApp                                                app{WebFrontConfig{.port = "0"}};
+                               std::map<std::string, std::unique_ptr<SpaceApp::Space>> spaces;
+                               app.cppFunction("where", [](SpaceApp::UI ui) {
+                                   return "path=" + ui.path() + ";";
+                               });
+                               app.spaces("/s/", [&](std::string_view segment) -> std::optional<http::RouteReply> {
+                                   spaces.emplace(segment, std::make_unique<SpaceApp::Space>(app, "/s/", segment));
+                                   return std::nullopt;
+                               });
+                               Running running{app};
+
+                               then("a page connected from a directory reads it, decoded and normalized as a file request reads its path", [&] {
+                                   const std::array<std::pair<const char*, const char*>, 7> cases{
+                                       {
+                                        {"/", "path=/;"},
+                                        {"/a/", "path=/a/;"},
+                                        {"/a/b/", "path=/a/b/;"},
+                                        {"/a//b/./?query=1", "path=/a/b/;"},
+                                        {"/a%20b/%61/", "path=/a b/a/;"},
+                                        {"/a/b/index.html", "path=/a/b/index.html;"},
+                                        {"/a%2Fb/", "path=/a/b/;"},  // decoded as the file request of /a%2Fb/index.html is
+                                       }
+                                   };
+                                   for (const auto& [target, expected] : cases) {
+                                       auto scope = info(target);
+                                       Page page{app.port(), target};
+                                       require(page.upgraded);
+                                       page.call("where", 1);
+                                       require(page.receiveUntil(expected));
+                                   }
+                               });
+                               then("under a space, the path within it", [&] {
+                                   Page page{app.port(), "/s/alpha/sub/"};
+                                   require(page.upgraded);
+                                   page.call("where", 1);
+                                   require(page.receiveUntil("path=/sub/;"));
+                                   Page top{app.port(), "/s/alpha/"};
+                                   require(top.upgraded);
+                                   top.call("where", 1);
+                                   require(top.receiveUntil("path=/;"));
+                               });
+                               then("an upgrade on a target a file request refuses is refused the same way, and never reaches the application", [&] {
+                                   for (const auto* target : {"/a/../b/", "/a/%2E%2E/b/", "/..%2Fb/", "/a%00/", "a/b/"}) {
+                                       auto       scope = info(target);
+                                       const auto file  = httpGet(app.port(), std::string(target) + "index.html");
+                                       Page       page{app.port(), target};
+                                       require(!page.upgraded);
+                                       require(page.received().substr(0, 12) == file.substr(0, 12));
+                                   }
+                                   require(httpGet(app.port(), "/a%00/index.html").starts_with("HTTP/1.1 400"));  // a control character, as ".."
+                                   require(httpGet(app.port(), "/a/%2E%2E/index.html").starts_with("HTTP/1.1 400"));
+                                   Page separator{app.port(), "/s/alpha%2Fsub/"};  // an encoded separator in the segment of a space
+                                   require(!separator.upgraded);
+                                   require(separator.received().substr(0, 12) == httpGet(app.port(), "/s/alpha%2Fsub/index.html").substr(0, 12));
+                                   require(spaceWaitUntil([&] {
+                                       return app.connectedBrowsers() == 0;
+                                   }));
+                               });
+                           }};
+
+const Scenario plusInPath{"A '+' of a path is literal for a file as for the path of the bridge, and \"%2B\" is the same '+' (#672)", {"spaces"}, [] {
+                              test::TemporaryDirectory root;
+                              for (const auto& [directory, text] : {
+                                       std::pair{"a+b",  "file-of-plus"},
+                                       std::pair{"a b", "file-of-space"}
+                              }) {
+                                  std::filesystem::create_directory(root.path() / directory);
+                                  std::ofstream{root.path() / directory / "page.txt"} << text;
+                              }
+                              SpaceApp app{
+                                  WebFrontConfig{.port = "0", .documentRoot = root.path()}
+                              };
+                              std::map<std::string, std::unique_ptr<SpaceApp::Space>> spaces;
+                              app.cppFunction("where", [](SpaceApp::UI ui) {
+                                  return "path=" + ui.path() + ";";
+                              });
+                              app.spaces("/s/", [&](std::string_view segment) -> std::optional<http::RouteReply> {
+                                  spaces.emplace(segment, std::make_unique<SpaceApp::Space>(app, "/s/", segment));
+                                  return std::nullopt;
+                              });
+                              Running                                                                running{app};
+                              const std::array<std::tuple<const char*, const char*, const char*>, 5> cases{
+                                  {
+                                   {"/a+b/", "file-of-plus", "path=/a+b/;"},
+                                   {"/a%2Bb/", "file-of-plus", "path=/a+b/;"},
+                                   {"/a%20b/", "file-of-space", "path=/a b/;"},
+                                   {"/s/alpha/a+b/", "file-of-plus", "path=/a+b/;"},
+                                   {"/s/alpha/a%2Bb/", "file-of-plus", "path=/a+b/;"},
+                                   }
+                              };
+                              then("the file a directory serves and the path its page's bridge reports name the same directory", [&] {
+                                  for (const auto& [directory, file, path] : cases) {
+                                      auto scope = info(directory);
+                                      require(httpGet(app.port(), std::string(directory) + "page.txt").find(file) != std::string::npos);
+                                      Page page{app.port(), directory};
+                                      require(page.upgraded);
+                                      page.call("where", 1);
+                                      require(page.receiveUntil(path));
+                                  }
+                              });
+                          }};
