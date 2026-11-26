@@ -88,6 +88,11 @@ public:
     void operator()(auto&&... ts) const {
         msg::FunctionCall<typename WebFront::BufferPolicy> command;
         auto                                               frame = detail::encodeCall<Net>(command, name, std::forward<decltype(ts)>(ts)...);
+        // One call for the inspectors, whatever the number of browsers it reaches (ADR-027, section 7).
+        if constexpr (requires { webFront.jsCallCounter(name); }) {
+            if (const auto counter = webFront.jsCallCounter(name))
+                counter->called();
+        }
         // The sending may be deferred until a starting browser's onUIStarted handlers return: it owns what it uses.
         webFront.sendToStartedLinks(detail::BroadcastCall<Net>{std::move(frame).share(), name, maxPending});
     }

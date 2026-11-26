@@ -996,6 +996,32 @@ try {
                     assert(opened.length === 0, 'An embedded view must never open a tab of the inspectors');
                     floating().querySelector('.webfront-inspector-close').click();
                     assert(floating().hidden, 'The inspector window must close');
+
+                    // The Functions entry shows what the application registered (#681, ADR-027 section 7), read through the
+                    // bridge of this page: its functions, their calls as they happen, and the rows that a search keeps.
+                    await window.webfrontInspectorHost.open('cpp.functions');
+                    await until(() => floating() && !floating().hidden, 'The Functions entry must open the inspector in the floating window');
+                    const panel = () => floating().querySelector('iframe')?.contentDocument;
+                    const functionRows = () => [...(panel()?.querySelector('table.registry')?.querySelectorAll('tbody tr') ?? [])];
+                    const names = () => functionRows().map(row => row.children[0].textContent);
+                    await until(() => names().includes('test.watch'), () => `The Functions panel must list the application's functions: ${names()}`);
+                    assert(!names().some(name => name.startsWith('webfront.')), `WebFront's own functions must be hidden until asked for: ${names()}`);
+                    const watchRow = functionRows().find(row => row.children[0].textContent === 'test.watch');
+                    assert(watchRow.children[1].textContent === '(a: string) => Promise<void>',
+                        `A function must show its TypeScript signature: ${watchRow.children[1].textContent}`);
+                    assert(/DeveloperTest\.cpp:\d+$/.test(watchRow.children[8].textContent),
+                        `A function must show where it was registered: ${watchRow.children[8].textContent}`);
+                    const callsOf = name => Number(functionRows().find(row => row.children[0].textContent === name)?.children[2].textContent);
+                    const viewCalls = callsOf('test.views');
+                    await webFront.cppFunction('test.views')();
+                    await until(() => callsOf('test.views') > viewCalls, 'The Functions panel must follow the calls at its period');
+                    const search = panel().querySelector('input[type=search]');
+                    search.value = 'test.views';
+                    search.dispatchEvent(new Event('input'));
+                    assert(names().length === 1 && names()[0] === 'test.views', `The search must keep the functions it finds: ${names()}`);
+                    assert(opened.length === 0, 'An embedded view must never open a tab of the inspectors');
+                    floating().querySelector('.webfront-inspector-close').click();
+                    assert(floating().hidden, 'The inspector window must close');
                 } finally { window.open = open; }
             }
             assert(here.menus().length === 0, 'The menu must be closed');

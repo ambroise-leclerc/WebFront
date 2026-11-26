@@ -9,6 +9,7 @@
 
 #pragma once
 #include "http/WebSocket.hpp"
+#include "Introspection.hpp"
 #include "weblink/CallFrame.hpp"
 #include "weblink/PendingCalls.hpp"
 
@@ -44,9 +45,10 @@ template <typename Net, http::BuffersPolicyType Policy, typename R>
 class BrowserCallSender {
     using Registry = PendingCalls<Policy>;
     using Socket   = websocket::WebSocket<Net, Policy>;
-    std::weak_ptr<Registry> pending;
-    std::weak_ptr<Socket>   socket;
-    std::vector<std::byte>  payload;
+    std::weak_ptr<Registry>                 pending;
+    std::weak_ptr<Socket>                   socket;
+    std::vector<std::byte>                  payload;
+    std::shared_ptr<inspect::JsCallCounter> counter;  // the inspectors' count of this function's calls, or null
 
     template <typename Receiver>
     struct State : std::enable_shared_from_this<State<Receiver>> {
@@ -70,11 +72,14 @@ class BrowserCallSender {
         std::exception_ptr                                                      error;
         msg::CallId                                                             id{};
         std::optional<ex::stop_callback_for_t<Token, OnStop>>                   stopCallback;
+        std::shared_ptr<inspect::JsCallCounter>                                 counter;
 
-        State(Receiver r, std::weak_ptr<Registry> calls, std::weak_ptr<Socket> ws, std::vector<std::byte> data)
-            : receiver(std::move(r)), pending(std::move(calls)), socket(std::move(ws)), payload(std::move(data)) { }
+        State(Receiver r, std::weak_ptr<Registry> calls, std::weak_ptr<Socket> ws, std::vector<std::byte> data, std::shared_ptr<inspect::JsCallCounter> counted)
+            : receiver(std::move(r)), pending(std::move(calls)), socket(std::move(ws)), payload(std::move(data)), counter(std::move(counted)) { }
 
         void start() noexcept {
+            if (counter)
+                counter->called();  // a call is made when its sender starts, not when it is built
             // Completion is deferred until callback construction and dispatch are finished:
             // registering a previously stopped token may invoke OnStop inline.
             try {
@@ -189,6 +194,8 @@ class BrowserCallSender {
                     deliverValue();
                     break;
                 case Outcome::error:
+                    if (counter)
+                        counter->failed();
                     ex::set_error(std::move(receiver), std::move(error));
                     break;
                 case Outcome::stopped:
@@ -221,16 +228,19 @@ public:
     using sender_concept        = ex::sender_tag;
     using completion_signatures = typename CallCompletions<R>::type;
 
-    BrowserCallSender(std::weak_ptr<Registry> calls, std::weak_ptr<Socket> ws, std::vector<std::byte> data)
-        : pending(std::move(calls)), socket(std::move(ws)), payload(std::move(data)) { }
+    BrowserCallSender(std::weak_ptr<Registry>                 calls,
+                      std::weak_ptr<Socket>                   ws,
+                      std::vector<std::byte>                  data,
+                      std::shared_ptr<inspect::JsCallCounter> counted = {})
+        : pending(std::move(calls)), socket(std::move(ws)), payload(std::move(data)), counter(std::move(counted)) { }
 
     template <typename Receiver>
     auto connect(Receiver receiver) && {
-        return Operation<Receiver>{std::make_shared<State<Receiver>>(std::move(receiver), pending, socket, std::move(payload))};
+        return Operation<Receiver>{std::make_shared<State<Receiver>>(std::move(receiver), pending, socket, std::move(payload), std::move(counter))};
     }
     template <typename Receiver>
     auto connect(Receiver receiver) const& {
-        return Operation<Receiver>{std::make_shared<State<Receiver>>(std::move(receiver), pending, socket, payload)};
+        return Operation<Receiver>{std::make_shared<State<Receiver>>(std::move(receiver), pending, socket, payload, counter)};
     }
 };
 }  // namespace webfront::detail
@@ -244,10 +254,13 @@ class JsFunctionSender {
     std::string                                      name;
     std::weak_ptr<detail::PendingCalls<Policy>>      pending;
     std::weak_ptr<websocket::WebSocket<Net, Policy>> socket;
+    std::shared_ptr<inspect::JsCallCounter>          counter;
 
 public:
     /// The connection of a browser that is gone leaves the references empty: started calls report an error.
     JsFunctionSender(std::string_view functionName, WebFront& wf, WebLinkId id, WebLinkGeneration generation) : name(functionName) {
+        if constexpr (requires { wf.jsCallCounter(name); })
+            counter = wf.jsCallCounter(name);
         if (const auto link = wf.findLink(id, generation)) {
             pending = link->pendingResults();
             socket  = link->socket();
@@ -264,7 +277,7 @@ public:
             const auto* data = static_cast<const std::byte*>(buffers[i].data());
             payload.insert(payload.end(), data, data + buffers[i].size());
         }
-        return detail::BrowserCallSender<Net, Policy, R>{pending, socket, std::move(payload)};
+        return detail::BrowserCallSender<Net, Policy, R>{pending, socket, std::move(payload), counter};
     }
 };
 }  // namespace webfront

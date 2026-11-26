@@ -17,6 +17,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <source_location>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -97,17 +98,20 @@ public:
     /// @throws std::invalid_argument for a name starting with `webfront.inspector.`: a space can neither hide a function of
     /// the inspectors from its pages nor pose as one (ADR-027, section 1)
     template <typename R, typename... Args>
-    bool cppFunction(std::string functionName, auto&& function) {
+    bool cppFunction(std::string functionName, auto&& function, std::source_location location = std::source_location::current()) {
         if (inspect::isReservedName(functionName))
             throw std::invalid_argument("webfront::BasicSpace::cppFunction(): names starting with 'webfront.inspector.' are reserved to WebFront");
-        auto handler = std::make_shared<typename App::CppHandler>(app.template makeCppHandler<R, Args...>(std::forward<decltype(function)>(function)));
+        // The inspectors list it with the path of this space, until the space releases it (ADR-027, section 7).
+        auto record  = app.template recordFunction<R, Args...>(functionName, location, state->path);
+        auto handler = std::make_shared<typename App::CppHandler>(
+            app.template makeCppHandler<R, Args...>(std::forward<decltype(function)>(function), std::move(record)));
         std::scoped_lock lock{state->mutex};
         return state->functions.try_emplace(std::move(functionName), std::move(handler)).second;
     }
 
     /// As BasicWF::cppFunction, deducing the signature from the callable.
     template <typename Function>
-    bool cppFunction(std::string functionName, Function&& function) {
+    bool cppFunction(std::string functionName, Function&& function, std::source_location location = std::source_location::current()) {
         using Callable = std::remove_cvref_t<Function>;
         static_assert(detail::has_callable_traits<Callable>,
                       "webfront::BasicSpace::cppFunction: could not deduce this callable's signature. Generic "
@@ -115,7 +119,7 @@ public:
                       "cppFunction<ReturnType, ArgTypes...>(name, callable).");
         using Traits = detail::callable_traits<Callable>;
         using Args   = typename detail::caller_aware_args<UI, typename Traits::RawArgs, typename Traits::DecayedArgs>::type;
-        return detail::ApplyArgs<typename Traits::Return, Args>::invoke(*this, std::move(functionName), std::forward<Function>(function));
+        return detail::ApplyArgs<typename Traits::Return, Args>::invoke(*this, std::move(functionName), std::forward<Function>(function), location);
     }
 
     /// Whether the pages of this space reach a C++ function of that name: the space's own or the application's.

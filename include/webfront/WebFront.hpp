@@ -16,6 +16,7 @@
 #include "dom/Document.hpp"
 #include "frontend/Frontend.hpp"
 #include "http/HTTPServer.hpp"
+#include "Introspection.hpp"
 #include "JsFunction.hpp"
 #include "JsFunctionSender.hpp"
 #include "networking/TCPNetworkingStdnet.hpp"
@@ -423,8 +424,26 @@ struct ApplyArgs;
 template <typename R, typename... Args>
 struct ApplyArgs<R, std::tuple<Args...>> {
     template <typename Self, typename Function>
-    static bool invoke(Self& self, std::string functionName, Function&& function) {
-        return self.template cppFunction<R, Args...>(std::move(functionName), std::forward<Function>(function));
+    static bool invoke(Self& self, std::string functionName, Function&& function, const std::source_location& location) {
+        return self.template cppFunction<R, Args...>(std::move(functionName), std::forward<Function>(function), location);
+    }
+};
+
+/// The TypeScript type of what a callback that answers later resolves its Promise with: the result of a task
+/// (ResultTask<R>), the single value of another sender when its completions can be read without an environment, else `unknown`.
+template <typename Sender>
+struct DeferredTypescript {
+    static std::string name() {
+        if constexpr (requires { typename deferred_value_t<Sender>::type; })
+            return inspect::typescriptType<typename deferred_value_t<Sender>::type>();
+        else
+            return "unknown";
+    }
+};
+template <typename Result, typename Environment>
+struct DeferredTypescript<networking::ex::task<Result, Environment>> {
+    static std::string name() {
+        return inspect::typescriptType<Result>();
     }
 };
 
@@ -473,12 +492,16 @@ websocket::Frame<Net> makeVoidFrame(msg::CallId callId) {
     return frame;
 }
 
+/// `record`, when the function has one, counts each call and its failure, whether it comes from the arguments, from the
+/// callback or from the encoding of its value (ADR-027, section 7).
 template <typename Net, http::BuffersPolicyType Policy, typename R, typename Callable>
-auto makeCppFunctionResponder(Callable&& callable) {
-    return [callable = std::forward<Callable>(callable)](std::span<const std::byte> data, auto& link, msg::CallId callId, auto&&... caller) mutable {
+auto makeCppFunctionResponder(Callable&& callable, std::shared_ptr<inspect::FunctionRecord> record = {}) {
+    return [callable = std::forward<Callable>(callable),
+            record   = std::move(record)](std::span<const std::byte> data, auto& link, msg::CallId callId, auto&&... caller) mutable {
         msg::FunctionReturn<Policy> result;
         result.setCallId(callId);
-        websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(result.header().data()), result.header().size())};
+        websocket::Frame<Net>      frame{std::span(reinterpret_cast<const std::byte*>(result.header().data()), result.header().size())};
+        const inspect::CallMeasure measure{record.get()};  // the handler owns the record while it runs
         // A failure may come from the callback or from encoding its value (a string over the wire
         // limit), which can leave 'result' partly encoded: failures are sent in a fresh message.
         try {
@@ -490,8 +513,10 @@ auto makeCppFunctionResponder(Callable&& callable) {
                 frame.freeze();
             }
         } catch (const std::exception& error) {
+            measure.failed(error.what());
             frame = makeFailureFrame<Net, Policy>(callId, error);
         } catch (...) {
+            measure.failed("Unknown C++ exception");
             frame = makeFailureFrame<Net, Policy>(callId, std::runtime_error{"Unknown C++ exception"});
         }
         if (callId != 0)
@@ -1065,7 +1090,8 @@ private:
     /// inspectors' callbacks are WebFront's or none (ADR-027, section 1).
     template <typename R, typename... Args>
     void reservedCppFunction(std::string functionName, auto&& function) {
-        if (!registerCppFunction<R, Args...>(functionName, std::forward<decltype(function)>(function)))
+        // No record: the inspectors do not list their own functions, whose calls would be those of the inspector itself.
+        if (!cppFunctions.try_emplace(functionName, makeCppHandler<R, Args...>(std::forward<decltype(function)>(function))).second)
             throw std::logic_error("webfront: the reserved function " + functionName + " is already registered");
     }
 
@@ -1216,13 +1242,14 @@ public:
      * @tparam Args parameters of the CppFunction
      * @param functionName
      * @param function
+     * @param location where the function is registered, which the inspectors show (ADR-027, section 7): leave its default
      * @return false when a function of that name was already registered, which stays registered
      * @throws std::invalid_argument for a name starting with `webfront.inspector.`, reserved to WebFront (ADR-027)
      */
     template <typename R, typename... Args>
-    bool cppFunction(std::string functionName, auto&& function) {
+    bool cppFunction(std::string functionName, auto&& function, std::source_location location = std::source_location::current()) {
         refuseReservedName(functionName);
-        return registerCppFunction<R, Args...>(std::move(functionName), std::forward<decltype(function)>(function));
+        return registerCppFunction<R, Args...>(std::move(functionName), std::forward<decltype(function)>(function), location);
     }
 
     /**
@@ -1236,11 +1263,12 @@ public:
      *
      * @param functionName
      * @param function
+     * @param location where the function is registered, which the inspectors show (ADR-027, section 7): leave its default
      * @return false when a function of that name was already registered, which stays registered
      * @throws std::invalid_argument for a name starting with `webfront.inspector.`, reserved to WebFront (ADR-027)
      */
     template <typename Function>
-    bool cppFunction(std::string functionName, Function&& function) {
+    bool cppFunction(std::string functionName, Function&& function, std::source_location location = std::source_location::current()) {
         using Callable = std::remove_cvref_t<Function>;
         static_assert(detail::has_callable_traits<Callable>,
                       "webfront::BasicWF::cppFunction: could not deduce this callable's signature. Generic "
@@ -1248,7 +1276,27 @@ public:
                       "cppFunction<ReturnType, ArgTypes...>(name, callable).");
         using Traits = detail::callable_traits<Callable>;
         using Args   = typename detail::caller_aware_args<UI, typename Traits::RawArgs, typename Traits::DecayedArgs>::type;
-        return detail::ApplyArgs<typename Traits::Return, Args>::invoke(*this, std::move(functionName), std::forward<Function>(function));
+        return detail::ApplyArgs<typename Traits::Return, Args>::invoke(*this, std::move(functionName), std::forward<Function>(function), location);
+    }
+
+    /**
+     * @brief The C++ functions registered now, the application's and its spaces', in the order of their registration: name,
+     * signature written in TypeScript, where each was registered, whether it receives the calling UI or answers later, and
+     * the counts of its calls (ADR-027, section 7). A copy taken at one moment; callable from any thread. The functions of
+     * WebFront's own inspectors (`webfront.inspector.*`) are not listed. Empty in a distribution build, which records nothing.
+     */
+    [[nodiscard]] std::vector<inspect::FunctionInfo> registeredFunctions() const {
+        return functionRegistry->list();
+    }
+
+    /// The counter of the calls C++ makes to the JavaScript function `functionName`, null while no inspector can read it
+    /// (outside the developer environment, and in a distribution build). For the bridge's own call objects.
+    [[nodiscard]] std::shared_ptr<inspect::JsCallCounter> jsCallCounter(std::string_view functionName) const {
+        if constexpr (inspect::introspection) {
+            if (auto* registry = jsCallsActive.load(std::memory_order_acquire))
+                return registry->counter(functionName);
+        }
+        return nullptr;
     }
 
     /**
@@ -1291,8 +1339,33 @@ private:
     }
 
     template <typename R, typename... Args>
-    bool registerCppFunction(std::string functionName, auto&& function) {
-        return cppFunctions.try_emplace(std::move(functionName), makeCppHandler<R, Args...>(std::forward<decltype(function)>(function))).second;
+    bool registerCppFunction(std::string functionName, auto&& function, const std::source_location& location) {
+        auto record = recordFunction<R, Args...>(functionName, location);
+        return cppFunctions.try_emplace(std::move(functionName), makeCppHandler<R, Args...>(std::forward<decltype(function)>(function), std::move(record)))
+            .second;
+    }
+
+    /// What the inspectors keep of a function about to be registered (ADR-027, section 7), owned by its handler: a
+    /// registration that is refused, or a function released with its space, takes its record with it. Null in a
+    /// distribution build. `scope` is the path of the space that registers it.
+    template <typename R, typename... Args>
+    [[nodiscard]] std::shared_ptr<inspect::FunctionRecord>
+    recordFunction(std::string_view functionName, const std::source_location& location, std::string_view scope = {}) {
+        if constexpr (inspect::introspection) {
+            constexpr bool           caller   = detail::takes_caller<UI, Args...>::value;
+            constexpr bool           deferred = detail::deferred_result<R>;
+            std::vector<std::string> parameters{inspect::typescriptType<Args>()...};
+            if (caller)
+                parameters.erase(parameters.begin());  // the calling UI does not come from JavaScript
+            std::string result;
+            if constexpr (deferred)
+                result = detail::DeferredTypescript<std::remove_cvref_t<R>>::name();
+            else
+                result = inspect::typescriptType<R>();
+            return functionRegistry->add(functionName, inspect::typescriptSignature(parameters, result), caller, deferred, location, scope);
+        } else {
+            return nullptr;
+        }
     }
 
 public:
@@ -1645,7 +1718,7 @@ private:
     /// request is admitted (DeveloperAppWithNetwork, a friend), then checked on the interface thread with isCurrentShowSession():
     /// a request admitted for one run never opens or closes a window of the next one.
     struct ShowSession {
-        std::uint64_t                       epoch{};
+        std::uint64_t                      epoch{};
         std::optional<frontend::UISession> session;
     };
     [[nodiscard]] ShowSession currentShowSession() const {
@@ -1675,7 +1748,63 @@ private:
         std::scoped_lock lock{watchRegistryMutex};
         if (!watchRegistry)
             watchRegistry = std::make_shared<inspect::WatchRegistry>();
+        if (!jsCalls) {
+            jsCalls = std::make_shared<inspect::JsCallRegistry>();
+            jsCallsActive.store(jsCalls.get(), std::memory_order_release);
+        }
         return watchRegistry;
+    }
+
+    /// For the inspectors' functions (DeveloperAppWithNetwork): what cppFunction registered, and the calls made to JavaScript.
+    [[nodiscard]] const std::shared_ptr<inspect::FunctionRegistry>& inspectedFunctions() const noexcept {
+        return functionRegistry;
+    }
+    [[nodiscard]] std::shared_ptr<inspect::JsCallRegistry> inspectedJsCalls() const {
+        std::scoped_lock lock{watchRegistryMutex};
+        return jsCalls;
+    }
+
+    /// The browsers connected now, in the order of their identifiers, as the inspectors show them; `caller` is the one that asks.
+    [[nodiscard]] std::vector<inspect::BrowserInfo> inspectedBrowsers(const UI& caller) const {
+        struct Seen {
+            inspect::BrowserInfo                   info;
+            std::shared_ptr<WebLink<Net, Policy>>  link;
+            std::shared_ptr<detail::DeferredCalls> calls;
+        };
+        std::vector<Seen> seen;
+        {
+            std::scoped_lock lock{linksMutex};
+            seen.reserve(webLinks.size());
+            for (const auto& [id, connection] : webLinks) {
+                inspect::BrowserInfo info;
+                info.id           = id;
+                info.embeddedView = !connection.closed && connection.viewAssociated;
+                info.localClient  = !connection.closed && (connection.viewAssociated || (trustLoopbackClients && connection.loopbackPeer));
+                info.started      = connection.stage == Connection::Stage::started;
+                info.closed       = connection.closed;
+                info.caller       = caller == UI{const_cast<BasicWF&>(*this), id, connection.generation};
+                info.path         = connection.path;
+                info.space        = connection.space ? connection.space->path : std::string{};
+                seen.push_back({std::move(info), connection.link, connection.deferredCalls});
+            }
+        }
+        // Outside linksMutex: each count takes the lock of what it counts.
+        std::vector<inspect::BrowserInfo> browsers;
+        browsers.reserve(seen.size());
+        for (auto& [info, link, calls] : seen) {
+            if (link) {
+                info.pendingWrites  = link->pendingWrites();
+                info.pendingResults = link->pendingResultCount();
+            }
+            info.pendingCalls = calls ? calls->pending() : 0;
+            browsers.push_back(std::move(info));
+        }
+        return browsers;
+    }
+
+    /// The tasks of the server's scope that have not ended: connections, bridge loops and the application's coroutines.
+    [[nodiscard]] std::size_t inspectedTasks() const noexcept {
+        return httpServer.taskScope().activeTasks();
     }
 
     // The constructor has already bound and listened; this thread services the queued I/O.
@@ -1818,14 +1947,14 @@ private:
 
     /// The type-erased handler of a C++ function, as cppFunction<R, Args...> registers it.
     template <typename R, typename... Args>
-    CppHandler makeCppHandler(auto&& function) {
+    CppHandler makeCppHandler(auto&& function, std::shared_ptr<inspect::FunctionRecord> record = {}) {
         if constexpr (detail::deferred_result<R>)
-            return makeDeferredHandler<R, Args...>(std::forward<decltype(function)>(function));
+            return makeDeferredHandler<R, Args...>(std::forward<decltype(function)>(function), std::move(record));
         else if constexpr (detail::takes_caller<UI, Args...>::value)
-            return makeCallerHandler<R, Args...>(std::forward<decltype(function)>(function));
+            return makeCallerHandler<R, Args...>(std::forward<decltype(function)>(function), std::move(record));
         else {
             auto callable  = detail::makeCppFunctionHandler<Policy, R, Args...>(std::forward<decltype(function)>(function));
-            auto responder = detail::makeCppFunctionResponder<Net, Policy, R>(std::move(callable));
+            auto responder = detail::makeCppFunctionResponder<Net, Policy, R>(std::move(callable), std::move(record));
             return [responder](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI) mutable {
                 responder(data, link, callId);
             };
@@ -1836,11 +1965,11 @@ private:
     /// call is owned by the connection (its closure stops the work and drops the late answer) and by the server scope
     /// (shutdown stops and joins it). The answer is sent on the server context.
     template <typename R, typename... Args>
-    CppHandler makeDeferredHandler(auto&& function) {
+    CppHandler makeDeferredHandler(auto&& function, std::shared_ptr<inspect::FunctionRecord> record) {
         // Naming the value type checks the contract at registration: one value at most, one kind of value completion.
         using DeferredValue [[maybe_unused]] = detail::deferred_value_t<R>;
-        const auto start                     = [this](auto invoke, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) {
-            this->startDeferred(std::move(invoke), link, callId, caller);
+        const auto start                     = [this, record = std::move(record)](auto invoke, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) {
+            this->startDeferred(std::move(invoke), link, callId, caller, record);
         };
         if constexpr (detail::takes_caller<UI, Args...>::value) {
             auto handler = registerDeferredHandler<Args...>(std::forward<decltype(function)>(function));
@@ -1875,7 +2004,7 @@ private:
     /// Claims the call identifier, then calls the callback and hands the sender it returned to a task that answers when it
     /// completes. The claim comes first: a call refused as a duplicate, or on a closed connection, never runs the callback.
     template <typename Invoke>
-    void startDeferred(Invoke invoke, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) {
+    void startDeferred(Invoke invoke, WebLink<Net, Policy>& link, msg::CallId callId, UI caller, const std::shared_ptr<inspect::FunctionRecord>& record) {
         const auto [calls, generation] = deferredCallsOf(caller);
         const auto key                 = calls ? calls->reserve(callId) : 0;
         if (key == 0) {
@@ -1883,21 +2012,25 @@ private:
             // reception drops such a call before it gets here, and this claim is the last guard.
             return;
         }
+        // The call is counted now and timed until its answer: the measure goes with the task that answers.
+        inspect::CallMeasure                                   measure{record};
         std::optional<std::remove_cvref_t<decltype(invoke())>> sender;
         try {
             sender.emplace(invoke());
         } catch (const std::exception& error) {
+            measure.failed(error.what());
             calls->finish(callId, key);
             if (callId != 0)
                 link.sendFrame(detail::makeFailureFrame<Net, Policy>(callId, error));
             return;
         } catch (...) {
+            measure.failed("Unknown C++ exception");
             calls->finish(callId, key);
             if (callId != 0)
                 link.sendFrame(detail::makeFailureFrame<Net, Policy>(callId, std::runtime_error{"Unknown C++ exception"}));
             return;
         }
-        const auto handle = spawn(respondLater(caller, generation, calls, callId, key, std::move(*sender)));
+        const auto handle = spawn(respondLater(caller, generation, calls, callId, key, std::move(*sender), std::move(measure)));
         if (handle.stopRequested()) {
             // The server refused the task (it is shutting down): it never runs, so nothing would release the identifier.
             calls->finish(callId, key);
@@ -1930,8 +2063,13 @@ private:
     /// completed stopped by something other than this call's own stop request. When that request was made (the
     /// connection closed, the application is stopping) nothing is sent: nobody is left to read it.
     template <typename Sender>
-    Task
-    respondLater(UI caller, WebLinkGeneration generation, std::shared_ptr<detail::DeferredCalls> calls, msg::CallId callId, std::uint64_t key, Sender sender) {
+    Task respondLater(UI                                     caller,
+                      WebLinkGeneration                      generation,
+                      std::shared_ptr<detail::DeferredCalls> calls,
+                      msg::CallId                            callId,
+                      std::uint64_t                          key,
+                      Sender                                 sender,
+                      inspect::CallMeasure                   measure) {
         struct Finish {
             detail::DeferredCalls& calls;
             msg::CallId            callId;
@@ -1955,10 +2093,14 @@ private:
             });
             answer.emplace(co_await std::move(framed));
         } catch (const std::exception& error) {
+            // A call stopped by its browser's disconnection or by the shutdown is a failure too: it gave no result.
+            measure.failed(error.what());
             answer.emplace(detail::makeFailureFrame<Net, Policy>(callId, error));
         } catch (...) {
+            measure.failed("Unknown C++ exception");
             answer.emplace(detail::makeFailureFrame<Net, Policy>(callId, std::runtime_error{"Unknown C++ exception"}));
         }
+        measure = {};  // the call ends with its answer, not with this task
         if (token.stop_requested() || callId == 0)
             co_return;
         if (const auto link = findLink(caller.id(), generation))
@@ -1966,10 +2108,10 @@ private:
     }
 
     template <typename R, typename Caller, typename... Args>
-    CppHandler makeCallerHandler(auto&& function) {
+    CppHandler makeCallerHandler(auto&& function, std::shared_ptr<inspect::FunctionRecord> record) {
         auto adapted   = detail::adaptCaller<Caller>(std::forward<decltype(function)>(function));
         auto callable  = detail::makeCppFunctionHandler<Policy, R, Args...>(std::move(adapted));
-        auto responder = detail::makeCppFunctionResponder<Net, Policy, R>(std::move(callable));
+        auto responder = detail::makeCppFunctionResponder<Net, Policy, R>(std::move(callable), std::move(record));
         return [responder](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) mutable {
             responder(data, link, callId, caller);
         };
@@ -1989,13 +2131,17 @@ private:
     const bool                              ptyPagesAllowed;
     bool                                    developerEnvironment = false;
     mutable std::mutex                      watchRegistryMutex;
-    std::shared_ptr<inspect::WatchRegistry> watchRegistry;       // set once by enableInspectors(), read by watch() from any thread
-    std::atomic<bool>                       launched{false};     // start() was called
-    std::atomic<std::thread::id>            showThread{};        // the thread inside this application's Frontend::open(), if any
-    std::atomic<std::uint64_t>              showEpoch{0};        // odd while show() runs its frontend, changes at each entry and exit
-    std::atomic<bool>                       showRunning{false};  // a show() of this application is in progress
-    std::atomic<bool>                       shown{false};        // show() was called, whether or not its server still runs
-    mutable std::mutex                      linksMutex;          // guards webLinks, read from any thread
+    std::shared_ptr<inspect::WatchRegistry> watchRegistry;  // set once by enableInspectors(), read by watch() from any thread
+    // What cppFunction registered (ADR-027, section 7); shared with the records' owners, which may outlive a registration.
+    std::shared_ptr<inspect::FunctionRegistry> functionRegistry = std::make_shared<inspect::FunctionRegistry>();
+    std::shared_ptr<inspect::JsCallRegistry>   jsCalls;                 // created by enableInspectors(), then never replaced
+    std::atomic<inspect::JsCallRegistry*>      jsCallsActive{nullptr};  // jsCalls, read on each call to JavaScript without a lock
+    std::atomic<bool>                          launched{false};         // start() was called
+    std::atomic<std::thread::id>               showThread{};            // the thread inside this application's Frontend::open(), if any
+    std::atomic<std::uint64_t>                 showEpoch{0};            // odd while show() runs its frontend, changes at each entry and exit
+    std::atomic<bool>                          showRunning{false};      // a show() of this application is in progress
+    std::atomic<bool>                          shown{false};            // show() was called, whether or not its server still runs
+    mutable std::mutex                         linksMutex;              // guards webLinks, read from any thread
     struct Connection {
         std::shared_ptr<WebLink<Net, Policy>> link;
         WebLinkGeneration                     generation;
