@@ -557,6 +557,22 @@ describe('The inspectors', () => {
             expect(calls.filter(([name]) => name === 'webfront.inspector.closeWindow')).toEqual([['webfront.inspector.closeWindow', 'cpp.watches', 'host-a']]);
         });
 
+        it('closes the window once every cancelled opening has answered, whatever their order', async () => {
+            const answers = [];
+            const {host, calls} = await testHost({containers: admitted(true), openWindow: () => new Promise(resolve => answers.push(resolve))});
+            await host.open('cpp.watches');
+            const first = host.detach('cpp.watches');
+            const second = host.detach('cpp.watches');
+            host.closeButton.click();  // cancels both
+            answers[1]();  // the latest opening answers first: the first one may still create the window
+            await second;
+            expect(calls.some(([name]) => name === 'webfront.inspector.closeWindow')).toBeFalse();
+            answers[0]();
+            expect(await first).toBe('floating');
+            expect(calls.filter(([name]) => name === 'webfront.inspector.closeWindow')).toEqual([['webfront.inspector.closeWindow', 'cpp.watches', 'host-a']]);
+            expect(host.panel.hidden).toBeTrue();
+        });
+
         it('does not let a cancelled opening close the window that a later detach of the panel reuses', async () => {
             const answers = [];
             const {host, calls} = await testHost({containers: admitted(true), openWindow: () => new Promise(resolve => answers.push(resolve))});

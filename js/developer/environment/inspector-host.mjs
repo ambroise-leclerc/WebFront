@@ -353,42 +353,42 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
 
     /**
      * Opens `id` in its detached container; resolves with whether it did. A failure leaves it in the floating window. A native
-     * window that opens after the panel was attached again (while C++ was opening it) is closed at once: the panel stays in
-     * the floating window that attach() showed.
+     * window that is no longer wanted once C++ has answered every opening of the panel (attached again, or its floating
+     * window closed meanwhile) is closed then: the panel stays in the floating window, or closed.
      */
     async function openDetached(id, container) {
         if (container === 'window') {
             const rect = shown(), started = action;
             const attempt = {cancelled: false};
-            if (!opening.has(id)) opening.set(id, new Set());
-            opening.get(id).add(attempt);
-            latest.set(id, attempt);
+            if (!opening.has(id)) opening.set(id, {pending: new Set(), latest: null});
+            const openings = opening.get(id);
+            openings.pending.add(attempt);
+            openings.latest = attempt;
+            let failure = null;
             try {
                 // A close that an attach asked for is over first: the window opened now is never the one being closed.
                 if (closing.has(id)) await closing.get(id);
                 await bridge.cppFunction('webfront.inspector.openWindow')(id, self, rect.width, rect.height);
-                // Attached again, or its floating window closed by the user, while C++ was opening it: no longer wanted.
-                if (!preferences.detached.has(id) || attempt.cancelled) {
-                    // A panel has one native window per host page: a later opening of it, which may reuse that window,
-                    // decides whether it stays (and closes it in turn if it was cancelled too).
-                    if (latest.get(id) === attempt)
-                        await bridge.cppFunction('webfront.inspector.closeWindow')(id, self).catch(() => {});
-                    return false;
-                }
-                return true;
             } catch (error) {
+                failure = error;
+            }
+            // A panel has one native window per host page, which every pending opening of it may reuse: whether it stays is
+            // decided once the last of them has answered, whatever their order, by the latest one asked for.
+            openings.pending.delete(attempt);
+            if (!openings.pending.size) {
+                opening.delete(id);
+                if (!preferences.detached.has(id) || openings.latest.cancelled)
+                    await bridge.cppFunction('webfront.inspector.closeWindow')(id, self).catch(() => {});
+            }
+            if (failure) {
                 // Shown as the fallback only if nothing was done with the window while the native one was being opened.
                 if (action === started) {
                     retryPanel = id;
-                    showFloating(id, `${hostReasons.windowFailed}: ${error?.message ?? error}`);
+                    showFloating(id, `${hostReasons.windowFailed}: ${failure?.message ?? failure}`);
                 }
                 return false;
-            } finally {
-                const pending = opening.get(id);
-                pending?.delete(attempt);
-                if (pending?.size === 0) opening.delete(id);
-                if (latest.get(id) === attempt) latest.delete(id);
             }
+            return preferences.detached.has(id) && !attempt.cancelled;
         }
         // The target names the host too: a tab of another page of the same browsing group is never reused for this one. A tab
         // that was asked to close itself may not be closed yet: a new name opens another tab instead of reusing that one.
@@ -410,13 +410,13 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
     // and `selfClosing` the generation of the panels whose tab closes itself (a tab this page did not open, before a reload).
     const closing = new Map(), tabs = new Map(), selfClosing = new Map();
     let generation = 0;
-    // The openings of a native window that C++ has not answered yet, per panel (Detach clicked twice makes two): closing the
-    // floating window that shows that panel meanwhile cancels all of them, and the window is closed once it opens.
-    // `latest` holds the last opening asked for each panel while it is pending: only that one closes a window it cancels.
-    const opening = new Map(), latest = new Map();
+    // The openings of a native window that C++ has not answered yet, per panel (Detach clicked twice makes two), and the
+    // latest one asked for: closing the floating window that shows that panel meanwhile cancels all of them, and the
+    // window is closed once the last of them has answered, unless a later detach asked for it again.
+    const opening = new Map();
     /** Closes the floating window at the user's request, with the native windows still opening for its panel. */
     function closeFloating() {
-        for (const attempt of (shownPanel && opening.get(shownPanel)) || []) attempt.cancelled = true;
+        for (const attempt of (shownPanel && opening.get(shownPanel)?.pending) || []) attempt.cancelled = true;
         hideFloating();
     }
     /** Closes the detached container of `id`; 'host' when this page closes it, 'self' when the window must close itself. */
