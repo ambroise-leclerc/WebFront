@@ -541,6 +541,21 @@ describe('The inspectors', () => {
             expect(host.preferences.detached.has('cpp.watches')).toBeTrue();
         });
 
+        it('closes every native window still opening for the panel when the floating window is closed, after Detach clicked twice', async () => {
+            const answers = [];
+            const {host, calls} = await testHost({containers: admitted(true), openWindow: () => new Promise(resolve => answers.push(resolve))});
+            await host.open('cpp.watches');
+            const first = host.detach('cpp.watches');
+            const second = host.detach('cpp.watches');
+            expect(answers.length).toBe(2);
+            host.closeButton.click();
+            answers[0]();  // the first opening answers after the close too
+            answers[1]();
+            await Promise.all([first, second]);
+            expect(host.panel.hidden).toBeTrue();
+            expect(calls.filter(([name]) => name === 'webfront.inspector.closeWindow').length).toBe(2);
+        });
+
         it('keeps the native window when another panel is opened in the floating window meanwhile', async () => {
             let opened;
             const {host, calls} = await testHost({containers: admitted(true), openWindow: () => new Promise(resolve => { opened = resolve; })});

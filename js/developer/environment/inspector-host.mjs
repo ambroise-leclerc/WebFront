@@ -360,7 +360,8 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
         if (container === 'window') {
             const rect = shown(), started = action;
             const attempt = {cancelled: false};
-            opening.set(id, attempt);
+            if (!opening.has(id)) opening.set(id, new Set());
+            opening.get(id).add(attempt);
             try {
                 // A close that an attach asked for is over first: the window opened now is never the one being closed.
                 if (closing.has(id)) await closing.get(id);
@@ -379,7 +380,9 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
                 }
                 return false;
             } finally {
-                if (opening.get(id) === attempt) opening.delete(id);
+                const pending = opening.get(id);
+                pending?.delete(attempt);
+                if (pending?.size === 0) opening.delete(id);
             }
         }
         // The target names the host too: a tab of another page of the same browsing group is never reused for this one. A tab
@@ -402,13 +405,12 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
     // and `selfClosing` the generation of the panels whose tab closes itself (a tab this page did not open, before a reload).
     const closing = new Map(), tabs = new Map(), selfClosing = new Map();
     let generation = 0;
-    // The native window of each panel that C++ is opening: closing the floating window that shows that panel meanwhile
-    // cancels it, and the window is closed once it opens.
+    // The openings of a native window that C++ has not answered yet, per panel (Detach clicked twice makes two): closing the
+    // floating window that shows that panel meanwhile cancels all of them, and the window is closed once it opens.
     const opening = new Map();
-    /** Closes the floating window at the user's request, with the native window still opening for its panel. */
+    /** Closes the floating window at the user's request, with the native windows still opening for its panel. */
     function closeFloating() {
-        const attempt = shownPanel && opening.get(shownPanel);
-        if (attempt) attempt.cancelled = true;
+        for (const attempt of (shownPanel && opening.get(shownPanel)) || []) attempt.cancelled = true;
         hideFloating();
     }
     /** Closes the detached container of `id`; 'host' when this page closes it, 'self' when the window must close itself. */
