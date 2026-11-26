@@ -424,6 +424,24 @@ add_test(NAME AddSubdirectoryConsumer
             -DENABLE_CACHE=OFF "-DCMAKE_CXX_COMPILER_LAUNCHER:STRING=$<TARGET_PROPERTY:tests,CXX_COMPILER_LAUNCHER>"
             -DCMAKE_BUILD_TYPE=$<CONFIG> -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
 set_tests_properties(AddSubdirectoryConsumer PROPERTIES TIMEOUT 600 LABELS portability)
+# webfront_embed_directory() from a parent project (#675): the embedded directory is served like the disk, and the build
+# follows changed, added and removed files.
+add_test(NAME EmbedDirectoryConsumer
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
+        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/embed-directory-consumer
+        -DCPM_MODULE=${CPM_DOWNLOAD_LOCATION}
+        "-DDEPENDENCY_ARGS=${_consumer_dependency_args}"
+        "-DTEST_GENERATOR=${CMAKE_GENERATOR}"
+        "-DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        "-DTEST_CXX_COMPILER_LAUNCHER=$<TARGET_PROPERTY:tests,CXX_COMPILER_LAUNCHER>"
+        -DTEST_BUILD_TYPE=$<CONFIG>
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckEmbedDirectory.cmake)
+set_tests_properties(EmbedDirectoryConsumer PROPERTIES TIMEOUT 900 LABELS portability)
+# Its arguments and the names it refuses, without a compiler.
+add_test(NAME EmbedDirectoryArguments
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/embed-directory-arguments
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckEmbedDirectoryArguments.cmake)
+set_tests_properties(EmbedDirectoryArguments PROPERTIES TIMEOUT 120)
 
 # Compile the real native frontend from a consuming project on the native desktop CI jobs.
 # Reuse the configured SDK source (including WebView2) and CPM bootstrap without network access.

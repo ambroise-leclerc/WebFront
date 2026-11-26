@@ -61,6 +61,62 @@ receive the stored representation, other clients accepting identity receive deco
 decoded `Content-Length`. See [HTTP asset encoding](HTTP_ASSETS.md) for negotiation, decoding limits
 and failure responses.
 
+## Embedding an interface directory from CMake
+
+An application whose interface is a plain directory of HTML, JavaScript, CSS, images and vendored files, with no build
+step, embeds it with `webfront_embed_directory()` (`cmake/WebFrontEmbedDirectory.cmake`), in pure CMake: neither `wf`, a
+JavaScript runtime nor a package manager takes part. The function is available after `add_subdirectory(WebFront)`
+(or FetchContent, CPM):
+
+```cmake
+add_executable(app main.cpp)
+target_link_libraries(app PRIVATE WebFront::WebFront)
+webfront_embed_directory(app ui CLASS AppUI NAMESPACE app EXCLUDE "(^|/)[.]")
+```
+
+```cpp
+#include <AppUI.hpp>  // generated in the build tree, on the include path of `app`
+#include <webfront/WebFront.hpp>
+
+#include <string_view>
+
+using App = webfront::BasicWF<webfront::NetProvider, webfront::fs::DocumentRootFirstFSWith<app::AppUI>>;
+
+int main(int argc, char** argv) {
+    webfront::WebFrontConfig config;
+    if (argc == 3 && std::string_view{argv[1]} == "--ui")
+        config.documentRoot = argv[2];  // development: the files on disk are served in front of the embedded ones
+    App ui{config};
+    ui.show();
+}
+```
+
+- **What it serves.** Every file under the directory, by its path relative to it (`index.html`, `lib/chart.js`; `/`
+  is `index.html`), with the bytes of the file. The server derives the MIME type from the extension, as for a file on
+  disk. `CLASS` defaults to `EmbeddedDirectory`, `NAMESPACE` to `webfront::fs` (a C++ keyword, a reserved identifier, `open` and, under `webfront`, a name WebFront
+  declares such as `File` are refused); the header is `<CLASS>.hpp`. `EXCLUDE`
+  takes regular expressions matched against the relative paths (above: hidden files such as `.DS_Store`). A path may
+  hold letters, digits, `_ . - + @ ~` and spaces; another name stops the configuration and names the file (a name
+  with `;`, which CMake splits, can only be renamed). The directory's own path may hold `[ ] * ?`, read as
+  themselves, but not `;` or an unpaired bracket; a directory with no file left to embed stops the configuration.
+- **When it is regenerated.** The build renders the header again when a file of the directory changes, and configures
+  again by itself when a file is added or removed (`file(GLOB_RECURSE CONFIGURE_DEPENDS)`). An unchanged directory
+  regenerates nothing.
+- **Composition (ADR-002).** `fs::DefaultFSWith<app::AppUI>` puts the embedded files in front of any document root: the
+  choice for a component, or for a build that must never serve from disk. `fs::DocumentRootFirstFSWith<app::AppUI>` puts
+  a configured document root in front of them, for a `--ui <dir>` option during development; without a root it touches
+  no disk. In both, the embedded `WebFront.js` cannot be shadowed, and the embedded interface replaces the fallback
+  page.
+- **Size.** The bytes are stored uncompressed (identity encoding), as 64-bit words: a few megabytes compile well, a much
+  larger interface compiles slowly. An application built with the developer environment uses `wf embed`, which also
+  bundles, type-checks and compresses with gzip.
+
+The `EmbedDirectoryConsumer` CTest case builds a parent project that embeds a directory with nested folders, binary,
+empty and hidden files, serves every file through the HTTP request handler from the embedded provider and from the disk,
+and compares status, `Content-Type` and bytes; it then changes, adds and removes files and checks that each build serves
+the directory as it now is. `EmbedDirectoryArguments` checks the file list, the rendered header and the configuration
+errors without a compiler. The consumer also compiles the program above (`test/cmake/embed-directory/app.cpp`).
+
 ## Licenses
 
 fflate (MIT) and esbuild are locked packages of the developer environment (`webfront-packages.lock.json`), not vendored

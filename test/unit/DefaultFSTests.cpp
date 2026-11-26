@@ -3,7 +3,7 @@
 // Created: 2026-07-22
 //
 // WebFront — tests/unit
-// Role: The default file system: precedence of the embedded script, the document root and the fallback page.
+// Role: The default file system: precedence of the embedded script, the document root, an embedded interface and the fallback page.
 // Thread: bridge-io | Alloc: heap-init
 // LLM: uses temporary roots
 
@@ -12,8 +12,10 @@
 #include <webfront/testing/Bdd.hpp>
 
 #include <array>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <type_traits>
 
@@ -117,3 +119,62 @@ const Scenario defaultFSLayers{"DefaultFS layers a configured document root over
                                        });
                                    });
                                }};
+
+namespace {
+
+// An application's embedded interface, as webfront_embed_directory() or wf embed generates it.
+class EmbeddedInterface {
+public:
+    explicit EmbeddedInterface(filesystem::path) { }
+    static optional<fs::File> open(filesystem::path path) {
+        static constexpr array<uint64_t, 1> index{0x656d626564646564};   // "embedded"
+        static constexpr array<uint64_t, 1> script{0x7363726970740000};  // "script"
+        const auto                          name = path.relative_path().generic_string();
+        if (name == "index.html")
+            return fs::File{index, 8};
+        if (name == "app.js" || name == "WebFront.js")
+            return fs::File{script, 6};
+        return {};
+    }
+};
+
+}  // namespace
+
+static_assert(std::is_same_v<fs::DocumentRootFirstFSWith<EmbeddedInterface>,
+                             fs::Multi<fs::detail::ProtectedWebFrontJsFS, fs::detail::OptionalDevRootFS, EmbeddedInterface, fs::IndexFS>>);
+
+const Scenario documentRootFirst{"DocumentRootFirstFSWith serves a configured document root in front of an embedded interface", [] {
+                                     given("no document root", [] {
+                                         fs::DocumentRootFirstFSWith<EmbeddedInterface> provider{filesystem::path{}};
+                                         then("the embedded interface replaces the fallback page, and the bridge stays protected", [&] {
+                                             auto index = provider.open("index.html");
+                                             require(index.has_value());
+                                             requireEqual(readAll(*index), string{"embedded"});
+                                             auto script = provider.open("app.js");
+                                             require(script.has_value());
+                                             requireEqual(readAll(*script), string{"script"});
+                                             auto bridge = provider.open("WebFront.js");
+                                             require(bridge.has_value());
+                                             require(readAll(*bridge) != "script");
+                                             require(provider.open("favicon.ico").has_value());
+                                         });
+                                     });
+                                     given("a document root holding a newer index.html", [] {
+                                         TemporaryRoot root;
+                                         root.write("index.html", "on disk");
+                                         root.write("WebFront.js", "// not the real bridge script");
+                                         fs::DocumentRootFirstFSWith<EmbeddedInterface> provider{root.path()};
+                                         then("the root's file wins, the embedded one serves what the root lacks, and WebFront.js is never shadowed", [&] {
+                                             auto index = provider.open("index.html");
+                                             require(index.has_value());
+                                             requireEqual(readAll(*index), string{"on disk"});
+                                             auto script = provider.open("app.js");
+                                             require(script.has_value());
+                                             requireEqual(readAll(*script), string{"script"});
+                                             auto bridge = provider.open("WebFront.js");
+                                             require(bridge.has_value());
+                                             const auto bridgeText = readAll(*bridge);
+                                             require(bridgeText != "script" && bridgeText != "// not the real bridge script");
+                                         });
+                                     });
+                                 }};

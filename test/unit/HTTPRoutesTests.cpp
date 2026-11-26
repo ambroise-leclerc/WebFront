@@ -3,7 +3,7 @@
 // Created: 2026-11-03
 //
 // WebFront — tests/unit
-// Role: Dynamic routes of the HTTP server: registration, priority, streamed replies, failures and shutdown.
+// Role: Dynamic routes of the HTTP server: registration, priority, streamed replies, failures, shutdown, secret prefixes and deployment headers.
 // Thread: bridge-io | Alloc: unrestricted
 // LLM: connections are accepted at once with mock requests
 
@@ -15,15 +15,18 @@
 #include <webfront/http/BlockingWorker.hpp>
 #include <webfront/http/HTTPServer.hpp>
 #include <webfront/testing/Bdd.hpp>
+#include <webfront/tooling/Logger.hpp>
 
 #include <atomic>
 #include <chrono>
 #include <fstream>
 #include <future>
 #include <list>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 
 using namespace webfront::bdd;
 #ifndef _WIN32
@@ -1112,3 +1115,437 @@ const Scenario headerNames{"Header names are ASCII tokens whatever the locale", 
                                    require(response.starts_with("HTTP/1.1 500 Internal Server Error\r\n"));
                                });
                            }};
+
+namespace {
+
+/// Every log line written at Debug level while it lives.
+class LogCapture {
+public:
+    LogCapture() {
+        log::setLogLevel(log::Debug);
+        sink = log::addSinks(std::function<void(std::string_view)>([this](std::string_view line) {
+            std::scoped_lock lock{mutex};
+            logged += std::string(line) + "\n";
+        }));
+    }
+    ~LogCapture() {
+        log::removeSinks(sink);
+        log::setLogLevel(log::Error);
+    }
+    std::string text() {
+        std::scoped_lock lock{mutex};
+        return logged;
+    }
+
+private:
+    std::mutex                                                       mutex;
+    std::string                                                      logged;
+    decltype(log::addSinks(std::function<void(std::string_view)>{})) sink{};
+};
+
+constexpr std::string_view sessionId = "c4p4b1l1ty-0f-a-s3ss10n";
+
+/// A file provider whose failure quotes the segment of the space its last request came from.
+struct QuotingFileSystem {
+    static inline std::string segment;
+    QuotingFileSystem(std::filesystem::path) { }
+    std::optional<fs::File> open(std::filesystem::path file) {
+        throw std::runtime_error("cannot open " + file.string() + " for session " + segment);
+    }
+};
+
+}  // namespace
+
+const Scenario secretPrefixMasks{"A secret prefix masks the segment that follows it, as the server reads a path", [] {
+                                     routing::SecretPrefixes secrets;
+                                     then("without a declared prefix, no path is covered", [&] {
+                                         require(!secrets.masked("/s/abc/index.html"));
+                                     });
+                                     secrets.add("/s/");
+                                     secrets.add("/share/links/");
+                                     then("a covered path shows a star in place of its segment, and never its query", [&] {
+                                         requireEqual(*secrets.masked("/s/abc/index.html?token=x"), std::string("/s/*/index.html"));
+                                         requireEqual(*secrets.masked("/s/abc"), std::string("/s/*"));
+                                         requireEqual(*secrets.masked("/s/abc/"), std::string("/s/*/"));
+                                         requireEqual(*secrets.masked("/share/links/abc/x/y"), std::string("/share/links/*/x/y"));
+                                         requireEqual(secrets.logged("/s/abc/a.js?q=1"), std::string("/s/*/a.js"));
+                                     });
+                                     then("any spelling the server or a file provider reads the same way is covered", [&] {
+                                         requireEqual(*secrets.masked("//S/./abc/index.html"), std::string("/S/*/index.html"));
+                                         requireEqual(*secrets.masked("/%73/abc/x"), std::string("/s/*/x"));
+                                         requireEqual(*secrets.masked("/%2573%252Fabc/x"), std::string("/s/*/x"));
+                                         requireEqual(*secrets.masked("\\s\\abc\\x"), std::string("/s/*/x"));
+                                         requireEqual(*secrets.masked("/s%2Fabc"), std::string("/s/*"));
+                                         requireEqual(*secrets.masked("/s/a%2Fb/x"), std::string("/s/*/*/x"));
+                                         requireEqual(*secrets.masked("/%25252573/abc/"), std::string("/*"));
+                                     });
+                                     then("other paths, and the prefix alone, are logged as they are", [&] {
+                                         require(!secrets.masked("/index.html"));
+                                         require(!secrets.masked("/s/"));
+                                         require(!secrets.masked("/s"));
+                                         require(!secrets.masked("/sessions/abc/"));
+                                         require(!secrets.masked("/share/abc/"));
+                                         requireEqual(secrets.logged("/a/b.js?q=secret"), std::string("/a/b.js"));
+                                     });
+                                     then("overlapping prefixes mask each of their segments", [&] {
+                                         secrets.add("/s/abc/files/");
+                                         requireEqual(*secrets.masked("/s/abc/files/token/x"), std::string("/s/*/files/*/x"));
+                                         requireEqual(*secrets.masked("/s/abc/files%2Ftoken/x"), std::string("/s/*/files/*/x"));
+                                         requireEqual(*secrets.masked("/s/abc/files%252Ftoken/x"), std::string("/s/*/files/*/x"));
+                                         requireEqual(*secrets.masked("/s/abc%2Ffiles%2Ftoken/x"), std::string("/s/*/*/*/x"));
+                                     });
+                                     then("a malformed prefix is refused", [&] {
+                                         Fixture fixture;
+                                         Router  server("127.0.0.1", "0");
+                                         for (const auto* prefix : {"", "/", "s/", "/s", "/a/../s/"}) {
+                                             auto scope = info(prefix);
+                                             requireThrows<std::invalid_argument>([&] {
+                                                 server.addSecretPrefix(prefix);
+                                             });
+                                         }
+                                     });
+                                 }};
+
+const Scenario secretPrefixLogs{
+    "Requests under a secret prefix never write its segment to the logs",
+    [] {
+        const auto session = std::string(sessionId);
+        const auto quiet   = [&](const std::string& logged) {
+            const auto found = logged.find(session);
+            auto       scope = info(found == std::string::npos ? std::string{} : logged.substr(found < 120 ? 0 : found - 120, 240));
+            require(found == std::string::npos);
+        };
+        given("a file request", [&] {
+            Fixture    fixture;
+            Router     server("127.0.0.1", "0");
+            LogCapture log;
+            server.addSecretPrefix("/s/");
+            const auto response = fixture.answer(get("/s/" + session + "/index.html?x=1"));
+            then("it is logged with the segment masked", [&] {
+                require(response.starts_with("HTTP/1.1 404"));
+                require(contains(log.text(), "Received request GET on /s/*/index.html"));
+                quiet(log.text());
+            });
+        });
+        given("a route request, on a route of every session and on a route of one session", [&] {
+            for (const auto& prefix : {std::string("/s/"), "/s/" + session + "/api/"}) {
+                Fixture    fixture;
+                Router     server("127.0.0.1", "0");
+                LogCapture log;
+                server.addSecretPrefix("/s/");
+                auto       route    = server.addRoute(prefix, [](const RouteRequest&) {
+                    return text("answered");
+                });
+                const auto response = fixture.answer(get("/s/" + session + "/api/data"));
+                then("it is answered and logged with the segment masked", [&] {
+                    auto scope = info(prefix);
+                    require(contains(response, "answered"));
+                    require(contains(log.text(), "Received request GET on /s/*/api/data"));
+                    quiet(log.text());
+                });
+            }
+        });
+        given("a WebSocket upgrade", [&] {
+            Fixture           fixture;
+            Router            server("127.0.0.1", "0");
+            LogCapture        log;
+            std::atomic<bool> upgraded{false};
+            std::string       path;
+            server.addSecretPrefix("/s/");
+            server.onUpgrade([&](RouteNet::Socket&&, const UpgradeSpace& space) {
+                path     = space.requestPath;
+                upgraded = true;
+            });
+            send("GET /s/" + session
+                 + "/ HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                   "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n");
+            requireEventually(
+                [&] {
+                    return upgraded.load();
+                },
+                10s);
+            then("the application gets the path, the logs only its masked form", [&] {
+                requireEqual(path, "/s/" + session + "/");
+                require(contains(log.text(), "Received request GET on /s/*/"));
+                quiet(log.text());
+            });
+        });
+        given("a failing route, and a route whose body fails, both quoting the path", [&] {
+            for (const bool inBody : {false, true}) {
+                Fixture    fixture;
+                Router     server("127.0.0.1", "0");
+                LogCapture log;
+                server.addSecretPrefix("/s/");
+                auto       route    = server.addRoute("/s/", [inBody](const RouteRequest& request) -> RouteReply {
+                    if (!inBody)
+                        throw std::runtime_error("no session at " + std::string(request.path));
+                    RouteReply reply;
+                    reply.body = [path = std::string(request.path)](std::span<char>) -> std::size_t {
+                        throw std::runtime_error("lost " + path);
+                    };
+                    return reply;
+                });
+                const auto response = fixture.answer(get("/s/" + session + "/data"));
+                then("the warning names the route, never the segment nor the error", [&] {
+                    auto scope = info(inBody ? "body" : "handler");
+                    if (!inBody)
+                        require(response.starts_with("HTTP/1.1 500"));
+                    require(contains(log.text(),
+                                     inBody ? "/s/ ended its response early (the error is not logged)"
+                                            : "Route /s/ failed (the error is not logged: it may quote a secret)"));
+                    quiet(log.text());
+                });
+            }
+        });
+        given("a mount whose prefix holds a secret segment, and a secret prefix that crosses a mount", [&] {
+            const auto mountPrefix = "/s/" + session + "/spaces/";
+            for (const auto& [mount, secret, target, shown] : {
+                     std::tuple{       mountPrefix,std::string("/s/"),mountPrefix + "alice/index.html",std::string("/s/*/spaces/*/index.html")                         },
+                     std::tuple{std::string("/m/"),
+                                std::string("/m/alice/share/"),
+                                "/m/alice/share/" + session + "/x.txt",
+                                std::string("/m/*/share/*/x.txt")}
+            }) {
+                Fixture    fixture;
+                Router     server("127.0.0.1", "0");
+                LogCapture log;
+                server.addSecretPrefix(secret);
+                server.mount(mount, [](std::string_view) {
+                    return MountAnswer{};
+                });
+                const auto response = fixture.answer(get(target));
+                then("the full path is logged with every secret segment masked", [&] {
+                    auto scope = info(target);
+                    require(response.starts_with("HTTP/1.1 404"));
+                    require(contains(log.text(), "Received request GET on " + shown));
+                    quiet(log.text());
+                });
+            }
+        });
+        given("a mount whose prefix holds a secret segment and whose resolver fails", [&] {
+            Fixture    fixture;
+            Router     server("127.0.0.1", "0");
+            LogCapture log;
+            server.addSecretPrefix("/s/");
+            server.mount("/s/" + session + "/spaces/", [](std::string_view) -> MountAnswer {
+                throw std::runtime_error("broken");
+            });
+            const auto response = fixture.answer(get("/s/" + session + "/spaces/alice/"));
+            then("the warning names the mount with its secret masked", [&] {
+                require(response.starts_with("HTTP/1.1 500"));
+                require(contains(log.text(), "The resolver of the mount /s/*/spaces/ failed"));
+                quiet(log.text());
+            });
+        });
+        given("without any secret prefix, a space's route, its body, and a file provider failing with the segment in their messages", [&] {
+            for (const auto* failing : {"handler", "body"}) {
+                Fixture    fixture;
+                Router     server("127.0.0.1", "0");
+                LogCapture log;
+                const auto table        = std::make_shared<RouteTable>();
+                auto       registration = table->add("/api/", [failing, &session](const RouteRequest&) -> RouteReply {
+                    if (std::string_view(failing) == "handler")
+                        throw std::runtime_error("no session " + session);
+                    RouteReply reply;
+                    reply.body = [&session](std::span<char>) -> std::size_t {
+                        throw std::runtime_error("lost session " + session);
+                    };
+                    return reply;
+                });
+                server.mount("/s/", [table](std::string_view) {
+                    return MountAnswer{.routes = table, .refusal = {}, .target = {}};
+                });
+                const auto response = fixture.answer(get("/s/" + session + "/api/x"));
+                then("the warning names the route under the masked space, never the error", [&] {
+                    auto scope = info(failing);
+                    require(contains(log.text(), "/s/*/api/"));
+                    require(contains(log.text(), "the error is not logged"));
+                    quiet(log.text());
+                });
+            }
+            Fixture                             fixture;
+            Server<RouteNet, QuotingFileSystem> server("127.0.0.1", "0");
+            LogCapture                          log;
+            server.mount("/s/", [](std::string_view segment) {
+                QuotingFileSystem::segment = std::string(segment);
+                return MountAnswer{};
+            });
+            const auto response = fixture.answer(get("/s/" + session + "/index.html"));
+            then("a file provider's error is not logged either", [&] {
+                require(response.starts_with("HTTP/1.1 500"));
+                require(contains(log.text(), "(the error is not logged)"));
+                quiet(log.text());
+            });
+        });
+        given("without any secret prefix, a resolver whose refusal is invalid and quotes the segment", [&] {
+            Fixture    fixture;
+            Router     server("127.0.0.1", "0");
+            LogCapture log;
+            server.mount("/s/", [](std::string_view segment) {
+                auto refusal = textReply(Response::forbidden, "refused");
+                refusal.headers.emplace_back("X-Session " + std::string(segment), "1");
+                return MountAnswer{.routes = {}, .refusal = std::move(refusal), .target = {}};
+            });
+            const auto response = fixture.answer(get("/s/" + session + "/"));
+            then("it answers 500 and its error is not logged", [&] {
+                require(response.starts_with("HTTP/1.1 500"));
+                require(contains(log.text(), "A mount's reply is invalid (the error is not logged"));
+                quiet(log.text());
+            });
+        });
+        given("a route outside the secret prefix that fails", [&] {
+            Fixture    fixture;
+            Router     server("127.0.0.1", "0");
+            LogCapture log;
+            server.addSecretPrefix("/s/");
+            auto       route    = server.addRoute("/api/", [](const RouteRequest& request) -> RouteReply {
+                throw std::runtime_error("broken at " + std::string(request.path));
+            });
+            const auto response = fixture.answer(get("/api/" + session));
+            then("it is logged as before, its path and its error included", [&] {
+                require(response.starts_with("HTTP/1.1 500"));
+                require(contains(log.text(), "Received request GET on /api/" + session));
+                require(contains(log.text(), "Route /api/ failed: broken at"));
+            });
+        });
+    }};
+
+namespace {
+
+ContentPolicy deploymentPolicy() {
+    ContentPolicy policy;
+    policy.referrerPolicy   = "no-referrer";
+    policy.noSniff          = true;
+    policy.htmlCacheControl = "no-cache";
+    return policy;
+}
+
+}  // namespace
+
+const Scenario deploymentHeaders{"The content policy's deployment headers go with the files, the route replies and the generated replies (#674)", [] {
+                                     given("a policy with a Referrer-Policy, nosniff and the Cache-Control of the HTML pages", [&] {
+                                         ProvidedFile::content = "<html></html>";
+                                         ProvidedFile::native.clear();
+                                         when("an HTML file is served", [&] {
+                                             Fixture                      fixture;
+                                             Server<RouteNet, ProvidedFS> server("127.0.0.1", "0", ".", deploymentPolicy());
+                                             const auto                   response = fixture.answer(get("/index.html"));
+                                             then("it carries the three headers", [&] {
+                                                 require(response.starts_with("HTTP/1.1 200 OK\r\n"));
+                                                 require(contains(response, "\r\nReferrer-Policy: no-referrer\r\n"));
+                                                 require(contains(response, "\r\nX-Content-Type-Options: nosniff\r\n"));
+                                                 require(contains(response, "\r\nCache-Control: no-cache\r\n"));
+                                             });
+                                         });
+                                         when("another file is served", [&] {
+                                             Fixture                      fixture;
+                                             Server<RouteNet, ProvidedFS> server("127.0.0.1", "0", ".", deploymentPolicy());
+                                             const auto                   response = fixture.answer(get("/file.bin"));
+                                             then("it carries the Referrer-Policy but not the Cache-Control of the pages", [&] {
+                                                 require(contains(response, "\r\nReferrer-Policy: no-referrer\r\n"));
+                                                 require(!contains(response, "Cache-Control"));
+                                             });
+                                         });
+                                         when("a route answers without a Referrer-Policy", [&] {
+                                             Fixture    fixture;
+                                             Router     server("127.0.0.1", "0", ".", deploymentPolicy());
+                                             auto       route    = server.addRoute("/api/", [](const RouteRequest&) {
+                                                 return text("from the route");
+                                             });
+                                             const auto response = fixture.answer(get("/api/x"));
+                                             then("the reply carries the policy's, and keeps its own Cache-Control", [&] {
+                                                 require(contains(response, "\r\nReferrer-Policy: no-referrer\r\n"));
+                                                 require(contains(response, "\r\nX-Content-Type-Options: nosniff\r\n"));
+                                                 require(contains(response, "\r\nCache-Control: no-store\r\n"));
+                                                 require(!contains(response, "no-cache"));
+                                                 require(response.ends_with("from the route"));
+                                             });
+                                         });
+                                         when("a route sets its own Referrer-Policy", [&] {
+                                             Fixture    fixture;
+                                             Router     server("127.0.0.1", "0", ".", deploymentPolicy());
+                                             auto       route    = server.addRoute("/api/", [](const RouteRequest&) {
+                                                 auto reply = text("x");
+                                                 reply.headers.emplace_back("referrer-policy", "same-origin");
+                                                 return reply;
+                                             });
+                                             const auto response = fixture.answer(get("/api/x"));
+                                             then("it keeps it, alone", [&] {
+                                                 require(contains(response, "\r\nreferrer-policy: same-origin\r\n"));
+                                                 require(!contains(response, "no-referrer"));
+                                             });
+                                         });
+                                         when("a file is missing", [&] {
+                                             Fixture    fixture;
+                                             Router     server("127.0.0.1", "0", ".", deploymentPolicy());
+                                             const auto response = fixture.answer(get("/missing.html"));
+                                             then("the generated 404 carries the headers of every reply", [&] {
+                                                 require(response.starts_with("HTTP/1.1 404 Not Found\r\n"));
+                                                 require(contains(response, "\r\nReferrer-Policy: no-referrer\r\n"));
+                                                 require(contains(response, "\r\nX-Content-Type-Options: nosniff\r\n"));
+                                                 require(!contains(response, "Cache-Control"));
+                                             });
+                                         });
+                                         when("a route refuses a method", [&] {
+                                             Fixture    fixture;
+                                             Router     server("127.0.0.1", "0", ".", deploymentPolicy());
+                                             auto       route    = server.addRoute("/api/", [](const RouteRequest&) {
+                                                 return text("x");
+                                             });
+                                             const auto response = fixture.answer(get("/api/x", "POST"));
+                                             then("the generated 405 carries them", [&] {
+                                                 require(response.starts_with("HTTP/1.1 405 Method Not Allowed\r\n"));
+                                                 require(contains(response, "\r\nReferrer-Policy: no-referrer\r\n"));
+                                             });
+                                         });
+                                         when("a mount's resolver refuses a segment", [&] {
+                                             Fixture fixture;
+                                             Router  server("127.0.0.1", "0", ".", deploymentPolicy());
+                                             server.mount("/s/", [](std::string_view) {
+                                                 return MountAnswer{.routes = {}, .refusal = textReply(Response::notFound, "unknown"), .target = {}};
+                                             });
+                                             const auto response = fixture.answer(get("/s/abc/"));
+                                             then("its reply carries them", [&] {
+                                                 require(response.starts_with("HTTP/1.1 404 Not Found\r\n"));
+                                                 require(contains(response, "\r\nReferrer-Policy: no-referrer\r\n"));
+                                                 require(contains(response, "\r\nX-Content-Type-Options: nosniff\r\n"));
+                                             });
+                                         });
+                                     });
+                                     given("the default policy", [&] {
+                                         ProvidedFile::content = "<html></html>";
+                                         ProvidedFile::native.clear();
+                                         when("an HTML file is served", [&] {
+                                             Fixture                      fixture;
+                                             Server<RouteNet, ProvidedFS> server("127.0.0.1", "0");
+                                             const auto                   response = fixture.answer(get("/index.html"));
+                                             then("none of the headers is sent", [&] {
+                                                 require(response.starts_with("HTTP/1.1 200 OK\r\n"));
+                                                 require(!contains(response, "Referrer-Policy"));
+                                                 require(!contains(response, "X-Content-Type-Options"));
+                                                 require(!contains(response, "Cache-Control"));
+                                             });
+                                         });
+                                         when("a route answers", [&] {
+                                             Fixture    fixture;
+                                             Router     server("127.0.0.1", "0");
+                                             auto       route    = server.addRoute("/api/", [](const RouteRequest&) {
+                                                 return text("x");
+                                             });
+                                             const auto response = fixture.answer(get("/api/x"));
+                                             then("it has no Referrer-Policy", [&] {
+                                                 require(!contains(response, "Referrer-Policy"));
+                                                 require(!contains(response, "X-Content-Type-Options"));
+                                             });
+                                         });
+                                         when("a file is missing", [&] {
+                                             Fixture    fixture;
+                                             Router     server("127.0.0.1", "0");
+                                             const auto response = fixture.answer(get("/missing.html"));
+                                             then("the 404 has no Referrer-Policy", [&] {
+                                                 require(response.starts_with("HTTP/1.1 404 Not Found\r\n"));
+                                                 require(!contains(response, "Referrer-Policy"));
+                                             });
+                                         });
+                                     });
+                                 }};
