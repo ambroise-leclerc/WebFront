@@ -59,10 +59,17 @@ inspect the native log or network diagnostics when debugging a connection from a
 
 ## Deployment headers
 
-A page whose URL carries a capability (a session `/s/<id>/` under [`app.spaces`](SPACES.md)) leaks it in the `Referer`
-of every link the user follows to another site. The last three members let the application set, from the configuration,
-the headers a public deployment expects on the replies WebFront writes. They are sent by the HTTP server whatever the
-frontend, embedded or system browser:
+A page whose URL carries a capability (a session `/s/<id>/` under [`app.spaces`](SPACES.md)) depends, without a
+`Referrer-Policy`, on the browser's default. Current engines default to `strict-origin-when-cross-origin`: a request to
+another site carries only the page's origin in `Referer` (and none from HTTPS to HTTP), while a same-origin request carries
+the full URL. The path can still leave the application when the effective policy is less strict: an older engine or one
+configured otherwise, or a page, a `<meta name="referrer">` or a `referrerpolicy` attribute that loosens it
+(`unsafe-url`, `no-referrer-when-downgrade`). `no-referrer` states the policy explicitly instead of relying on that
+default: no `Referer` at all, the application's own requests included (WebFront itself never reads it); a document or an
+element can still override it, so the application's pages must not loosen it.
+
+The last three members let the application set, from the configuration, the headers a public deployment expects on the
+replies WebFront writes. They are sent by the HTTP server whatever the frontend, embedded or system browser:
 
 ```cpp
 webfront::WebFrontConfig config;
