@@ -38,6 +38,7 @@ these entries stays in the GitHub releases and the Git history.
 - A `+` in the path of a file request is a literal `+`, as for the routes, the spaces and `ui.path()`: `/a+b.html` serves `a+b.html`, no longer `a b.html`, which `/a%20b.html` names (#672).
 
 ### Fixed
+- A closed WKWebView secondary window, or one that another window covered, no longer leaves its page suspended and connected to the application: on macOS 14+ a secondary window is never suspended while inactive (#681, `docs/WKWEBVIEW.md`).
 - An invalid content policy (an origin of `bridgeAllowedOrigins` or `navigationAllowedOrigins`, a `referrerPolicy`, a `htmlCacheControl`) throws `std::invalid_argument` before the server binds its port, as documented, instead of an "address already in use" error when that port is taken (#674).
 - `DeveloperBrowserIntegration-workspace` gives the relaunched bootstrap page the same 60 s to start as the first one, instead of 10 s, which a loaded runner exceeded while the page verified its cached environment (#660).
 - Applications started from the terminal of a Snap-packaged editor (VSCodium) now run on WebKitGTK without cleaning the environment by hand; `WEBFRONT_KEEP_SNAP_ENVIRONMENT=1` opts out (#662, `docs/WEBKITGTK.md`).

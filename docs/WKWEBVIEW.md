@@ -209,3 +209,6 @@ retained lifecycle cases.
 
 Hidden sessions require macOS 14+ and use the public `WKPreferences::inactiveSchedulingPolicy` value `None` so
 asynchronous bridge and Worker work continues after the load event. Visible sessions retain macOS 13.3 support.
+On macOS 14+, a secondary window (`openSecondaryWindow()`) uses the same policy, visible or not: closing it hides it
+before its view is released, and an occluded window is inactive all along, so a suspended page would keep its
+connection after its window closed. The first visible window keeps WebKit's default policy.
