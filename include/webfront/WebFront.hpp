@@ -906,6 +906,16 @@ public:
         return httpServer.addRoute(std::move(prefix), std::move(handler), std::move(options));
     }
 
+    /** @brief Declares that the segment following `prefix` (absolute, ending with '/', such as "/s/") is a secret, a capability
+     * such as a session's identifier: WebFront never writes it to its logs, for files, routes, WebSocket upgrades and their
+     * failures alike ("/s/<id>/index.html" is logged with a star in place of `<id>`), nor the message of an error raised
+     * while serving such a path. A family of spaces (spaces()) always masks its segment so. Throws std::invalid_argument
+     * for a malformed prefix. Thread-safe; declare the prefixes before the pages can request them.
+     */
+    void addSecretPrefix(std::string_view prefix) {
+        httpServer.addSecretPrefix(prefix);
+    }
+
     /** @brief Declares a family of spaces under `prefix` (absolute, ending with '/', such as "/s/"): an HTTP request or a
      * WebSocket whose path starts with `prefix + segment + "/"` belongs to the space `segment` (see BasicSpace), and is
      * served as its path without that start would be at the root: a page with relative URLs works at `/s/abc/` as at `/`.

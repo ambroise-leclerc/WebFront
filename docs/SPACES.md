@@ -125,6 +125,7 @@ callback), or at a time when none of its callbacks can run; destroy the spaces b
   runs only for a segment that has no space yet, and every later request to an existing space (its pages, its WebSocket,
   its routes) reaches it without calling the resolver again.
   WebFront's logs show a space's segment masked (`/s/*/index.html`), and never a resolver's error message, which may
-  quote it; the application's own logs are its business.
+  quote it; the application's own logs are its business. `app.addSecretPrefix(prefix)` masks a segment so outside the
+  spaces, and within a space as it reads its paths (`docs/HTTP_ASSETS.md`).
 - `onLastUIClosed` counts connected pages: a space that no page ever reached is not reported, and the application ends
   it with its own timeout.
