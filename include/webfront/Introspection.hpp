@@ -455,15 +455,16 @@ public:
         std::uint64_t            last = 0;
         bool                     more = false;
         for (const auto& record : alive(from)) {
-            auto       info  = snapshot(*record);
-            const auto bytes = encodedSize(info);
+            // The row first, then its cost: what is counted is what is sent (a path made visible is longer than it was).
+            auto       shown = row(snapshot(*record));
+            const auto bytes = encodedSize(shown);
             if (rows.size() == wanted || used + bytes > room) {
                 more = true;
                 break;
             }
             used += bytes;
-            last  = info.id;
-            rows.push_back(row(info));
+            last  = record->id;
+            rows.push_back(std::move(shown));
         }
         return {std::move(rows), more && last != 0 ? static_cast<double>(last) : 0.0};
     }
@@ -509,6 +510,9 @@ private:
         std::vector<std::shared_ptr<FunctionRecord>> records;
         {
             std::scoped_lock lock{table->mutex};
+            // Room first: once a registration is held here, nothing may throw under the lock, since releasing what
+            // would then be its last owner takes this same lock.
+            records.reserve(table->entries.size());
             for (auto entry = table->entries.upper_bound(after); entry != table->entries.end(); ++entry)
                 if (auto record = entry->second.lock())
                     records.push_back(std::move(record));
@@ -536,10 +540,11 @@ private:
         return info;
     }
 
-    [[nodiscard]] static std::size_t encodedSize(const FunctionInfo& info) noexcept {
-        return detail::encodedTuple + 6 * detail::encodedNumber + detail::encodedText(info.label.size()) + detail::encodedText(info.signature.size())
-               + detail::encodedText(info.location.size()) + detail::encodedText(std::min(info.scope.size(), maxTextBytes))
-               + detail::encodedText(info.lastError.size());
+    /// An upper bound of the encoded size of a row, from the texts it holds.
+    [[nodiscard]] static std::size_t encodedSize(const FunctionRow& shown) noexcept {
+        return detail::encodedTuple + 6 * detail::encodedNumber + detail::encodedText(std::get<1>(shown).size())
+               + detail::encodedText(std::get<2>(shown).size()) + detail::encodedText(std::get<3>(shown).size())
+               + detail::encodedText(std::get<4>(shown).size()) + detail::encodedText(std::get<8>(shown).size());
     }
 
     /// Shared with the records, which remove their own entry and may outlive the registry.

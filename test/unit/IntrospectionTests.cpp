@@ -516,6 +516,23 @@ const Scenario introFunctionPages{
             requireEqual(std::get<9>(row), 20.0);
             requireEqual(std::get<10>(row), 30.0);
         });
+        then("a page counts a space's path as it is sent, control characters made visible", [&] {
+            inspect::FunctionRegistry                             scoped;
+            const std::string                                     path(80, '\n');  // 80 bytes registered, 240 once visible
+            std::vector<std::shared_ptr<inspect::FunctionRecord>> kept;
+            for (int i = 0; i < 40; ++i)
+                kept.push_back(scoped.add("f" + std::to_string(i), "() => Promise<void>", false, false, std::source_location::current(), path));
+            requireEqual(scoped.find("f0", path)->scope, path);
+            const auto [rows, next] = scoped.page(0, 200, inspect::minPageBytes);
+            static_cast<void>(next);
+            std::size_t sent = 0;
+            for (const auto& shown : rows) {
+                requireEqual(std::get<4>(shown).size(), std::size_t{240});
+                sent += 2 + 6 * 9 + 5 * 3 + std::get<1>(shown).size() + std::get<2>(shown).size() + std::get<3>(shown).size() + 240 + std::get<8>(shown).size();
+            }
+            require(!rows.empty() && rows.size() < kept.size());
+            require(sent + inspect::responseHeaderBytes <= inspect::minPageBytes);
+        });
         then("a cursor or a count that is not a whole number is refused", [&] {
             checkThrows<std::invalid_argument>([&] {
                 static_cast<void>(registry.page(-1, 200, inspect::minPageBytes));
