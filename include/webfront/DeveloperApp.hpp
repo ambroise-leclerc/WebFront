@@ -264,8 +264,10 @@ private:
     void exposeWrite(std::string name) {
         using Caller = typename Base::UI;
         this->template cppFunction<Result, Caller, Args...>(std::move(name), [owned = store](Caller ui, Args... arguments) -> Result {
-            if (frontend::providesViewProof<Frontend>())
-                admit(ui);
+            // The inspectors' code (ADR-027, section 2), with a message that names what was refused.
+            if (frontend::providesViewProof<Frontend>() && !ui.isLocalClient())
+                throw webfront::detail::makeBridgeError(inspect::code::denied,
+                                                        "Project writes require an admitted application view (or a loopback page with trustLoopbackClients)");
             return ((*owned).*Member)(std::move(arguments)...);
         });
     }

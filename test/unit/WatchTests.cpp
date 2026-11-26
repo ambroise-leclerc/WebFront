@@ -211,6 +211,13 @@ const Scenario watchPages{
                 const auto next = registry.page(revision, std::get<1>(narrow), 200, inspect::responseHeaderBytes + 80);
                 requireEqual(namesOf(next), std::vector<std::string>{"c", "d"});
             });
+            then("a budget that cannot hold the next watch is refused, not answered as the end of the list", [&] {
+                checkThrows<std::length_error>([&] {
+                    static_cast<void>(registry.page(revision, 0, 200, inspect::responseHeaderBytes + 10));
+                });
+                // Only the revision is asked for: no descriptor has to fit.
+                require(std::get<0>(registry.page(revision, 0, 0, 0)).empty());
+            });
             then("a count above 1 000 is read as 1 000, and numbers that are not whole are refused", [&] {
                 WatchRegistry many;
                 for (int index = 0; index < 1001; ++index)

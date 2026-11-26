@@ -365,7 +365,8 @@ public:
      * greater than `after`, in the order of the identifiers, at most `count` of them (0 asks only for the revision) and as
      * many as fit `budget` bytes with the answer's header. `next` is the last identifier served, 0 at the end; `changed`
      * tells that `revision` is no longer the registry's. Throws std::invalid_argument for a number that is not a whole
-     * number from 0 to 2^53.
+     * number from 0 to 2^53, and std::length_error when the first remaining watch does not fit `budget`: an empty page
+     * ending with 0 would hide the rest (a budget of minPageBytes always holds one).
      */
     [[nodiscard]] WatchPage page(double revision, double after, double count, std::size_t budget) const {
         const auto              known = wholeNumber(revision, "revision"), from = wholeNumber(after, "cursor");
@@ -379,6 +380,8 @@ public:
         for (auto entry = entries.upper_bound(from); entry != entries.end(); ++entry) {
             const auto bytes = encodedSize(entry->second);
             if (served.size() == wanted || used + bytes > room) {
+                if (served.empty() && wanted != 0)
+                    throw std::length_error("The inspector's page budget cannot hold one watch descriptor");
                 more = true;
                 break;
             }

@@ -7,6 +7,7 @@ import {detachedContainer, containerFor, hostReasons, parsePreferences, formatPr
 import {readDescriptor, readPage, listWatches, listingAttempts, reconcile, watchOpener, createWatchDiscovery, renderWatches, pageBridge, attachAgain,
     watchesFunction} from '../../../js/developer/environment/inspector.mjs';
 import {inspectorChannel, inspectorPanels} from '../../../js/developer/environment/menu.mjs';
+import {LineEditor} from '../../../js/developer/environment/terminal.mjs';
 import {memoryBridge} from '../memory-bridge.mjs';
 
 const encode = text => new TextEncoder().encode(text);
@@ -123,12 +124,35 @@ describe('The inspectors', () => {
             const store = preferencesStore(bridge);
             store.detached('cpp.watches', true);
             await expectAsync(store.saved()).toBeRejectedWithError('Disconnected');
-            expect(calls).toEqual(['webfront.developer.state', 'webfront.developer.read', 'webfront.inspector.savePreferences']);
+            // Without a file, the read fails and listing the directories shows that the file is absent.
+            expect(calls).toEqual(['webfront.developer.state', 'webfront.developer.read', 'webfront.developer.list', 'webfront.developer.list',
+                'webfront.developer.list', 'webfront.inspector.savePreferences']);
             expect(storage.has(preferencesPath)).toBeFalse();
             connected = true;
             store.detached('cpp.watches', true);
             await store.saved();
             expect([...parsePreferences(new TextDecoder().decode(storage.get(preferencesPath))).detached]).toEqual(['cpp.watches']);
+        });
+
+        it('do not commit over choices that could not be read', async () => {
+            const others = encode(formatPreferences({detached: new Set(['cpp.functions']), rect: {x: 1, y: 2, width: 300, height: 200}}));
+            const {bridge: memory, storage} = memoryBridge(new Map([[preferencesPath, others]]));
+            let failing = true;
+            const bridge = {cppFunction: name => async (...args) => {
+                if (name === 'webfront.developer.read' && failing) throw new Error('Cannot read project file: ' + args[0]);
+                return memory.cppFunction(name)(...args);
+            }};
+            const store = preferencesStore(bridge);
+            store.detached('cpp.watches', true);
+            await expectAsync(store.saved()).toBeRejectedWithError(/Cannot read project file/);
+            expect(storage.get(preferencesPath)).toBe(others);
+            // Shown, they are empty: the inspectors still open.
+            expect([...(await readPreferences(bridge)).detached]).toEqual([]);
+            failing = false;
+            store.detached('cpp.watches', true);
+            await store.saved();
+            expect([...parsePreferences(new TextDecoder().decode(storage.get(preferencesPath))).detached].sort())
+                .toEqual(['cpp.functions', 'cpp.watches']);
         });
 
         it('write again a change whose file changed between its read and its commit', async () => {
@@ -405,6 +429,19 @@ describe('The inspectors', () => {
             expect(made.length).toBe(1);
         });
 
+        it('creates the host again on the next panel after a failed creation', async () => {
+            let attempts = 0;
+            const inspectors = prepareInspectors({access: Promise.resolve({containers: admitted(true), reason: ''}), create: async () => {
+                if (++attempts === 1) throw new Error('no host');
+                return {open: panel => panel};
+            }});
+            await new Promise(resolve => setTimeout(resolve));  // the creation started by the access fails
+            expect(attempts).toBe(1);
+            expect(inspectors.host()).toBeNull();
+            expect(await inspectors.open('cpp.watches')).toBe('cpp.watches');
+            expect(attempts).toBe(2);
+        });
+
         it('does not show a panel again when its native window fails after another action', async () => {
             let fail;
             const pending = new Promise((resolve, reject) => { fail = reject; });
@@ -430,6 +467,18 @@ describe('The inspectors', () => {
             expect(host.panel.hidden).toBeFalse();
             expect(host.shownPanel).toBe('cpp.watches');
             expect(host.preferences.detached.has('cpp.watches')).toBeFalse();
+        });
+
+        it('says in the terminal that a panel could not open, above the line being edited', () => {
+            let output = '';
+            const editor = new LineEditor({write: text => { output += text; }, run: async () => {}});
+            editor.showPrompt();
+            editor.handle('ls');
+            output = '';
+            editor.notice('The inspector could not open: no host');
+            // The edited line is erased, the notice printed on its own line, then the prompt and the line drawn again.
+            expect(output.startsWith('\r\x1b[JThe inspector could not open: no host\r\n> ')).toBeTrue();
+            expect(output).toContain('ls');
         });
 
         it('opens at a default place inside a small viewport', () => {

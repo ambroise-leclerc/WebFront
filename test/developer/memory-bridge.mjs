@@ -17,7 +17,8 @@ export function memoryBridge(storage = new Map()) {
             const prefix = directory ? directory + '/' : '';
             const names = new Set([...storage.keys()].filter(key => key.startsWith(prefix))
                 .map(key => key.slice(prefix.length)).map(rest => rest.includes('/') ? rest.split('/')[0] + '/' : rest));
-            if (!names.size) throw new Error('Cannot list project directory: ' + directory);
+            // The project root always exists, even empty; another directory exists only through the files it holds.
+            if (!names.size && directory) throw new Error('Cannot list project directory: ' + directory);
             return new TextEncoder().encode(JSON.stringify([...names].sort()));
         },
         // Like Store::entries: the same entries with their type and size; the memory project keeps no dates.

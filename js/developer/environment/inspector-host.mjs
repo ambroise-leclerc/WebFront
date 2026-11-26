@@ -66,8 +66,36 @@ export function parsePreferences(text) {
 export const formatPreferences = ({detached, rect}) =>
     JSON.stringify({format: 1, detached: [...detached].sort(), rect: rect ?? null}) + '\n';
 
+/**
+ * Whether a project file is absent, rather than present but unreadable: the directory that holds it, listed, does not name
+ * it, or is itself absent. A failure to list a directory that exists is thrown.
+ */
+async function projectFileMissing(bridge, path) {
+    const slash = path.lastIndexOf('/');
+    const directory = slash < 0 ? '' : path.slice(0, slash), name = path.slice(slash + 1);
+    try {
+        const names = JSON.parse(decoder.decode(await call(bridge, 'list', directory)));
+        return !names.includes(name) && !names.includes(`${name}/`);
+    } catch (error) {
+        if (directory && await projectFileMissing(bridge, directory)) return true;
+        throw error;
+    }
+}
+
+/** The choices the project has: empty ones without a file; a file that exists but cannot be read throws. */
+async function readStoredPreferences(bridge) {
+    let bytes;
+    try { bytes = await readProject(bridge, preferencesPath); }
+    catch (error) {
+        if (await projectFileMissing(bridge, preferencesPath).catch(() => false)) return parsePreferences('');
+        throw error;
+    }
+    return parsePreferences(decoder.decode(bytes));
+}
+
+/** The choices to show: empty ones when they cannot be read, which never prevents the inspectors from opening. */
 export async function readPreferences(bridge) {
-    try { return parsePreferences(decoder.decode(await readProject(bridge, preferencesPath))); }
+    try { return await readStoredPreferences(bridge); }
     catch { return parsePreferences(''); }
 }
 
@@ -81,12 +109,15 @@ export function applyPreferenceChanges(current, {panels, rect}) {
 // Another page writing the choices, or having changed them since they were read: the change is tried again shortly after.
 const preferenceConflict = /changed since it was read|already being written/;
 
-/** Applies `changes` to the choices as the project has them now, committed only if the file did not change meanwhile. */
+/**
+ * Applies `changes` to the choices as the project has them now, committed only if the file did not change meanwhile. A file
+ * that cannot be read fails the write: committing this page's changes alone would erase the choices of the other pages.
+ */
 async function writePreferenceChanges(bridge, changes) {
     for (let attempt = 1; ; ++attempt) {
         try {
             const token = await call(bridge, 'state', preferencesPath);
-            const text = formatPreferences(applyPreferenceChanges(await readPreferences(bridge), changes));
+            const text = formatPreferences(applyPreferenceChanges(await readStoredPreferences(bridge), changes));
             await bridge.cppFunction('webfront.inspector.savePreferences')(token, encoder.encode(text));
             return;
         } catch (error) {
@@ -428,11 +459,15 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
  * The inspectors of a page that holds the tab: `open(panel)` shows a panel, creating the host on first use. The host is also
  * created as soon as `access` says that this page reaches the inspectors, without waiting for a panel to be opened: a panel
  * detached before this page was reloaded carries the page's identifier, and its request to be attached again must find the
- * host listening. `host()` is the promise of the host, null until it is created. `create` replaces createInspectorHost (tests).
+ * host listening. `host()` is the promise of the host, null until it is created; a creation that failed is tried again on the
+ * next `open(panel)`. `create` replaces createInspectorHost (tests).
  */
 export function prepareInspectors({create = createInspectorHost, ...options}) {
     let made = null;
-    const host = () => made ??= create(options);
+    const host = () => made ??= Promise.resolve().then(() => create(options)).catch(error => {
+        made = null;
+        throw error;
+    });
     Promise.resolve(options.access).then(access => { if (access?.containers?.host) host().catch(() => {}); }, () => {});
     return {
         open: panel => host().then(created => created.open(panel)),
