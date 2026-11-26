@@ -23,6 +23,9 @@ clients: they can forge this header. This is browser cross-origin protection, no
 | `popups` | `PopupPolicy::block` | Cancel new windows; `systemBrowser` forwards user-initiated HTTP(S) destinations to the system browser instead. |
 | `devToolsEnabled` | `true` | Enable embedded engine DevTools entry points. |
 | `contextMenusEnabled` | `true` | Enable embedded default context menus. |
+| `referrerPolicy` | empty | `Referrer-Policy` of every HTTP reply that does not set its own; empty sends none. See [deployment headers](#deployment-headers). |
+| `noSniff` | `false` | `X-Content-Type-Options: nosniff` on every HTTP reply that does not set its own. |
+| `htmlCacheControl` | empty | `Cache-Control` of the HTML files the server serves; empty sends none. |
 
 ```cpp
 webfront::WebFrontConfig config;
@@ -53,6 +56,37 @@ The refusal includes a plain-text HTTP body and a warning log pointing to
 `contentPolicy.bridgeAllowedOrigins`, `allowMissingOrigin` and the loopback-only wildcard-bind
 default. The browser WebSocket API does not expose that HTTP response body to JavaScript;
 inspect the native log or network diagnostics when debugging a connection from another host.
+
+## Deployment headers
+
+A page whose URL carries a capability (a session `/s/<id>/` under [`app.spaces`](SPACES.md)) leaks it in the `Referer`
+of every link the user follows to another site. The last three members let the application set, from the configuration,
+the headers a public deployment expects on the replies WebFront writes. They are sent by the HTTP server whatever the
+frontend, embedded or system browser:
+
+```cpp
+webfront::WebFrontConfig config;
+config.contentPolicy.referrerPolicy   = "no-referrer";
+config.contentPolicy.noSniff          = true;
+config.contentPolicy.htmlCacheControl = "no-cache";
+```
+
+- `referrerPolicy` and `noSniff` go with the served files, the replies of the routes, the refusals of a mount's resolver,
+  and the replies the server generates (404, 405, 413, 500...). A reply that already holds the header, compared without
+  case, keeps its own: a route or a `harden` function can choose another policy for its answers. A WebSocket `101` carries
+  none.
+- `htmlCacheControl` goes with the `.html` and `.htm` files of the providers (the embedded pages, the document root), so
+  that a browser revalidates a page after a new version of the application; their scripts and styles are left to the
+  browser's heuristics. A route sets its own `Cache-Control`.
+- `referrerPolicy` is a token of the Referrer Policy specification (`no-referrer`, `no-referrer-when-downgrade`, `origin`,
+  `origin-when-cross-origin`, `same-origin`, `strict-origin`, `strict-origin-when-cross-origin`, `unsafe-url`), or a
+  comma-separated list of them, written in lower case. Any other value, and a `htmlCacheControl` holding a control
+  character, throw `std::invalid_argument` before the listener is bound.
+
+The defaults send none of these headers, as before #674. Behind a reverse proxy, the proxy may add or replace them; the
+origin the browser sees is then the proxy's, which `bridgeAllowedOrigins` must list. `Strict-Transport-Security` and
+`Content-Security-Policy` stay with the proxy or the application's routes: the first only makes sense on the public HTTPS
+name, the second depends on the application's own pages.
 
 ## Frontend mapping and scope
 
@@ -88,7 +122,8 @@ the policy to their engine; server bridge checks apply even with legacy adapters
 ## Regression coverage
 
 The unit tests check exact origin matching, normalization, allow-lists, absent/malformed/duplicate headers,
-HTTP status and popup delegation. Jasmine verifies the normal same-origin bridge and real denied
+HTTP status, popup delegation, and the deployment headers on a file, a route reply, a mount's refusal and the generated
+404 and 405, absent by default and kept when a route sets its own. Jasmine verifies the normal same-origin bridge and real denied
 connections from a foreign-origin iframe and a sandboxed opaque origin, bracketed by positive
 connections to the same endpoint. Rejected probes report only after the WebSocket close event,
 before their parent removes their frame. Positive controls run in the original test document

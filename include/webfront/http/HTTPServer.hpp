@@ -945,6 +945,11 @@ public:
         secrets = std::move(prefixes);
     }
 
+    /// The content policy the handler checks upgrades with; the server also takes its deployment headers from it.
+    [[nodiscard]] const detail::BoundContentPolicy& policy() const noexcept {
+        return contentPolicy;
+    }
+
     /** @brief Per-handler gzip cache counters and retained storage; read on the server context. */
     [[nodiscard]] gzip::ValidatedCache::Statistics fallbackCacheStatistics() const {
         return fallbackCache.statistics();
@@ -1009,7 +1014,10 @@ private:
             return result;
         }
         response.statusCode = result.partial ? Response::partialContent : Response::ok;
-        response.headers.emplace_back("Content-Type", MimeType(requestPath->extension().string()).toString());
+        const auto type     = MimeType(requestPath->extension().string());
+        response.headers.emplace_back("Content-Type", type.toString());
+        if (type.type == MimeType::html && !contentPolicy.options().htmlCacheControl.empty())
+            response.headers.emplace_back("Cache-Control", contentPolicy.options().htmlCacheControl);
         if (!result.needsDecode) {
             if (!response.getHeaderValue("Content-Length"))
                 response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
@@ -1461,6 +1469,16 @@ private:
         return mounted;
     }
 
+    // The headers of the content policy (Referrer-Policy...) that a reply does not set itself; never on a WebSocket upgrade.
+    void addDeploymentHeaders(Response& response) const {
+        if (response.statusCode == Response::switchingProtocols)
+            return;
+        requestHandler.policy().forEachResponseHeader([&response](std::string_view name, std::string_view value) {
+            if (!response.getHeaderValue(name))
+                response.headers.emplace_back(name, value);
+        });
+    }
+
     // Sends a reply the server did not get from a route (a mount's refusal or redirection), then closes the connection.
     networking::Task sendReply(typename Net::Socket& socket, bool head, RouteReply reply) {
         Response response;
@@ -1481,6 +1499,7 @@ private:
         }
         if (head)
             response.content.clear();
+        addDeploymentHeaders(response);
         co_await Net::Send(socket, response.toBuffers<Net>());
         if (!head && reply.body)
             co_await streamBody(routeWorker, socket, std::move(reply.body), reply.contentLength, "Mount reply", true);
@@ -1740,6 +1759,7 @@ private:
         const bool streaming = !head && reply.body;  // the built-in 405 has no reply.body
         if (head)
             response.content.clear();                // an error page keeps its Content-Length; HEAD never has a body
+        addDeploymentHeaders(response);
         co_await Net::Send(socket, response.toBuffers<Net>());
         if (streaming)
             co_await streamBody(routeWorker, socket, std::move(reply.body), reply.contentLength, std::move(label), secret);
@@ -1887,6 +1907,7 @@ private:
         }
         if (head)
             response.content.clear();  // an error page keeps its Content-Length; HEAD never has a body
+        addDeploymentHeaders(response);
         co_await Net::Send(socket, response.toBuffers<Net>());
         if (streamed)
             co_await streamBody(
