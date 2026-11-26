@@ -351,12 +351,20 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
         frame = empty;
     }
 
-    /** Opens `id` in its detached container; resolves with whether it did. A failure leaves it in the floating window. */
+    /**
+     * Opens `id` in its detached container; resolves with whether it did. A failure leaves it in the floating window. A native
+     * window that opens after the panel was attached again (while C++ was opening it) is closed at once: the panel stays in
+     * the floating window that attach() showed.
+     */
     async function openDetached(id, container) {
         if (container === 'window') {
             const rect = shown(), started = action;
             try {
                 await bridge.cppFunction('webfront.inspector.openWindow')(id, self, rect.width, rect.height);
+                if (!preferences.detached.has(id)) {
+                    await bridge.cppFunction('webfront.inspector.closeWindow')(id, self).catch(() => {});
+                    return false;
+                }
                 return true;
             } catch (error) {
                 // Shown as the fallback only if nothing was done with the window while the native one was being opened.

@@ -184,6 +184,7 @@ describe('The inspectors', () => {
             const bridge = {cppFunction: name => async (...args) => {
                 calls.push([name, ...args]);
                 if (name === 'webfront.inspector.openWindow') return openWindow(...args);
+                if (name === 'webfront.inspector.closeWindow') return true;
                 if (name === 'webfront.inspector.embedded') return embedded;
                 return projectBridge.cppFunction(name)(...args);
             }};
@@ -455,18 +456,35 @@ describe('The inspectors', () => {
             expect(host.notice.hidden).toBeTrue();
         });
 
-        it('keeps a panel attached while its detach was pending', async () => {
+        it('keeps a panel attached while its detach was pending, and closes the native window that opened late', async () => {
             let opened;
             const pending = new Promise(resolve => { opened = resolve; });
-            const {host} = await testHost({containers: admitted(true), openWindow: () => pending});
+            const {host, calls} = await testHost({containers: admitted(true), openWindow: () => pending});
             await host.open('cpp.watches');
             const detaching = host.detach('cpp.watches');
-            host.attach('cpp.watches');  // the window asks to come back before C++ answered
-            opened();
-            await detaching;
+            host.attach('cpp.watches');  // the panel is attached again before C++ answered
+            expect(calls.some(([name]) => name === 'webfront.inspector.closeWindow')).toBeFalse();
+            opened();  // the native window opens after all
+            expect(await detaching).toBe('floating');
             expect(host.panel.hidden).toBeFalse();
             expect(host.shownPanel).toBe('cpp.watches');
             expect(host.preferences.detached.has('cpp.watches')).toBeFalse();
+            // Shown once: the stale native window is closed, the floating one stays.
+            expect(calls.filter(([name]) => name === 'webfront.inspector.closeWindow')).toEqual([['webfront.inspector.closeWindow', 'cpp.watches', 'host-a']]);
+        });
+
+        it('keeps the native window of a panel detached again while its first opening was pending', async () => {
+            const answers = [];
+            const {host, calls} = await testHost({containers: admitted(true), openWindow: () => new Promise(resolve => answers.push(resolve))});
+            await host.open('cpp.watches');
+            const first = host.detach('cpp.watches');
+            host.attach('cpp.watches');
+            const second = host.detach('cpp.watches');  // detached again: the window that opens is wanted
+            answers.forEach(resolve => resolve());
+            expect(await first).toBe('window');
+            expect(await second).toBe('window');
+            expect(calls.some(([name]) => name === 'webfront.inspector.closeWindow')).toBeFalse();
+            expect(host.panel.hidden).toBeTrue();
         });
 
         it('says in the terminal that a panel could not open, above the line being edited', () => {
