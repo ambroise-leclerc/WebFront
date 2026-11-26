@@ -355,7 +355,15 @@ public:
     /// refused (the name is taken) releases it, and it is listed no more.
     [[nodiscard]] std::shared_ptr<FunctionRecord>
     add(std::string_view name, std::string signature, bool takesCaller, bool deferred, const std::source_location& location, std::string_view scope = {}) {
-        auto record         = std::make_shared<FunctionRecord>();
+        // The record leaves the table when its last owner releases it, whether or not an inspector ever reads: an
+        // application that creates and destroys spaces, or registers a name twice, does not grow the table.
+        std::shared_ptr<FunctionRecord> record(new FunctionRecord, [weak = std::weak_ptr(table)](FunctionRecord* released) {
+            if (const auto owner = weak.lock()) {
+                std::scoped_lock lock{owner->mutex};
+                owner->entries.erase(released->id);
+            }
+            delete released;
+        });
         record->name        = std::string(name);
         record->label       = boundedText(name);
         record->signature   = std::move(signature);
@@ -364,10 +372,16 @@ public:
         record->takesCaller = takesCaller;
         record->deferred    = deferred;
         record->gate        = gate;
-        std::scoped_lock lock{mutex};
-        record->id = nextId++;
-        entries.emplace(record->id, record);
+        std::scoped_lock lock{table->mutex};
+        record->id = table->nextId++;
+        table->entries.emplace(record->id, record);
         return record;
+    }
+
+    /// The entries of the table: the functions registered now, and those being released at this very moment.
+    [[nodiscard]] std::size_t size() const {
+        std::scoped_lock lock{table->mutex};
+        return table->entries.size();
     }
 
     /// The functions that are still registered, in the order of their registration.
@@ -450,19 +464,17 @@ public:
     }
 
 private:
-    /// The records still owned by a handler whose identifier is greater than `after`; those released are forgotten.
+    /// The records still owned by a handler whose identifier is greater than `after`. One being released at this moment
+    /// is skipped: its release removes its entry.
     [[nodiscard]] std::vector<std::shared_ptr<FunctionRecord>> alive(std::uint64_t after) const {
         std::vector<std::shared_ptr<FunctionRecord>> records;
-        std::scoped_lock                             lock{mutex};
-        for (auto entry = entries.begin(); entry != entries.end();) {
-            if (auto record = entry->second.lock()) {
-                if (entry->first > after)
+        {
+            std::scoped_lock lock{table->mutex};
+            for (auto entry = table->entries.upper_bound(after); entry != table->entries.end(); ++entry)
+                if (auto record = entry->second.lock())
                     records.push_back(std::move(record));
-                ++entry;
-            } else
-                entry = entries.erase(entry);
         }
-        return records;
+        return records;  // released, if these were the last owners, outside the table's lock
     }
 
     [[nodiscard]] static FunctionInfo snapshot(const FunctionRecord& record) {
@@ -488,10 +500,14 @@ private:
                + detail::encodedText(info.location.size()) + detail::encodedText(info.scope.size()) + detail::encodedText(info.lastError.size());
     }
 
-    std::shared_ptr<TimingGate>                                    gate = std::make_shared<TimingGate>();
-    mutable std::mutex                                             mutex;
-    mutable std::map<std::uint64_t, std::weak_ptr<FunctionRecord>> entries;
-    std::uint64_t                                                  nextId = 1;
+    /// Shared with the records, which remove their own entry and may outlive the registry.
+    struct Table {
+        std::mutex                                             mutex;
+        std::map<std::uint64_t, std::weak_ptr<FunctionRecord>> entries;
+        std::uint64_t                                          nextId = 1;
+    };
+    std::shared_ptr<TimingGate> gate  = std::make_shared<TimingGate>();
+    std::shared_ptr<Table>      table = std::make_shared<Table>();
 };
 
 // --- JavaScript functions called by C++ ------------------------------------------------------------------------
@@ -588,6 +604,41 @@ private:
     std::map<std::string, std::shared_ptr<JsCallCounter>, std::less<>> byName;
     std::vector<std::shared_ptr<JsCallCounter>>                        byId;  // the identifier is the rank, from 1
     std::shared_ptr<JsCallCounter>                                     others;
+};
+
+/**
+ * @brief Where the bridge's call objects find the counters of an application: empty until the developer environment
+ * enables the inspectors, then the registry for good. Shared with the call objects, so that one built before the
+ * environment was mounted counts the calls it starts afterwards, and one that outlives the application reads nothing freed.
+ */
+class JsCallSource {
+public:
+    /// Creates the registry, once; the calls made from now on are counted.
+    std::shared_ptr<JsCallRegistry> enable() {
+        std::scoped_lock lock{mutex};
+        if (!owned) {
+            owned = std::make_shared<JsCallRegistry>();
+            active.store(owned.get(), std::memory_order_release);
+        }
+        return owned;
+    }
+
+    /// The counter of that name, null while nothing counts: one atomic load in that case.
+    [[nodiscard]] std::shared_ptr<JsCallCounter> counter(std::string_view name) const {
+        if (auto* registry = active.load(std::memory_order_acquire))
+            return registry->counter(name);
+        return nullptr;
+    }
+
+    [[nodiscard]] std::shared_ptr<JsCallRegistry> registry() const {
+        std::scoped_lock lock{mutex};
+        return owned;
+    }
+
+private:
+    mutable std::mutex              mutex;
+    std::shared_ptr<JsCallRegistry> owned;  // set once, never replaced: `active` stays valid as long as this source
+    std::atomic<JsCallRegistry*>    active{nullptr};
 };
 
 // --- Browsers --------------------------------------------------------------------------------------------------

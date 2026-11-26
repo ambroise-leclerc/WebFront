@@ -1292,11 +1292,13 @@ public:
     /// The counter of the calls C++ makes to the JavaScript function `functionName`, null while no inspector can read it
     /// (outside the developer environment, and in a distribution build). For the bridge's own call objects.
     [[nodiscard]] std::shared_ptr<inspect::JsCallCounter> jsCallCounter(std::string_view functionName) const {
-        if constexpr (inspect::introspection) {
-            if (auto* registry = jsCallsActive.load(std::memory_order_acquire))
-                return registry->counter(functionName);
-        }
-        return nullptr;
+        return jsCalls ? jsCalls->counter(functionName) : nullptr;
+    }
+
+    /// Where a call object that may start its calls later finds that counter then (JsFunctionSender); null in a
+    /// distribution build. It stays valid after the application is gone.
+    [[nodiscard]] const std::shared_ptr<inspect::JsCallSource>& jsCallSource() const noexcept {
+        return jsCalls;
     }
 
     /**
@@ -1748,10 +1750,8 @@ private:
         std::scoped_lock lock{watchRegistryMutex};
         if (!watchRegistry)
             watchRegistry = std::make_shared<inspect::WatchRegistry>();
-        if (!jsCalls) {
-            jsCalls = std::make_shared<inspect::JsCallRegistry>();
-            jsCallsActive.store(jsCalls.get(), std::memory_order_release);
-        }
+        if (jsCalls)
+            jsCalls->enable();
         return watchRegistry;
     }
 
@@ -1760,8 +1760,7 @@ private:
         return functionRegistry;
     }
     [[nodiscard]] std::shared_ptr<inspect::JsCallRegistry> inspectedJsCalls() const {
-        std::scoped_lock lock{watchRegistryMutex};
-        return jsCalls;
+        return jsCalls ? jsCalls->registry() : nullptr;
     }
 
     /// The browsers connected now, in the order of their identifiers, as the inspectors show them; `caller` is the one that asks.
@@ -2134,14 +2133,14 @@ private:
     std::shared_ptr<inspect::WatchRegistry> watchRegistry;  // set once by enableInspectors(), read by watch() from any thread
     // What cppFunction registered (ADR-027, section 7); shared with the records' owners, which may outlive a registration.
     std::shared_ptr<inspect::FunctionRegistry> functionRegistry = std::make_shared<inspect::FunctionRegistry>();
-    std::shared_ptr<inspect::JsCallRegistry>   jsCalls;                 // created by enableInspectors(), then never replaced
-    std::atomic<inspect::JsCallRegistry*>      jsCallsActive{nullptr};  // jsCalls, read on each call to JavaScript without a lock
-    std::atomic<bool>                          launched{false};         // start() was called
-    std::atomic<std::thread::id>               showThread{};            // the thread inside this application's Frontend::open(), if any
-    std::atomic<std::uint64_t>                 showEpoch{0};            // odd while show() runs its frontend, changes at each entry and exit
-    std::atomic<bool>                          showRunning{false};      // a show() of this application is in progress
-    std::atomic<bool>                          shown{false};            // show() was called, whether or not its server still runs
-    mutable std::mutex                         linksMutex;              // guards webLinks, read from any thread
+    // The counters of the calls to JavaScript, empty until enableInspectors(); null in a distribution build. Never replaced.
+    const std::shared_ptr<inspect::JsCallSource> jsCalls = inspect::introspection ? std::make_shared<inspect::JsCallSource>() : nullptr;
+    std::atomic<bool>                            launched{false};     // start() was called
+    std::atomic<std::thread::id>                 showThread{};        // the thread inside this application's Frontend::open(), if any
+    std::atomic<std::uint64_t>                   showEpoch{0};        // odd while show() runs its frontend, changes at each entry and exit
+    std::atomic<bool>                            showRunning{false};  // a show() of this application is in progress
+    std::atomic<bool>                            shown{false};        // show() was called, whether or not its server still runs
+    mutable std::mutex                           linksMutex;          // guards webLinks, read from any thread
     struct Connection {
         std::shared_ptr<WebLink<Net, Policy>> link;
         WebLinkGeneration                     generation;

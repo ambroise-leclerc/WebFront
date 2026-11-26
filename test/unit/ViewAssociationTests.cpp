@@ -698,6 +698,14 @@ std::string encodedValue(const Value& value) {
     return text.substr(message.header().size());
 }
 
+/// A receiver that drops what a typed call completes with: the test reads the inspectors' counters instead.
+struct IgnoringReceiver {
+    using receiver_concept = networking::ex::receiver_tag;
+    void set_value(int) noexcept { }
+    void set_error(std::exception_ptr) noexcept { }
+    void set_stopped() noexcept { }
+};
+
 /// What the socket wrote in answer to `ask`.
 template <typename Ask>
 std::string answerOf(Ask ask) {
@@ -796,6 +804,33 @@ const Scenario inspectorRegistryAccess{
                 require(counter != nullptr);
                 requireEqual(counter->calls.load(), std::uint64_t{1});
                 requireEqual(counter->failures.load(), std::uint64_t{1});
+            });
+        });
+        given("a sender built before the developer environment is mounted, and started after", [&] {
+            freshNetwork();
+            webfront::test::TemporaryDirectory project;
+            InspectorApp                       app(project.path(), inspectorConfig(false));
+            connect(app, testing::LaunchSecret<InspectorApp>::of(app), inspectorUpgradeRequest);
+            std::optional<decltype(std::declval<InspectorApp::UI>().jsFunctionSender<int>(""))> early;
+            app.forEachUI([&](InspectorApp::UI ui) {
+                early.emplace(ui.template jsFunctionSender<int>("measureLater"));
+            });
+            require(early.has_value());
+            require(app.jsCallCounter("measureLater") == nullptr);
+            app.bootstrap("developer", {.environment = "https://example.test/env.tgz", .integrity = "sha512-abc"});
+            auto operation = networking::ex::connect((*early)(), IgnoringReceiver{});
+            networking::ex::start(operation);
+            then("the call it starts is counted: the counter is looked for when the call starts", [&] {
+                const auto counter = app.jsCallCounter("measureLater");
+                require(counter != nullptr);
+                requireEqual(counter->calls.load(), std::uint64_t{1});
+                requireEqual(counter->failures.load(), std::uint64_t{0});
+            });
+            andWhen("the browser disconnects before it answers", [&] {
+                ViewSocket::fail(std::make_error_code(std::errc::connection_reset));
+                then("the failure of the call is counted too", [&] {
+                    requireEqual(app.jsCallCounter("measureLater")->failures.load(), std::uint64_t{1});
+                });
             });
         });
         given("a page that is not admitted, such as an external browser's", [&] {

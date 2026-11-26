@@ -432,6 +432,24 @@ const Scenario introFunctionPages{"The functions are read page after page, each 
                                           requireEqual(rows.size(), std::size_t{4});
                                           requireEqual(std::get<0>(rows.at(1)), 3.0);
                                       });
+                                      then("released functions leave the table at once, without any read: it does not grow with what comes and goes", [&] {
+                                          requireEqual(registry.size(), std::size_t{5});
+                                          for (int i = 0; i < 1000; ++i)
+                                              static_cast<void>(
+                                                  registry.add("transient", "() => Promise<void>", false, false, std::source_location::current()));
+                                          requireEqual(registry.size(), std::size_t{5});
+                                          owned.clear();
+                                          requireEqual(registry.size(), std::size_t{0});
+                                      });
+                                      then("a record that outlives its registry is released without it", [&] {
+                                          std::shared_ptr<inspect::FunctionRecord> kept;
+                                          {
+                                              inspect::FunctionRegistry shortLived;
+                                              kept = shortLived.add("kept", "() => Promise<void>", false, false, std::source_location::current());
+                                          }
+                                          requireEqual(kept->name, std::string{"kept"});
+                                          kept.reset();
+                                      });
                                       then("a cursor or a count that is not a whole number is refused", [&] {
                                           checkThrows<std::invalid_argument>([&] {
                                               static_cast<void>(registry.page(-1, 200, inspect::minPageBytes));
@@ -503,6 +521,17 @@ const Scenario introJsCalls{"The JavaScript functions that C++ calls are counted
                                         requireEqual(registry.size(), inspect::maxJsFunctionNames + 1);
                                         requireEqual(registry.counter("yet-another")->calls.load(), std::uint64_t{2});
                                         requireEqual(registry.counter("draw")->calls.load(), std::uint64_t{2});
+                                    });
+                                });
+                                given("the source that call objects keep", [&] {
+                                    inspect::JsCallSource source;
+                                    then("it counts nothing until the inspectors are enabled, then gives the counters of one registry", [&] {
+                                        require(source.counter("draw") == nullptr);
+                                        require(source.registry() == nullptr);
+                                        const auto registry = source.enable();
+                                        require(source.enable() == registry);
+                                        source.counter("draw")->called();
+                                        requireEqual(registry->counter("draw")->calls.load(), std::uint64_t{1});
                                     });
                                 });
                                 given("an application outside the developer environment", [&] {
