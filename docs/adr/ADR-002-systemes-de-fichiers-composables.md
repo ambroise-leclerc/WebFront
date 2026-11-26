@@ -17,11 +17,12 @@
 | 2.5 | 2026-11-03 | Acceptée | Ambroise Leclerc | `fs::File::knownSize()` : taille connue avant lecture (données embarquées, fichier natif sur flux positionnable), pour annoncer `Content-Length` et envoyer le fichier en flux (#454). Les routes dynamiques passent après le `WebFront.js` protégé et ne peuvent pas le masquer. | Branche `454-dynamic-routes` |
 | 2.6 | 2026-11-04 | Acceptée | Ambroise Leclerc | `fs::File::seek`, `entityTag()` et `setEntityTag()` : positionnement dans un fichier de taille connue et validateur fort fourni par le fournisseur (jamais déduit d'un chemin, d'une taille ou d'une date), pour les requêtes `Range` et `If-Range` (#455). Le serveur traite les plages ; `fs::Provider` ne voit toujours pas la requête. | Branche `455-range-requests` |
 | 3.0 | 2026-11-05 | Acceptée | Ambroise Leclerc | Stockage modifiable sous des racines déclarées (#460, ADR-020) : concept `fs::Storage` (listage paginé stable, métadonnées, lecture, écriture par fichier temporaire validée par renommage atomique, création de dossier, suppression, renommage sans remplacement), erreurs typées `fs::StorageError` (`storage.*`), `fs::NativeStorage` confiné pendant la résolution par descripteurs (POSIX) ou handles (Windows), contrôle des propriétaires des répertoires et des ancêtres, `rootMoved` et `confinementViolated`, `fs::MemoryStorage` simulé ; `fs::ByteSource`, point d'extension de `fs::File` pour les handles natifs ; `SafePath` refuse les noms réservés de Windows. Les fournisseurs restent en lecture seule. | [509de1a](https://github.com/ambroise-leclerc/WebFront/commit/509de1a), branche `460-writable-storage` (PR #500) |
+| 3.1 | 2026-11-26 | Acceptée | Ambroise Leclerc | Interface d'une application embarquée depuis CMake (#675) : `webfront_embed_directory()` génère un provider header-only pour chaque fichier d'un répertoire, régénéré par le build ; `fs::DocumentRootFirstFSWith<Extra...>` place la racine de développement devant les providers de l'application, `DefaultFSWith` restant l'ordre des composants. | Branche `675-embed-directory` |
 
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2023-03-16** (version 1.0).
-Dernière révision : **2026-11-05** (version 3.0).
+Dernière révision : **2026-11-26** (version 3.1).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -75,7 +76,11 @@ pas implémentés ; `ByteSource` est leur point d’extension.
 Le filesystem par défaut consulte, dans cet ordre : le `WebFront.js` embarqué protégé,
 la racine de développement optionnelle, puis la page de repli embarquée d’`IndexFS`.
 `fs::DefaultFSWith<Extra...>` place les providers supplémentaires entre le bridge protégé
-et la racine locale. Sans `documentRoot`, le provider local ne touche pas au disque.
+et la racine locale : une racine de développement ne masque pas les fichiers d'un composant.
+`fs::DocumentRootFirstFSWith<Extra...>` les place après la racine locale et avant `IndexFS` :
+c'est l'ordre de l'interface propre d'une application (`webfront_embed_directory()`, `wf embed`),
+qu'une option `--ui <dir>` remplace par les fichiers du disque pendant le développement.
+Dans les deux cas, le bridge reste protégé. Sans `documentRoot`, le provider local ne touche pas au disque.
 
 Les espaces réservés `webfront/components/<name>/` et `webfront/tools/<pkg>/` séparaient les
 ressources réutilisables des pages applicatives ; `PackageFS` et les composants qui les servaient

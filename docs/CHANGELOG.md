@@ -11,6 +11,7 @@ these entries stays in the GitHub releases and the Git history.
 ## Unreleased
 
 ### Added
+- Embed a plain interface directory (HTML, JavaScript, CSS, vendored files) from CMake with `webfront_embed_directory(app ui CLASS AppUI)`, without the developer environment: the build regenerates the provider when a file changes, and `fs::DocumentRootFirstFSWith<AppUI>` lets a development root serve in front of it (#675, `docs/EMBEDDED_ASSETS.md`).
 - Set from the configuration `Referrer-Policy` (`contentPolicy.referrerPolicy`: `"no-referrer"` forbids explicitly that a capability in your URLs leaves in `Referer`), `X-Content-Type-Options: nosniff` (`noSniff`) and the `Cache-Control` of HTML pages (`htmlCacheControl`), on files, route and generated replies unless a reply sets its own (#674, `docs/CONTENT_POLICY.md`).
 - Keep a capability carried by your URLs out of WebFront's logs with `app.addSecretPrefix("/s/")`: the segment after the prefix is logged as `*` (`/s/*/index.html`) for files, routes, WebSocket upgrades and their failures, whose error messages are not logged (#673, `docs/HTTP_ASSETS.md`).
 - Read the path from which a browser opened its bridge, by default its page's directory (within its space under `app.spaces`), with `ui.path()`; a WebSocket upgrade is accepted on any path a file would be served from, and refused as a file request is otherwise (#672, `docs/SPACES.md`).

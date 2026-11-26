@@ -71,4 +71,10 @@ using DefaultFS = Multi<detail::ProtectedWebFrontJsFS, detail::OptionalDevRootFS
 template <Provider... Extra>
 using DefaultFSWith = Multi<detail::ProtectedWebFrontJsFS, Extra..., detail::OptionalDevRootFS, IndexFS>;
 
+/// DefaultFS with an application's own embedded interface (webfront_embed_directory, wf embed) behind the document root:
+/// when the application configures a root during development (a --ui <dir> option), its files are served in front of
+/// the embedded ones; without a root it is DefaultFSWith<Extra...> and touches no disk. The bridge stays protected.
+template <Provider... Extra>
+using DocumentRootFirstFSWith = Multi<detail::ProtectedWebFrontJsFS, detail::OptionalDevRootFS, Extra..., IndexFS>;
+
 }  // namespace webfront::fs

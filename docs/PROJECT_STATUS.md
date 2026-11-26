@@ -42,7 +42,9 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   `webfront::Commands`. From environment 0.9.1, a project that has a preview opens
   on its interface over the whole window, with the terminal in a floating window behind a tab on the window's edge. See the
   [developer reference](DEVELOPER_ENVIRONMENT.md).
-- **Distribution.** `wf embed` generates the application's compressed C++ provider.
+- **Distribution.** `wf embed` generates the application's compressed C++ provider. An interface kept as a plain
+  directory, with no build step, is embedded from CMake alone by `webfront_embed_directory()` (identity encoded; see
+  [embedded assets](EMBEDDED_ASSETS.md#embedding-an-interface-directory-from-cmake)).
   `NativeAppWithAssets<Provider>` runs without project files, developer callbacks or tool cache.
   Native-engine deployment remains application work. The [README walkthrough](../README.md)
   covers the console, developer and embedded Game of Life stages; Hello World and the host loop
