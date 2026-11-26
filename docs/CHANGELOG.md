@@ -11,6 +11,7 @@ these entries stays in the GitHub releases and the Git history.
 ## Unreleased
 
 ### Added
+- Set from the configuration `Referrer-Policy` (`contentPolicy.referrerPolicy`: `"no-referrer"` forbids explicitly that a capability in your URLs leaves in `Referer`), `X-Content-Type-Options: nosniff` (`noSniff`) and the `Cache-Control` of HTML pages (`htmlCacheControl`), on files, route and generated replies unless a reply sets its own (#674, `docs/CONTENT_POLICY.md`).
 - Keep a capability carried by your URLs out of WebFront's logs with `app.addSecretPrefix("/s/")`: the segment after the prefix is logged as `*` (`/s/*/index.html`) for files, routes, WebSocket upgrades and their failures, whose error messages are not logged (#673, `docs/HTTP_ASSETS.md`).
 - Read the path from which a browser opened its bridge, by default its page's directory (within its space under `app.spaces`), with `ui.path()`; a WebSocket upgrade is accepted on any path a file would be served from, and refused as a file request is otherwise (#672, `docs/SPACES.md`).
 - Serve several independent users from one process with application spaces: `app.spaces("/s/", resolver)` gives each `/s/<id>/` its own `cppFunction`s, page handlers, broadcasts and relative routes (`WebFront::Space`), serves the files under the prefix, lets the resolver refuse a space with its own reply, and tells the application when a space's last page closes (#671, `docs/SPACES.md`).
@@ -26,6 +27,7 @@ these entries stays in the GitHub releases and the Git history.
 - A `+` in the path of a file request is a literal `+`, as for the routes, the spaces and `ui.path()`: `/a+b.html` serves `a+b.html`, no longer `a b.html`, which `/a%20b.html` names (#672).
 
 ### Fixed
+- An invalid content policy (an origin of `bridgeAllowedOrigins` or `navigationAllowedOrigins`, a `referrerPolicy`, a `htmlCacheControl`) throws `std::invalid_argument` before the server binds its port, as documented, instead of an "address already in use" error when that port is taken (#674).
 - `DeveloperBrowserIntegration-workspace` gives the relaunched bootstrap page the same 60 s to start as the first one, instead of 10 s, which a loaded runner exceeded while the page verified its cached environment (#660).
 - Applications started from the terminal of a Snap-packaged editor (VSCodium) now run on WebKitGTK without cleaning the environment by hand; `WEBFRONT_KEEP_SNAP_ENVIRONMENT=1` opts out (#662, `docs/WEBKITGTK.md`).
 

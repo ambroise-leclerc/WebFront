@@ -3,7 +3,7 @@
 // Created: 2026-11-03
 //
 // WebFront — tests/unit
-// Role: Dynamic routes of the HTTP server: registration, priority, streamed replies, failures, shutdown and secret prefixes.
+// Role: Dynamic routes of the HTTP server: registration, priority, streamed replies, failures, shutdown, secret prefixes and deployment headers.
 // Thread: bridge-io | Alloc: unrestricted
 // LLM: connections are accepted at once with mock requests
 
@@ -1409,3 +1409,143 @@ const Scenario secretPrefixLogs{
             });
         });
     }};
+
+namespace {
+
+ContentPolicy deploymentPolicy() {
+    ContentPolicy policy;
+    policy.referrerPolicy   = "no-referrer";
+    policy.noSniff          = true;
+    policy.htmlCacheControl = "no-cache";
+    return policy;
+}
+
+}  // namespace
+
+const Scenario deploymentHeaders{"The content policy's deployment headers go with the files, the route replies and the generated replies (#674)", [] {
+                                     given("a policy with a Referrer-Policy, nosniff and the Cache-Control of the HTML pages", [&] {
+                                         ProvidedFile::content = "<html></html>";
+                                         ProvidedFile::native.clear();
+                                         when("an HTML file is served", [&] {
+                                             Fixture                      fixture;
+                                             Server<RouteNet, ProvidedFS> server("127.0.0.1", "0", ".", deploymentPolicy());
+                                             const auto                   response = fixture.answer(get("/index.html"));
+                                             then("it carries the three headers", [&] {
+                                                 require(response.starts_with("HTTP/1.1 200 OK\r\n"));
+                                                 require(contains(response, "\r\nReferrer-Policy: no-referrer\r\n"));
+                                                 require(contains(response, "\r\nX-Content-Type-Options: nosniff\r\n"));
+                                                 require(contains(response, "\r\nCache-Control: no-cache\r\n"));
+                                             });
+                                         });
+                                         when("another file is served", [&] {
+                                             Fixture                      fixture;
+                                             Server<RouteNet, ProvidedFS> server("127.0.0.1", "0", ".", deploymentPolicy());
+                                             const auto                   response = fixture.answer(get("/file.bin"));
+                                             then("it carries the Referrer-Policy but not the Cache-Control of the pages", [&] {
+                                                 require(contains(response, "\r\nReferrer-Policy: no-referrer\r\n"));
+                                                 require(!contains(response, "Cache-Control"));
+                                             });
+                                         });
+                                         when("a route answers without a Referrer-Policy", [&] {
+                                             Fixture    fixture;
+                                             Router     server("127.0.0.1", "0", ".", deploymentPolicy());
+                                             auto       route    = server.addRoute("/api/", [](const RouteRequest&) {
+                                                 return text("from the route");
+                                             });
+                                             const auto response = fixture.answer(get("/api/x"));
+                                             then("the reply carries the policy's, and keeps its own Cache-Control", [&] {
+                                                 require(contains(response, "\r\nReferrer-Policy: no-referrer\r\n"));
+                                                 require(contains(response, "\r\nX-Content-Type-Options: nosniff\r\n"));
+                                                 require(contains(response, "\r\nCache-Control: no-store\r\n"));
+                                                 require(!contains(response, "no-cache"));
+                                                 require(response.ends_with("from the route"));
+                                             });
+                                         });
+                                         when("a route sets its own Referrer-Policy", [&] {
+                                             Fixture    fixture;
+                                             Router     server("127.0.0.1", "0", ".", deploymentPolicy());
+                                             auto       route    = server.addRoute("/api/", [](const RouteRequest&) {
+                                                 auto reply = text("x");
+                                                 reply.headers.emplace_back("referrer-policy", "same-origin");
+                                                 return reply;
+                                             });
+                                             const auto response = fixture.answer(get("/api/x"));
+                                             then("it keeps it, alone", [&] {
+                                                 require(contains(response, "\r\nreferrer-policy: same-origin\r\n"));
+                                                 require(!contains(response, "no-referrer"));
+                                             });
+                                         });
+                                         when("a file is missing", [&] {
+                                             Fixture    fixture;
+                                             Router     server("127.0.0.1", "0", ".", deploymentPolicy());
+                                             const auto response = fixture.answer(get("/missing.html"));
+                                             then("the generated 404 carries the headers of every reply", [&] {
+                                                 require(response.starts_with("HTTP/1.1 404 Not Found\r\n"));
+                                                 require(contains(response, "\r\nReferrer-Policy: no-referrer\r\n"));
+                                                 require(contains(response, "\r\nX-Content-Type-Options: nosniff\r\n"));
+                                                 require(!contains(response, "Cache-Control"));
+                                             });
+                                         });
+                                         when("a route refuses a method", [&] {
+                                             Fixture    fixture;
+                                             Router     server("127.0.0.1", "0", ".", deploymentPolicy());
+                                             auto       route    = server.addRoute("/api/", [](const RouteRequest&) {
+                                                 return text("x");
+                                             });
+                                             const auto response = fixture.answer(get("/api/x", "POST"));
+                                             then("the generated 405 carries them", [&] {
+                                                 require(response.starts_with("HTTP/1.1 405 Method Not Allowed\r\n"));
+                                                 require(contains(response, "\r\nReferrer-Policy: no-referrer\r\n"));
+                                             });
+                                         });
+                                         when("a mount's resolver refuses a segment", [&] {
+                                             Fixture fixture;
+                                             Router  server("127.0.0.1", "0", ".", deploymentPolicy());
+                                             server.mount("/s/", [](std::string_view) {
+                                                 return MountAnswer{.routes = {}, .refusal = textReply(Response::notFound, "unknown"), .target = {}};
+                                             });
+                                             const auto response = fixture.answer(get("/s/abc/"));
+                                             then("its reply carries them", [&] {
+                                                 require(response.starts_with("HTTP/1.1 404 Not Found\r\n"));
+                                                 require(contains(response, "\r\nReferrer-Policy: no-referrer\r\n"));
+                                                 require(contains(response, "\r\nX-Content-Type-Options: nosniff\r\n"));
+                                             });
+                                         });
+                                     });
+                                     given("the default policy", [&] {
+                                         ProvidedFile::content = "<html></html>";
+                                         ProvidedFile::native.clear();
+                                         when("an HTML file is served", [&] {
+                                             Fixture                      fixture;
+                                             Server<RouteNet, ProvidedFS> server("127.0.0.1", "0");
+                                             const auto                   response = fixture.answer(get("/index.html"));
+                                             then("none of the headers is sent", [&] {
+                                                 require(response.starts_with("HTTP/1.1 200 OK\r\n"));
+                                                 require(!contains(response, "Referrer-Policy"));
+                                                 require(!contains(response, "X-Content-Type-Options"));
+                                                 require(!contains(response, "Cache-Control"));
+                                             });
+                                         });
+                                         when("a route answers", [&] {
+                                             Fixture    fixture;
+                                             Router     server("127.0.0.1", "0");
+                                             auto       route    = server.addRoute("/api/", [](const RouteRequest&) {
+                                                 return text("x");
+                                             });
+                                             const auto response = fixture.answer(get("/api/x"));
+                                             then("it has no Referrer-Policy", [&] {
+                                                 require(!contains(response, "Referrer-Policy"));
+                                                 require(!contains(response, "X-Content-Type-Options"));
+                                             });
+                                         });
+                                         when("a file is missing", [&] {
+                                             Fixture    fixture;
+                                             Router     server("127.0.0.1", "0");
+                                             const auto response = fixture.answer(get("/missing.html"));
+                                             then("the 404 has no Referrer-Policy", [&] {
+                                                 require(response.starts_with("HTTP/1.1 404 Not Found\r\n"));
+                                                 require(!contains(response, "Referrer-Policy"));
+                                             });
+                                         });
+                                     });
+                                 }};

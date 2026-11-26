@@ -102,7 +102,8 @@ never matches (and a browser applies no heuristic freshness to development files
 
 A dynamic route that serves a file, such as the services built on #454, calls `http::fileReply(request, file, contentType)`:
 it applies the same rules to the route's `RouteRequest::request` and returns the `RouteReply` (200, 206 or 416) that the
-handler completes with its own headers (`Cache-Control`, `Content-Disposition`...). A handler with its own storage
+handler completes with its own headers (`Cache-Control`, `Content-Disposition`...); the `Referrer-Policy` and
+`X-Content-Type-Options` of the [content policy](CONTENT_POLICY.md#deployment-headers) are added to a reply that does not set them. A handler with its own storage
 can use `http::range::select(request, size, entityTag)` directly. A file with a stored coding is sent as stored, with `Content-Encoding` and `Vary: Accept-Encoding`, in full and with `Accept-Ranges: none`; a client that does not accept the coding gets a 406, because `fileReply` does not decode. The read-only reply is repeatable: successive range
 requests on one URL each open the file again.
 

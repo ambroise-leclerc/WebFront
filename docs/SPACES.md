@@ -126,6 +126,9 @@ callback), or at a time when none of its callbacks can run; destroy the spaces b
   its routes) reaches it without calling the resolver again.
   WebFront's logs show a space's segment masked (`/s/*/index.html`), and never the error message of a resolver, of an
   invalid refusal, or of a route handler, a reply body or a file provider serving a space, which may quote it; the application's own logs are its business. `app.addSecretPrefix(prefix)` masks a segment so outside the
-  spaces, and within a space as it reads its paths (`docs/HTTP_ASSETS.md`).
+  spaces, and within a space as it reads its paths (`docs/HTTP_ASSETS.md`). The browser's default referrer policy sends only
+  the origin to another site, but a less strict effective policy (an older engine, a page that loosens it) sends the
+  segment in `Referer`; `contentPolicy.referrerPolicy = "no-referrer"` forbids it explicitly
+  (`docs/CONTENT_POLICY.md#deployment-headers`).
 - `onLastUIClosed` counts connected pages: a space that no page ever reached is not reported, and the application ends
   it with its own timeout.

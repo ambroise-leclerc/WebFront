@@ -3,13 +3,14 @@
 // Created: 2026-10-18
 //
 // WebFront — core
-// Role: Shared per-application content rules (origins, popups, navigation) applied by every frontend.
+// Role: Shared per-application content rules (origins, popups, navigation, deployment headers) applied by every frontend and the HTTP server.
 // Thread: worker-safe | Alloc: heap-init
 // LLM: public API; see docs/CONTENT_POLICY.md before changing defaults
 
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <optional>
 #include <stdexcept>
@@ -32,6 +33,12 @@ struct ContentPolicy {
     PopupPolicy              popups{PopupPolicy::block};
     bool                     devToolsEnabled{true};
     bool                     contextMenusEnabled{true};
+    /// `Referrer-Policy` of every reply the HTTP server writes, unless the reply sets its own; empty: no header.
+    std::string referrerPolicy{};
+    /// `X-Content-Type-Options: nosniff` on every reply the HTTP server writes, unless the reply sets its own.
+    bool noSniff{false};
+    /// `Cache-Control` of the HTML files the HTTP server serves (not the routes, which set their own); empty: no header.
+    std::string htmlCacheControl{};
 };
 
 namespace detail {
@@ -162,6 +169,18 @@ public:
         : policy(std::move(options)), applicationOrigin(requireOrigin(applicationUrl, false)) {
         normalize(policy.bridgeAllowedOrigins);
         normalize(policy.navigationAllowedOrigins);
+        requireReferrerPolicy(policy.referrerPolicy);
+        requireFieldValue("htmlCacheControl", policy.htmlCacheControl);
+    }
+
+    /// Throws std::invalid_argument for what the constructor would refuse in `options`, without an application URL: the server
+    /// calls it before it binds its port, so a bad configuration is never reported as a port in use.
+    static void validate(const ContentPolicy& options) {
+        for (const auto* origins : {&options.bridgeAllowedOrigins, &options.navigationAllowedOrigins})
+            for (const auto& origin : *origins)
+                (void)requireOrigin(origin);
+        requireReferrerPolicy(options.referrerPolicy);
+        requireFieldValue("htmlCacheControl", options.htmlCacheControl);
     }
 
     bool allowsBridge(std::optional<std::string_view> origin) const {
@@ -197,6 +216,15 @@ public:
         return policy;
     }
 
+    /// Calls `visit(name, value)` for each header every HTTP reply carries unless it sets that header itself.
+    template <typename Visitor>
+    void forEachResponseHeader(Visitor&& visit) const {
+        if (!policy.referrerPolicy.empty())
+            visit(std::string_view{"Referrer-Policy"}, std::string_view{policy.referrerPolicy});
+        if (policy.noSniff)
+            visit(std::string_view{"X-Content-Type-Options"}, std::string_view{"nosniff"});
+    }
+
 private:
     ContentPolicy policy;
     std::string   applicationOrigin;
@@ -205,6 +233,40 @@ private:
         if (auto origin = contentOrigin(value, originOnly))
             return *origin;
         throw std::invalid_argument("WebFront: content policy requires an HTTP(S) origin: " + std::string(value));
+    }
+    // The tokens of the Referrer Policy specification; a comma-separated list is a fallback chain for older browsers.
+    static void requireReferrerPolicy(std::string_view value) {
+        static constexpr std::array<std::string_view, 8> tokens{"no-referrer",
+                                                                "no-referrer-when-downgrade",
+                                                                "origin",
+                                                                "origin-when-cross-origin",
+                                                                "same-origin",
+                                                                "strict-origin",
+                                                                "strict-origin-when-cross-origin",
+                                                                "unsafe-url"};
+        if (value.empty())
+            return;
+        for (std::size_t start = 0;;) {
+            const auto comma = value.find(',', start);
+            auto       token = value.substr(start, comma == std::string_view::npos ? std::string_view::npos : comma - start);
+            while (!token.empty() && (token.front() == ' ' || token.front() == '\t'))
+                token.remove_prefix(1);
+            while (!token.empty() && (token.back() == ' ' || token.back() == '\t'))
+                token.remove_suffix(1);
+            if (std::ranges::find(tokens, token) == tokens.end())
+                throw std::invalid_argument("WebFront: contentPolicy.referrerPolicy is not a Referrer-Policy value: " + std::string(value));
+            if (comma == std::string_view::npos)
+                return;
+            start = comma + 1;
+        }
+    }
+    // A header value that cannot split a response: no control character but the tab (RFC 9110 §5.5).
+    static void requireFieldValue(std::string_view member, std::string_view value) {
+        if (std::ranges::any_of(value, [](char c) {
+                const auto byte = static_cast<unsigned char>(c);
+                return (byte < 0x20 && c != '\t') || byte == 0x7f;
+            }))
+            throw std::invalid_argument("WebFront: contentPolicy." + std::string(member) + " holds a control character");
     }
     static void normalize(std::vector<std::string>& origins) {
         for (auto& origin : origins)

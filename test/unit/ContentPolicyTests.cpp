@@ -3,7 +3,7 @@
 // Created: 2026-10-18
 //
 // WebFront — tests/unit
-// Role: The content policy: origins, popups and warnings.
+// Role: The content policy: origins, popups, deployment headers and warnings.
 // Thread: worker-safe | Alloc: heap-init
 // LLM: pins the defaults of docs/CONTENT_POLICY.md
 
@@ -167,6 +167,54 @@ const Scenario contentPolicyControls{"Content policy controls popup delegation",
                                              });
                                          });
                                      }};
+
+const Scenario contentPolicyDeployment{
+    "Content policy deployment headers are validated before the listener is bound (#674)",
+    [] {
+        const auto headersOf = [](const ContentPolicy& options) {
+            std::vector<std::pair<std::string, std::string>> headers;
+            detail::BoundContentPolicy{"http://127.0.0.1:9002", options}.forEachResponseHeader([&](std::string_view name, std::string_view value) {
+                headers.emplace_back(name, value);
+            });
+            return headers;
+        };
+        given("the default policy", [&] {
+            then("no header is added", [&] {
+                require(headersOf({}).empty());
+            });
+        });
+        given("a Referrer-Policy and nosniff", [&] {
+            then("both headers are added", [&] {
+                require(headersOf({
+                            .referrerPolicy = "no-referrer",
+                            .noSniff        = true
+                })
+                        == std::vector<std::pair<std::string, std::string>>{{"Referrer-Policy", "no-referrer"}, {"X-Content-Type-Options", "nosniff"}});
+            });
+        });
+        given("a fallback list of Referrer-Policy tokens", [&] {
+            then("it is accepted as written", [&] {
+                requireEqual(headersOf({.referrerPolicy = "no-referrer, strict-origin-when-cross-origin"}).front().second,
+                             std::string("no-referrer, strict-origin-when-cross-origin"));
+            });
+        });
+        given("values that are not Referrer-Policy tokens", [&] {
+            for (const auto* value : {"none", "No-Referrer", "no-referrer,", "no-referrer\r\nX-Evil: 1", "no-referrer;"}) {
+                then("'", value, "' is refused", [&] {
+                    requireThrows<std::invalid_argument>([&] {
+                        (void)detail::BoundContentPolicy{"http://127.0.0.1:9002", {.referrerPolicy = value}};
+                    });
+                });
+            }
+        });
+        given("a Cache-Control that would split a response", [&] {
+            then("it is refused", [&] {
+                requireThrows<std::invalid_argument>([&] {
+                    (void)detail::BoundContentPolicy{"http://127.0.0.1:9002", {.htmlCacheControl = "no-cache\r\nX-Evil: 1"}};
+                });
+            });
+        });
+    }};
 
 const Scenario webSocketUpgrades{"WebSocket upgrades authorize Origin before returning 101", [] {
                                      using namespace webfront::http;
