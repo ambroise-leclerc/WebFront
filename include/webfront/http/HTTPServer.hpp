@@ -42,6 +42,7 @@
 #include <optional>
 #include <ranges>
 #include <regex>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -597,7 +598,7 @@ public:
     /// The path (its query cut) as the logs may show it when a secret prefix covers it, otherwise nothing. The path is
     /// judged as the server and the file providers would read it: percent-decoded (up to three times), with backslashes
     /// as separators, empty or "." segments dropped, in any letter case; the segment that follows each covering prefix is
-    /// replaced by '*'. A path still encoded after three layers is masked whole ("/*").
+    /// replaced by '*', in every layer of encoding at once. A path still encoded after three layers is masked whole ("/*").
     [[nodiscard]] std::optional<std::string> masked(std::string_view target) const {
         std::vector<std::vector<std::string>> secret;
         {
@@ -611,37 +612,61 @@ public:
                 return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
             });
         };
-        std::string text(target.substr(0, target.find('?')));
-        for (int pass = 0; pass < 3; ++pass) {
+        const auto split = [](std::string_view text) {
             std::vector<std::string_view> segments;
             for (std::size_t from = 0; from <= text.size();) {
                 const auto end     = std::min(text.find_first_of("/\\", from), text.size());
-                const auto segment = std::string_view(text).substr(from, end - from);
+                const auto segment = text.substr(from, end - from);
                 if (!segment.empty() && segment != ".")
                     segments.push_back(segment);
                 from = end + 1;
             }
-            std::vector<bool> hidden(segments.size(), false);
-            bool              covered = false;
-            for (const auto& prefix : secret)
-                if (segments.size() > prefix.size() && std::ranges::equal(prefix, std::span(segments).first(prefix.size()), sameText)) {
-                    hidden[prefix.size()] = true;
-                    covered               = true;
-                }
-            if (covered) {
-                std::string shown;
-                for (std::size_t index = 0; index < segments.size(); ++index)
-                    shown += "/" + (hidden[index] ? std::string("*") : std::string(segments[index]));
-                if (text.ends_with('/') || text.ends_with('\\'))
-                    shown += '/';
-                return shown;
-            }
-            auto decoded = uri::decode(text, false);
-            if (decoded == text)
-                return {};
-            text = std::move(decoded);
+            return segments;
+        };
+        // Every layer of encoding is read before anything is shown: a separator decoded in a later layer can put a secret
+        // after another prefix ("/s/abc/files%2Ftoken" under "/s/" and "/s/abc/files/").
+        std::vector<std::string> layers{std::string(target.substr(0, target.find('?')))};
+        for (;;) {
+            auto decoded = uri::decode(layers.back(), false);
+            if (decoded == layers.back())
+                break;
+            if (layers.size() == 3)
+                return std::string("/*");  // still encoded after three layers: nothing is worth showing
+            layers.push_back(std::move(decoded));
         }
-        return std::string("/*");
+        // The last layer is shown. A segment hidden in an earlier layer hides what it decodes to, so that no layer reveals
+        // what another one masks ("/s/a%2Fb/" shows neither "a" nor "b").
+        const auto&           shownText = layers.back();
+        const auto            segments  = split(shownText);
+        std::vector<bool>     hidden(segments.size(), false);
+        std::set<std::string> hiddenText;
+        bool                  covered = false;
+        for (const auto& layer : layers) {
+            const auto pieces = split(layer);
+            const bool last   = &layer == &layers.back();
+            for (const auto& prefix : secret) {
+                if (pieces.size() <= prefix.size() || !std::ranges::equal(prefix, std::span(pieces).first(prefix.size()), sameText))
+                    continue;
+                covered = true;
+                if (last) {
+                    hidden[prefix.size()] = true;
+                    continue;
+                }
+                std::string secretText(pieces[prefix.size()]);
+                for (auto decoded = uri::decode(secretText, false); decoded != secretText; decoded = uri::decode(secretText, false))
+                    secretText = std::move(decoded);
+                for (const auto piece : split(secretText))
+                    hiddenText.emplace(piece);
+            }
+        }
+        if (!covered)
+            return {};
+        std::string shown;
+        for (std::size_t index = 0; index < segments.size(); ++index)
+            shown += "/" + (hidden[index] || hiddenText.contains(std::string(segments[index])) ? std::string("*") : std::string(segments[index]));
+        if (shownText.ends_with('/') || shownText.ends_with('\\'))
+            shown += '/';
+        return shown;
     }
 
     /// The path as the logs show it: masked when a secret prefix covers it, otherwise as it is, its query cut (it may quote a URL).

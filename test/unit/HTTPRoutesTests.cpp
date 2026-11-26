@@ -1166,6 +1166,7 @@ const Scenario secretPrefixMasks{"A secret prefix masks the segment that follows
                                          requireEqual(*secrets.masked("/%2573%252Fabc/x"), std::string("/s/*/x"));
                                          requireEqual(*secrets.masked("\\s\\abc\\x"), std::string("/s/*/x"));
                                          requireEqual(*secrets.masked("/s%2Fabc"), std::string("/s/*"));
+                                         requireEqual(*secrets.masked("/s/a%2Fb/x"), std::string("/s/*/*/x"));
                                          requireEqual(*secrets.masked("/%25252573/abc/"), std::string("/*"));
                                      });
                                      then("other paths, and the prefix alone, are logged as they are", [&] {
@@ -1179,6 +1180,9 @@ const Scenario secretPrefixMasks{"A secret prefix masks the segment that follows
                                      then("overlapping prefixes mask each of their segments", [&] {
                                          secrets.add("/s/abc/files/");
                                          requireEqual(*secrets.masked("/s/abc/files/token/x"), std::string("/s/*/files/*/x"));
+                                         requireEqual(*secrets.masked("/s/abc/files%2Ftoken/x"), std::string("/s/*/files/*/x"));
+                                         requireEqual(*secrets.masked("/s/abc/files%252Ftoken/x"), std::string("/s/*/files/*/x"));
+                                         requireEqual(*secrets.masked("/s/abc%2Ffiles%2Ftoken/x"), std::string("/s/*/*/*/x"));
                                      });
                                      then("a malformed prefix is refused", [&] {
                                          Fixture fixture;
