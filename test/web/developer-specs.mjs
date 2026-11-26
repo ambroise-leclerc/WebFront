@@ -1107,12 +1107,25 @@ try {
         assert(again.inside('.webfront-terminal-window') && again.box('.webfront-terminal-window').right > again.viewport().width - 1, 'A drag must stay inside the window');
         pointer('pointermove', 0, 0);
         assert(left() > 0, 'A released bar must not follow the pointer');
-        // The place is remembered in the project.
+        // The unproven bootstrap frame can move its terminal, and its project writes are refused.
+        const framePlace = {x: left(), y: top()};
         const placePath = '.webfront/developer/terminal-window.json';
+        const frameWrite = await failure(relaunched.contentWindow.webFront.cppFunction('webfront.developer.begin')(placePath, false));
+        assert(frameWrite?.code === 'webfront.inspector.denied', 'An unproven bootstrap frame must not publish its terminal place');
+
+        // Move the proven main view's terminal and check that a later session will read its place.
+        if (here.state() === 'interface') here.button().click();
+        for (let count = 0; count < 100; ++count) {
+            key(here.bar(), {key: 'ArrowLeft'});
+            key(here.bar(), {key: 'ArrowUp'});
+        }
+        key(here.bar(), {key: 'ArrowRight'});
+        key(here.bar(), {key: 'ArrowDown'});
+        const mainPlace = here.box('.webfront-terminal-window');
         const place = async () => { try { return JSON.parse(new TextDecoder().decode(await readFile(placePath))); } catch { return null; } };
-        await until(async () => (await place())?.x === left(), 'The place of the terminal window must be remembered in the project');
+        await until(async () => (await place())?.x === mainPlace.x, 'The place of the proven view must be remembered in the project');
         const remembered = await place();
-        assert(remembered.format === 1 && remembered.width === again.box('.webfront-terminal-window').width, `The size must be remembered too: ${JSON.stringify(remembered)}`);
+        assert(remembered.format === 1 && remembered.width === mainPlace.width, `The size must be remembered too: ${JSON.stringify(remembered)}`);
 
         // A smaller window keeps the icon and the terminal window; the remembered place comes back with the room.
         const columns = () => Math.round(page.querySelector('#terminal .xterm-screen')?.getBoundingClientRect().width ?? 0);
@@ -1129,7 +1142,7 @@ try {
         assert(again.inside('.webfront-terminal-window') && again.inside('.webfront-terminal-toggle'), 'A small window must keep the icon and the terminal window');
         await until(() => columns() < wideScreen, 'xterm.js must be fitted to a smaller terminal window');
         resize(900, 600);
-        await until(() => left() === remembered.x && top() === remembered.y, 'A window enlarged again must give the terminal window its place back');
+        await until(() => left() === framePlace.x && top() === framePlace.y, 'A window enlarged again must give the terminal window its place back');
         await until(() => columns() === wideScreen, 'xterm.js must be fitted to the terminal window again');
 
         // The close button and the shortcut collapse and open it, wherever the focus is.
