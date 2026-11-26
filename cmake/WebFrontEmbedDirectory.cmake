@@ -18,7 +18,8 @@ include_guard(GLOBAL)
 # root given at run time (a --ui <dir> option) is served in front of it during development.
 #
 # The build regenerates the header when a file of the directory changes, and configures again when a file is added or
-# removed (file(GLOB_RECURSE CONFIGURE_DEPENDS)). CLASS defaults to EmbeddedDirectory and NAMESPACE to webfront::fs.
+# removed (file(GLOB_RECURSE CONFIGURE_DEPENDS)). CLASS defaults to EmbeddedDirectory and NAMESPACE to webfront::fs; a
+# C++ keyword or a reserved identifier is refused in either.
 # EXCLUDE drops the relative paths that match one of its regular expressions (for instance "(^|/)[.]" for hidden files
 # such as .DS_Store). A path may only hold letters, digits and the characters _ . - + @ ~ and space, without an empty,
 # "." or ".." part; another name fails the configuration and names the file. A directory reached through a symbolic link
@@ -50,13 +51,54 @@ function(webfront_embed_directory target directory)
     if(NOT ARG_NAMESPACE MATCHES "^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$")
         message(FATAL_ERROR "webfront_embed_directory: NAMESPACE must be a C++ namespace such as app or app::ui (got '${ARG_NAMESPACE}')")
     endif()
+    # The C++ keywords (C++26 included) and the identifiers with a special meaning (final, override, import, module),
+    # between semicolons so that a name matches only as a whole. Defined here: the function runs in its caller's scope.
+    set(reserved ";alignas;alignof;and;and_eq;asm;auto;bitand;bitor;bool;break;case;catch;char;char8_t;char16_t;\
+char32_t;class;compl;concept;const;consteval;constexpr;constinit;const_cast;continue;contract_assert;co_await;co_return;\
+co_yield;decltype;default;delete;do;double;dynamic_cast;else;enum;explicit;export;extern;false;final;float;for;friend;goto;\
+if;import;inline;int;long;module;mutable;namespace;new;noexcept;not;not_eq;nullptr;operator;or;or_eq;override;\
+private;protected;public;register;reinterpret_cast;requires;return;short;signed;sizeof;static;static_assert;static_cast;\
+struct;switch;template;this;thread_local;throw;true;try;typedef;typeid;typename;union;unsigned;using;virtual;void;volatile;\
+wchar_t;while;xor;xor_eq;")
+    # The header must compile: a keyword, a reserved identifier or the name of a generated member would not.
+    if(reserved MATCHES ";${ARG_CLASS};" OR ARG_CLASS MATCHES "__|^Asset[0-9]+$")
+        message(FATAL_ERROR "webfront_embed_directory: CLASS cannot be '${ARG_CLASS}': a C++ keyword, a reserved identifier "
+            "(with '__') or a name of the generated members (Asset<n>) would not compile")
+    endif()
+    string(REPLACE "::" ";" components "${ARG_NAMESPACE}")
+    foreach(component IN LISTS components)
+        if(reserved MATCHES ";${component};" OR component MATCHES "__|^_[A-Z]")
+            message(FATAL_ERROR "webfront_embed_directory: NAMESPACE cannot hold '${component}': a C++ keyword or a reserved "
+                "identifier (with '__', or '_' and a capital letter) would not compile or could meet a macro")
+        endif()
+    endforeach()
     cmake_path(ABSOLUTE_PATH directory BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" NORMALIZE)
     string(REGEX REPLACE "(.)/$" "\\1" directory "${directory}")
+    if(directory MATCHES ";")
+        message(FATAL_ERROR "webfront_embed_directory: cannot embed a directory whose path holds ';' (${directory}): CMake "
+            "would split its file names. Rename it.")
+    endif()
     if(NOT IS_DIRECTORY "${directory}")
         message(FATAL_ERROR "webfront_embed_directory: ${directory} is not a directory")
     endif()
 
-    file(GLOB_RECURSE paths LIST_DIRECTORIES false CONFIGURE_DEPENDS RELATIVE "${directory}" "${directory}/*")
+    # The glob is a CMake list, which a ';' in a name splits into fragments: the first keeps the directory, the next ones
+    # lose it (or are empty, or the first ends with '/'). They are recognized and refused before any other check, since
+    # no fragment names a file and EXCLUDE could not match the whole name.
+    file(GLOB_RECURSE found LIST_DIRECTORIES false CONFIGURE_DEPENDS "${directory}/*")
+    string(LENGTH "${directory}/" prefix_length)
+    set(paths "")
+    set(previous "")
+    foreach(file IN LISTS found)
+        string(FIND "${file}" "${directory}/" at)
+        if(NOT at EQUAL 0 OR file MATCHES "/$" OR file STREQUAL "${directory}/")
+            message(FATAL_ERROR "webfront_embed_directory: cannot serve a file whose path holds ';' (near '${previous};${file}'): "
+                "CMake splits such a name, so neither the build nor EXCLUDE can name it. Rename it.")
+        endif()
+        string(SUBSTRING "${file}" ${prefix_length} -1 path)
+        list(APPEND paths "${path}")
+        set(previous "${file}")
+    endforeach()
     set(kept "")
     set(sources "")
     foreach(path IN LISTS paths)
