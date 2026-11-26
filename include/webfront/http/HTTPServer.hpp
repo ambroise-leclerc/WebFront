@@ -42,6 +42,7 @@
 #include <optional>
 #include <ranges>
 #include <regex>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -575,6 +576,129 @@ inline bool mentionsServices(std::string_view target) {
     return true;  // still encoded after three layers: nothing is worth showing
 }
 
+/// The prefixes followed by a secret segment (Server::addSecretPrefix): a capability such as a session's identifier in
+/// "/s/<id>/index.html". What the logs show of a path covered by one of them has that segment masked: "/s/*/index.html".
+/// Thread-safe; prefixes are only added.
+class SecretPrefixes {
+public:
+    /// @param prefix absolute path ending with '/' (RouteTable::validPrefix is the caller's check).
+    void add(std::string_view prefix) {
+        auto             segments = segmentsOf(prefix);
+        std::scoped_lock lock{mutex};
+        if (std::ranges::find(prefixes, segments) == prefixes.end())
+            prefixes.push_back(std::move(segments));
+    }
+
+    /// The path (its query cut) as the logs may show it when a secret prefix covers it, otherwise nothing. The path is
+    /// judged as the server and the file providers would read it: percent-decoded (up to three times), with backslashes
+    /// as separators, empty or "." segments dropped, in any letter case; the segment that follows each covering prefix is
+    /// replaced by '*', in every layer of encoding at once. A path still encoded after three layers is masked whole ("/*").
+    /// @param mount the prefix of the mount the target is under, if any: its segment is masked too, and the secret prefixes
+    ///        also cover the target as the space reads it, from its own root.
+    [[nodiscard]] std::optional<std::string> masked(std::string_view target, std::string_view mount = {}) const {
+        std::vector<std::vector<std::string>> secret;
+        {
+            std::scoped_lock lock{mutex};
+            if (prefixes.empty() && mount.empty())
+                return {};  // an application without secret prefixes pays nothing more per request
+            secret = prefixes;
+        }
+        if (!mount.empty()) {
+            const auto space = segmentsOf(mount);
+            for (std::size_t index = 0, count = secret.size(); index < count; ++index) {
+                auto within = space;
+                within.emplace_back();  // the segment of the space, whatever it is
+                within.insert(within.end(), secret[index].begin(), secret[index].end());
+                secret.push_back(std::move(within));
+            }
+            secret.push_back(space);
+        }
+        // An empty segment of a prefix stands for any segment (never one of a path, where empty segments are dropped).
+        const auto sameText = [](std::string_view a, std::string_view b) {
+            return a.empty() || std::ranges::equal(a, b, [](char x, char y) {
+                       return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
+                   });
+        };
+        const auto split = [](std::string_view text) {
+            std::vector<std::string_view> segments;
+            for (std::size_t from = 0; from <= text.size();) {
+                const auto end     = std::min(text.find_first_of("/\\", from), text.size());
+                const auto segment = text.substr(from, end - from);
+                if (!segment.empty() && segment != ".")
+                    segments.push_back(segment);
+                from = end + 1;
+            }
+            return segments;
+        };
+        // Every layer of encoding is read before anything is shown: a separator decoded in a later layer can put a secret
+        // after another prefix ("/s/abc/files%2Ftoken" under "/s/" and "/s/abc/files/").
+        std::vector<std::string> layers{std::string(target.substr(0, target.find('?')))};
+        for (;;) {
+            auto decoded = uri::decode(layers.back(), false);
+            if (decoded == layers.back())
+                break;
+            if (layers.size() == 3)
+                return std::string("/*");  // still encoded after three layers: nothing is worth showing
+            layers.push_back(std::move(decoded));
+        }
+        // The last layer is shown. A segment hidden in an earlier layer hides what it decodes to, so that no layer reveals
+        // what another one masks ("/s/a%2Fb/" shows neither "a" nor "b").
+        const auto&           shownText = layers.back();
+        const auto            segments  = split(shownText);
+        std::vector<bool>     hidden(segments.size(), false);
+        std::set<std::string> hiddenText;
+        bool                  covered = false;
+        for (const auto& layer : layers) {
+            const auto pieces = split(layer);
+            const bool last   = &layer == &layers.back();
+            for (const auto& prefix : secret) {
+                if (pieces.size() <= prefix.size() || !std::ranges::equal(prefix, std::span(pieces).first(prefix.size()), sameText))
+                    continue;
+                covered = true;
+                if (last) {
+                    hidden[prefix.size()] = true;
+                    continue;
+                }
+                std::string secretText(pieces[prefix.size()]);
+                for (auto decoded = uri::decode(secretText, false); decoded != secretText; decoded = uri::decode(secretText, false))
+                    secretText = std::move(decoded);
+                for (const auto piece : split(secretText))
+                    hiddenText.emplace(piece);
+            }
+        }
+        if (!covered)
+            return {};
+        std::string shown;
+        for (std::size_t index = 0; index < segments.size(); ++index)
+            shown += "/" + (hidden[index] || hiddenText.contains(std::string(segments[index])) ? std::string("*") : std::string(segments[index]));
+        if (shownText.ends_with('/') || shownText.ends_with('\\'))
+            shown += '/';
+        return shown;
+    }
+
+    /// The path as the logs show it: masked when a secret prefix covers it, otherwise as it is, its query cut (it may quote a URL).
+    [[nodiscard]] std::string logged(std::string_view target, std::string_view mount = {}) const {
+        if (auto shown = masked(target, mount))
+            return std::move(*shown);
+        return std::string(target.substr(0, target.find('?')));
+    }
+
+private:
+    static std::vector<std::string> segmentsOf(std::string_view prefix) {
+        std::vector<std::string> segments;
+        for (std::size_t from = 1; from < prefix.size();) {
+            const auto end = std::min(prefix.find('/', from), prefix.size());
+            if (end > from)
+                segments.emplace_back(prefix.substr(from, end - from));
+            from = end + 1;
+        }
+        return segments;
+    }
+
+    mutable std::mutex                    mutex;
+    std::vector<std::vector<std::string>> prefixes;  // the segments of each prefix
+};
+
 /// What contentLength returns for a length that is not a decimal number, or for several different lengths.
 inline constexpr std::uint64_t malformedLength = std::numeric_limits<std::uint64_t>::max();
 
@@ -816,6 +940,11 @@ public:
     RequestHandler& operator=(const RequestHandler&) = default;
     RequestHandler& operator=(RequestHandler&&)      = default;
 
+    /// The secret prefixes of the server (Server::addSecretPrefix): a path they cover is never written to the debug logs.
+    void keepSecret(std::shared_ptr<const routing::SecretPrefixes> prefixes) {
+        secrets = std::move(prefixes);
+    }
+
     /** @brief Per-handler gzip cache counters and retained storage; read on the server context. */
     [[nodiscard]] gzip::ValidatedCache::Statistics fallbackCacheStatistics() const {
         return fallbackCache.statistics();
@@ -839,8 +968,9 @@ public:
     Response handleRequest(Request request) {
         return prepare(std::move(request), false).response;
     }
-    Prepared prepareRequest(Request request) {
-        return prepare(std::move(request), true);
+    /// `quiet`: the path is not written to the debug logs (a secret the server recognized beyond this handler's view).
+    Prepared prepareRequest(Request request, bool quiet = false) {
+        return prepare(std::move(request), true, quiet);
     }
 
     template <typename Lease>
@@ -856,8 +986,8 @@ public:
     }
 
 private:
-    Prepared prepare(Request request, bool asynchronous) {
-        auto requestPath = filePath(request.uri);
+    Prepared prepare(Request request, bool asynchronous, bool quiet = false) {
+        auto requestPath = filePath(request.uri, quiet);
         if (!requestPath)
             return {Response::getStatusResponse(Response::badRequest)};
         switch (request.method) {
@@ -893,12 +1023,12 @@ private:
     }
 
     // The file a request URI names, or nothing when the URI is not a safe absolute path.
-    static std::optional<std::filesystem::path> filePath(const std::string& uri) {
+    std::optional<std::filesystem::path> filePath(const std::string& uri, bool quiet = false) const {
         // The query is not part of the file name; it is cut before decoding, so "%3F" stays in the name. A '+' of a URL path
         // is literal, as for the routes, the spaces and the path of a WebSocket upgrade (UI::path): "/a+b/" is "a+b/".
         const auto rawPath    = std::string_view(uri).substr(0, uri.find('?'));
         auto       requestUri = uri::decode(rawPath, false);
-        const bool secret     = routing::mentionsServices(uri) || routing::mentionsServices(requestUri);
+        const bool secret     = quiet || routing::mentionsServices(uri) || routing::mentionsServices(requestUri) || (secrets && secrets->masked(uri));
         if (!secret)
             log::debug("Request path - raw:'{}' decoded:'{}'", rawPath, requestUri);  // never the query
         if (!isSafePath(requestUri))
@@ -1033,10 +1163,11 @@ private:
         return {};
     }
 
-    FS                         fs;
-    detail::BoundContentPolicy contentPolicy;
-    gzip::ValidatedCache       fallbackCache{maxDecodedAssetCacheSize<Policy>()};
-    std::size_t                maxEncodedAssetSize{gzip::decodeLimits<Policy>().encoded};
+    FS                                             fs;
+    detail::BoundContentPolicy                     contentPolicy;
+    gzip::ValidatedCache                           fallbackCache{maxDecodedAssetCacheSize<Policy>()};
+    std::size_t                                    maxEncodedAssetSize{gzip::decodeLimits<Policy>().encoded};
+    std::shared_ptr<const routing::SecretPrefixes> secrets;
 };
 
 template <networking::Features Net, fs::Provider FS, BuffersPolicyType Policy = DefaultBuffersPolicy, typename Decode = gzip::Decoder>
@@ -1053,6 +1184,7 @@ public:
           requestHandler(docRoot,
                          detail::BoundContentPolicy{detail::applicationOrigin(address, listeningPort, networking::secureTransport<Net>), std::move(policy)}),
           decodeExecutor(gzip::decodeLimits<Policy>(), std::move(decode)) {
+        requestHandler.keepSecret(secrets);
         spawn(acceptConnections());
     }
     ~Server() noexcept {
@@ -1188,6 +1320,20 @@ public:
         mounts.emplace_back(std::move(prefix), std::make_shared<const MountResolver>(std::move(resolver)));
     }
 
+    /** @brief Declares that the segment following `prefix` (absolute, ending with '/', as a route prefix) is a secret, a
+     * capability such as a session's identifier: the server never writes it to its logs, whatever answers the request (a
+     * file, a route, a WebSocket upgrade, a failure). It logs "/s/<id>/index.html" with a star in place of the segment,
+     * other paths as before, and never the message of an error raised while serving a covered path, which may quote it.
+     * The segment of a mount is always masked so; this covers the paths outside the mounts, the prefix of a mount, and the
+     * paths within a space as it reads them. Prefixes may overlap; a declaration lasts as long as the server. Throws std::invalid_argument for a
+     * malformed prefix. Thread-safe.
+     */
+    void addSecretPrefix(std::string_view prefix) {
+        if (!RouteTable::validPrefix(prefix))
+            throw std::invalid_argument("Invalid secret prefix '" + std::string(prefix) + "'");
+        secrets->add(prefix);
+    }
+
     [[nodiscard]] auto fallbackDecodeStatistics() const {
         return decodeExecutor.statistics();
     }
@@ -1198,13 +1344,14 @@ public:
     }
 
 private:
-    typename Net::IoContext         ioContext;
-    typename Net::Acceptor          acceptor;
-    std::string                     listeningPort;
-    networking::TaskScope           tasks;
-    RequestHandler<Net, FS, Policy> requestHandler;
-    gzip::DecodeExecutor<Decode>    decodeExecutor;
-    RouteTable                      routes;
+    typename Net::IoContext                  ioContext;
+    typename Net::Acceptor                   acceptor;
+    std::string                              listeningPort;
+    networking::TaskScope                    tasks;
+    RequestHandler<Net, FS, Policy>          requestHandler;
+    gzip::DecodeExecutor<Decode>             decodeExecutor;
+    RouteTable                               routes;
+    std::shared_ptr<routing::SecretPrefixes> secrets = std::make_shared<routing::SecretPrefixes>();
     // Route handlers may block for as long as they like: they get their own threads, so that the files of the
     // providers (WebFront.js, pages) keep flowing for the other browsers.
     BlockingWorker                                                            routeWorker{4};
@@ -1217,7 +1364,7 @@ private:
     struct Mounted {
         std::optional<RouteReply>         reply;
         std::string                       space;   ///< The path of the mount and segment, "/s/abc/".
-        std::string                       logged;  ///< What the logs show of it: the segment, a session's secret, masked ("/s/*").
+        std::string                       prefix;  ///< The prefix of the mount, "/s/": the logs mask the segment that follows it.
         std::string                       uri;     ///< The target within the space, encoded again: "/rest?query".
         std::shared_ptr<const RouteTable> routes;
         std::shared_ptr<void>             target;  ///< MountAnswer::target.
@@ -1296,10 +1443,10 @@ private:
             answer = (*resolver)(segment);
         } catch (const std::exception&) {
             // The message may quote the segment, which can be a session's secret.
-            log::warn("The resolver of the mount {} failed (the error is not logged: it may quote the segment)", prefix);
+            log::warn("The resolver of the mount {} failed (the error is not logged: it may quote the segment)", secrets->logged(prefix));
             answer.refusal = textReply(Response::internalServerError, "Internal Server Error\n");
         } catch (...) {
-            log::warn("The resolver of the mount {} failed with an exception which is not a std::exception", prefix);
+            log::warn("The resolver of the mount {} failed with an exception which is not a std::exception", secrets->logged(prefix));
             answer.refusal = textReply(Response::internalServerError, "Internal Server Error\n");
         }
         if (answer.refusal) {
@@ -1307,7 +1454,7 @@ private:
             return mounted;
         }
         mounted.space  = prefix + segment + "/";
-        mounted.logged = prefix + "*";
+        mounted.prefix = prefix;
         mounted.uri    = rest + (query.empty() ? "" : "?" + query);
         mounted.routes = std::move(answer.routes);
         mounted.target = std::move(answer.target);
@@ -1326,8 +1473,9 @@ private:
                 response.headers.emplace_back("Content-Length", std::to_string(*reply.contentLength));
             else if (!reply.body)
                 response.headers.emplace_back("Content-Length", "0");
-        } catch (const std::exception& error) {
-            log::warn("A mount's reply is invalid: {}", error.what());
+        } catch (const std::exception&) {
+            // The message may quote a header the resolver built from the segment, a session's secret.
+            log::warn("A mount's reply is invalid (the error is not logged: it may quote the segment)");
             response   = Response::getStatusResponse(Response::internalServerError);
             reply.body = nullptr;
         }
@@ -1486,7 +1634,14 @@ private:
     // fails the pending send and ends the response; the stop request of the server cancels the awaits.
     // `received` views the bytes that followed the headers in `buffer`, the reception buffer of serve(), which outlives this
     // call: nothing is copied unless a POST needs the rest of its body, and then only the bytes the body owns.
-    networking::Task serveRoute(typename Net::Socket& socket, Request request, RouteMatch match, std::string_view received, std::span<char> buffer) {
+    // `label` names the route in the logs, its prefix masked as the request's path is; `secret`, the errors are not logged.
+    networking::Task serveRoute(typename Net::Socket& socket,
+                                Request               request,
+                                RouteMatch            match,
+                                std::string_view      received,
+                                std::span<char>       buffer,
+                                std::string           label,
+                                bool                  secret) {
         const bool head = request.method == Request::Method::Head;
         const bool post = request.method == Request::Method::Post && match.route->postBodyLimit.has_value();
         RouteReply reply;
@@ -1569,15 +1724,15 @@ private:
                     response.headers.emplace_back("Content-Length", "0");
             }
         } catch (const std::exception& error) {
-            if (match.route->secretPath)
-                log::warn("Route {} failed (the error is not logged: it may quote a secret)", match.route->prefix);
+            if (secret)
+                log::warn("Route {} failed (the error is not logged: it may quote a secret)", label);
             else
-                log::warn("Route {} failed: {}", match.route->prefix, error.what());
+                log::warn("Route {} failed: {}", label, error.what());
             response = Response::getStatusResponse(Response::internalServerError);
             hardenError();
             reply.body = nullptr;
         } catch (...) {
-            log::warn("Route {} failed with an exception which is not a std::exception", match.route->prefix);
+            log::warn("Route {} failed with an exception which is not a std::exception", label);
             response = Response::getStatusResponse(Response::internalServerError);
             hardenError();
             reply.body = nullptr;
@@ -1587,7 +1742,7 @@ private:
             response.content.clear();                // an error page keeps its Content-Length; HEAD never has a body
         co_await Net::Send(socket, response.toBuffers<Net>());
         if (streaming)
-            co_await streamBody(routeWorker, socket, std::move(reply.body), reply.contentLength, match.route->prefix, match.route->secretPath);
+            co_await streamBody(routeWorker, socket, std::move(reply.body), reply.contentLength, std::move(label), secret);
         co_await closeResponse(socket);
     }
 
@@ -1645,7 +1800,8 @@ private:
                     rest = std::string_view(stop, end);
             }
             std::shared_ptr<const RouteTable> spaceRoutes;
-            std::string                       within;  // the space of a request under a mount, as the logs show it
+            std::string                       mountPrefix;  // the prefix of the mount of the request, if any
+            std::string                       original;     // the target as it came, before a mount made it relative
             if (auto mounted = resolveMount(request)) {
                 if (mounted->reply) {
                     log::info("Received request {} under a mount: answered by its resolver ({})",
@@ -1655,9 +1811,9 @@ private:
                     co_return;
                 }
                 space       = UpgradeSpace{std::move(mounted->space), std::move(mounted->target), {}};
-                within      = std::move(mounted->logged);
+                mountPrefix = std::move(mounted->prefix);
                 spaceRoutes = std::move(mounted->routes);
-                request.uri = std::move(mounted->uri);
+                original    = std::exchange(request.uri, std::move(mounted->uri));
             }
             if (request.isUpgradeRequest("websocket")) {
                 // The upgrade is accepted where a file would be served, and refused as a file request is otherwise.
@@ -1667,22 +1823,33 @@ private:
                 space.requestPath = std::move(target->first);
             }
             auto match = matchRoute(request, spaceRoutes.get());
+            // Under a mount, the logs show the whole path as it came, the mount's segment and the secret segments masked; a
+            // secret prefix covers it as the server read it and as the space reads it. The query may quote a URL: never shown.
+            const auto shown = [&](std::string_view path) {
+                return mountPrefix.empty() ? secrets->logged(path) : secrets->logged(space.path + std::string(path.substr(1)), mountPrefix);
+            };
+            const bool covered = secrets->masked(request.uri) || (!mountPrefix.empty() && secrets->masked(original));
+            // An error message may quote the path as the handler or the provider saw it, or what it captured: under a mount,
+            // the space's segment, which is always secret. Its text is then never logged.
+            const bool quietErrors = covered || !mountPrefix.empty();
             if (match && match->route->secretPath)
-                log::info("Received request {} on {}{}...", request.getMethodName(), within, match->route->prefix);  // the rest is a secret
+                log::info("Received request {} on {}...", request.getMethodName(), shown(match->route->prefix));  // the rest is a secret
             else if (routing::mentionsServices(request.uri))
                 log::info("Received request {} on a services path (not logged)", request.getMethodName());
             else
-                log::info("Received request {} on {}{}",
+                log::info("Received request {} on {}",
                           request.getMethodName(),
-                          within,
-                          std::string_view(request.uri).substr(0, request.uri.find('?')));  // the query may quote a URL
+                          mountPrefix.empty() ? secrets->logged(request.uri) : secrets->logged(original, mountPrefix));
             if (match) {
-                co_await serveRoute(socket, std::move(request), std::move(*match), rest, buffer);
+                const bool secret = match->route->secretPath || quietErrors;
+                auto       label  = shown(match->route->prefix);
+                co_await serveRoute(socket, std::move(request), std::move(*match), rest, buffer, std::move(label), secret);
                 co_return;
             }
-            head           = request.method == Request::Method::Head;
-            servicesTarget = routing::mentionsServices(request.uri);  // before the request is moved away
-            auto prepared  = requestHandler.prepareRequest(std::move(request));
+            head                 = request.method == Request::Method::Head;
+            const bool quietPath = routing::mentionsServices(request.uri) || covered;  // before the request is moved away
+            servicesTarget       = quietPath || quietErrors;
+            auto prepared        = requestHandler.prepareRequest(std::move(request), quietPath);
             if (prepared.needsDecode) {
                 lease.emplace(co_await networking::ex::continues_on(decodeExecutor.submit(std::move(prepared.response.content), prepared.limit, prepared.head),
                                                                     Net::Scheduler(socket)));
@@ -1739,7 +1906,8 @@ private:
                     return read;
                 },
                 streamLength,
-                "File response");
+                "File response",
+                servicesTarget);
         if (response.statusCode != Response::switchingProtocols || tasks.stopRequested())
             co_await closeResponse(socket);  // a stopped server hands nothing over: its drain would never end
         else if (upgradeHandler)

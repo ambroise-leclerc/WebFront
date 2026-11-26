@@ -63,6 +63,19 @@ Limits: the server has no timeout on reading the headers or the body, so a slow 
 bytes received so far (at most `n`); size `n` for the smallest request the route needs. A refusal sent while the client
 is still sending its body can reach it as a connection reset instead of the status, since the unread body is not drained.
 
+### Secret path segments (#673)
+
+The server logs every request with its path (never its query). An application whose URLs carry a capability, such as a
+session identifier that is enough to drive the session (`/s/<id>/`), declares the prefix that precedes it with
+`app.addSecretPrefix("/s/")`: the segment that follows the prefix is then never written to WebFront's logs, for a file, a
+route, a WebSocket upgrade and the warnings of a failure alike. The request is logged as `/s/*/index.html`, and the error
+message of a handler, a body or a file provider serving such a path, which may quote it, is not logged. The path is judged
+as the server reads it (percent-decoded, empty and `.` segments dropped, in any letter case); prefixes may overlap
+(`/s/` and `/s/<id>/files/` mask both segments), and a declaration lasts as long as the application. The prefix is not a
+route: it changes nothing in what is served. A family of spaces (`app.spaces`, `docs/SPACES.md`) always masks its segment
+in this way, and a secret prefix also covers the prefix of a family and the paths within a space as it reads them; `http::RouteOptions::secretPath` masks the whole rest of a path, under `/webfront/services/` only. The
+application's own logs are its business.
+
 ## Byte ranges (#455)
 
 An unencoded file of known size, from any provider, is served by ranges (RFC 9110 §14) and says so with

@@ -11,6 +11,7 @@ these entries stays in the GitHub releases and the Git history.
 ## Unreleased
 
 ### Added
+- Keep a capability carried by your URLs out of WebFront's logs with `app.addSecretPrefix("/s/")`: the segment after the prefix is logged as `*` (`/s/*/index.html`) for files, routes, WebSocket upgrades and their failures, whose error messages are not logged (#673, `docs/HTTP_ASSETS.md`).
 - Read the path from which a browser opened its bridge, by default its page's directory (within its space under `app.spaces`), with `ui.path()`; a WebSocket upgrade is accepted on any path a file would be served from, and refused as a file request is otherwise (#672, `docs/SPACES.md`).
 - Serve several independent users from one process with application spaces: `app.spaces("/s/", resolver)` gives each `/s/<id>/` its own `cppFunction`s, page handlers, broadcasts and relative routes (`WebFront::Space`), serves the files under the prefix, lets the resolver refuse a space with its own reply, and tells the application when a space's last page closes (#671, `docs/SPACES.md`).
 - Compile test files faster: include `<webfront/testing/bdd/Core.hpp>`, free of `<chrono>`, `<thread>` and `<fstream>`, and only the parts a file uses (`bdd/Matchers.hpp`, `bdd/Approx.hpp`, `bdd/Eventually.hpp`, `bdd/Runner.hpp` for `main()`); `Bdd.hpp` still includes them all (#669, `docs/BDD.md`).
