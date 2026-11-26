@@ -360,6 +360,8 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
         if (container === 'window') {
             const rect = shown(), started = action;
             try {
+                // A close that an attach asked for is over first: the window opened now is never the one being closed.
+                if (closing.has(id)) await closing.get(id);
                 await bridge.cppFunction('webfront.inspector.openWindow')(id, self, rect.width, rect.height);
                 if (!preferences.detached.has(id)) {
                     await bridge.cppFunction('webfront.inspector.closeWindow')(id, self).catch(() => {});
@@ -375,12 +377,42 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
                 return false;
             }
         }
-        // The target names the host too: a tab of another page of the same browsing group is never reused for this one.
-        const tab = openTab(urlOf(id), `webfront-inspector-${self}-${id.replace('.', '-')}`);
-        if (tab) return true;
+        // The target names the host too: a tab of another page of the same browsing group is never reused for this one. A tab
+        // that was asked to close itself may not be closed yet: a new name opens another tab instead of reusing that one.
+        const generation = selfClosing.get(id);
+        const name = `webfront-inspector-${self}-${id.replace('.', '-')}${generation ? `-${generation}` : ''}`;
+        const tab = openTab(urlOf(id), name);
+        if (tab) {
+            tabs.set(id, tab);
+            return true;
+        }
         retryPanel = id;
         showFloating(id, hostReasons.blocked);
         return false;
+    }
+
+    // The detached container of a panel attached again is closed by this page, ordered with its later detaches, and not by
+    // the detached window once it got the answer: a detach between that answer and the window's close would reuse the
+    // window, then lose it. `closing` holds the close of a native window still in progress, `tabs` the tabs this page opened,
+    // and `selfClosing` the generation of the panels whose tab closes itself (a tab this page did not open, before a reload).
+    const closing = new Map(), tabs = new Map(), selfClosing = new Map();
+    let generation = 0;
+    /** Closes the detached container of `id`; 'host' when this page closes it, 'self' when the window must close itself. */
+    function closeDetached(id) {
+        if (detachedContainer(containers, {embedded: isEmbedded}) === 'window') {
+            const closed = bridge.cppFunction('webfront.inspector.closeWindow')(id, self).catch(() => false);
+            closing.set(id, closed);
+            closed.then(() => { if (closing.get(id) === closed) closing.delete(id); });
+            return 'host';
+        }
+        const tab = tabs.get(id);
+        tabs.delete(id);
+        if (tab && !tab.closed) {
+            tab.close();
+            return 'host';
+        }
+        selfClosing.set(id, ++generation);
+        return 'self';
     }
 
     /** Hides the floating window's `id` now that its detached container opened, unless it was attached or changed since. */
@@ -447,14 +479,15 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
     closeButton.addEventListener('click', hideFloating);
     retry.addEventListener('click', () => { if (retryPanel) host.detach(retryPanel); });
 
-    // A detached inspector asks to come back: the first host that takes it answers, so that the inspector closes its window.
+    // A detached inspector asks to come back: the page that detached it shows the panel, closes the detached container when
+    // it can, and answers who closes it ('host', or 'self' for a tab this page did not open).
     if (typeof view.BroadcastChannel === 'function') {
         const channel = new view.BroadcastChannel(inspectorChannel);
         channel.addEventListener('message', ({data}) => {
             // Only the page that detached the panel takes it back: other pages of the same origin ignore the request.
             if (data?.type !== 'attach' || data.host !== self || !panels.has(data.panel) || !containers?.host) return;
             host.attach(data.panel);
-            channel.postMessage({type: 'attached', id: data.id});
+            channel.postMessage({type: 'attached', id: data.id, closer: closeDetached(data.panel)});
         });
         host.channel = channel;
     }

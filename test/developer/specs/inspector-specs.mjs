@@ -178,13 +178,14 @@ describe('The inspectors', () => {
     describe('host', () => {
         const hosts = [];
         // A host of this page on a project in memory, whose inspector functions answer as `answers` says.
-        async function testHost({containers, embedded = true, files = new Map(), openWindow = async () => {}, windowOpen = () => ({}), hostId = 'host-a'} = {}) {
+        async function testHost({containers, embedded = true, files = new Map(), openWindow = async () => {}, closeWindow = async () => true,
+            windowOpen = () => ({}), hostId = 'host-a'} = {}) {
             const {bridge: projectBridge, storage} = memoryBridge(files);
             const calls = [];
             const bridge = {cppFunction: name => async (...args) => {
                 calls.push([name, ...args]);
                 if (name === 'webfront.inspector.openWindow') return openWindow(...args);
-                if (name === 'webfront.inspector.closeWindow') return true;
+                if (name === 'webfront.inspector.closeWindow') return closeWindow(...args);
                 if (name === 'webfront.inspector.embedded') return embedded;
                 return projectBridge.cppFunction(name)(...args);
             }};
@@ -349,6 +350,58 @@ describe('The inspectors', () => {
                 await other.saved();
                 expect(otherStorage.has(preferencesPath)).toBeFalse();
             } finally { inspector.close(); }
+        });
+
+        // The window that asked to be attached again, on the channel: resolves with the host's answer.
+        async function askAttach(panel, request) {
+            const inspector = new BroadcastChannel(inspectorChannel);
+            try {
+                return await new Promise(resolve => {
+                    inspector.addEventListener('message', ({data}) => { if (data?.type === 'attached' && data.id === request) resolve(data); });
+                    inspector.postMessage({type: 'attach', panel, host: 'host-a', id: request});
+                });
+            } finally { inspector.close(); }
+        }
+
+        it('closes the native window of a panel attached again itself, before a new detach opens one', async () => {
+            let closed;
+            const {host, calls} = await testHost({containers: admitted(true), closeWindow: () => new Promise(resolve => { closed = resolve; })});
+            await host.detach('cpp.watches');
+            expect((await askAttach('cpp.watches', 'request-close')).closer).toBe('host');
+            expect(host.preferences.detached.has('cpp.watches')).toBeFalse();
+            // The user detaches it again while the close is in progress: the window opens only once the close is over.
+            const detaching = host.detach('cpp.watches');
+            await new Promise(resolve => setTimeout(resolve));
+            const names = () => calls.map(([name]) => name).filter(name => name.endsWith('Window'));
+            expect(names()).toEqual(['webfront.inspector.openWindow', 'webfront.inspector.closeWindow']);
+            closed(true);
+            expect(await detaching).toBe('window');
+            expect(names()).toEqual(['webfront.inspector.openWindow', 'webfront.inspector.closeWindow', 'webfront.inspector.openWindow']);
+            expect(host.preferences.detached.has('cpp.watches')).toBeTrue();
+        });
+
+        it('closes a tab it opened when its panel is attached again, and opens a new one on the next detach', async () => {
+            const tabs = [];
+            const {host, opened} = await testHost({containers: admitted(false, true), embedded: false, windowOpen: () => {
+                const tab = {closed: false, close() { this.closed = true; }};
+                tabs.push(tab);
+                return tab;
+            }});
+            await host.detach('cpp.watches');
+            expect((await askAttach('cpp.watches', 'request-tab')).closer).toBe('host');
+            expect(tabs[0].closed).toBeTrue();
+            expect(await host.detach('cpp.watches')).toBe('tab');
+            expect(tabs[1].closed).toBeFalse();
+            expect(opened.map(([, name]) => name)).toEqual(['webfront-inspector-host-a-cpp-watches', 'webfront-inspector-host-a-cpp-watches']);
+        });
+
+        it('lets a tab it did not open close itself, and never reuses that tab for a new detach', async () => {
+            // The tab was opened before this page was reloaded: this page has no reference to it.
+            const {host, opened} = await testHost({containers: admitted(false, true), embedded: false, files: new Map([[preferencesPath,
+                encode(formatPreferences({detached: new Set(['cpp.watches']), rect: null}))]])});
+            expect((await askAttach('cpp.watches', 'request-orphan')).closer).toBe('self');
+            expect(await host.detach('cpp.watches')).toBe('tab');
+            expect(opened.map(([, name]) => name)).toEqual(['webfront-inspector-host-a-cpp-watches-1']);
         });
 
         // The Web Locks of an origin, shared by the pages of a test: a page holds a lock until it is released.
@@ -565,6 +618,23 @@ describe('The inspectors', () => {
             expect(reloads).toEqual([]);
             shown({persisted: true});   // back to a page that was kept: its discovery had stopped
             expect(reloads).toEqual([true]);
+        });
+
+        it('leaves its closing to the host page when the host answers that it closes it', async () => {
+            const status = document.createElement('p');
+            const calls = [], closed = [];
+            const bridge = {cppFunction: name => async (...args) => { calls.push([name, ...args]); return true; }};
+            for (const opener of [{}, null]) {
+                const view = {BroadcastChannel, setTimeout: (run, delay) => setTimeout(run, delay), clearTimeout: id => clearTimeout(id), opener,
+                    close: () => closed.push(true)};
+                const host = new BroadcastChannel(inspectorChannel);
+                host.addEventListener('message', ({data}) => host.postMessage({type: 'attached', id: data.id, closer: 'host'}));
+                try { expect(await attachAgain(view, bridge, 'cpp.functions', status, {host: 'host-a'})).toBeTrue(); }
+                finally { host.close(); }
+            }
+            // Neither a tab nor a native window closes itself: a detach meanwhile may have reused it.
+            expect(closed).toEqual([]);
+            expect(calls).toEqual([]);
         });
 
         it('closes its native window through C++ when it has no opener', async () => {

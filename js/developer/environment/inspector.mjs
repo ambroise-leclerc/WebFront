@@ -334,9 +334,10 @@ export async function main(view = window) {
 }
 
 /**
- * Asks the page that detached the panel (`host`, the identifier its address carries) to show it again, and closes this
- * window once that page answered: a native window through C++, a tab by itself. Another page of the same origin does not
- * answer. Without an answer the window stays, and says why.
+ * Asks the page that detached the panel (`host`, the identifier its address carries) to show it again. That page closes this
+ * window itself when it can (a native window, or a tab it opened); otherwise it answers that this window closes itself: a tab
+ * by itself, a native window through C++. Another page of the same origin does not answer. Without an answer the window
+ * stays, and says why.
  */
 export async function attachAgain(view, bridge, id, status, {host = null, wait = 1000} = {}) {
     if (typeof view.BroadcastChannel !== 'function' || !host) {
@@ -345,20 +346,23 @@ export async function attachAgain(view, bridge, id, status, {host = null, wait =
     }
     const channel = new view.BroadcastChannel(channelName);
     const request = `${id}:${Date.now()}:${Math.random()}`;
-    const answered = await new Promise(resolve => {
-        const timer = view.setTimeout(() => resolve(false), wait);
+    const answer = await new Promise(resolve => {
+        const timer = view.setTimeout(() => resolve(null), wait);
         channel.addEventListener('message', ({data}) => {
             if (data?.type !== 'attached' || data.id !== request) return;
             view.clearTimeout(timer);
-            resolve(true);
+            resolve(data);
         });
         channel.postMessage({type: 'attach', panel: id, host, id: request});
     });
     channel.close();
-    if (!answered) {
+    if (!answer) {
         status.textContent = 'The main page did not answer: open the panel from the menu of its tab.';
         return false;
     }
+    // The host closes this window itself, ordered with a detach the user may make meanwhile, which reuses or reopens it:
+    // closing it from here could close the window of that newer detach.
+    if (answer.closer === 'host') return true;
     if (view.opener) view.close();
     else await bridge.cppFunction('webfront.inspector.closeWindow')(id, host).catch(() => view.close());
     return true;

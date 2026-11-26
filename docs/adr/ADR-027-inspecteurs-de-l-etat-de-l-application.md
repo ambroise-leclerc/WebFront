@@ -690,8 +690,12 @@ autre page du même groupe de navigation ne réutilise pas son onglet. Un pannea
 `webfront.inspector.closeWindow(panneau, hôte)` ferme celle d'un panneau rattaché de nouveau. Les deux s'exécutent sur
 le thread de l'interface, où `openSecondaryWindow` et `requestClose(page)` ne retiennent pas le thread du serveur. Une
 fenêtre détachée demande son rattachement par un `BroadcastChannel` de même origine, en nommant son hôte : seule la page
-qui l'a détachée le prend, les autres pages de l'application ouvertes sur la même origine l'ignorent, et la fenêtre ne
-se ferme qu'après cette réponse.
+qui l'a détachée le prend, les autres pages de l'application ouvertes sur la même origine l'ignorent. C'est cette page
+qui ferme la fenêtre, quand elle le peut : une fenêtre native par `closeWindow` sur sa propre connexion, et un nouveau
+détachement n'ouvre la fenêtre qu'une fois cette fermeture terminée ; un onglet qu'elle a ouvert, par sa référence. Une
+fermeture demandée par la fenêtre elle-même pourrait sinon refermer celle qu'un détachement fait entre-temps vient de
+réutiliser. Un onglet dont elle n'a pas la référence (ouvert avant un rechargement) se ferme lui-même après la réponse,
+et le détachement suivant ouvre un onglet sous un autre nom plutôt que de réutiliser celui-ci.
 
 La liste des observateurs se lit page après page sous la révision de la première ; une page qui répond `changé` fait
 recommencer la liste, pour qu'un observateur retiré entre deux pages ne reste pas affiché sous la nouvelle révision.
