@@ -73,7 +73,7 @@ message of a handler, a body or a file provider serving such a path, which may q
 as the server reads it (percent-decoded, empty and `.` segments dropped, in any letter case); prefixes may overlap
 (`/s/` and `/s/<id>/files/` mask both segments), and a declaration lasts as long as the application. The prefix is not a
 route: it changes nothing in what is served. A family of spaces (`app.spaces`, `docs/SPACES.md`) always masks its segment
-in this way; `http::RouteOptions::secretPath` masks the whole rest of a path, under `/webfront/services/` only. The
+in this way, and a secret prefix also covers the prefix of a family and the paths within a space as it reads them; `http::RouteOptions::secretPath` masks the whole rest of a path, under `/webfront/services/` only. The
 application's own logs are its business.
 
 ## Byte ranges (#455)

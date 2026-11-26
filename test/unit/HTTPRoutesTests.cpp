@@ -26,6 +26,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 
 using namespace webfront::bdd;
 #ifndef _WIN32
@@ -1196,108 +1197,150 @@ const Scenario secretPrefixMasks{"A secret prefix masks the segment that follows
                                      });
                                  }};
 
-const Scenario secretPrefixLogs{"Requests under a secret prefix never write its segment to the logs", [] {
-                                    const auto session = std::string(sessionId);
-                                    const auto quiet   = [&](const std::string& logged) {
-                                        const auto found = logged.find(session);
-                                        auto       scope = info(found == std::string::npos ? std::string{} : logged.substr(found < 120 ? 0 : found - 120, 240));
-                                        require(found == std::string::npos);
-                                    };
-                                    given("a file request", [&] {
-                                        Fixture    fixture;
-                                        Router     server("127.0.0.1", "0");
-                                        LogCapture log;
-                                        server.addSecretPrefix("/s/");
-                                        const auto response = fixture.answer(get("/s/" + session + "/index.html?x=1"));
-                                        then("it is logged with the segment masked", [&] {
-                                            require(response.starts_with("HTTP/1.1 404"));
-                                            require(contains(log.text(), "Received request GET on /s/*/index.html"));
-                                            quiet(log.text());
-                                        });
-                                    });
-                                    given("a route request, on a route of every session and on a route of one session", [&] {
-                                        for (const auto& prefix : {std::string("/s/"), "/s/" + session + "/api/"}) {
-                                            Fixture    fixture;
-                                            Router     server("127.0.0.1", "0");
-                                            LogCapture log;
-                                            server.addSecretPrefix("/s/");
-                                            auto       route    = server.addRoute(prefix, [](const RouteRequest&) {
-                                                return text("answered");
-                                            });
-                                            const auto response = fixture.answer(get("/s/" + session + "/api/data"));
-                                            then("it is answered and logged with the segment masked", [&] {
-                                                auto scope = info(prefix);
-                                                require(contains(response, "answered"));
-                                                require(contains(log.text(), "Received request GET on /s/*/api/data"));
-                                                quiet(log.text());
-                                            });
-                                        }
-                                    });
-                                    given("a WebSocket upgrade", [&] {
-                                        Fixture           fixture;
-                                        Router            server("127.0.0.1", "0");
-                                        LogCapture        log;
-                                        std::atomic<bool> upgraded{false};
-                                        std::string       path;
-                                        server.addSecretPrefix("/s/");
-                                        server.onUpgrade([&](RouteNet::Socket&&, const UpgradeSpace& space) {
-                                            path     = space.requestPath;
-                                            upgraded = true;
-                                        });
-                                        send("GET /s/" + session
-                                             + "/ HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-                                               "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n");
-                                        requireEventually(
-                                            [&] {
-                                                return upgraded.load();
-                                            },
-                                            10s);
-                                        then("the application gets the path, the logs only its masked form", [&] {
-                                            requireEqual(path, "/s/" + session + "/");
-                                            require(contains(log.text(), "Received request GET on /s/*/"));
-                                            quiet(log.text());
-                                        });
-                                    });
-                                    given("a failing route, and a route whose body fails, both quoting the path", [&] {
-                                        for (const bool inBody : {false, true}) {
-                                            Fixture    fixture;
-                                            Router     server("127.0.0.1", "0");
-                                            LogCapture log;
-                                            server.addSecretPrefix("/s/");
-                                            auto       route    = server.addRoute("/s/", [inBody](const RouteRequest& request) -> RouteReply {
-                                                if (!inBody)
-                                                    throw std::runtime_error("no session at " + std::string(request.path));
-                                                RouteReply reply;
-                                                reply.body = [path = std::string(request.path)](std::span<char>) -> std::size_t {
-                                                    throw std::runtime_error("lost " + path);
-                                                };
-                                                return reply;
-                                            });
-                                            const auto response = fixture.answer(get("/s/" + session + "/data"));
-                                            then("the warning names the route, never the segment nor the error", [&] {
-                                                auto scope = info(inBody ? "body" : "handler");
-                                                if (!inBody)
-                                                    require(response.starts_with("HTTP/1.1 500"));
-                                                require(contains(log.text(),
-                                                                 inBody ? "/s/ ended its response early (the error is not logged)"
-                                                                        : "Route /s/ failed (the error is not logged: it may quote a secret)"));
-                                                quiet(log.text());
-                                            });
-                                        }
-                                    });
-                                    given("a route outside the secret prefix that fails", [&] {
-                                        Fixture    fixture;
-                                        Router     server("127.0.0.1", "0");
-                                        LogCapture log;
-                                        server.addSecretPrefix("/s/");
-                                        auto       route    = server.addRoute("/api/", [](const RouteRequest& request) -> RouteReply {
-                                            throw std::runtime_error("broken at " + std::string(request.path));
-                                        });
-                                        const auto response = fixture.answer(get("/api/" + session));
-                                        then("it is logged as before, its path and its error included", [&] {
-                                            require(response.starts_with("HTTP/1.1 500"));
-                                            require(contains(log.text(), "Received request GET on /api/" + session));
-                                            require(contains(log.text(), "Route /api/ failed: broken at"));
-                                        });
-                                    });
-                                }};
+const Scenario secretPrefixLogs{
+    "Requests under a secret prefix never write its segment to the logs",
+    [] {
+        const auto session = std::string(sessionId);
+        const auto quiet   = [&](const std::string& logged) {
+            const auto found = logged.find(session);
+            auto       scope = info(found == std::string::npos ? std::string{} : logged.substr(found < 120 ? 0 : found - 120, 240));
+            require(found == std::string::npos);
+        };
+        given("a file request", [&] {
+            Fixture    fixture;
+            Router     server("127.0.0.1", "0");
+            LogCapture log;
+            server.addSecretPrefix("/s/");
+            const auto response = fixture.answer(get("/s/" + session + "/index.html?x=1"));
+            then("it is logged with the segment masked", [&] {
+                require(response.starts_with("HTTP/1.1 404"));
+                require(contains(log.text(), "Received request GET on /s/*/index.html"));
+                quiet(log.text());
+            });
+        });
+        given("a route request, on a route of every session and on a route of one session", [&] {
+            for (const auto& prefix : {std::string("/s/"), "/s/" + session + "/api/"}) {
+                Fixture    fixture;
+                Router     server("127.0.0.1", "0");
+                LogCapture log;
+                server.addSecretPrefix("/s/");
+                auto       route    = server.addRoute(prefix, [](const RouteRequest&) {
+                    return text("answered");
+                });
+                const auto response = fixture.answer(get("/s/" + session + "/api/data"));
+                then("it is answered and logged with the segment masked", [&] {
+                    auto scope = info(prefix);
+                    require(contains(response, "answered"));
+                    require(contains(log.text(), "Received request GET on /s/*/api/data"));
+                    quiet(log.text());
+                });
+            }
+        });
+        given("a WebSocket upgrade", [&] {
+            Fixture           fixture;
+            Router            server("127.0.0.1", "0");
+            LogCapture        log;
+            std::atomic<bool> upgraded{false};
+            std::string       path;
+            server.addSecretPrefix("/s/");
+            server.onUpgrade([&](RouteNet::Socket&&, const UpgradeSpace& space) {
+                path     = space.requestPath;
+                upgraded = true;
+            });
+            send("GET /s/" + session
+                 + "/ HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                   "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n");
+            requireEventually(
+                [&] {
+                    return upgraded.load();
+                },
+                10s);
+            then("the application gets the path, the logs only its masked form", [&] {
+                requireEqual(path, "/s/" + session + "/");
+                require(contains(log.text(), "Received request GET on /s/*/"));
+                quiet(log.text());
+            });
+        });
+        given("a failing route, and a route whose body fails, both quoting the path", [&] {
+            for (const bool inBody : {false, true}) {
+                Fixture    fixture;
+                Router     server("127.0.0.1", "0");
+                LogCapture log;
+                server.addSecretPrefix("/s/");
+                auto       route    = server.addRoute("/s/", [inBody](const RouteRequest& request) -> RouteReply {
+                    if (!inBody)
+                        throw std::runtime_error("no session at " + std::string(request.path));
+                    RouteReply reply;
+                    reply.body = [path = std::string(request.path)](std::span<char>) -> std::size_t {
+                        throw std::runtime_error("lost " + path);
+                    };
+                    return reply;
+                });
+                const auto response = fixture.answer(get("/s/" + session + "/data"));
+                then("the warning names the route, never the segment nor the error", [&] {
+                    auto scope = info(inBody ? "body" : "handler");
+                    if (!inBody)
+                        require(response.starts_with("HTTP/1.1 500"));
+                    require(contains(log.text(),
+                                     inBody ? "/s/ ended its response early (the error is not logged)"
+                                            : "Route /s/ failed (the error is not logged: it may quote a secret)"));
+                    quiet(log.text());
+                });
+            }
+        });
+        given("a mount whose prefix holds a secret segment, and a secret prefix that crosses a mount", [&] {
+            const auto mountPrefix = "/s/" + session + "/spaces/";
+            for (const auto& [mount, secret, target, shown] : {
+                     std::tuple{       mountPrefix,std::string("/s/"),mountPrefix + "alice/index.html",std::string("/s/*/spaces/*/index.html")                         },
+                     std::tuple{std::string("/m/"),
+                                std::string("/m/alice/share/"),
+                                "/m/alice/share/" + session + "/x.txt",
+                                std::string("/m/*/share/*/x.txt")}
+            }) {
+                Fixture    fixture;
+                Router     server("127.0.0.1", "0");
+                LogCapture log;
+                server.addSecretPrefix(secret);
+                server.mount(mount, [](std::string_view) {
+                    return MountAnswer{};
+                });
+                const auto response = fixture.answer(get(target));
+                then("the full path is logged with every secret segment masked", [&] {
+                    auto scope = info(target);
+                    require(response.starts_with("HTTP/1.1 404"));
+                    require(contains(log.text(), "Received request GET on " + shown));
+                    quiet(log.text());
+                });
+            }
+        });
+        given("a mount whose prefix holds a secret segment and whose resolver fails", [&] {
+            Fixture    fixture;
+            Router     server("127.0.0.1", "0");
+            LogCapture log;
+            server.addSecretPrefix("/s/");
+            server.mount("/s/" + session + "/spaces/", [](std::string_view) -> MountAnswer {
+                throw std::runtime_error("broken");
+            });
+            const auto response = fixture.answer(get("/s/" + session + "/spaces/alice/"));
+            then("the warning names the mount with its secret masked", [&] {
+                require(response.starts_with("HTTP/1.1 500"));
+                require(contains(log.text(), "The resolver of the mount /s/*/spaces/ failed"));
+                quiet(log.text());
+            });
+        });
+        given("a route outside the secret prefix that fails", [&] {
+            Fixture    fixture;
+            Router     server("127.0.0.1", "0");
+            LogCapture log;
+            server.addSecretPrefix("/s/");
+            auto       route    = server.addRoute("/api/", [](const RouteRequest& request) -> RouteReply {
+                throw std::runtime_error("broken at " + std::string(request.path));
+            });
+            const auto response = fixture.answer(get("/api/" + session));
+            then("it is logged as before, its path and its error included", [&] {
+                require(response.starts_with("HTTP/1.1 500"));
+                require(contains(log.text(), "Received request GET on /api/" + session));
+                require(contains(log.text(), "Route /api/ failed: broken at"));
+            });
+        });
+    }};
