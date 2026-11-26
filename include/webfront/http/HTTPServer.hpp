@@ -1473,8 +1473,9 @@ private:
                 response.headers.emplace_back("Content-Length", std::to_string(*reply.contentLength));
             else if (!reply.body)
                 response.headers.emplace_back("Content-Length", "0");
-        } catch (const std::exception& error) {
-            log::warn("A mount's reply is invalid: {}", error.what());
+        } catch (const std::exception&) {
+            // The message may quote a header the resolver built from the segment, a session's secret.
+            log::warn("A mount's reply is invalid (the error is not logged: it may quote the segment)");
             response   = Response::getStatusResponse(Response::internalServerError);
             reply.body = nullptr;
         }
@@ -1828,6 +1829,9 @@ private:
                 return mountPrefix.empty() ? secrets->logged(path) : secrets->logged(space.path + std::string(path.substr(1)), mountPrefix);
             };
             const bool covered = secrets->masked(request.uri) || (!mountPrefix.empty() && secrets->masked(original));
+            // An error message may quote the path as the handler or the provider saw it, or what it captured: under a mount,
+            // the space's segment, which is always secret. Its text is then never logged.
+            const bool quietErrors = covered || !mountPrefix.empty();
             if (match && match->route->secretPath)
                 log::info("Received request {} on {}...", request.getMethodName(), shown(match->route->prefix));  // the rest is a secret
             else if (routing::mentionsServices(request.uri))
@@ -1837,14 +1841,15 @@ private:
                           request.getMethodName(),
                           mountPrefix.empty() ? secrets->logged(request.uri) : secrets->logged(original, mountPrefix));
             if (match) {
-                const bool secret = match->route->secretPath || covered;
+                const bool secret = match->route->secretPath || quietErrors;
                 auto       label  = shown(match->route->prefix);
                 co_await serveRoute(socket, std::move(request), std::move(*match), rest, buffer, std::move(label), secret);
                 co_return;
             }
-            head           = request.method == Request::Method::Head;
-            servicesTarget = routing::mentionsServices(request.uri) || covered;  // before the request is moved away
-            auto prepared  = requestHandler.prepareRequest(std::move(request), servicesTarget);
+            head                 = request.method == Request::Method::Head;
+            const bool quietPath = routing::mentionsServices(request.uri) || covered;  // before the request is moved away
+            servicesTarget       = quietPath || quietErrors;
+            auto prepared        = requestHandler.prepareRequest(std::move(request), quietPath);
             if (prepared.needsDecode) {
                 lease.emplace(co_await networking::ex::continues_on(decodeExecutor.submit(std::move(prepared.response.content), prepared.limit, prepared.head),
                                                                     Net::Scheduler(socket)));

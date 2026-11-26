@@ -1145,6 +1145,15 @@ private:
 
 constexpr std::string_view sessionId = "c4p4b1l1ty-0f-a-s3ss10n";
 
+/// A file provider whose failure quotes the segment of the space its last request came from.
+struct QuotingFileSystem {
+    static inline std::string segment;
+    QuotingFileSystem(std::filesystem::path) { }
+    std::optional<fs::File> open(std::filesystem::path file) {
+        throw std::runtime_error("cannot open " + file.string() + " for session " + segment);
+    }
+};
+
 }  // namespace
 
 const Scenario secretPrefixMasks{"A secret prefix masks the segment that follows it, as the server reads a path", [] {
@@ -1325,6 +1334,62 @@ const Scenario secretPrefixLogs{
             then("the warning names the mount with its secret masked", [&] {
                 require(response.starts_with("HTTP/1.1 500"));
                 require(contains(log.text(), "The resolver of the mount /s/*/spaces/ failed"));
+                quiet(log.text());
+            });
+        });
+        given("without any secret prefix, a space's route, its body, and a file provider failing with the segment in their messages", [&] {
+            for (const auto* failing : {"handler", "body"}) {
+                Fixture    fixture;
+                Router     server("127.0.0.1", "0");
+                LogCapture log;
+                const auto table        = std::make_shared<RouteTable>();
+                auto       registration = table->add("/api/", [failing, &session](const RouteRequest&) -> RouteReply {
+                    if (std::string_view(failing) == "handler")
+                        throw std::runtime_error("no session " + session);
+                    RouteReply reply;
+                    reply.body = [&session](std::span<char>) -> std::size_t {
+                        throw std::runtime_error("lost session " + session);
+                    };
+                    return reply;
+                });
+                server.mount("/s/", [table](std::string_view) {
+                    return MountAnswer{.routes = table, .refusal = {}, .target = {}};
+                });
+                const auto response = fixture.answer(get("/s/" + session + "/api/x"));
+                then("the warning names the route under the masked space, never the error", [&] {
+                    auto scope = info(failing);
+                    require(contains(log.text(), "/s/*/api/"));
+                    require(contains(log.text(), "the error is not logged"));
+                    quiet(log.text());
+                });
+            }
+            Fixture                             fixture;
+            Server<RouteNet, QuotingFileSystem> server("127.0.0.1", "0");
+            LogCapture                          log;
+            server.mount("/s/", [](std::string_view segment) {
+                QuotingFileSystem::segment = std::string(segment);
+                return MountAnswer{};
+            });
+            const auto response = fixture.answer(get("/s/" + session + "/index.html"));
+            then("a file provider's error is not logged either", [&] {
+                require(response.starts_with("HTTP/1.1 500"));
+                require(contains(log.text(), "(the error is not logged)"));
+                quiet(log.text());
+            });
+        });
+        given("without any secret prefix, a resolver whose refusal is invalid and quotes the segment", [&] {
+            Fixture    fixture;
+            Router     server("127.0.0.1", "0");
+            LogCapture log;
+            server.mount("/s/", [](std::string_view segment) {
+                auto refusal = textReply(Response::forbidden, "refused");
+                refusal.headers.emplace_back("X-Session " + std::string(segment), "1");
+                return MountAnswer{.routes = {}, .refusal = std::move(refusal), .target = {}};
+            });
+            const auto response = fixture.answer(get("/s/" + session + "/"));
+            then("it answers 500 and its error is not logged", [&] {
+                require(response.starts_with("HTTP/1.1 500"));
+                require(contains(log.text(), "A mount's reply is invalid (the error is not logged"));
                 quiet(log.text());
             });
         });
