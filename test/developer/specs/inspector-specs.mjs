@@ -192,7 +192,7 @@ describe('The inspectors', () => {
             const host = await createInspectorHost({bridge, page: document, inspectorUrl: '/webfront/developer/environment/inspector.html',
                 access: Promise.resolve({containers, reason: ''}), hostId, windowOpen: (url, name) => { opened.push([url, name]); return windowOpen(url, name); }});
             hosts.push(host);
-            return {host, calls, opened, storage};
+            return {host, bridge, calls, opened, storage};
         }
         afterEach(() => {
             for (const host of hosts.splice(0)) {
@@ -207,7 +207,7 @@ describe('The inspectors', () => {
         const frameUrl = host => new URL(host.frame.getAttribute('src'), location.href);
 
         it('shows a panel in a floating window whose frame borrows this page\'s bridge', async () => {
-            const {host} = await testHost({containers: admitted(false)});
+            const {host, bridge} = await testHost({containers: admitted(false)});
             expect(await host.open('cpp.watches')).toBe('floating');
             expect(host.panel.hidden).toBeFalse();
             expect(host.panel.getAttribute('role')).toBe('dialog');
@@ -216,6 +216,7 @@ describe('The inspectors', () => {
             expect(frameUrl(host).searchParams.get('panel')).toBe('cpp.watches');
             expect(frameUrl(host).searchParams.get('frame')).toBe('1');
             expect(window.webfrontInspectorHost).toBe(host);
+            expect(host.bridge).toBe(bridge);  // the bridge its frame borrows
             // Inside the viewport, at its default place.
             const rect = host.panel.getBoundingClientRect();
             expect(rect.left).toBeGreaterThanOrEqual(0);
@@ -509,8 +510,12 @@ describe('The inspectors', () => {
     describe('page', () => {
         it('borrows the bridge of its host page in a frame, without loading WebFront.js', async () => {
             const bridge = {ready: Promise.resolve()};
-            const view = {parent: {webFront: bridge}, document};
+            // The host's bridge, not the page's global one: the environment may be mounted with another bridge.
+            const global = {ready: Promise.resolve()};
+            const view = {parent: {webFront: global, webfrontInspectorHost: {bridge}}, document};
             expect(await pageBridge(view, {frame: true})).toBe(bridge);
+            // Without a host, the global bridge of the page is never borrowed.
+            await expectAsync(pageBridge({parent: {webFront: global}, document}, {frame: true})).toBeRejectedWithError(/borrow/);
             await expectAsync(pageBridge({parent: {}, document}, {frame: true})).toBeRejectedWithError(/borrow/);
         });
 

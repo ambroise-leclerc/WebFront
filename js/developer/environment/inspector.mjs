@@ -12,8 +12,10 @@ import {inspectorPanels as panels, panelTitle, inspectorChannel as channelName} 
  */
 export async function pageBridge(view = window, {frame = false} = {}) {
     if (frame && view.parent !== view) {
+        // The bridge the host was created with, which may not be the page's global webFront: the frame then reads the
+        // same connection as its host, whose access was checked, and never another one.
         let borrowed = null;
-        try { borrowed = view.parent.webFront; }
+        try { borrowed = view.parent.webfrontInspectorHost?.bridge ?? null; }
         catch { /* another origin: never borrowed */ }
         if (!borrowed) throw new Error('The inspector\'s frame has no host page to borrow the bridge from');
         await borrowed.ready;

@@ -393,6 +393,8 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
         get embedded() { return isEmbedded; },
         /** The identifier that names this page in its detached windows. */
         get id() { return self; },
+        /** The bridge this host was created with: the frame of the floating window borrows it (inspector.mjs, pageBridge). */
+        get bridge() { return bridge; },
         get shownPanel() { return shownPanel; },
         get frame() { return frame; },
         panel, bar, detachButton, closeButton, notice,
