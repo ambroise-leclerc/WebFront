@@ -553,7 +553,25 @@ describe('The inspectors', () => {
             answers[1]();
             await Promise.all([first, second]);
             expect(host.panel.hidden).toBeTrue();
-            expect(calls.filter(([name]) => name === 'webfront.inspector.closeWindow').length).toBe(2);
+            // Both aimed at the panel's one native window: the latest opening closes it.
+            expect(calls.filter(([name]) => name === 'webfront.inspector.closeWindow')).toEqual([['webfront.inspector.closeWindow', 'cpp.watches', 'host-a']]);
+        });
+
+        it('does not let a cancelled opening close the window that a later detach of the panel reuses', async () => {
+            const answers = [];
+            const {host, calls} = await testHost({containers: admitted(true), openWindow: () => new Promise(resolve => answers.push(resolve))});
+            await host.open('cpp.watches');
+            const cancelled = host.detach('cpp.watches');
+            host.closeButton.click();  // cancels the first opening
+            const again = host.detach('cpp.watches');  // the user detaches it again at once
+            expect(answers.length).toBe(2);
+            answers[0]();  // the cancelled opening answers first
+            await cancelled;
+            expect(calls.some(([name]) => name === 'webfront.inspector.closeWindow')).toBeFalse();
+            answers[1]();
+            expect(await again).toBe('window');
+            expect(calls.some(([name]) => name === 'webfront.inspector.closeWindow')).toBeFalse();
+            expect(host.panel.hidden).toBeTrue();
         });
 
         it('keeps the native window when another panel is opened in the floating window meanwhile', async () => {

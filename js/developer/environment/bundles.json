@@ -24,7 +24,7 @@
   "js/developer/environment/terminal.mjs": "3b74d1a4d0466ce06af4df2bd9727c2ecb933780dc52de94abc153c1e60d48e7",
   "js/developer/environment/workspace.mjs": "e82ec4df21ffb2b112550e0212504aba05af4f924b5645c0712f40f8466257fc",
   "js/developer/environment/menu.mjs": "b4fe4c38e6b8cc6c1101df842e282ab85e6c6e029b2225738b9d27bc5efbc88d",
-  "js/developer/environment/inspector-host.mjs": "a6a5eea8aa10bcbb71c477fd0c7731514e3ba80caff3cc47e02fde6e10c769ac",
+  "js/developer/environment/inspector-host.mjs": "20a28dd403861a1492f4b2590ebd1b2da71a185498e58ee7fe434597f51b2c0c",
   "js/developer/environment/inspector.mjs": "dc253099f207d29e0c86d815e545212a548c1eed7ff2fba0e9195ff0d40f21c3",
   "js/developer/environment/inspector.html": "66bfb80d6bd29bc9aabf71e0dd9b163dfcd1f1c77d1a41818645af1a4f9b8616",
   "js/developer/environment/tarball.mjs": "1c1e1aea067910e1fec74e85b4bf9fbefed9b38187a04d8d2764f0b9a96fca39",

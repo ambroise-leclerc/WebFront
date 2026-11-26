@@ -435,7 +435,9 @@ public:
     Watch(Watch&& other) noexcept : registry(std::move(other.registry)), watchId(std::exchange(other.watchId, 0)) { }
     Watch& operator=(Watch&& other) noexcept {
         if (this != &other) {
-            reset();
+            // The previous watch is removed once this handle holds the new one: its source, released then, may assign
+            // this handle again, and that assignment is the one kept.
+            Watch previous{std::move(*this)};
             registry = std::move(other.registry);
             watchId  = std::exchange(other.watchId, 0);
         }
@@ -445,12 +447,13 @@ public:
         reset();
     }
 
-    /// Removes the watch now; the handle becomes empty.
+    /// Removes the watch now; the handle becomes empty. The handle is emptied before the removal and not touched after it:
+    /// the source, released by the removal, may assign this handle to a new watch, which stays registered.
     void reset() noexcept {
-        if (const auto id = std::exchange(watchId, 0); id != 0)
-            if (const auto owner = registry.lock())
-                owner->remove(id);
-        registry.reset();
+        const auto id    = std::exchange(watchId, 0);
+        const auto owner = std::exchange(registry, {}).lock();
+        if (id != 0 && owner)
+            owner->remove(id);
     }
 
     /// The identifier the inspectors know the watch by, 0 for an empty handle.

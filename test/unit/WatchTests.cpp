@@ -277,69 +277,111 @@ const Scenario watchPages{
         });
     }};
 
-const Scenario watchHandles{"A watch exists while its handle lives, and the handle outlives the application (ADR-027, section 5)", {"inspector"}, [] {
-                                given("a handle on a registry", [&] {
-                                    auto           registry = std::make_shared<WatchRegistry>();
-                                    auto           source   = std::make_shared<int>(7);
-                                    std::weak_ptr  observed = source;
-                                    inspect::Watch handle{registry, registry->add("grid", "integer", "app.cpp:1", false, std::move(source))};
-                                    then("the watch is registered and the registry keeps its source", [&] {
-                                        require(static_cast<bool>(handle));
-                                        require(registry->contains(handle.id()));
-                                        require(!observed.expired());
-                                    });
-                                    when("the handle is moved, then reset", [&] {
-                                        const auto     id    = handle.id();
-                                        inspect::Watch moved = std::move(handle);
-                                        require(!handle);
-                                        require(moved.id() == id && registry->contains(id));
-                                        moved.reset();
-                                        then("the watch and its source are gone", [&] {
-                                            require(!registry->contains(id));
-                                            require(observed.expired());
-                                        });
-                                    });
-                                    when("the registry goes first", [&] {
-                                        registry.reset();
-                                        then("the handle is destroyed without touching it", [&] {
-                                            handle.reset();
-                                            require(!handle);
-                                        });
-                                    });
-                                });
-                                given("an application outside the developer environment", [&] {
-                                    BasicWF<NetProvider, fs::DefaultFS> app{WebFrontConfig{.port = "0"}};
-                                    int                                 value = 0;
-                                    then("watch() registers nothing and returns an empty handle", [&] {
-                                        auto handle = app.watch("value", [&value]() -> const int& {
-                                            return value;
-                                        });
-                                        require(!handle);
-                                        require(!app.watch("byName", sharedValues));  // a function given by name
-                                        requireEqual(handle.id(), std::uint64_t{0});
-                                    });
-                                    then("an invalid name is refused all the same", [&] {
-                                        checkThrows<std::invalid_argument>([&] {
-                                            static_cast<void>(app.watch("", [&value]() -> const int& {
-                                                return value;
-                                            }));
-                                        });
-                                    });
-                                    then("cppFunction refuses the names reserved to the inspectors", [&] {
-                                        checkThrows<std::invalid_argument>([&] {
-                                            app.cppFunction("webfront.inspector.containers", [] {
-                                                return true;
-                                            });
-                                        });
-                                        checkThrows<std::invalid_argument>([&] {
-                                            app.cppFunction<bool>("webfront.inspector.watches", [] {
-                                                return true;
-                                            });
-                                        });
-                                        require(!app.hasCppFunction("webfront.inspector.containers"));
-                                        require(app.cppFunction("webfront.inspectorish", [] {
-                                            return true;
-                                        }));
-                                    });
-                                });
-                            }};
+const Scenario watchHandles{
+    "A watch exists while its handle lives, and the handle outlives the application (ADR-027, section 5)",
+    {"inspector"},
+    [] {
+        given("a handle on a registry", [&] {
+            auto           registry = std::make_shared<WatchRegistry>();
+            auto           source   = std::make_shared<int>(7);
+            std::weak_ptr  observed = source;
+            inspect::Watch handle{registry, registry->add("grid", "integer", "app.cpp:1", false, std::move(source))};
+            then("the watch is registered and the registry keeps its source", [&] {
+                require(static_cast<bool>(handle));
+                require(registry->contains(handle.id()));
+                require(!observed.expired());
+            });
+            when("the handle is moved, then reset", [&] {
+                const auto     id    = handle.id();
+                inspect::Watch moved = std::move(handle);
+                require(!handle);
+                require(moved.id() == id && registry->contains(id));
+                moved.reset();
+                then("the watch and its source are gone", [&] {
+                    require(!registry->contains(id));
+                    require(observed.expired());
+                });
+            });
+            when("the registry goes first", [&] {
+                registry.reset();
+                then("the handle is destroyed without touching it", [&] {
+                    handle.reset();
+                    require(!handle);
+                });
+            });
+        });
+        given("a source whose release assigns its own handle to a new watch", [&] {
+            auto           registry = std::make_shared<WatchRegistry>();
+            inspect::Watch handle;
+            // The destructor of the source registers a new watch in the same handle, as a source
+            // owning an object that watches itself again would.
+            struct Reassigning {
+                WatchRegistry&               registry;
+                inspect::Watch&              handle;
+                std::weak_ptr<WatchRegistry> owner;
+                ~Reassigning() {
+                    handle = inspect::Watch{owner, registry.add("again", "integer", "app.cpp:2", false, nullptr)};
+                }
+            };
+            const auto first = registry->add("first", "integer", "app.cpp:1", false, std::make_shared<Reassigning>(Reassigning{*registry, handle, registry}));
+            handle           = inspect::Watch{registry, first};
+            when("the handle is reset", [&] {
+                handle.reset();
+                then("the new watch stays registered and its handle can still remove it", [&] {
+                    require(!registry->contains(first));
+                    require(static_cast<bool>(handle));
+                    const auto again = handle.id();
+                    require(registry->contains(again));
+                    handle.reset();
+                    require(!registry->contains(again));
+                    require(!handle);
+                });
+            });
+            when("the handle is assigned another watch", [&] {
+                handle = inspect::Watch{registry, addWatch(*registry, "other")};
+                then("the assignment made by the released source is the one kept, still removable", [&] {
+                    require(!registry->contains(first));
+                    requireEqual(registry->size(), std::size_t{1});
+                    const auto kept = handle.id();
+                    require(registry->contains(kept));
+                    handle.reset();
+                    requireEqual(registry->size(), std::size_t{0});
+                });
+            });
+        });
+        given("an application outside the developer environment", [&] {
+            BasicWF<NetProvider, fs::DefaultFS> app{WebFrontConfig{.port = "0"}};
+            int                                 value = 0;
+            then("watch() registers nothing and returns an empty handle", [&] {
+                auto handle = app.watch("value", [&value]() -> const int& {
+                    return value;
+                });
+                require(!handle);
+                require(!app.watch("byName", sharedValues));  // a function given by name
+                requireEqual(handle.id(), std::uint64_t{0});
+            });
+            then("an invalid name is refused all the same", [&] {
+                checkThrows<std::invalid_argument>([&] {
+                    static_cast<void>(app.watch("", [&value]() -> const int& {
+                        return value;
+                    }));
+                });
+            });
+            then("cppFunction refuses the names reserved to the inspectors", [&] {
+                checkThrows<std::invalid_argument>([&] {
+                    app.cppFunction("webfront.inspector.containers", [] {
+                        return true;
+                    });
+                });
+                checkThrows<std::invalid_argument>([&] {
+                    app.cppFunction<bool>("webfront.inspector.watches", [] {
+                        return true;
+                    });
+                });
+                require(!app.hasCppFunction("webfront.inspector.containers"));
+                require(app.cppFunction("webfront.inspectorish", [] {
+                    return true;
+                }));
+            });
+        });
+    }};
