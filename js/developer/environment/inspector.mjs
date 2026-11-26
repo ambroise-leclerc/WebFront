@@ -232,6 +232,15 @@ export function watchOpener(view, period = 1000) {
 }
 
 /**
+ * Loads the page again when the browser restores it from its back-forward cache. The restored page is resumed without
+ * main(): the discovery of the watches and the watch of the opener, stopped when it was hidden, would not start again, and
+ * the connection of a tab may have been closed meanwhile. Loading it again starts all of them anew.
+ */
+export function reloadWhenRestored(view) {
+    view.addEventListener('pageshow', event => { if (event.persisted) view.location.reload(); });
+}
+
+/**
  * Shows the panel named by the page's URL. In a frame it borrows the host page's bridge; elsewhere it has its own
  * connection, offers to attach the panel to the host page again, and closes itself when the page that opened it is gone.
  */
@@ -241,6 +250,7 @@ export async function main(view = window) {
     const id = params.get('panel') ?? 'cpp.watches';
     const framed = params.get('frame') === '1';
     page.title = `WebFront inspector: ${panelTitle(id)}`;
+    reloadWhenRestored(view);
     const style = page.createElement('style');
     style.textContent = styles;
     page.head.append(style);

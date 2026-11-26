@@ -4,7 +4,7 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.1 | 2026-11-25 | Proposée | Ambroise Leclerc | Hôte détachable (#680) : `webfront.inspector.embedded()` dit à la page hôte si elle est la vue d'un frontend intégré, ce qui décide de l'onglet du navigateur système ; `webfront.inspector.closeWindow(panneau, hôte)` ferme la fenêtre d'un panneau rattaché ; une fenêtre par panneau et par page hôte, qui seule le rattache ; choix et place conservés dans `inspector-window.json`. | À renseigner après intégration. |
+| 1.1 | 2026-11-25 | Proposée | Ambroise Leclerc | Hôte détachable (#680) : `webfront.inspector.embedded()` dit à la page hôte si elle peut tourner dans un frontend intégré (vue prouvée, ou frontend actif qui transmet la preuve), ce qui décide de l'onglet du navigateur système ; `webfront.inspector.closeWindow(panneau, hôte)` ferme la fenêtre d'un panneau rattaché ; une fenêtre par panneau et par page hôte, qui seule le rattache ; choix et place conservés dans `inspector-window.json`. | À renseigner après intégration. |
 | 1.0 | 2026-11-25 | Proposée | Ambroise Leclerc | Décision initiale (#678, épique #677) : inspecteurs réservés à l'environnement développeur, accès réservé aux vues prouvées sauf autorisation explicite, nœuds d'arbre sur les types existants du pont, lecture et différences paginées, opérations entières sous le verrou ou sur l'exécuteur de l'application, modification à la demande de l'application, page unique `inspector.html` dans un conteneur choisi sur l'accès effectif. | À renseigner après intégration. |
 
 ## État et portée
@@ -675,8 +675,11 @@ flottante sert de repli). L'ordre qui suit choisit le conteneur d'un panneau **d
    pourquoi (section 2).
 
 La page hôte ne sait pas d'elle-même si elle tourne dans le navigateur système : `containers()` décrit l'accès, pas la
-vue. Elle le demande à `webfront.inspector.embedded()`, qui vérifie l'accès comme les autres fonctions et rend
-`UI::isEmbeddedView()` de l'appelant ; un échec compte comme une vue intégrée, ce qui n'essaie jamais d'onglet.
+vue. Elle le demande à `webfront.inspector.embedded()`, qui vérifie l'accès comme les autres fonctions et répond vrai
+quand l'appelant est une vue prouvée (`UI::isEmbeddedView()`) **ou** quand le frontend actif transmet la preuve à ses
+vues. La preuve désigne une vue prouvée, pas l'endroit où tourne une page qui ne l'a pas : sous un tel frontend, une page
+admise sans preuve (un cadre d'une vue intégrée, avec `trustLoopbackClients`) peut se trouver dans une vue intégrée, et
+on ne lui propose pas d'onglet. Un échec compte aussi comme une vue intégrée, ce qui n'essaie jamais d'onglet.
 
 Chaque page hôte a un **identifiant** (1 à 64 lettres, chiffres, `-` ou `_`), gardé dans le stockage de session de son
 onglet pour qu'un rechargement le garde. Ce stockage étant copié dans une page qu'elle ouvre, l'identifiant n'est repris

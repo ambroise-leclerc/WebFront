@@ -192,11 +192,13 @@ private:
             [trust = this->trustsLoopbackClients()](Caller ui) {
                 return developer::inspectorContainers(Base::canShowSecondaryWindow(), ui.isLocalClient(), trust);
             });
-        // Whether the calling page is the view of an embedded frontend: a tab of the system browser is offered only to a page
-        // that is not (ADR-027, section 8), since window.open() in an embedded view would open a frame without the proof.
+        // Whether the calling page may run in an embedded frontend: a tab of the system browser is offered only to a page
+        // that cannot (ADR-027, section 8), since window.open() in an embedded view would open a frame without the proof.
+        // The proof tells a proven view, not where an unproven page runs: while the active frontend gives its views the
+        // proof, an admitted page without it (a frame of such a view, under trustLoopbackClients) may be inside one too.
         this->template reservedCppFunction<bool, Caller>("webfront.inspector.embedded", [](Caller ui) {
             admit(ui);
-            return ui.isEmbeddedView();
+            return ui.isEmbeddedView() || frontend::providesViewProof<Frontend>();
         });
         this->template reservedCppFunction<void, Caller, std::string, std::vector<std::uint8_t>>(
             "webfront.inspector.savePreferences",

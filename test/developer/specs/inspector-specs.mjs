@@ -5,7 +5,7 @@ import {detachedContainer, containerFor, hostReasons, parsePreferences, formatPr
     createInspectorHost, defaultInspectorRect, panelTitle, claimHostIdentifier, hostKey, prepareInspectors,
     preferencesStore, applyPreferenceChanges} from '../../../js/developer/environment/inspector-host.mjs';
 import {readDescriptor, readPage, listWatches, listingAttempts, reconcile, watchOpener, createWatchDiscovery, renderWatches, pageBridge, attachAgain,
-    watchesFunction} from '../../../js/developer/environment/inspector.mjs';
+    watchesFunction, reloadWhenRestored} from '../../../js/developer/environment/inspector.mjs';
 import {inspectorChannel, inspectorPanels} from '../../../js/developer/environment/menu.mjs';
 import {LineEditor} from '../../../js/developer/environment/terminal.mjs';
 import {memoryBridge} from '../memory-bridge.mjs';
@@ -531,6 +531,17 @@ describe('The inspectors', () => {
                 handlers.find(([name]) => name === 'pagehide')[1]();
                 expect(watchOpener({...view, opener: null})).toBeNull();
             } finally { jasmine.clock().uninstall(); }
+        });
+
+        it('loads itself again when the browser restores it from its back-forward cache', () => {
+            const handlers = [], reloads = [];
+            const view = {addEventListener: (name, handler) => handlers.push([name, handler]), location: {reload: () => reloads.push(true)}};
+            reloadWhenRestored(view);
+            const shown = handlers.find(([name]) => name === 'pageshow')[1];
+            shown({persisted: false});  // the first load
+            expect(reloads).toEqual([]);
+            shown({persisted: true});   // back to a page that was kept: its discovery had stopped
+            expect(reloads).toEqual([true]);
         });
 
         it('closes its native window through C++ when it has no opener', async () => {

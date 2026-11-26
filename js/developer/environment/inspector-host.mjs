@@ -225,7 +225,7 @@ export async function claimHostIdentifier(view) {
 
 /**
  * The inspectors' host for the page that holds the tab. `inspectorUrl` is the URL of inspector.html, `access` resolves to what
- * the menu read (menu.mjs, inspectorAccess), and `embedded` to whether this page is an embedded view (by default asked to
+ * the menu read (menu.mjs, inspectorAccess), and `embedded` to whether this page may run in an embedded frontend (by default asked to
  * webfront.inspector.embedded(); an error counts as embedded, which never offers a tab). `open(panel)` shows a panel in its
  * container, `detach(panel)` and `attach(panel)` move it, and `reason(panel)` says why it cannot be detached ('' when it
  * can). `windowOpen` replaces window.open (tests). `hostId` names this page in its detached windows (claimHostIdentifier()).

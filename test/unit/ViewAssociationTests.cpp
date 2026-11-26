@@ -632,8 +632,17 @@ const Scenario inspectorWatchesAccess{
             ViewSocket::peerIsLoopback = true;
             AdmittedBrowser<InspectorApp> browser{true, false};
             callWithoutArgument("webfront.inspector.embedded", 12);
-            then("it is admitted and told that it is not one: a tab of the system browser may be offered to it", [&] {
+            then("under a frontend without the proof, it is told that it is not one: a tab of the system browser may be offered", [&] {
                 require(ViewSocket::wrote(booleanAnswer(12, false)));
+            });
+        });
+        given("a trusted loopback page that is not proven, under a frontend that gives its views the proof", [&] {
+            freshNetwork();
+            ViewSocket::peerIsLoopback = true;
+            AdmittedBrowser<InspectorWindowApp> browser{true, false};
+            callWithoutArgument("webfront.inspector.embedded", 12);
+            then("it is told that it may be one (a frame of an embedded view), which never offers it a tab", [&] {
+                require(ViewSocket::wrote(booleanAnswer(12, true)));
             });
         });
         given("a trusted loopback page", [&] {
