@@ -377,6 +377,31 @@ describe('The registry panels of the inspectors', () => {
             expect(parts.status.classList.contains('error')).toBeTrue();
             panel.poller.stop();
         });
+
+        it('keeps a failed read told while the rows read earlier are searched, until a read succeeds', async () => {
+            let lost = false;
+            const tuples = () => [functionTuple(1, 'saveFile'), functionTuple(2, 'ping')];
+            const timers = manualTimers();
+            const bridge = fakeBridge({[functionsFunction]: (...args) => { if (lost) throw new Error('connection lost'); return paged(tuples, 200)(...args); },
+                [jsFunctionsFunction]: paged(() => [], 200)});
+            const parts = panelParts();
+            const panel = await showFunctionsPanel({...parts, view: panelView(timers), bridge});
+            lost = true;
+            timers.fire();
+            await panel.poller.settled();
+            expect(parts.status.textContent).toBe('The functions cannot be read: connection lost');
+            panel.toolbar.search.value = 'ping';
+            panel.toolbar.search.dispatchEvent(new Event('input'));
+            expect(column(panel.functions, 0)).toEqual(['ping']);
+            expect(parts.status.textContent).toBe('The functions cannot be read: connection lost');
+            expect(parts.status.classList.contains('error')).toBeTrue();
+            lost = false;
+            timers.fire();
+            await panel.poller.settled();
+            expect(parts.status.classList.contains('error')).toBeFalse();
+            expect(parts.status.textContent).toContain('1 of 2 C++ functions');
+            panel.poller.stop();
+        });
     });
 
     describe('browsers panel', () => {

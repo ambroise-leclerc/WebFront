@@ -102,11 +102,16 @@ public:
         if (inspect::isReservedName(functionName))
             throw std::invalid_argument("webfront::BasicSpace::cppFunction(): names starting with 'webfront.inspector.' are reserved to WebFront");
         // The inspectors list it with the path of this space, until the space releases it (ADR-027, section 7).
-        auto record  = app.template recordFunction<R, Args...>(functionName, location, state->path);
-        auto handler = std::make_shared<typename App::CppHandler>(
-            app.template makeCppHandler<R, Args...>(std::forward<decltype(function)>(function), std::move(record)));
-        std::scoped_lock lock{state->mutex};
-        return state->functions.try_emplace(std::move(functionName), std::move(handler)).second;
+        const auto record = app.template recordFunction<R, Args...>(functionName, location, state->path);
+        auto handler = std::make_shared<typename App::CppHandler>(app.template makeCppHandler<R, Args...>(std::forward<decltype(function)>(function), record));
+        bool added   = false;
+        {
+            std::scoped_lock lock{state->mutex};
+            added = state->functions.try_emplace(std::move(functionName), std::move(handler)).second;
+        }
+        if (added)
+            app.publishFunction(record);  // listed only once the space accepted it
+        return added;
     }
 
     /// As BasicWF::cppFunction, deducing the signature from the callable.

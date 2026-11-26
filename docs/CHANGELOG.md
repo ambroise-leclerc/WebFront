@@ -32,7 +32,7 @@ these entries stays in the GitHub releases and the Git history.
 - The test helpers, `webfront_add_jasmine_test` included, export the real `XDG_DATA_HOME` and `XDG_CACHE_HOME` as `WEBFRONT_TEST_REAL_XDG_DATA_HOME` and `WEBFRONT_TEST_REAL_XDG_CACHE_HOME`, so an application under test can keep the throwaway WebKitGTK profile away from the programs it starts ([#664](https://github.com/ambroise-leclerc/WebFront/issues/664), `docs/CONSUMER_TESTING.md`).
 
 ### Changed
-- `cppFunction` and `Space::cppFunction` take a last, defaulted `std::source_location` parameter, which the inspectors show; existing calls compile unchanged, the explicit `cppFunction<R, Args...>` form included, and each call of a registered function now increments an atomic counter outside distribution builds (#681, ADR-027).
+- The inspectors show where each `cppFunction` was registered; existing calls of `cppFunction` and `Space::cppFunction` compile unchanged (#681, ADR-027).
 - `WebFront.js` opens its WebSocket on the directory of the page (`ws://host/dir/` instead of `ws://host`), which tells the server a page's space (#671) and lets an application be deployed under a sub-path of a site (#672).
 - A request whose path holds a control character (`%00`...) is refused with 400, as a `..` already was, instead of being looked up as a file (#672).
 - A `+` in the path of a file request is a literal `+`, as for the routes, the spaces and `ui.path()`: `/a+b.html` serves `a+b.html`, no longer `a b.html`, which `/a%20b.html` names (#672).

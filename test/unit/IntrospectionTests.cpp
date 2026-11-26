@@ -62,6 +62,12 @@ testing::ManualSender introGate() {
     });
 }
 
+/// Completes with a string that no message can carry: its encoding fails once the task has answered.
+ResultTask<std::string> introTooLong() {
+    co_await introGate();
+    co_return std::string(http::maxMessageSize<http::DefaultBuffersPolicy>() + 1, 'x');
+}
+
 ResultTask<std::string> introLater(std::string value) {
     co_await introGate();
     co_return "later:" + value;
@@ -248,6 +254,7 @@ const Scenario introCounters{"The calls of a function are counted, with its fail
                                      throw std::runtime_error(std::string{"a\nb"} + std::string(1000, 'x'));
                                  });
                                  app.cppFunction("later", &introLater);
+                                 app.cppFunction("tooLong", &introTooLong);
                                  browser.connect();
 
                                  when("a call succeeds", [&] {
@@ -301,6 +308,16 @@ const Scenario introCounters{"The calls of a function are counted, with its fail
                                      then("its answer is not a failure", [&] {
                                          require(IntroSocket::wrote("later:x"));
                                          requireEqual(browser.function("later").failures, std::uint64_t{0});
+                                     });
+                                 });
+                                 when("a function that answers later gives a value that cannot be encoded", [&] {
+                                     browser.call("tooLong", 9);
+                                     introGates.at(0).complete({}, 0);
+                                     const auto info = browser.function("tooLong");
+                                     then("the call is rejected and counted as a failure, as for a function that answers at once", [&] {
+                                         requireEqual(info.calls, std::uint64_t{1});
+                                         requireEqual(info.failures, std::uint64_t{1});
+                                         require(!info.lastError.empty());
                                      });
                                  });
                                  when("the browser disconnects before a function answers", [&] {
@@ -384,95 +401,130 @@ const Scenario introTiming{"The duration of a call is measured only while an ins
                                });
                            }};
 
-const Scenario introFunctionPages{"The functions are read page after page, each within the budget of an answer (ADR-027, sections 3 and 7)", {"inspector"}, [] {
-                                      inspect::FunctionRegistry                             registry;
-                                      std::vector<std::shared_ptr<inspect::FunctionRecord>> owned;
-                                      const std::string                                     longName(1000, 'n');
-                                      for (int i = 0; i < 5; ++i)
-                                          owned.push_back(registry.add(longName + std::to_string(i),
-                                                                       inspect::typescriptSignature(std::vector<std::string>(200, "Float64Array"), "void"),
-                                                                       i % 2 == 0,
-                                                                       i == 1,
-                                                                       std::source_location::current()));
-                                      for (const auto& record : owned)
-                                          record->fail(std::string(1000, 'e'));
+const Scenario introFunctionPages{
+    "The functions are read page after page, each within the budget of an answer (ADR-027, sections 3 and 7)",
+    {"inspector"},
+    [] {
+        inspect::FunctionRegistry                             registry;
+        std::vector<std::shared_ptr<inspect::FunctionRecord>> owned;
+        const std::string                                     longName(1000, 'n');
+        for (int i = 0; i < 5; ++i)
+            owned.push_back(registry.add(longName + std::to_string(i),
+                                         inspect::typescriptSignature(std::vector<std::string>(200, "Float64Array"), "void"),
+                                         i % 2 == 0,
+                                         i == 1,
+                                         std::source_location::current()));
+        for (const auto& record : owned)
+            record->fail(std::string(1000, 'e'));
 
-                                      then("a page of one row always fits the smallest budget", [&] {
-                                          const auto [rows, next] = registry.page(0, 200, inspect::minPageBytes);
-                                          require(!rows.empty());
-                                          requireEqual(std::get<1>(rows.front()).size(), inspect::maxTextBytes);
-                                          require(next != 0);
-                                      });
-                                      then("the pages follow each other by the last identifier served, without loss or repetition", [&] {
-                                          std::vector<double> ids;
-                                          double              after = 0;
-                                          int                 pages = 0;
-                                          do {
-                                              const auto [rows, next] = registry.page(after, 2, inspect::responseBudget<http::DefaultBuffersPolicy>);
-                                              require(rows.size() <= 2);
-                                              for (const auto& row : rows)
-                                                  ids.push_back(std::get<0>(row));
-                                              after = next;
-                                              ++pages;
-                                          } while (after != 0 && pages < 10);
-                                          requireEqual(ids, (std::vector<double>{1, 2, 3, 4, 5}));
-                                          requireEqual(pages, 3);
-                                      });
-                                      then("the flags tell the caller and the deferred answer", [&] {
-                                          const auto [rows, next] = registry.page(0, 200, inspect::responseBudget<http::DefaultBuffersPolicy>);
-                                          static_cast<void>(next);
-                                          requireEqual(static_cast<unsigned>(std::get<5>(rows.at(0))), inspect::function_flag::takesCaller);
-                                          requireEqual(static_cast<unsigned>(std::get<5>(rows.at(1))), inspect::function_flag::deferred);
-                                          requireEqual(std::get<7>(rows.at(0)), 1.0);
-                                      });
-                                      then("a function released by its owner is listed no more, and the others keep their identifiers", [&] {
-                                          owned.erase(owned.begin() + 1);
-                                          const auto [rows, next] = registry.page(0, 200, inspect::responseBudget<http::DefaultBuffersPolicy>);
-                                          static_cast<void>(next);
-                                          requireEqual(rows.size(), std::size_t{4});
-                                          requireEqual(std::get<0>(rows.at(1)), 3.0);
-                                      });
-                                      then("released functions leave the table at once, without any read: it does not grow with what comes and goes", [&] {
-                                          requireEqual(registry.size(), std::size_t{5});
-                                          for (int i = 0; i < 1000; ++i)
-                                              static_cast<void>(
-                                                  registry.add("transient", "() => Promise<void>", false, false, std::source_location::current()));
-                                          requireEqual(registry.size(), std::size_t{5});
-                                          owned.clear();
-                                          requireEqual(registry.size(), std::size_t{0});
-                                      });
-                                      then("a record that outlives its registry is released without it", [&] {
-                                          std::shared_ptr<inspect::FunctionRecord> kept;
-                                          {
-                                              inspect::FunctionRegistry shortLived;
-                                              kept = shortLived.add("kept", "() => Promise<void>", false, false, std::source_location::current());
-                                          }
-                                          requireEqual(kept->name, std::string{"kept"});
-                                          kept.reset();
-                                      });
-                                      then("the application reads the names exactly as it registered them; only a page bounds them", [&] {
-                                          const auto functions = registry.list();
-                                          requireEqual(functions.size(), std::size_t{5});
-                                          requireEqual(functions.at(0).name, longName + "0");
-                                          requireEqual(functions.at(4).name, longName + "4");
-                                          require(functions.at(0).name != functions.at(4).name);
-                                          requireEqual(functions.at(0).label.size(), inspect::maxTextBytes);
-                                          require(registry.find(longName + "3").has_value());
-                                          const auto control = registry.add("a\nb", "() => Promise<void>", false, false, std::source_location::current());
-                                          requireEqual(registry.find("a\nb")->name, std::string{"a\nb"});
-                                          requireEqual(registry.find("a\nb")->label,
-                                                       std::string{"a\xE2\x90\x8A"
-                                                                   "b"});
-                                      });
-                                      then("a cursor or a count that is not a whole number is refused", [&] {
-                                          checkThrows<std::invalid_argument>([&] {
-                                              static_cast<void>(registry.page(-1, 200, inspect::minPageBytes));
-                                          });
-                                          checkThrows<std::invalid_argument>([&] {
-                                              static_cast<void>(registry.page(0, 1.5, inspect::minPageBytes));
-                                          });
-                                      });
-                                  }};
+        then("a page of one row always fits the smallest budget", [&] {
+            const auto [rows, next] = registry.page(0, 200, inspect::minPageBytes);
+            require(!rows.empty());
+            requireEqual(std::get<1>(rows.front()).size(), inspect::maxTextBytes);
+            require(next != 0);
+        });
+        then("the pages follow each other by the last identifier served, without loss or repetition", [&] {
+            std::vector<double> ids;
+            double              after = 0;
+            int                 pages = 0;
+            do {
+                const auto [rows, next] = registry.page(after, 2, inspect::responseBudget<http::DefaultBuffersPolicy>);
+                require(rows.size() <= 2);
+                for (const auto& row : rows)
+                    ids.push_back(std::get<0>(row));
+                after = next;
+                ++pages;
+            } while (after != 0 && pages < 10);
+            requireEqual(ids, (std::vector<double>{1, 2, 3, 4, 5}));
+            requireEqual(pages, 3);
+        });
+        then("the flags tell the caller and the deferred answer", [&] {
+            const auto [rows, next] = registry.page(0, 200, inspect::responseBudget<http::DefaultBuffersPolicy>);
+            static_cast<void>(next);
+            requireEqual(static_cast<unsigned>(std::get<5>(rows.at(0))), inspect::function_flag::takesCaller);
+            requireEqual(static_cast<unsigned>(std::get<5>(rows.at(1))), inspect::function_flag::deferred);
+            requireEqual(std::get<7>(rows.at(0)), 1.0);
+        });
+        then("a function released by its owner is listed no more, and the others keep their identifiers", [&] {
+            owned.erase(owned.begin() + 1);
+            const auto [rows, next] = registry.page(0, 200, inspect::responseBudget<http::DefaultBuffersPolicy>);
+            static_cast<void>(next);
+            requireEqual(rows.size(), std::size_t{4});
+            requireEqual(std::get<0>(rows.at(1)), 3.0);
+        });
+        then("released functions leave the table at once, without any read: it does not grow with what comes and goes", [&] {
+            requireEqual(registry.size(), std::size_t{5});
+            for (int i = 0; i < 1000; ++i)
+                static_cast<void>(registry.add("transient", "() => Promise<void>", false, false, std::source_location::current()));
+            requireEqual(registry.size(), std::size_t{5});
+            owned.clear();
+            requireEqual(registry.size(), std::size_t{0});
+        });
+        then("a record that outlives its registry is released without it", [&] {
+            std::shared_ptr<inspect::FunctionRecord> kept;
+            {
+                inspect::FunctionRegistry shortLived;
+                kept = shortLived.add("kept", "() => Promise<void>", false, false, std::source_location::current());
+            }
+            requireEqual(kept->name, std::string{"kept"});
+            kept.reset();
+        });
+        then("the application reads the names exactly as it registered them; only a page bounds them", [&] {
+            const auto functions = registry.list();
+            requireEqual(functions.size(), std::size_t{5});
+            requireEqual(functions.at(0).name, longName + "0");
+            requireEqual(functions.at(4).name, longName + "4");
+            require(functions.at(0).name != functions.at(4).name);
+            requireEqual(functions.at(0).label.size(), inspect::maxTextBytes);
+            require(registry.find(longName + "3").has_value());
+            const auto control = registry.add("a\nb", "() => Promise<void>", false, false, std::source_location::current());
+            requireEqual(registry.find("a\nb")->name, std::string{"a\nb"});
+            requireEqual(registry.find("a\nb")->label,
+                         std::string{"a\xE2\x90\x8A"
+                                     "b"});
+        });
+        then("a record is listed only once its registration is accepted", [&] {
+            const auto prepared = registry.prepare("pending", "() => Promise<void>", false, false, std::source_location::current());
+            require(!registry.find("pending").has_value());
+            requireEqual(registry.size(), std::size_t{5});
+            registry.publish(prepared);
+            require(registry.find("pending").has_value());
+            requireEqual(registry.find("pending")->id, std::uint64_t{6});
+        });
+        then("a function released while one of its calls is still answered is listed no more, and the call ends its measure", [&] {
+            registry.observe();
+            auto                 registration = registry.add("leaving", "() => Promise<void>", false, true, std::source_location::current());
+            inspect::CallMeasure inFlight{registration->keep()};
+            const auto           record = registration->keep();
+            registration.reset();
+            require(!registry.find("leaving").has_value());
+            inFlight.failed("stopped");
+            inFlight = {};
+            requireEqual(record->calls.load(), std::uint64_t{1});
+            requireEqual(record->failures.load(), std::uint64_t{1});
+            requireEqual(record->durations().count, std::uint64_t{1});
+        });
+        then("the number, the sum and the longest of the durations are read as one state", [&] {
+            const auto record = registry.add("steady", "() => Promise<void>", false, false, std::source_location::current());
+            record->timed(std::chrono::milliseconds{10});
+            record->timed(std::chrono::milliseconds{30});
+            const auto durations = record->durations();
+            requireEqual(durations.count, std::uint64_t{2});
+            requireEqual(durations.totalNanoseconds, std::uint64_t{40'000'000});
+            requireEqual(durations.maxNanoseconds, std::uint64_t{30'000'000});
+            const auto row = inspect::FunctionRegistry::row(*registry.find("steady"));
+            requireEqual(std::get<9>(row), 20.0);
+            requireEqual(std::get<10>(row), 30.0);
+        });
+        then("a cursor or a count that is not a whole number is refused", [&] {
+            checkThrows<std::invalid_argument>([&] {
+                static_cast<void>(registry.page(-1, 200, inspect::minPageBytes));
+            });
+            checkThrows<std::invalid_argument>([&] {
+                static_cast<void>(registry.page(0, 1.5, inspect::minPageBytes));
+            });
+        });
+    }};
 
 const Scenario introSpaces{"The functions of a space are listed with its path, until the space releases them (ADR-027, section 7)", {"inspector"}, [] {
                                IntroBrowser browser;

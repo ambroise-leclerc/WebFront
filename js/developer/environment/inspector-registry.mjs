@@ -426,7 +426,7 @@ const scrolling = (page, table) => {
  * C++ called. WebFront's own functions (the environment's callbacks, the terminal's) are hidden unless asked for.
  */
 export async function showFunctionsPanel({page, view, header, body, status, bridge}) {
-    let search = '', own = false, data = {functions: [], jsFunctions: []};
+    let search = '', own = false, failed = false, data = {functions: [], jsFunctions: []};
     const functions = createTable(page, {columns: functionColumns, caption: 'C++ functions (cppFunction)'});
     const jsFunctions = createTable(page, {columns: jsFunctionColumns, caption: 'JavaScript functions called by C++ (jsFunction)'});
     const show = () => {
@@ -435,6 +435,8 @@ export async function showFunctionsPanel({page, view, header, body, status, brid
         functions.render(found);
         const calls = filterRows(own ? data.jsFunctions : data.jsFunctions.filter(row => !ownFunction(row.name)), search, ['name']);
         jsFunctions.render(calls);
+        // A failed read stays told until a read succeeds: filtering what was read earlier must not hide it.
+        if (failed) return;
         status.classList.remove('error');
         const hidden = data.functions.length - visible.length;
         status.textContent = `${found.length} of ${visible.length} C++ functions`
@@ -457,8 +459,9 @@ export async function showFunctionsPanel({page, view, header, body, status, brid
             const called = await listRows(bridge, jsFunctionsFunction, readJsFunctionRow, {active});
             return called && {functions: listed.rows, jsFunctions: called.rows};
         },
-        onData: read => { data = read; show(); },
+        onData: read => { data = read; failed = false; show(); },
         onError: error => {
+            failed = true;
             status.classList.add('error');
             status.textContent = readFailure(error, 'The functions');
         },
@@ -473,7 +476,7 @@ export async function showFunctionsPanel({page, view, header, body, status, brid
 
 /** The panel of the browsers and the tasks: who is connected and what waits, the tasks of the server's scope, the commands. */
 export async function showBrowsersPanel({page, view, header, body, status, bridge}) {
-    let search = '', data = {browsers: [], tasks: 0, commands: []};
+    let search = '', failed = false, data = {browsers: [], tasks: 0, commands: []};
     const browsers = createTable(page, {columns: browserColumns, caption: 'Connected browsers'});
     const commands = createTable(page, {columns: commandColumns, caption: 'Terminal commands of the application (webfront::Commands)'});
     const summary = page.createElement('p');
@@ -485,6 +488,8 @@ export async function showBrowsersPanel({page, view, header, body, status, bridg
         summary.textContent = `${data.browsers.length} connected ${data.browsers.length === 1 ? 'browser' : 'browsers'}, `
             + `${data.tasks} running ${data.tasks === 1 ? 'task' : 'tasks'} in the server's scope, `
             + `${data.commands.length} terminal ${data.commands.length === 1 ? 'command' : 'commands'}.`;
+        // A failed read stays told until a read succeeds.
+        if (failed) return;
         status.classList.remove('error');
         status.textContent = '';
     };
@@ -499,8 +504,9 @@ export async function showBrowsersPanel({page, view, header, body, status, bridg
             if (!count(tasks)) throw unreadable();
             return {browsers: listed.rows, tasks, commands: await listCommands(bridge)};
         },
-        onData: read => { data = read; show(); },
+        onData: read => { data = read; failed = false; show(); },
         onError: error => {
+            failed = true;
             status.classList.add('error');
             status.textContent = readFailure(error, 'The browsers');
         },

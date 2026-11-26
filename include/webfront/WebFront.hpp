@@ -466,17 +466,23 @@ void rejectWithBridgeCode(Link& link, msg::CallId callId, std::string_view code,
         link.sendFrame(makeFailureFrame<Net, Policy>(callId, makeBridgeError(code, message)));
 }
 
-/// A self-contained return message carrying `value`, or the failure of its encoding (a string over the message size).
+/// A self-contained return message carrying `value`; throws when the value cannot be encoded (a string over the message size).
 template <typename Net, http::BuffersPolicyType Policy, typename Value>
-websocket::Frame<Net> makeValueFrame(msg::CallId callId, const Value& value) {
+websocket::Frame<Net> encodeValueFrame(msg::CallId callId, const Value& value) {
     msg::FunctionReturn<Policy> result;
     result.setCallId(callId);
     websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(result.header().data()), result.header().size())};
+    if constexpr (!std::is_void_v<Value>)
+        result.encodeParameter(value, frame);
+    frame.freeze();
+    return frame;
+}
+
+/// A self-contained return message carrying `value`, or the failure of its encoding.
+template <typename Net, http::BuffersPolicyType Policy, typename Value>
+websocket::Frame<Net> makeValueFrame(msg::CallId callId, const Value& value) {
     try {
-        if constexpr (!std::is_void_v<Value>)
-            result.encodeParameter(value, frame);
-        frame.freeze();
-        return frame;
+        return encodeValueFrame<Net, Policy>(callId, value);
     } catch (const std::exception& error) {
         return makeFailureFrame<Net, Policy>(callId, error);
     }
@@ -1342,14 +1348,26 @@ private:
 
     template <typename R, typename... Args>
     bool registerCppFunction(std::string functionName, auto&& function, const std::source_location& location) {
-        auto record = recordFunction<R, Args...>(functionName, location);
-        return cppFunctions.try_emplace(std::move(functionName), makeCppHandler<R, Args...>(std::forward<decltype(function)>(function), std::move(record)))
-            .second;
+        if (cppFunctions.contains(functionName))
+            return false;
+        // The record is listed once the registration is accepted: nothing reads a function that is not registered.
+        const auto record = recordFunction<R, Args...>(functionName, location);
+        const bool added =
+            cppFunctions.try_emplace(std::move(functionName), makeCppHandler<R, Args...>(std::forward<decltype(function)>(function), record)).second;
+        if (added)
+            publishFunction(record);
+        return added;
     }
 
-    /// What the inspectors keep of a function about to be registered (ADR-027, section 7), owned by its handler: a
-    /// registration that is refused, or a function released with its space, takes its record with it. Null in a
-    /// distribution build. `scope` is the path of the space that registers it.
+    /// Lists the record of a function whose registration was accepted (null in a distribution build).
+    void publishFunction(const std::shared_ptr<inspect::FunctionRecord>& record) {
+        if (record)
+            functionRegistry->publish(record);
+    }
+
+    /// What the inspectors keep of a function about to be registered (ADR-027, section 7), owned by its handler and not
+    /// listed until publishFunction(): a registration that is refused, or a function released with its space, takes its
+    /// record with it. Null in a distribution build. `scope` is the path of the space that registers it.
     template <typename R, typename... Args>
     [[nodiscard]] std::shared_ptr<inspect::FunctionRecord>
     recordFunction(std::string_view functionName, const std::source_location& location, std::string_view scope = {}) {
@@ -1364,7 +1382,7 @@ private:
                 result = detail::DeferredTypescript<std::remove_cvref_t<R>>::name();
             else
                 result = inspect::typescriptType<R>();
-            return functionRegistry->add(functionName, inspect::typescriptSignature(parameters, result), caller, deferred, location, scope);
+            return functionRegistry->prepare(functionName, inspect::typescriptSignature(parameters, result), caller, deferred, location, scope);
         } else {
             return nullptr;
         }
@@ -2012,7 +2030,8 @@ private:
             return;
         }
         // The call is counted now and timed until its answer: the measure goes with the task that answers.
-        inspect::CallMeasure                                   measure{record};
+        // It holds the record, not the registration: a space that releases the function meanwhile unlists it at once.
+        inspect::CallMeasure                                   measure{record ? record->keep() : nullptr};
         std::optional<std::remove_cvref_t<decltype(invoke())>> sender;
         try {
             sender.emplace(invoke());
@@ -2088,7 +2107,9 @@ private:
                 if constexpr (sizeof...(values) == 0)
                     return detail::makeVoidFrame<Net, Policy>(callId);
                 else
-                    return detail::makeValueFrame<Net, Policy>(callId, values...);
+                    // A value that cannot be encoded throws here: the call then fails as its callback's exception would,
+                    // and is counted so, as on the path of a callback that answers at once.
+                    return detail::encodeValueFrame<Net, Policy>(callId, values...);
             });
             answer.emplace(co_await std::move(framed));
         } catch (const std::exception& error) {

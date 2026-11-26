@@ -221,9 +221,19 @@ struct FunctionRecord {
 
     std::atomic<std::uint64_t> calls{0};
     std::atomic<std::uint64_t> failures{0};
-    std::atomic<std::uint64_t> timedCalls{0};
-    std::atomic<std::uint64_t> totalNanoseconds{0};
-    std::atomic<std::uint64_t> maxNanoseconds{0};
+
+    /// The durations measured so far, read as one state: their number, their sum and the longest.
+    struct Durations {
+        std::uint64_t count            = 0;
+        std::uint64_t totalNanoseconds = 0;
+        std::uint64_t maxNanoseconds   = 0;
+    };
+
+    /// The record itself, kept alive: what a call answered later holds until its answer, so that its measure outlives a
+    /// function released meanwhile without keeping that function registered. Null once the record is being destroyed.
+    [[nodiscard]] std::shared_ptr<FunctionRecord> keep() const noexcept {
+        return storage.lock();
+    }
 
     /// A call failed: counted, and its message kept, bounded and made visible. Never throws.
     void fail(std::string_view message) noexcept {
@@ -235,12 +245,18 @@ struct FunctionRecord {
         } catch (...) { }  // without memory for the message, the count alone tells the failure
     }
 
+    /// A call was timed. Only the calls made while an inspector reads come here: the lock is not on the path of the others.
     void timed(TimingGate::Clock::duration duration) noexcept {
         const auto nanoseconds = static_cast<std::uint64_t>(std::max<std::int64_t>(0, std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count()));
-        timedCalls.fetch_add(1, std::memory_order_relaxed);
-        totalNanoseconds.fetch_add(nanoseconds, std::memory_order_relaxed);
-        auto longest = maxNanoseconds.load(std::memory_order_relaxed);
-        while (nanoseconds > longest && !maxNanoseconds.compare_exchange_weak(longest, nanoseconds, std::memory_order_relaxed)) { }
+        std::scoped_lock lock{durationMutex};
+        ++measured.count;
+        measured.totalNanoseconds += nanoseconds;
+        measured.maxNanoseconds    = std::max(measured.maxNanoseconds, nanoseconds);
+    }
+
+    [[nodiscard]] Durations durations() const {
+        std::scoped_lock lock{durationMutex};
+        return measured;
     }
 
     [[nodiscard]] std::string lastError() const {
@@ -249,8 +265,12 @@ struct FunctionRecord {
     }
 
 private:
-    mutable std::mutex errorMutex;
-    std::string        error;
+    friend class FunctionRegistry;
+    std::weak_ptr<FunctionRecord> storage;  // set by the registry that created the record
+    mutable std::mutex            errorMutex;
+    std::string                   error;
+    mutable std::mutex            durationMutex;
+    Durations                     measured;
 };
 
 /**
@@ -352,31 +372,49 @@ using FunctionPage = std::tuple<std::vector<FunctionRow>, double>;
  */
 class FunctionRegistry {
 public:
-    /// Records a function about to be registered. The caller keeps the record with the handler; a registration that is
-    /// refused (the name is taken) releases it, and it is listed no more.
+    /**
+     * Prepares the record of a function about to be registered, without listing it: its registration is the pointer
+     * returned, which the function's handler keeps, and publish() lists it once the registration is accepted. The record
+     * leaves the table when that registration is released, whether or not an inspector ever reads (an application that
+     * creates and destroys spaces does not grow the table), even while a call answered later still holds the record
+     * through keep(): what is listed is what is registered.
+     */
     [[nodiscard]] std::shared_ptr<FunctionRecord>
-    add(std::string_view name, std::string signature, bool takesCaller, bool deferred, const std::source_location& location, std::string_view scope = {}) {
-        // The record leaves the table when its last owner releases it, whether or not an inspector ever reads: an
-        // application that creates and destroys spaces, or registers a name twice, does not grow the table.
-        std::shared_ptr<FunctionRecord> record(new FunctionRecord, [weak = std::weak_ptr(table)](FunctionRecord* released) {
+    prepare(std::string_view name, std::string signature, bool takesCaller, bool deferred, const std::source_location& location, std::string_view scope = {}) {
+        auto data          = std::make_shared<FunctionRecord>();
+        data->storage      = data;
+        data->name         = std::string(name);
+        data->label        = boundedText(name);
+        data->signature    = std::move(signature);
+        data->location     = locationText(location);
+        data->scope        = std::string(scope);
+        data->takesCaller  = takesCaller;
+        data->deferred     = deferred;
+        data->gate         = gate;
+        auto* const record = data.get();
+        return std::shared_ptr<FunctionRecord>(record, [data = std::move(data), weak = std::weak_ptr(table)](FunctionRecord* released) {
             if (const auto owner = weak.lock()) {
                 std::scoped_lock lock{owner->mutex};
                 owner->entries.erase(released->id);
             }
-            delete released;
         });
-        record->name        = std::string(name);
-        record->label       = boundedText(name);
-        record->signature   = std::move(signature);
-        record->location    = locationText(location);
-        record->scope       = std::string(scope);
-        record->takesCaller = takesCaller;
-        record->deferred    = deferred;
-        record->gate        = gate;
+    }
+
+    /// Lists a prepared record: the registration it describes was accepted. It gets its identifier now.
+    void publish(const std::shared_ptr<FunctionRecord>& registration) {
         std::scoped_lock lock{table->mutex};
-        record->id = table->nextId++;
-        table->entries.emplace(record->id, record);
-        return record;
+        if (registration->id != 0)
+            return;
+        registration->id = table->nextId++;
+        table->entries.emplace(registration->id, registration);
+    }
+
+    /// Prepares and lists a record at once.
+    [[nodiscard]] std::shared_ptr<FunctionRecord>
+    add(std::string_view name, std::string signature, bool takesCaller, bool deferred, const std::source_location& location, std::string_view scope = {}) {
+        auto registration = prepare(name, std::move(signature), takesCaller, deferred, location, scope);
+        publish(registration);
+        return registration;
     }
 
     /// The entries of the table: the functions registered now, and those being released at this very moment.
@@ -480,20 +518,21 @@ private:
 
     [[nodiscard]] static FunctionInfo snapshot(const FunctionRecord& record) {
         FunctionInfo info;
-        info.id            = record.id;
-        info.name          = record.name;
-        info.label         = record.label;
-        info.signature     = record.signature;
-        info.location      = record.location;
-        info.scope         = record.scope;
-        info.takesCaller   = record.takesCaller;
-        info.deferred      = record.deferred;
-        info.calls         = record.calls.load(std::memory_order_relaxed);
-        info.failures      = record.failures.load(std::memory_order_relaxed);
-        info.lastError     = record.lastError();
-        info.timedCalls    = record.timedCalls.load(std::memory_order_relaxed);
-        info.totalDuration = std::chrono::nanoseconds{static_cast<std::int64_t>(record.totalNanoseconds.load(std::memory_order_relaxed))};
-        info.maxDuration   = std::chrono::nanoseconds{static_cast<std::int64_t>(record.maxNanoseconds.load(std::memory_order_relaxed))};
+        info.id              = record.id;
+        info.name            = record.name;
+        info.label           = record.label;
+        info.signature       = record.signature;
+        info.location        = record.location;
+        info.scope           = record.scope;
+        info.takesCaller     = record.takesCaller;
+        info.deferred        = record.deferred;
+        info.calls           = record.calls.load(std::memory_order_relaxed);
+        info.failures        = record.failures.load(std::memory_order_relaxed);
+        info.lastError       = record.lastError();
+        const auto durations = record.durations();
+        info.timedCalls      = durations.count;
+        info.totalDuration   = std::chrono::nanoseconds{static_cast<std::int64_t>(durations.totalNanoseconds)};
+        info.maxDuration     = std::chrono::nanoseconds{static_cast<std::int64_t>(durations.maxNanoseconds)};
         return info;
     }
 
