@@ -97,7 +97,8 @@ int main(int argc, char** argv) {
   declares such as `File` are refused); the header is `<CLASS>.hpp`. `EXCLUDE`
   takes regular expressions matched against the relative paths (above: hidden files such as `.DS_Store`). A path may
   hold letters, digits, `_ . - + @ ~` and spaces; another name stops the configuration and names the file (a name
-  with `;`, which CMake splits, can only be renamed).
+  with `;`, which CMake splits, can only be renamed). The directory's own path may hold `[ ] * ?`, read as
+  themselves, but not `;` or an unpaired bracket; a directory with no file left to embed stops the configuration.
 - **When it is regenerated.** The build renders the header again when a file of the directory changes, and configures
   again by itself when a file is added or removed (`file(GLOB_RECURSE CONFIGURE_DEPENDS)`). An unchanged directory
   regenerates nothing.

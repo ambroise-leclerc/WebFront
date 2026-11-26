@@ -12,7 +12,8 @@ if(NOT TEST_BUILD_TYPE)
     set(TEST_BUILD_TYPE Release)
 endif()
 
-set(ui "${WORK_DIR}/ui dir")
+# A space and paired brackets in the path: the build tools must take them as they are.
+set(ui "${WORK_DIR}/ui [dir]")
 set(build "${WORK_DIR}/build")
 file(REMOVE_RECURSE "${WORK_DIR}")
 file(MAKE_DIRECTORY "${ui}/lib/vendor" "${ui}/lib/@scope" "${ui}/assets" "${ui}/a/b/c" "${ui}/.hidden")

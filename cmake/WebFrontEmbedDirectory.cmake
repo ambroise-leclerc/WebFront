@@ -23,7 +23,8 @@ include_guard(GLOBAL)
 # EXCLUDE drops the relative paths that match one of its regular expressions (for instance "(^|/)[.]" for hidden files
 # such as .DS_Store). A path may only hold letters, digits and the characters _ . - + @ ~ and space, without an empty,
 # "." or ".." part; another name fails the configuration and names the file. A directory reached through a symbolic link
-# is not entered.
+# is not entered. The path of <directory> itself may hold glob characters (ui[1]), but not ';' or an unpaired [ or ], which
+# CMake lists cannot carry; a directory with no file left to embed is an error.
 #
 # The header holds every byte uncompressed, as 64-bit words: a few megabytes are fine, a much larger interface compiles
 # slowly. `wf embed` generates a gzip-compressed provider for an application built with the developer environment.
@@ -102,6 +103,15 @@ wchar_t;while;xor;xor_eq;")
         message(FATAL_ERROR "webfront_embed_directory: cannot embed a directory whose path holds ';' (${directory}): CMake "
             "would split its file names. Rename it.")
     endif()
+    # A [ or ] without its pair stops CMake from splitting a list at ';', so the paths of the glob would run together.
+    set(unpaired "${directory}")
+    while(unpaired MATCHES "\\[[^][]*\\]")
+        string(REGEX REPLACE "\\[[^][]*\\]" "" unpaired "${unpaired}")
+    endwhile()
+    if(unpaired MATCHES "[][]")
+        message(FATAL_ERROR "webfront_embed_directory: cannot embed a directory whose path holds an unpaired '[' or ']' "
+            "(${directory}): CMake would join its file names. Rename it.")
+    endif()
     if(NOT IS_DIRECTORY "${directory}")
         message(FATAL_ERROR "webfront_embed_directory: ${directory} is not a directory")
     endif()
@@ -109,7 +119,10 @@ wchar_t;while;xor;xor_eq;")
     # The glob is a CMake list, which a ';' in a name splits into fragments: the first keeps the directory, the next ones
     # lose it (or are empty, or the first ends with '/'). They are recognized and refused before any other check, since
     # no fragment names a file and EXCLUDE could not match the whole name.
-    file(GLOB_RECURSE found LIST_DIRECTORIES false CONFIGURE_DEPENDS "${directory}/*")
+    # The directory's path is not a pattern: its [ ] * ? are put in brackets, which the glob reads as the character itself
+    # (ui[1] would otherwise list a sibling ui1, or nothing).
+    string(REGEX REPLACE "([][*?])" "[\\1]" pattern "${directory}")
+    file(GLOB_RECURSE found LIST_DIRECTORIES false CONFIGURE_DEPENDS "${pattern}/*")
     string(LENGTH "${directory}/" prefix_length)
     set(paths "")
     set(previous "")
@@ -144,6 +157,10 @@ wchar_t;while;xor;xor_eq;")
         list(APPEND kept "${path}")
         list(APPEND sources "${directory}/${path}")
     endforeach()
+    if(NOT kept)
+        message(FATAL_ERROR "webfront_embed_directory: no file to embed in ${directory}: the directory is empty, or EXCLUDE "
+            "drops every file, so the provider would serve nothing")
+    endif()
     list(SORT kept)
     list(JOIN kept "\n" manifest)
 
