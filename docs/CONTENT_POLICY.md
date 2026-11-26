@@ -123,7 +123,8 @@ the policy to their engine; server bridge checks apply even with legacy adapters
 
 The unit tests check exact origin matching, normalization, allow-lists, absent/malformed/duplicate headers,
 HTTP status, popup delegation, and the deployment headers on a file, a route reply, a mount's refusal and the generated
-404 and 405, absent by default and kept when a route sets its own. Jasmine verifies the normal same-origin bridge and real denied
+404 and 405, absent by default and kept when a route sets its own; an invalid policy throws `std::invalid_argument`
+even when the requested port is already in use. Jasmine verifies the normal same-origin bridge and real denied
 connections from a foreign-origin iframe and a sandboxed opaque origin, bracketed by positive
 connections to the same endpoint. Rejected probes report only after the WebSocket close event,
 before their parent removes their frame. Positive controls run in the original test document

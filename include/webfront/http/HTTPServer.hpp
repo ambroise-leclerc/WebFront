@@ -1188,7 +1188,8 @@ public:
            Decode                            decode      = {},
            std::shared_ptr<tls::Credentials> credentials = {})
         : acceptor(ioContext),
-          listeningPort((configureTransport(std::move(credentials)), bind(address, port))),
+          // The policy is checked before the bind: an invalid one is reported as such, even when the port is in use.
+          listeningPort((detail::BoundContentPolicy::validate(policy), configureTransport(std::move(credentials)), bind(address, port))),
           requestHandler(docRoot,
                          detail::BoundContentPolicy{detail::applicationOrigin(address, listeningPort, networking::secureTransport<Net>), std::move(policy)}),
           decodeExecutor(gzip::decodeLimits<Policy>(), std::move(decode)) {

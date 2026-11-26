@@ -173,6 +173,16 @@ public:
         requireFieldValue("htmlCacheControl", policy.htmlCacheControl);
     }
 
+    /// Throws std::invalid_argument for what the constructor would refuse in `options`, without an application URL: the server
+    /// calls it before it binds its port, so a bad configuration is never reported as a port in use.
+    static void validate(const ContentPolicy& options) {
+        for (const auto* origins : {&options.bridgeAllowedOrigins, &options.navigationAllowedOrigins})
+            for (const auto& origin : *origins)
+                (void)requireOrigin(origin);
+        requireReferrerPolicy(options.referrerPolicy);
+        requireFieldValue("htmlCacheControl", options.htmlCacheControl);
+    }
+
     bool allowsBridge(std::optional<std::string_view> origin) const {
         if (!origin)
             return policy.allowMissingOrigin;

@@ -3,7 +3,7 @@
 // Created: 2026-10-13
 //
 // WebFront — tests/unit
-// Role: Shutdown of the stdnet provider: cancellation of pending operations and joining.
+// Role: Shutdown of the stdnet provider: cancellation of pending operations and joining, and the binding of its port.
 // Thread: bridge-io | Alloc: unrestricted
 // LLM: pins the structured shutdown contract
 
@@ -577,3 +577,27 @@ const Scenario defaultPortFallback{"A configuration without a port falls back to
                                            });
                                        });
                                    }};
+
+const Scenario invalidPolicyBeforeBind{"An invalid content policy is refused before the port is bound, even a port in use (#674)", [] {
+                                           using Server = http::Server<Stdnet, fs::DefaultFS>;
+                                           given("a port held by another server", [&] {
+                                               Server                             holder("127.0.0.1", "0");
+                                               const std::string                  taken{holder.port()};
+                                               const std::array<ContentPolicy, 4> invalid{ContentPolicy{.referrerPolicy = "none"},
+                                                                                          ContentPolicy{.htmlCacheControl = "no-cache\r\nX-Evil: 1"},
+                                                                                          ContentPolicy{.bridgeAllowedOrigins = {"http://evil/path"}},
+                                                                                          ContentPolicy{.navigationAllowedOrigins = {"file:///etc"}}};
+                                               for (std::size_t index = 0; index < invalid.size(); ++index) {
+                                                   then("invalid policy ", index, " throws std::invalid_argument, not a bind error", [&] {
+                                                       requireThrows<std::invalid_argument>([&] {
+                                                           Server server("127.0.0.1", taken, ".", invalid[index]);
+                                                       });
+                                                   });
+                                               }
+                                               then("a valid policy on that port still fails to bind", [&] {
+                                                   requireThrows<std::system_error>([&] {
+                                                       Server server("127.0.0.1", taken, ".", ContentPolicy{.referrerPolicy = "no-referrer"});
+                                                   });
+                                               });
+                                           });
+                                       }};
