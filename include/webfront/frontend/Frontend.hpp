@@ -92,7 +92,8 @@ template <FrontendType Frontend>
                       { Frontend::providesViewProof() } -> std::same_as<bool>;
                   })
         return Frontend::providesViewProof();
-    return false;
+    else
+        return false;
 }
 
 // `action` describes what BasicWF should do after `open()` returns.
