@@ -36,6 +36,7 @@ const Scenario inspectorsAbsent{"A distribution build registers no inspector fun
                                             for (const auto* name : {"webfront.inspector.containers",
                                                                      "webfront.inspector.embedded",
                                                                      "webfront.inspector.watches",
+                                                                     "webfront.inspector.readPreferences",
                                                                      "webfront.inspector.savePreferences",
                                                                      "webfront.inspector.openWindow",
                                                                      "webfront.inspector.closeWindow"})

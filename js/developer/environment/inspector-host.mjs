@@ -82,20 +82,35 @@ async function projectFileMissing(bridge, path) {
     }
 }
 
-/** The choices the project has: empty ones without a file; a file that exists but cannot be read throws. */
+const readPreferencesFunction = 'webfront.inspector.readPreferences';
+const missingFunction = error => error?.code === 'webfront.notFound' || /C\+\+ function '[^']*' was not found/.test(String(error?.message));
+
+/**
+ * The choices the project has, with the token that a save from them is conditioned on: {preferences, token}. Empty choices
+ * without a file; a file that exists but cannot be read throws. The library reads the file and its token under one lock, the
+ * token being that of the bytes read: a content that changed and came back meanwhile does not take a save of choices read
+ * from another one. A library without webfront.inspector.readPreferences gives the token, then the file.
+ */
 async function readStoredPreferences(bridge) {
+    try {
+        const [present, bytes, token] = await bridge.cppFunction(readPreferencesFunction)();
+        return {preferences: parsePreferences(present ? decoder.decode(bytes) : ''), token};
+    } catch (error) {
+        if (!missingFunction(error)) throw error;
+    }
+    const token = await call(bridge, 'state', preferencesPath);
     let bytes;
     try { bytes = await readProject(bridge, preferencesPath); }
     catch (error) {
-        if (await projectFileMissing(bridge, preferencesPath).catch(() => false)) return parsePreferences('');
+        if (await projectFileMissing(bridge, preferencesPath).catch(() => false)) return {preferences: parsePreferences(''), token};
         throw error;
     }
-    return parsePreferences(decoder.decode(bytes));
+    return {preferences: parsePreferences(decoder.decode(bytes)), token};
 }
 
 /** The choices to show: empty ones when they cannot be read, which never prevents the inspectors from opening. */
 export async function readPreferences(bridge) {
-    try { return await readStoredPreferences(bridge); }
+    try { return (await readStoredPreferences(bridge)).preferences; }
     catch { return parsePreferences(''); }
 }
 
@@ -116,8 +131,8 @@ const preferenceConflict = /changed since it was read|already being written/;
 async function writePreferenceChanges(bridge, changes) {
     for (let attempt = 1; ; ++attempt) {
         try {
-            const token = await call(bridge, 'state', preferencesPath);
-            const text = formatPreferences(applyPreferenceChanges(await readStoredPreferences(bridge), changes));
+            const {preferences, token} = await readStoredPreferences(bridge);
+            const text = formatPreferences(applyPreferenceChanges(preferences, changes));
             await bridge.cppFunction('webfront.inspector.savePreferences')(token, encoder.encode(text));
             return;
         } catch (error) {
@@ -132,7 +147,8 @@ async function writePreferenceChanges(bridge, changes) {
  * other's: whether a panel is detached is written at once, the window's place shortly after it stops moving. Each write
  * reads the file again and applies only what this page changed, and is committed only if the file did not change since
  * it was read (else it is tried again). `saved()` writes what is pending and resolves once it is written; a failed write
- * keeps the inspector usable.
+ * keeps the inspector usable, and its changes are written with the next one, after any newer change of the same panel or
+ * place, which wins.
  */
 export function preferencesStore(bridge, delay = 300) {
     let timer = null, pending = {panels: new Map(), rect: undefined}, writes = Promise.resolve();
@@ -142,7 +158,12 @@ export function preferencesStore(bridge, delay = 300) {
         if (!pending.panels.size && pending.rect === undefined) return writes;
         const changes = pending;
         pending = {panels: new Map(), rect: undefined};
-        writes = writes.catch(() => {}).then(() => writePreferenceChanges(bridge, changes));
+        writes = writes.catch(() => {}).then(() => writePreferenceChanges(bridge, changes)).catch(error => {
+            // Not written: kept for the next write, under the changes made since, which are newer.
+            for (const [id, away] of changes.panels) if (!pending.panels.has(id)) pending.panels.set(id, away);
+            if (pending.rect === undefined) pending.rect = changes.rect;
+            throw error;
+        });
         return writes;
     };
     return {
@@ -419,13 +440,17 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
         for (const attempt of (shownPanel && opening.get(shownPanel)?.pending) || []) attempt.cancelled = true;
         hideFloating();
     }
-    /** Closes the detached container of `id`; 'host' when this page closes it, 'self' when the window must close itself. */
-    function closeDetached(id) {
+    /**
+     * Closes the detached container of `id`; resolves with 'host' when this page closed it, 'self' when the window must close
+     * itself. A native window counts as closed only when C++ says so: a close that failed or found no window answers 'self',
+     * so that the window does not stay open waiting for a close that will not come.
+     */
+    async function closeDetached(id) {
         if (detachedContainer(containers, {embedded: isEmbedded}) === 'window') {
-            const closed = bridge.cppFunction('webfront.inspector.closeWindow')(id, self).catch(() => false);
+            const closed = bridge.cppFunction('webfront.inspector.closeWindow')(id, self).then(Boolean, () => false);
             closing.set(id, closed);
             closed.then(() => { if (closing.get(id) === closed) closing.delete(id); });
-            return 'host';
+            return await closed ? 'host' : 'self';
         }
         const tab = tabs.get(id);
         tabs.delete(id);
@@ -509,7 +534,7 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
             // Only the page that detached the panel takes it back: other pages of the same origin ignore the request.
             if (data?.type !== 'attach' || data.host !== self || !panels.has(data.panel) || !containers?.host) return;
             host.attach(data.panel);
-            channel.postMessage({type: 'attached', id: data.id, closer: closeDetached(data.panel)});
+            closeDetached(data.panel).then(closer => channel.postMessage({type: 'attached', id: data.id, closer}));
         });
         host.channel = channel;
     }

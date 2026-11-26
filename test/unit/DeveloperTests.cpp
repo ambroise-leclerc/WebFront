@@ -909,6 +909,44 @@ const Scenario conditionalFilePublication{"A failed single-file publication rele
                                               });
                                           }};
 
+const Scenario readWithState{"A small file is read with the token of exactly its bytes, so that a save applies only to that content", [] {
+                                 TemporaryDirectory project;
+                                 developer::Store   store{project.path()};
+                                 const std::string  path = ".webfront/developer/inspector-window.json";
+                                 given("no file", [&] {
+                                     const auto [present, content, token] = store.readWithState(path, 1024);
+                                     then("it is absent, with the token of its absence, and a save from it creates the file", [&] {
+                                         require(!present);
+                                         require(content.empty());
+                                         requireEqual(token, store.state({path}));
+                                         store.publishFile(path, bytes("first"), token);
+                                         requireEqual(store.read(path, 0), bytes("first"));
+                                     });
+                                 });
+                                 given("a file whose content changes and comes back after it was read", [&] {
+                                     store.publishFile(path, bytes("A"), store.state({path}));
+                                     store.publishFile(path, bytes("B"), store.state({path}));
+                                     const auto [present, content, token] = store.readWithState(path, 1024);
+                                     require(present && content == bytes("B"));
+                                     requireEqual(token, store.state({path}));
+                                     store.publishFile(path, bytes("A"), store.state({path}));  // back to an earlier content
+                                     then("a save from what was read is refused: the token is that of the bytes read, not of the earlier content", [&] {
+                                         requireThrows([&] {
+                                             store.publishFile(path, bytes("merged"), token);
+                                         });
+                                         requireEqual(store.read(path, 0), bytes("A"));
+                                     });
+                                 });
+                                 given("a file larger than the limit", [&] {
+                                     store.publishFile(path, bytes("0123456789"), store.state({path}));
+                                     then("it is refused rather than cut", [&] {
+                                         requireThrows<std::length_error>([&] {
+                                             static_cast<void>(store.readWithState(path, 4));
+                                         });
+                                     });
+                                 });
+                             }};
+
 const Scenario newDirectories{
     "New directories are durable once their parents are synchronized",
     [] {

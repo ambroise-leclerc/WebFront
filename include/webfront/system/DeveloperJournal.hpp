@@ -24,6 +24,7 @@
 #include <functional>
 #include <optional>
 #include <set>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -193,6 +194,27 @@ inline std::optional<std::vector<JournalEntry>> parseJournal(const std::string& 
         entries.push_back({lines[i], source});
     }
     return entries;
+}
+
+/// The fingerprint() of one file from its content as read: absent (nullopt) or these bytes. A token computed from the bytes a
+/// caller got describes exactly them, even if the file changed and came back meanwhile.
+inline std::string fingerprintOfContent(const std::optional<std::span<const std::uint8_t>>& content) {
+    std::uint64_t hash = 14695981039346656037ULL;
+    const auto    feed = [&hash](const void* data, std::size_t size) {
+        const auto* bytes = static_cast<const unsigned char*>(data);
+        for (std::size_t i = 0; i < size; ++i)
+            hash = (hash ^ bytes[i]) * 1099511628211ULL;
+    };
+    const char present = content ? 1 : 0;
+    feed(&present, 1);
+    if (content) {
+        const auto size = static_cast<std::uint64_t>(content->size());
+        feed(&size, sizeof size);
+        feed(content->data(), content->size());
+    }
+    char text[17];
+    std::snprintf(text, sizeof text, "%016llx", static_cast<unsigned long long>(hash));
+    return text;
 }
 
 /// Identifies the content of project files: a precondition for publications that were prepared

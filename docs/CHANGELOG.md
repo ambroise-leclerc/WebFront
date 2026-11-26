@@ -11,6 +11,7 @@ these entries stays in the GitHub releases and the Git history.
 ## Unreleased
 
 ### Breaking
+- A custom frontend whose `open()` takes `const ViewLaunch&` declares `static bool providesViewProof()`, `true` when it gives the proof to its view and `false` otherwise, or the developer environment no longer compiles with it: undeclared, its proven view would leave project writes and C++ commands unguarded (#680, ADR-027, `docs/FRONTENDS.md`).
 - `cppFunction` (and `Space::cppFunction`) refuses the names starting with `webfront.inspector.`, reserved to the inspectors, with `std::invalid_argument`: rename such a function, and its `webFront.cppFunction(...)` calls in the page, to a name of your own (#680, ADR-027).
 
 ### Added

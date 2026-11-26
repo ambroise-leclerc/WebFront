@@ -300,11 +300,12 @@ export class LineEditor {
 
     /**
      * Prints `text` as lines of their own, for an event that no command reported: above the line being edited, which is
-     * drawn again below them, or after the output of the command that runs.
+     * drawn again below them (also while a completion is pending, which then acts on the line drawn again), or after the
+     * output of the command that runs.
      */
     notice(text) {
         const lines = text.endsWith('\n') ? text : `${text}\r\n`;
-        if (this.running || this.closed || this.completing) return this.write((this.atLineStart ? '' : '\r\n') + lines);
+        if (this.running || this.closed) return this.write((this.atLineStart ? '' : '\r\n') + lines);
         this.write(ansi.up(this.row) + '\r' + ansi.clearBelow + lines);
         this.showPrompt();
     }

@@ -13,7 +13,8 @@ A frontend is a type with:
 | `static void initialize()` | Called once successfully per frontend type, before the first `BasicWF` listener is created. A thrown exception aborts construction; the next construction retries. |
 | `static void open(std::string_view port, std::string_view file)` | Called by `show()` / `openAndRun()` on the calling thread, while the HTTP server runs on its own thread. |
 | `static void open(address, port, page, const ContentPolicy&)` (optional) | Preferred overload receiving the per-application [content policy](CONTENT_POLICY.md). |
-| `static void open(address, port, page, const ContentPolicy&, const WindowOptions&, const ViewLaunch&)` (optional) | Richest overload: also receives the [view association](#view-association) proof of this launch. |
+| `static void open(address, port, page, const ContentPolicy&, const WindowOptions&, const ViewLaunch&)` (optional) | Richest overload: also receives the [view association](#view-association) proof of this launch. A frontend that offers it declares `static bool providesViewProof()`. |
+| `static bool providesViewProof()` (required with the `ViewLaunch` overload) | `true` when the frontend gives the proof to its view, `false` when it does not (the system browser, which receives `ViewLaunch` only for the origin). While it is `true`, the developer environment's project writes and the terminal's C++ commands are refused to a page that is not a local client (ADR-027, section 2). A frontend with the `ViewLaunch` overload that leaves it undeclared fails to compile where WebFront checks it; any other frontend counts as `false`. |
 | `static constexpr Action action` | What `BasicWF` does once `open()` returns. |
 | `static void launch(address, port, page)` (optional) | Opens the interface and returns without waiting for it (the system browser spawns its opener command and does not wait for it to end). `BasicWF::start()` requires it; only a frontend without a window loop offers it (the system browser). A `launch(address, port, page, const ContentPolicy&)` overload is preferred when present; neither receives window options or the view-association proof. |
 | `static constexpr bool endsOnRequest` (optional) | `false` when `requestClose()` cannot end every session (`NativeOrBrowserFrontend` with the plain system browser as fallback); `webfront::UIThread` then refuses the frontend. |
@@ -55,7 +56,8 @@ on a command line or in a URL.
 - `NativeOrBrowserFrontend` passes the proof to the native window only.
 - The association does not protect against a script admitted into the view (ADR-008): it shares the authority of the bridge
   and could read the property before `WebFront.js`. An adapter that cannot inject a script simply does not implement the overload.
-- A custom frontend that wants services restricted to its own view implements the overload and applies
+- A custom frontend that wants services restricted to its own view implements the overload, declares
+  `providesViewProof()` returning `true`, and applies
   `webfront::detail::viewSecretScript(secret, origin)` (or the engine's equivalent) at the start of the document. The helper
   returns an empty script, hence no association, unless the secret is lowercase hexadecimal and the origin a plain http origin;
   give it `webfront::detail::browserOrigin(address, port)` (lowercase, without port 80), which `ViewLaunch::origin` already is.

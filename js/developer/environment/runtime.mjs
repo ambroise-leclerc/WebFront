@@ -672,6 +672,7 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
     const openInspector = panel => inspectors.open(panel).catch(error => {
         const text = `\x1b[31mThe inspector could not open: ${error?.message ?? error}\x1b[0m`;
         if (editor) editor.notice(text); else terminal.write(`${text}\r\n`);
+        workspace?.open({focus: false});  // a collapsed terminal would hide the diagnostic; the keys stay where they are
     });
     const workspace = layout && preview && !isManaged(preview) ? await createWorkspace({bridge, element, frame: preview, openInspector}) : null;
     if (workspace) inspectors = prepareInspectors({bridge, page: element.ownerDocument, access: workspace.inspectorAccess,

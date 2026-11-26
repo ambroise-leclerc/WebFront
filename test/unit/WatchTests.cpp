@@ -66,6 +66,9 @@ const Scenario watchTexts{"The texts of a watch are bounded and made visible (AD
                                       requireEqual(inspect::boundedText("\xC3\xA9t\xC3\xA9", 2), std::string{"\xC3\xA9"});
                                       requireEqual(inspect::boundedText("abc", 0), std::string{});
                                   });
+                                  then("an unbounded limit keeps the whole text", [&] {
+                                      requireEqual(inspect::boundedText("abcdef", std::string_view::npos), std::string{"abcdef"});
+                                  });
                                   then("a long location keeps the end of the path", [&] {
                                       const auto text = inspect::locationText(std::source_location::current());
                                       require(text.size() <= inspect::maxTextBytes);
@@ -116,6 +119,18 @@ const Scenario watchKinds{"The kind of a watch's root follows the order of ADR-0
                                   static_assert(!inspect::SourceShape<decltype(reference)>::writable);
                                   static_assert(std::is_same_v<inspect::SourceShape<decltype(copy)>::Object, std::string>);
                                   static_assert(!inspect::WatchSource<int>);
+                                  // A visitor callable on an lvalue only, as the stored source is called, is a visitor.
+                                  struct LvalueVisitor {
+                                      void operator()(inspect::Visit<const int>) & { }
+                                  };
+                                  struct ConstLvalueVisitor {
+                                      void operator()(inspect::Visit<std::vector<int>>) const& { }
+                                  };
+                                  static_assert(std::is_same_v<inspect::SourceShape<LvalueVisitor>::Object, const int>);
+                                  static_assert(inspect::SourceShape<ConstLvalueVisitor>::writable);
+                                  // An accessor that returns nothing gives nothing to show: it is refused.
+                                  auto nothing = [] { };
+                                  static_assert(!inspect::WatchSource<decltype(nothing)>);
                                   // A function given by name is a source too, kept as a pointer.
                                   static_assert(inspect::WatchSource<decltype(sharedValues)>);
                                   static_assert(std::is_same_v<inspect::SourceShape<std::decay_t<decltype(sharedValues)>>::Object, const std::vector<int>>);
@@ -262,10 +277,12 @@ const Scenario watchPages{
             static_cast<void>(addWatch(registry, std::string(inspect::maxTextBytes - 1, 'n') + "\t"));  // the picture crosses the bound
             const auto names = namesOf(registry.page(0, 0, 10, 32768));
             then("the page shows them with their control characters visible", [&] {
+                requireEqual(names.size(), std::size_t{3});  // before any index: an omitted name fails here
                 requireEqual(names[0], std::string{"line\xE2\x90\x8Aone"});
                 requireEqual(names[1], std::string{"line\xE2\x90\x8Aone"});
             });
             then("a name that its visible form makes longer is cut within the bound", [&] {
+                requireEqual(names.size(), std::size_t{3});
                 require(names[2].size() <= inspect::maxTextBytes);
                 require(names[2].ends_with("\xE2\x80\xA6"));
             });
@@ -323,7 +340,7 @@ const Scenario watchHandles{
                     handle = inspect::Watch{owner, registry.add("again", "integer", "app.cpp:2", false, nullptr)};
                 }
             };
-            const auto first = registry->add("first", "integer", "app.cpp:1", false, std::make_shared<Reassigning>(Reassigning{*registry, handle, registry}));
+            const auto first = registry->add("first", "integer", "app.cpp:1", false, std::make_shared<Reassigning>(*registry, handle, registry));
             handle           = inspect::Watch{registry, first};
             when("the handle is reset", [&] {
                 handle.reset();
@@ -341,10 +358,33 @@ const Scenario watchHandles{
                 handle = inspect::Watch{registry, addWatch(*registry, "other")};
                 then("the assignment made by the released source is the one kept, still removable", [&] {
                     require(!registry->contains(first));
-                    requireEqual(registry->size(), std::size_t{1});
+                    // The one watch left is the source's "again", not "other", and the handle holds it.
+                    requireEqual(namesOf(registry->page(0, 0, 10, 32768)), std::vector<std::string>{"again"});
                     const auto kept = handle.id();
                     require(registry->contains(kept));
                     handle.reset();
+                    requireEqual(registry->size(), std::size_t{0});
+                });
+            });
+        });
+        given("a source whose release assigns its handle while the handle is destroyed", [&] {
+            auto registry = std::make_shared<WatchRegistry>();
+            // Destroyed with delete once released, so that the source's reference stays on the handle while its destructor runs.
+            auto  owned  = std::make_unique<inspect::Watch>();
+            auto* handle = owned.get();
+            struct Reassigning {
+                WatchRegistry&               registry;
+                inspect::Watch&              handle;
+                std::weak_ptr<WatchRegistry> owner;
+                ~Reassigning() {
+                    handle = inspect::Watch{owner, registry.add("again", "integer", "app.cpp:2", false, nullptr)};
+                }
+            };
+            *handle = inspect::Watch{registry,
+                                     registry->add("first", "integer", "app.cpp:1", false, std::make_shared<Reassigning>(*registry, *handle, registry))};
+            when("the handle is destroyed", [&] {
+                delete owned.release();
+                then("the handle takes no new watch, and the one the source registered is removed with its temporary", [&] {
                     requireEqual(registry->size(), std::size_t{0});
                 });
             });

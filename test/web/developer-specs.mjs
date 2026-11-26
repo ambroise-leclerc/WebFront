@@ -925,7 +925,12 @@ try {
             'A displayed interface must fill the window, with the icon');
         if (part === 'workspace') {
             // This page's own menu: the inspector entries follow what its connection is admitted to.
-            const [secondaryWindow, admitted] = await webFront.cppFunction('webfront.inspector.containers')();
+            // The containers come from the frontend type, known to the test program: a containers() that wrongly answered
+            // no window, or no admission, would otherwise run a shorter path and still pass.
+            const [secondaryWindow, admitted] = await webFront.cppFunction('test.expectedContainers')();
+            const [offeredWindow, offeredAdmission] = await webFront.cppFunction('webfront.inspector.containers')();
+            assert(offeredWindow === secondaryWindow && offeredAdmission === admitted,
+                `The inspectors must offer what the frontend gives: ${[offeredWindow, offeredAdmission]} instead of ${[secondaryWindow, admitted]}`);
             const tabBox = here.box('.webfront-terminal-toggle');
             here.rightClick(here.button(), tabBox.left + 10, tabBox.top + 10);
             if (!admitted) {

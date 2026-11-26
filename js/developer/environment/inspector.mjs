@@ -67,14 +67,18 @@ export const listingAttempts = 8;
  * Every live watch, page after page from the start, with the revision of the registry they describe. The pages give the
  * revision of the first one: a page that answers "changed" means that a watch was registered or removed while the list was
  * read, so the pages already read may name a removed watch, and the listing starts again. After `listingAttempts` such
- * changes, the list is given with the revision 0, which the next poll always finds changed.
+ * changes it gives up and resolves with null: the list shown stays, and the next poll, which finds the registry changed,
+ * tries again. Only a stable read gives a list, always a complete one. `active()` is asked before each page: once it is
+ * false (the inspector paused or closed) the listing stops and resolves with null, having read no further.
  */
-export async function listWatches(bridge, revision = 0) {
+export async function listWatches(bridge, revision = 0, {active = () => true} = {}) {
     for (let attempt = 0; attempt < listingAttempts; ++attempt) {
+        if (!active()) return null;
         const first = readPage(await bridge.cppFunction(watchesFunction)(revision, 0, 200));
         const watches = [...first.descriptors];
         let next = first.next, stable = true;
         while (stable && next) {
+            if (!active()) return null;
             const page = readPage(await bridge.cppFunction(watchesFunction)(first.revision, next, 200));
             watches.push(...page.descriptors);
             stable = !page.changed;
@@ -83,18 +87,7 @@ export async function listWatches(bridge, revision = 0) {
         if (stable) return {watches, revision: first.revision};
         revision = 0;
     }
-    const {watches} = await listWatchesOnce(bridge);
-    return {watches, revision: 0};
-}
-
-async function listWatchesOnce(bridge) {
-    const watches = [];
-    for (let after = 0;;) {
-        const page = readPage(await bridge.cppFunction(watchesFunction)(0, after, 200));
-        watches.push(...page.descriptors);
-        if (!page.next) return {watches};
-        after = page.next;
-    }
+    return null;
 }
 
 /** What changed between the watches shown (`known`, a Map by id) and a new list: the descriptors to add, the ids to remove. */
@@ -119,12 +112,19 @@ export function createWatchDiscovery({bridge, onChange, onError = () => {}, onRe
         for (const id of change.removed) known.delete(id);
         if (change.added.length || change.removed.length) onChange({...change, watches: [...known.values()]});
     };
+    // Paused or stopped: no further request, and nothing read after the pause is shown. The revision moves only with a list
+    // that is shown, so that a resumption reads again from the one shown.
+    const active = () => !paused && !stopped;
     async function poll() {
         const {changed, revision: current} = readPage(await bridge.cppFunction(watchesFunction)(revision, 0, 0));
+        if (!active()) return;
         if (changed || current !== revision) {
-            const listed = await listWatches(bridge, current);
-            revision = listed.revision;
-            apply(listed.watches);
+            const listed = await listWatches(bridge, current, {active});
+            if (!active()) return;
+            if (listed) {
+                revision = listed.revision;
+                apply(listed.watches);
+            }
         }
         onRead([...known.values()]);
     }
@@ -291,7 +291,12 @@ export async function main(view = window) {
         attach.textContent = 'Attach';
         attach.title = 'Show this panel in the floating window of the main page';
         header.append(attach);
-        attach.addEventListener('click', () => attachAgain(view, bridge, id, status, {host: params.get('host')}));
+        // Its own status: the reads of the watches, which clear theirs, never clear why the panel could not be attached.
+        const attachStatus = page.createElement('p');
+        attachStatus.className = 'status attach-status';
+        attachStatus.setAttribute('role', 'status');
+        body.prepend(attachStatus);
+        attach.addEventListener('click', () => attachAgain(view, bridge, id, attachStatus, {host: params.get('host')}));
     }
 
     if (id !== 'cpp.watches') {
@@ -336,34 +341,43 @@ export async function main(view = window) {
 /**
  * Asks the page that detached the panel (`host`, the identifier its address carries) to show it again. That page closes this
  * window itself when it can (a native window, or a tab it opened); otherwise it answers that this window closes itself: a tab
- * by itself, a native window through C++. Another page of the same origin does not answer. Without an answer the window
- * stays, and says why.
+ * by itself, a native window through C++. Another page of the same origin does not answer. Without an answer within `wait`
+ * the window stays and says why in `status`; an answer that comes later still closes it.
  */
 export async function attachAgain(view, bridge, id, status, {host = null, wait = 1000} = {}) {
     if (typeof view.BroadcastChannel !== 'function' || !host) {
         status.textContent = 'This window cannot reach the page that opened it: close it and open the panel from the menu.';
         return false;
     }
+    status.textContent = '';
     const channel = new view.BroadcastChannel(channelName);
     const request = `${id}:${Date.now()}:${Math.random()}`;
-    const answer = await new Promise(resolve => {
-        const timer = view.setTimeout(() => resolve(null), wait);
+    // The channel listens until the answer, or until this page goes: an answer that comes after the wait still closes this
+    // window, since the host shows the panel again by then (else the panel would be shown twice).
+    const close = () => channel.close();
+    view.addEventListener?.('pagehide', close, {once: true});
+    const finish = async answer => {
+        close();
+        status.textContent = '';
+        // The host closes this window itself, ordered with a detach the user may make meanwhile, which reuses or reopens it:
+        // closing it from here could close the window of that newer detach.
+        if (answer.closer === 'host') return true;
+        if (view.opener) view.close();
+        else await bridge.cppFunction('webfront.inspector.closeWindow')(id, host).catch(() => view.close());
+        return true;
+    };
+    return new Promise(resolve => {
+        let late = false;
+        const timer = view.setTimeout(() => {
+            late = true;
+            status.textContent = 'The main page did not answer: open the panel from the menu of its tab.';
+            resolve(false);
+        }, wait);
         channel.addEventListener('message', ({data}) => {
             if (data?.type !== 'attached' || data.id !== request) return;
             view.clearTimeout(timer);
-            resolve(data);
+            finish(data).then(done => { if (!late) resolve(done); });
         });
         channel.postMessage({type: 'attach', panel: id, host, id: request});
     });
-    channel.close();
-    if (!answer) {
-        status.textContent = 'The main page did not answer: open the panel from the menu of its tab.';
-        return false;
-    }
-    // The host closes this window itself, ordered with a detach the user may make meanwhile, which reuses or reopens it:
-    // closing it from here could close the window of that newer detach.
-    if (answer.closer === 'host') return true;
-    if (view.opener) view.close();
-    else await bridge.cppFunction('webfront.inspector.closeWindow')(id, host).catch(() => view.close());
-    return true;
 }

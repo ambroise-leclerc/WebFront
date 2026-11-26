@@ -57,6 +57,11 @@ export function memoryBridge(storage = new Map()) {
         },
     };
     const bridge = {cppFunction: name => async (...args) => {
+        if (name === 'webfront.inspector.readPreferences') {
+            // Like Store::readWithState: the file and the token of exactly those bytes.
+            const path = '.webfront/developer/inspector-window.json';
+            return [storage.has(path), storage.get(path) ?? new Uint8Array(), stateOf([path])];
+        }
         if (name === 'webfront.inspector.savePreferences') {
             const path = '.webfront/developer/inspector-window.json';
             const [expected, bytes] = args;

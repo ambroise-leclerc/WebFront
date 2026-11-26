@@ -459,7 +459,9 @@ environment's `mount`, not to the embedded bootstrap page):
   | CEF, or an embedded view without secondary windows | none: Detach is greyed, with the reason in its tooltip (`window.open` there would open a frame without the proof) |
 
   Attach brings the panel back to the page that detached it only, even when other pages of the application are open on
-  the same origin. The project keeps the detached panels and the floating window's place in
+  the same origin. A page keeps its identifier across a reload through Web Locks; in a browser without them, a reloaded
+  page has a new one, and a tab detached before the reload asks the old page in vain: it says that the main page did not
+  answer. Close that tab, open the panel from the menu of the reloaded page, then use Attach in the window it opens. The project keeps the detached panels and the floating window's place in
   `.webfront/developer/inspector-window.json`. A save that reaches C++ completes or releases its transaction there,
   even when its page closes. A page closed before the save reaches C++ may lose its latest choice.
   With a frontend that proves its view, developer file writes and starting or cancelling native terminal commands

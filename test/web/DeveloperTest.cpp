@@ -25,6 +25,7 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <tuple>
 #include <utility>
 
 namespace {
@@ -287,6 +288,12 @@ public:
         });
         app.cppFunction("test.part", [part = mode.part] {
             return part;
+        });
+        // What the inspectors must offer this page, known from the frontend type and not from webfront.inspector.containers(),
+        // which the spec checks against it: the view of an embedded frontend is admitted, and a frontend that has secondary
+        // windows offers one (ADR-027, sections 2 and 8).
+        app.cppFunction("test.expectedContainers", [] {
+            return std::tuple<bool, bool>{App::supportsSecondaryWindow, true};
         });
         app.cppFunction("test.browsers", [this] {
             return static_cast<double>(app.connectedBrowsers());

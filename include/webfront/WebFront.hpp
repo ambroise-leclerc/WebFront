@@ -1628,16 +1628,7 @@ protected:
             windowOptions.background = "#141821";
     }
 
-    /// For the developer environment: from now on, watch() registers in the table that the inspectors read (ADR-027).
-    /// Returns that table. A distribution build never calls it.
-    std::shared_ptr<inspect::WatchRegistry> enableInspectors() {
-        std::scoped_lock lock{watchRegistryMutex};
-        if (!watchRegistry)
-            watchRegistry = std::make_shared<inspect::WatchRegistry>();
-        return watchRegistry;
-    }
-
-    /// The table of the watches, null until enableInspectors().
+    /// The table of the watches, null until the developer bootstrap enabled it.
     [[nodiscard]] std::shared_ptr<inspect::WatchRegistry> inspectorRegistry() const {
         std::scoped_lock lock{watchRegistryMutex};
         return watchRegistry;
@@ -1650,6 +1641,43 @@ protected:
     }
 
 private:
+    /// The run of show() that owns the interface: its epoch and the interface loop's session, empty when none runs. Read when a
+    /// request is admitted (DeveloperAppWithNetwork, a friend), then checked on the interface thread with isCurrentShowSession():
+    /// a request admitted for one run never opens or closes a window of the next one.
+    struct ShowSession {
+        std::uint64_t                       epoch{};
+        std::optional<frontend::UISession> session;
+    };
+    [[nodiscard]] ShowSession currentShowSession() const {
+        if constexpr (supportsSecondaryWindow) {
+            const auto epoch = showEpoch.load();
+            if (epoch % 2 == 0)
+                return {};
+            auto session = Frontend::uiExecutor().session();
+            if (!session || session->thread != showThread.load() || showEpoch.load() != epoch)
+                return {};
+            return {epoch, std::move(session)};
+        } else {
+            return {};
+        }
+    }
+    [[nodiscard]] bool isCurrentShowSession(const ShowSession& bound) const {
+        if (!bound.session)
+            return false;
+        const auto now = currentShowSession();
+        return now.epoch == bound.epoch && now.session == bound.session;
+    }
+
+    /// For the developer environment's bootstrap only (DeveloperAppWithNetwork, a friend): from now on, watch() registers in
+    /// the table that the inspectors read (ADR-027). Returns that table. Private, so that no other subclass gives watch() a
+    /// table without the bootstrap or in a distribution build, where the handle must stay empty (section 1).
+    std::shared_ptr<inspect::WatchRegistry> enableInspectors() {
+        std::scoped_lock lock{watchRegistryMutex};
+        if (!watchRegistry)
+            watchRegistry = std::make_shared<inspect::WatchRegistry>();
+        return watchRegistry;
+    }
+
     // The constructor has already bound and listened; this thread services the queued I/O.
     // Launch server only once or restart if previous thread ended
     void startServerThread() {

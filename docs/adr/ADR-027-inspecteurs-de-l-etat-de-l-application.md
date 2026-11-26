@@ -4,7 +4,7 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.1 | 2026-11-25 | Proposée | Ambroise Leclerc | Hôte détachable (#680) : `webfront.inspector.embedded()` dit à la page hôte si elle peut tourner dans un frontend intégré (vue prouvée, ou frontend actif qui transmet la preuve), ce qui décide de l'onglet du navigateur système ; `webfront.inspector.closeWindow(panneau, hôte)` ferme la fenêtre d'un panneau rattaché ; une fenêtre par panneau et par page hôte, qui seule le rattache ; choix et place conservés dans `inspector-window.json`. | À renseigner après intégration. |
+| 1.1 | 2026-11-25 | Proposée | Ambroise Leclerc | Hôte détachable (#680) : `webfront.inspector.embedded()` dit à la page hôte si elle peut tourner dans un frontend intégré (vue prouvée, ou frontend actif qui transmet la preuve), ce qui décide de l'onglet du navigateur système ; `webfront.inspector.closeWindow(panneau, hôte)` ferme la fenêtre d'un panneau rattaché ; une fenêtre par panneau et par page hôte, qui seule le rattache ; choix et place conservés dans `inspector-window.json`, lus avec le jeton de leurs octets par `webfront.inspector.readPreferences()`. | À renseigner après intégration. |
 | 1.0 | 2026-11-25 | Proposée | Ambroise Leclerc | Décision initiale (#678, épique #677) : inspecteurs réservés à l'environnement développeur, accès réservé aux vues prouvées sauf autorisation explicite, nœuds d'arbre sur les types existants du pont, lecture et différences paginées, opérations entières sous le verrou ou sur l'exécuteur de l'application, modification à la demande de l'application, page unique `inspector.html` dans un conteneur choisi sur l'accès effectif. | À renseigner après intégration. |
 
 ## État et portée
@@ -702,10 +702,14 @@ recommencer la liste, pour qu'un observateur retiré entre deux pages ne reste p
 
 Le choix de chaque panneau et la place de la fenêtre flottante sont écrits comme des **changements** du fichier du
 projet, relu au moment de l'écriture et validé seulement s'il n'a pas changé depuis (sinon l'écriture recommence) :
-plusieurs pages d'un même projet ne défont pas leurs choix. Un détachement ou un rattachement est écrit aussitôt, la
-place après une courte pause. Un seul appel admis à `webfront.inspector.savePreferences` écrit la version
-conditionnelle, et C++ libère sa transaction en cas d'échec. Si la page ferme avant que cet appel arrive,
-le dernier changement peut être perdu.
+plusieurs pages d'un même projet ne défont pas leurs choix. `webfront.inspector.readPreferences()` lit le fichier et
+son jeton sous un même verrou du store, le jeton étant calculé sur les octets rendus : un contenu qui change puis revient
+entre la lecture et la sauvegarde ne valide pas des choix lus sur un autre contenu. Un fichier absent donne des choix
+vides avec le jeton de son absence ; un fichier présent mais illisible fait échouer l'écriture plutôt que de l'écraser.
+Un détachement ou un rattachement est écrit aussitôt, la place après une courte pause. Un seul appel admis à
+`webfront.inspector.savePreferences` écrit la version conditionnelle, et C++ libère sa transaction en cas d'échec ; un
+changement non écrit est repris par l'écriture suivante, après les changements plus récents du même panneau ou de la
+place, qui l'emportent. Si la page ferme avant que cet appel arrive, le dernier changement peut être perdu.
 
 La même règle désactive « Détacher » quand aucun conteneur détaché ne donnerait l'accès.
 

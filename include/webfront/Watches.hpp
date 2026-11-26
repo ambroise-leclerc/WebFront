@@ -4,7 +4,7 @@
 //
 // WebFront — core
 // Role: The registry of the watches an application declares for the inspectors (ADR-027), and its discovery page.
-// Thread: thread-safe | Alloc: heap-init
+// Thread: thread-safe | Alloc: unrestricted
 // LLM: public API (Watch, Visit) and the bounds of ADR-027 section 3; the registry is read by webfront.inspector.watches
 
 #pragma once
@@ -101,11 +101,11 @@ inline constexpr std::string_view ellipsis = "\xE2\x80\xA6";
 /// A limit too small for the ellipsis gives the longest prefix that fits, without it.
 [[nodiscard]] inline std::string boundedText(std::string_view text, std::size_t limit = maxTextBytes) {
     std::string visible;
-    visible.reserve((std::min)(text.size(), limit + 4));  // parenthesized: Windows headers may define min
+    visible.reserve((std::min)(text.size(), limit));  // parenthesized: Windows headers may define min
     for (const char c : text) {
         detail::appendVisible(visible, c);
-        if (visible.size() > limit + 4)
-            break;  // enough to know that it is cut
+        if (visible.size() > limit)
+            break;  // the first byte past the limit is enough to know that it is cut, whatever the limit (npos included)
     }
     if (visible.size() <= limit)
         return visible;
@@ -241,6 +241,15 @@ template <typename R, typename C, typename A>
 struct single_parameter<R (C::*)(A) noexcept> : single_parameter<R (*)(A)> { };
 template <typename R, typename C, typename A>
 struct single_parameter<R (C::*)(A) const noexcept> : single_parameter<R (*)(A)> { };
+// Callable on an lvalue only, as the stored source is invoked.
+template <typename R, typename C, typename A>
+struct single_parameter<R (C::*)(A) &> : single_parameter<R (*)(A)> { };
+template <typename R, typename C, typename A>
+struct single_parameter<R (C::*)(A) const&> : single_parameter<R (*)(A)> { };
+template <typename R, typename C, typename A>
+struct single_parameter<R (C::*)(A) & noexcept> : single_parameter<R (*)(A)> { };
+template <typename R, typename C, typename A>
+struct single_parameter<R (C::*)(A) const & noexcept> : single_parameter<R (*)(A)> { };
 
 template <typename Source>
 struct call_signature {
@@ -274,8 +283,9 @@ struct SourceShape<Source> {
     static constexpr bool writable = !std::is_const_v<Object>;
 };
 
+// An accessor gives an object: one that returns nothing (void) gives nothing to show, and is refused.
 template <typename Source>
-    requires(!detail::visitor_source<Source> && std::invocable<Source&>)
+    requires(!detail::visitor_source<Source> && std::invocable<Source&> && !std::is_void_v<std::invoke_result_t<Source&>>)
 struct SourceShape<Source> {
     using Object                   = std::remove_reference_t<std::invoke_result_t<Source&>>;
     static constexpr bool visitor  = false;
@@ -434,7 +444,8 @@ public:
     Watch& operator=(const Watch&) = delete;
     Watch(Watch&& other) noexcept : registry(std::move(other.registry)), watchId(std::exchange(other.watchId, 0)) { }
     Watch& operator=(Watch&& other) noexcept {
-        if (this != &other) {
+        // A handle being destroyed takes no new watch: it could not remove it. The source of the assignment keeps it.
+        if (this != &other && !destroying) {
             // The previous watch is removed once this handle holds the new one: its source, released then, may assign
             // this handle again, and that assignment is the one kept.
             Watch previous{std::move(*this)};
@@ -444,6 +455,7 @@ public:
         return *this;
     }
     ~Watch() {
+        destroying = true;  // a source released by reset() may assign this handle: the assignment is refused
         reset();
     }
 
@@ -467,7 +479,8 @@ public:
 
 private:
     std::weak_ptr<WatchRegistry> registry;
-    std::uint64_t                watchId = 0;
+    std::uint64_t                watchId    = 0;
+    bool                         destroying = false;
 };
 
 }  // namespace webfront::inspect

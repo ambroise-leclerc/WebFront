@@ -94,6 +94,9 @@ inline bool inspectorHostIdentifier(std::string_view host) noexcept {
     });
 }
 
+/// Where the inspectors keep the detached panels and the floating window's place, in the project (inspector-host.mjs).
+inline constexpr std::string_view inspectorPreferencesPath = ".webfront/developer/inspector-window.json";
+
 /// The page of the environment that shows an inspector panel for a host page, as openSecondaryWindow() names its window:
 /// one window per panel and host, so that the same host opening a panel again brings its window to the front. Throws
 /// std::invalid_argument for an unknown panel or an invalid host identifier.
@@ -200,11 +203,19 @@ private:
             admit(ui);
             return ui.isEmbeddedView() || frontend::providesViewProof<Frontend>();
         });
+        // The inspectors' choices, read with the token of exactly the bytes returned, then written only if the file still has
+        // that content: a page applies its changes to what it read, never to a content that changed and came back meanwhile.
+        this->template reservedCppFunction<std::tuple<bool, std::vector<std::uint8_t>, std::string>, Caller>(
+            "webfront.inspector.readPreferences",
+            [owned = store](Caller ui) {
+                admit(ui);
+                return owned->readWithState(std::string{developer::inspectorPreferencesPath}, 64 * 1024);
+            });
         this->template reservedCppFunction<void, Caller, std::string, std::vector<std::uint8_t>>(
             "webfront.inspector.savePreferences",
             [owned = store](Caller ui, std::string expected, std::vector<std::uint8_t> bytes) {
                 admit(ui);
-                owned->publishFile(".webfront/developer/inspector-window.json", std::move(bytes), expected);
+                owned->publishFile(std::string{developer::inspectorPreferencesPath}, std::move(bytes), expected);
             });
         // The discovery of the watches (section 3): a read of the table, without calling any source.
         this->template reservedCppFunction<inspect::WatchPage, Caller, double, double, double>(
@@ -225,8 +236,13 @@ private:
                 WindowOptions options{.title  = "WebFront inspector",
                                       .width  = developer::inspectorWindowExtent(width, 720),
                                       .height = developer::inspectorWindowExtent(height, 560)};
+                // Bound to the interface session that runs when the request is admitted: if that loop ends before the work
+                // reaches the interface thread, a loop started since is not given a window it was not asked for.
+                const auto bound = this->currentShowSession();
                 // The continuation of then() runs on the interface thread; the task itself resumes on the server's.
                 co_await networking::ex::then(this->uiExecutor().schedule(), [&] {
+                    if (!this->isCurrentShowSession(bound))
+                        throw webfront::detail::makeBridgeError(inspect::code::unavailable, "The interface session has ended");
                     this->openSecondaryWindow(page, std::move(options));
                 });
             });
@@ -238,8 +254,9 @@ private:
                 auto page = developer::inspectorPage(panel, host);
                 if (!Base::canShowSecondaryWindow())
                     co_return false;
+                const auto bound = this->currentShowSession();  // as openWindow: never a window of a later session
                 co_return co_await networking::ex::then(this->uiExecutor().schedule(), [&] {
-                    return this->requestClose(page);
+                    return this->isCurrentShowSession(bound) && this->requestClose(page);
                 });
             });
     }

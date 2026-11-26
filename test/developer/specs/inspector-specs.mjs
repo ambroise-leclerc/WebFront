@@ -124,9 +124,9 @@ describe('The inspectors', () => {
             const store = preferencesStore(bridge);
             store.detached('cpp.watches', true);
             await expectAsync(store.saved()).toBeRejectedWithError('Disconnected');
-            // Without a file, the read fails and listing the directories shows that the file is absent.
-            expect(calls).toEqual(['webfront.developer.state', 'webfront.developer.read', 'webfront.developer.list', 'webfront.developer.list',
-                'webfront.developer.list', 'webfront.inspector.savePreferences']);
+            expect(storage.has(preferencesPath)).toBeFalse();
+            // One read gives the file (absent here) and the token of exactly what it read.
+            expect(calls).toEqual(['webfront.inspector.readPreferences', 'webfront.inspector.savePreferences']);
             expect(storage.has(preferencesPath)).toBeFalse();
             connected = true;
             store.detached('cpp.watches', true);
@@ -139,7 +139,7 @@ describe('The inspectors', () => {
             const {bridge: memory, storage} = memoryBridge(new Map([[preferencesPath, others]]));
             let failing = true;
             const bridge = {cppFunction: name => async (...args) => {
-                if (name === 'webfront.developer.read' && failing) throw new Error('Cannot read project file: ' + args[0]);
+                if (name === 'webfront.inspector.readPreferences' && failing) throw new Error('Cannot read project file: ' + preferencesPath);
                 return memory.cppFunction(name)(...args);
             }};
             const store = preferencesStore(bridge);
@@ -153,6 +153,57 @@ describe('The inspectors', () => {
             await store.saved();
             expect([...parsePreferences(new TextDecoder().decode(storage.get(preferencesPath))).detached].sort())
                 .toEqual(['cpp.functions', 'cpp.watches']);
+        });
+
+        it('keep a change whose save failed, and write it with the next one without asking for it again', async () => {
+            const {bridge: memory, storage} = memoryBridge();
+            let connected = false;
+            const bridge = {cppFunction: name => async (...args) => {
+                if (name === 'webfront.inspector.savePreferences' && !connected) throw new Error('Disconnected');
+                return memory.cppFunction(name)(...args);
+            }};
+            const store = preferencesStore(bridge);
+            store.detached('cpp.watches', true);
+            await expectAsync(store.saved()).toBeRejectedWithError('Disconnected');
+            connected = true;
+            // Only a move after the reconnection: the detach that failed is written with it.
+            store.place({x: 5, y: 6, width: 400, height: 300});
+            await store.saved();
+            const written = parsePreferences(new TextDecoder().decode(storage.get(preferencesPath)));
+            expect([...written.detached]).toEqual(['cpp.watches']);
+            expect(written.rect).toEqual({x: 5, y: 6, width: 400, height: 300});
+        });
+
+        it('let a newer change of a panel win over the failed one it replaces', async () => {
+            const {bridge: memory, storage} = memoryBridge();
+            let connected = false;
+            const bridge = {cppFunction: name => async (...args) => {
+                if (name === 'webfront.inspector.savePreferences' && !connected) throw new Error('Disconnected');
+                return memory.cppFunction(name)(...args);
+            }};
+            const store = preferencesStore(bridge);
+            store.detached('cpp.watches', true);
+            await expectAsync(store.saved()).toBeRejectedWithError('Disconnected');
+            connected = true;
+            store.detached('cpp.watches', false);  // attached again since: the newer change is the one written
+            await store.saved();
+            expect([...parsePreferences(new TextDecoder().decode(storage.get(preferencesPath))).detached]).toEqual([]);
+        });
+
+        it('fall back to the token then the file with a library that cannot read them together', async () => {
+            const {bridge: memory, storage} = memoryBridge(new Map([[preferencesPath, encode(formatPreferences({detached: new Set(['cpp.functions']), rect: null}))]]));
+            const calls = [];
+            const bridge = {cppFunction: name => async (...args) => {
+                calls.push(name);
+                if (name === 'webfront.inspector.readPreferences')
+                    throw Object.assign(new Error("C++ function 'webfront.inspector.readPreferences' was not found"), {code: 'webfront.notFound'});
+                return memory.cppFunction(name)(...args);
+            }};
+            const store = preferencesStore(bridge);
+            store.detached('cpp.watches', true);
+            await store.saved();
+            expect(calls.slice(0, 3)).toEqual(['webfront.inspector.readPreferences', 'webfront.developer.state', 'webfront.developer.read']);
+            expect([...parsePreferences(new TextDecoder().decode(storage.get(preferencesPath))).detached].sort()).toEqual(['cpp.functions', 'cpp.watches']);
         });
 
         it('write again a change whose file changed between its read and its commit', async () => {
@@ -367,7 +418,8 @@ describe('The inspectors', () => {
             let closed;
             const {host, calls} = await testHost({containers: admitted(true), closeWindow: () => new Promise(resolve => { closed = resolve; })});
             await host.detach('cpp.watches');
-            expect((await askAttach('cpp.watches', 'request-close')).closer).toBe('host');
+            const answer = askAttach('cpp.watches', 'request-close');  // answered once the close is over
+            await new Promise(resolve => setTimeout(resolve, 20));
             expect(host.preferences.detached.has('cpp.watches')).toBeFalse();
             // The user detaches it again while the close is in progress: the window opens only once the close is over.
             const detaching = host.detach('cpp.watches');
@@ -375,9 +427,22 @@ describe('The inspectors', () => {
             const names = () => calls.map(([name]) => name).filter(name => name.endsWith('Window'));
             expect(names()).toEqual(['webfront.inspector.openWindow', 'webfront.inspector.closeWindow']);
             closed(true);
+            expect((await answer).closer).toBe('host');
             expect(await detaching).toBe('window');
             expect(names()).toEqual(['webfront.inspector.openWindow', 'webfront.inspector.closeWindow', 'webfront.inspector.openWindow']);
             expect(host.preferences.detached.has('cpp.watches')).toBeTrue();
+        });
+
+        it('lets the native window close itself when the host could not close it', async () => {
+            for (const closeWindow of [async () => false, async () => { throw new Error('no session'); }]) {
+                const {host} = await testHost({containers: admitted(true), closeWindow});
+                await host.detach('cpp.watches');
+                // The window waits for the host only when the host closed it: else it would stay open.
+                expect((await askAttach('cpp.watches', `request-${hosts.length}`)).closer).toBe('self');
+                expect(host.shownPanel).toBe('cpp.watches');
+                host.close();
+                host.channel?.close();
+            }
         });
 
         it('closes a tab it opened when its panel is attached again, and opens a new one on the next detach', async () => {
@@ -628,6 +693,25 @@ describe('The inspectors', () => {
             expect(output).toContain('ls');
         });
 
+        it('draws the line again after a notice received while a completion is pending', async () => {
+            let output = '', answer;
+            const ran = [];
+            const editor = new LineEditor({write: text => { output += text; }, run: async line => { ran.push(line); },
+                complete: () => new Promise(resolve => { answer = resolve; })});
+            editor.showPrompt();
+            editor.handle('ls');
+            editor.handle('\t');  // the completion is pending
+            output = '';
+            editor.notice('The inspector could not open: no host');
+            expect(output.startsWith('\r\x1b[JThe inspector could not open: no host\r\n> ')).toBeTrue();
+            expect(output).toContain('ls');
+            answer({candidates: []});  // no candidate: the completion draws nothing
+            await new Promise(resolve => setTimeout(resolve));
+            editor.handle('\r');
+            await editor.whenIdle();
+            expect(ran).toEqual(['ls']);
+        });
+
         it('opens at a default place inside a small viewport', () => {
             const rect = defaultInspectorRect({width: 400, height: 300});
             expect(rect.x + rect.width).toBeLessThanOrEqual(400);
@@ -693,6 +777,25 @@ describe('The inspectors', () => {
             expect(reloads).toEqual([]);
             shown({persisted: true});   // back to a page that was kept: its discovery had stopped
             expect(reloads).toEqual([true]);
+        });
+
+        it('closes itself on an answer that comes after the wait, which the host gave once it showed the panel again', async () => {
+            const status = document.createElement('p');
+            const closed = [];
+            const view = {BroadcastChannel, setTimeout: (run, delay) => setTimeout(run, delay), clearTimeout: id => clearTimeout(id), opener: {},
+                close: () => closed.push(true)};
+            const host = new BroadcastChannel(inspectorChannel);
+            host.addEventListener('message', ({data}) => {
+                if (data?.type === 'attach') setTimeout(() => host.postMessage({type: 'attached', id: data.id, closer: 'self'}), 80);
+            });
+            try {
+                expect(await attachAgain(view, null, 'cpp.watches', status, {host: 'host-a', wait: 20})).toBeFalse();
+                expect(status.textContent).toContain('did not answer');
+                expect(closed).toEqual([]);
+                await new Promise(resolve => setTimeout(resolve, 150));
+                expect(closed).toEqual([true]);  // the late answer closed it
+                expect(status.textContent).toBe('');
+            } finally { host.close(); }
         });
 
         it('leaves its closing to the host page when the host answers that it closes it', async () => {
@@ -769,18 +872,61 @@ describe('The inspectors', () => {
             expect(registry.answer(revision, 0, 0)[3]).toBeFalse();
         });
 
-        it('give up the revision when the registry keeps changing, so that the next poll reads the list again', async () => {
+        it('give up a listing while the registry keeps changing, with a bounded number of reads', async () => {
             const registry = memoryWatches(1);
             ['a', 'b'].forEach(name => registry.add(name));
+            // Each read adds a watch: no page can ever catch up with the registry.
             const bridge = {cppFunction: () => async (...args) => {
                 const answer = registry.answer(...args);
-                if (args[1] === 0) registry.add(`x${registry.calls.length}`);
+                registry.add(`x${registry.calls.length}`);
                 return answer;
             }};
-            const {watches, revision} = await listWatches(bridge, 0);
-            expect(revision).toBe(0);
-            expect(watches.length).toBeGreaterThan(0);
-            expect(registry.calls.filter(([, after]) => after === 0).length).toBeGreaterThanOrEqual(listingAttempts);
+            expect(await listWatches(bridge, 0)).toBeNull();
+            expect(registry.calls.filter(([, after]) => after === 0).length).toBe(listingAttempts);
+            expect(registry.calls.length).toBeLessThanOrEqual(2 * listingAttempts);  // never reads to the end of a growing list
+        });
+
+        it('keep the watches shown when a listing gives up, and show the list once a read is stable', async () => {
+            const registry = memoryWatches(1);
+            registry.add('a');
+            let churning = true;
+            const bridge = {cppFunction: () => async (...args) => {
+                const answer = registry.answer(...args);
+                if (churning) registry.add(`x${registry.calls.length}`);
+                return answer;
+            }};
+            const changes = [];
+            const discovery = createWatchDiscovery({bridge, onChange: change => changes.push(change.watches.map(watch => watch.name)), timers: {setTimeout: () => 0, clearTimeout: () => {}}});
+            await discovery.start();
+            expect(changes).toEqual([]);  // nothing shown from an unstable read
+            churning = false;
+            await discovery.start();
+            expect(changes.length).toBe(1);
+            expect(changes[0][0]).toBe('a');
+            expect(changes[0].length).toBe((await listWatches(bridge, 0)).watches.length);  // the complete list
+            discovery.stop();
+        });
+
+        it('send no further read and show nothing read after a pause', async () => {
+            const registry = memoryWatches(1);
+            ['a', 'b', 'c'].forEach(name => registry.add(name));
+            let discovery, pauses = 1;
+            const bridge = {cppFunction: () => async (...args) => {
+                const answer = registry.answer(...args);
+                if (args[2] === 0 && pauses-- > 0) discovery.pause();  // the user pauses while the revision is asked
+                return answer;
+            }};
+            const changes = [];
+            discovery = createWatchDiscovery({bridge, onChange: change => changes.push(change), timers: {setTimeout: () => 0, clearTimeout: () => {}}});
+            await discovery.start();
+            expect(registry.calls.length).toBe(1);  // only the revision: no page after the pause
+            expect(changes).toEqual([]);
+            // Resumed, it reads again from the revision shown (none yet), and shows the list.
+            discovery.resume();
+            await discovery.start();
+            expect(changes.length).toBe(1);
+            expect(changes[0].watches.map(watch => watch.name)).toEqual(['a', 'b', 'c']);
+            discovery.stop();
         });
 
         it('reconcile the watches shown with a new list', () => {

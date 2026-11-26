@@ -85,15 +85,29 @@ concept FrontendType = requires(std::string_view port, std::string_view file) {
     { Frontend::open(port, file) } -> std::same_as<void>;
 } && std::same_as<std::remove_cvref_t<decltype(Frontend::action)>, Action>;
 
-/// Whether the active frontend gives the application window the bridge's launch proof.
+namespace detail {
+/// A frontend whose open() receives the ViewLaunch proof, which it may give to its view.
+template <typename Frontend>
+concept receivesViewLaunch = requires(std::string_view text, const ContentPolicy& policy, const WindowOptions& window, const ViewLaunch& launch) {
+    Frontend::open(text, text, text, policy, window, launch);
+};
+}  // namespace detail
+
+/// Whether the active frontend gives the application window the bridge's launch proof. A frontend whose open() receives
+/// ViewLaunch must say it (true when it gives the proof to its view, false when it does not, as the system browser):
+/// left undeclared, a view that holds the proof would not be guarded (ADR-027, section 2). Any other is taken as false.
 template <FrontendType Frontend>
 [[nodiscard]] bool providesViewProof() {
     if constexpr (requires {
                       { Frontend::providesViewProof() } -> std::same_as<bool>;
                   })
         return Frontend::providesViewProof();
-    else
+    else {
+        static_assert(!detail::receivesViewLaunch<Frontend>,
+                      "A frontend whose open() receives ViewLaunch declares static bool providesViewProof(): true when its view "
+                      "gets the proof, false otherwise (ADR-027, section 2; docs/FRONTENDS.md)");
         return false;
+    }
 }
 
 // `action` describes what BasicWF should do after `open()` returns.
@@ -102,6 +116,11 @@ template <FrontendType Frontend>
 struct DefaultBrowserFrontend {
     static constexpr Action action{Action::keepServerRunning};
     static constexpr bool   requiresMainThread = false;
+
+    /// The system browser never gets the proof (ADR-020), although its open() receives ViewLaunch for the origin.
+    static constexpr bool providesViewProof() noexcept {
+        return false;
+    }
 
     static void initialize() { }
 
@@ -151,6 +170,10 @@ struct DefaultBrowserFrontend {
  */
 struct BrowserWithUILoopFrontend {
     static constexpr Action action{Action::keepServerRunning};
+    /// The system browser never gets the proof (ADR-020).
+    static constexpr bool providesViewProof() noexcept {
+        return false;
+    }
     // AppKit's run loop belongs to the main thread; the Windows message pump and the GLib loop run where open() is called.
 #if defined(__APPLE__)
     static constexpr bool requiresMainThread = true;
