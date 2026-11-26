@@ -450,6 +450,20 @@ const Scenario introFunctionPages{"The functions are read page after page, each 
                                           requireEqual(kept->name, std::string{"kept"});
                                           kept.reset();
                                       });
+                                      then("the application reads the names exactly as it registered them; only a page bounds them", [&] {
+                                          const auto functions = registry.list();
+                                          requireEqual(functions.size(), std::size_t{5});
+                                          requireEqual(functions.at(0).name, longName + "0");
+                                          requireEqual(functions.at(4).name, longName + "4");
+                                          require(functions.at(0).name != functions.at(4).name);
+                                          requireEqual(functions.at(0).label.size(), inspect::maxTextBytes);
+                                          require(registry.find(longName + "3").has_value());
+                                          const auto control = registry.add("a\nb", "() => Promise<void>", false, false, std::source_location::current());
+                                          requireEqual(registry.find("a\nb")->name, std::string{"a\nb"});
+                                          requireEqual(registry.find("a\nb")->label,
+                                                       std::string{"a\xE2\x90\x8A"
+                                                                   "b"});
+                                      });
                                       then("a cursor or a count that is not a whole number is refused", [&] {
                                           checkThrows<std::invalid_argument>([&] {
                                               static_cast<void>(registry.page(-1, 200, inspect::minPageBytes));

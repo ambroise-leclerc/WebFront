@@ -318,7 +318,8 @@ private:
 /// A registered function as the application reads it (BasicWF::registeredFunctions): a copy, taken at one moment.
 struct FunctionInfo {
     std::uint64_t            id = 0;
-    std::string              name;
+    std::string              name;   // exactly as it was registered
+    std::string              label;  // the name as the inspectors show it: control characters visible, 256 bytes at most
     std::string              signature;
     std::string              location;
     std::string              scope;
@@ -368,7 +369,7 @@ public:
         record->label       = boundedText(name);
         record->signature   = std::move(signature);
         record->location    = locationText(location);
-        record->scope       = boundedText(scope);
+        record->scope       = std::string(scope);
         record->takesCaller = takesCaller;
         record->deferred    = deferred;
         record->gate        = gate;
@@ -451,10 +452,10 @@ public:
                                | (info.timedCalls != 0 ? function_flag::timed : 0u);
         const double   mean  = info.timedCalls != 0 ? milliseconds(info.totalDuration) / static_cast<double>(info.timedCalls) : 0.0;
         return {static_cast<double>(info.id),
-                info.name,
+                info.label,
                 info.signature,
                 info.location,
-                info.scope,
+                boundedText(info.scope),
                 static_cast<double>(flags),
                 static_cast<double>(info.calls),
                 static_cast<double>(info.failures),
@@ -480,7 +481,8 @@ private:
     [[nodiscard]] static FunctionInfo snapshot(const FunctionRecord& record) {
         FunctionInfo info;
         info.id            = record.id;
-        info.name          = record.label;
+        info.name          = record.name;
+        info.label         = record.label;
         info.signature     = record.signature;
         info.location      = record.location;
         info.scope         = record.scope;
@@ -496,8 +498,9 @@ private:
     }
 
     [[nodiscard]] static std::size_t encodedSize(const FunctionInfo& info) noexcept {
-        return detail::encodedTuple + 6 * detail::encodedNumber + detail::encodedText(info.name.size()) + detail::encodedText(info.signature.size())
-               + detail::encodedText(info.location.size()) + detail::encodedText(info.scope.size()) + detail::encodedText(info.lastError.size());
+        return detail::encodedTuple + 6 * detail::encodedNumber + detail::encodedText(info.label.size()) + detail::encodedText(info.signature.size())
+               + detail::encodedText(info.location.size()) + detail::encodedText(std::min(info.scope.size(), maxTextBytes))
+               + detail::encodedText(info.lastError.size());
     }
 
     /// Shared with the records, which remove their own entry and may outlive the registry.
