@@ -527,6 +527,32 @@ describe('The inspectors', () => {
             expect(calls.filter(([name]) => name === 'webfront.inspector.closeWindow')).toEqual([['webfront.inspector.closeWindow', 'cpp.watches', 'host-a']]);
         });
 
+        it('closes the native window that opens after the user closed the floating window', async () => {
+            let opened;
+            const {host, calls} = await testHost({containers: admitted(true), openWindow: () => new Promise(resolve => { opened = resolve; })});
+            await host.open('cpp.watches');
+            const detaching = host.detach('cpp.watches');
+            host.closeButton.click();  // the user closes the inspector before C++ answered
+            opened();
+            await detaching;
+            expect(host.panel.hidden).toBeTrue();
+            expect(calls.filter(([name]) => name === 'webfront.inspector.closeWindow')).toEqual([['webfront.inspector.closeWindow', 'cpp.watches', 'host-a']]);
+            // The panel stays remembered detached: the next opening goes to its window.
+            expect(host.preferences.detached.has('cpp.watches')).toBeTrue();
+        });
+
+        it('keeps the native window when another panel is opened in the floating window meanwhile', async () => {
+            let opened;
+            const {host, calls} = await testHost({containers: admitted(true), openWindow: () => new Promise(resolve => { opened = resolve; })});
+            await host.open('cpp.watches');
+            const detaching = host.detach('cpp.watches');
+            await host.open('cpp.functions');
+            host.closeButton.click();  // closes Functions, not the panel being detached
+            opened();
+            expect(await detaching).toBe('window');
+            expect(calls.some(([name]) => name === 'webfront.inspector.closeWindow')).toBeFalse();
+        });
+
         it('keeps the native window of a panel detached again while its first opening was pending', async () => {
             const answers = [];
             const {host, calls} = await testHost({containers: admitted(true), openWindow: () => new Promise(resolve => answers.push(resolve))});

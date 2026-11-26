@@ -359,11 +359,14 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
     async function openDetached(id, container) {
         if (container === 'window') {
             const rect = shown(), started = action;
+            const attempt = {cancelled: false};
+            opening.set(id, attempt);
             try {
                 // A close that an attach asked for is over first: the window opened now is never the one being closed.
                 if (closing.has(id)) await closing.get(id);
                 await bridge.cppFunction('webfront.inspector.openWindow')(id, self, rect.width, rect.height);
-                if (!preferences.detached.has(id)) {
+                // Attached again, or its floating window closed by the user, while C++ was opening it: no longer wanted.
+                if (!preferences.detached.has(id) || attempt.cancelled) {
                     await bridge.cppFunction('webfront.inspector.closeWindow')(id, self).catch(() => {});
                     return false;
                 }
@@ -375,6 +378,8 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
                     showFloating(id, `${hostReasons.windowFailed}: ${error?.message ?? error}`);
                 }
                 return false;
+            } finally {
+                if (opening.get(id) === attempt) opening.delete(id);
             }
         }
         // The target names the host too: a tab of another page of the same browsing group is never reused for this one. A tab
@@ -397,6 +402,15 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
     // and `selfClosing` the generation of the panels whose tab closes itself (a tab this page did not open, before a reload).
     const closing = new Map(), tabs = new Map(), selfClosing = new Map();
     let generation = 0;
+    // The native window of each panel that C++ is opening: closing the floating window that shows that panel meanwhile
+    // cancels it, and the window is closed once it opens.
+    const opening = new Map();
+    /** Closes the floating window at the user's request, with the native window still opening for its panel. */
+    function closeFloating() {
+        const attempt = shownPanel && opening.get(shownPanel);
+        if (attempt) attempt.cancelled = true;
+        hideFloating();
+    }
     /** Closes the detached container of `id`; 'host' when this page closes it, 'self' when the window must close itself. */
     function closeDetached(id) {
         if (detachedContainer(containers, {embedded: isEmbedded}) === 'window') {
@@ -468,7 +482,7 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
             retryPanel = null;
             showFloating(id);
         },
-        close: hideFloating,
+        close: closeFloating,
         saved: () => store.saved(),
         get preferences() { return {detached: new Set(preferences.detached), rect: preferences.rect}; },
     };
@@ -476,7 +490,7 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
     detachButton.addEventListener('click', () => {
         if (shownPanel && !reason()) host.detach(shownPanel);
     });
-    closeButton.addEventListener('click', hideFloating);
+    closeButton.addEventListener('click', closeFloating);
     retry.addEventListener('click', () => { if (retryPanel) host.detach(retryPanel); });
 
     // A detached inspector asks to come back: the page that detached it shows the panel, closes the detached container when
