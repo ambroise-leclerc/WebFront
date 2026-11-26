@@ -85,12 +85,12 @@ file(READ "${header}" rendered)
 foreach(fragment
         "namespace webfront::fs {"
         "class EmbeddedDirectory {"
-        "explicit EmbeddedDirectory(std::filesystem::path) { }"
-        "if (name == \"@a@ b+~.svg\")\n            return File{Asset0{}};"
-        "if (name == \"sub/hello.js\")\n            return File{Asset4{}};"
-        "struct Asset1 {  // empty.css\n        static constexpr std::size_t dataSize{0};\n        static constexpr std::array<std::uint64_t, 0> data{};"
-        "struct Asset4 {  // sub/hello.js\n        static constexpr std::size_t dataSize{5};\n        static constexpr std::array<std::uint64_t, 1> data{\n            0x68656c6c6f000000\n        };"
-        "dataSize{41};\n        static constexpr std::array<std::uint64_t, 6> data{\n            0x3031323334353637, 0x3839303132333435, 0x3637383930313233, 0x3435363738393031, 0x3233343536373839,\n            0x3000000000000000\n        };")
+        "explicit EmbeddedDirectory(::std::filesystem::path) { }"
+        "if (name == \"@a@ b+~.svg\")\n            return ::webfront::fs::File{Asset0{}};"
+        "if (name == \"sub/hello.js\")\n            return ::webfront::fs::File{Asset4{}};"
+        "struct Asset1 {  // empty.css\n        static constexpr ::std::size_t dataSize{0};\n        static constexpr ::std::array<::std::uint64_t, 0> data{};"
+        "struct Asset4 {  // sub/hello.js\n        static constexpr ::std::size_t dataSize{5};\n        static constexpr ::std::array<::std::uint64_t, 1> data{\n            0x68656c6c6f000000\n        };"
+        "dataSize{41};\n        static constexpr ::std::array<::std::uint64_t, 6> data{\n            0x3031323334353637, 0x3839303132333435, 0x3637383930313233, 0x3435363738393031, 0x3233343536373839,\n            0x3000000000000000\n        };")
     string(FIND "${rendered}" "${fragment}" at)
     if(at EQUAL -1)
         message(FATAL_ERROR "The header lacks:\n${fragment}\n--- header ---\n${rendered}")
@@ -135,10 +135,47 @@ file(WRITE "${semicolon_directory}/index.html" "x")
 expect_failure(semicolon_directory "webfront_embed_directory(app \"${semicolon_directory}\")" "cannot embed a directory whose path holds ';'")
 
 # A C++ keyword or a reserved identifier would configure, then the generated header would not compile.
-foreach(class class final Asset0 Asset12 A__b)
+foreach(class class final Asset0 Asset12 A__b open)
     expect_failure(class_${class} "webfront_embed_directory(app \"${ui}\" CLASS ${class})" "CLASS cannot be '${class}'")
 endforeach()
 foreach(namespace and app::int std::module app::__detail _App::ui)
     string(MAKE_C_IDENTIFIER "${namespace}" label)
     expect_failure(namespace_${label} "webfront_embed_directory(app \"${ui}\" NAMESPACE ${namespace})" "NAMESPACE cannot hold '")
 endforeach()
+
+# A name WebFront declares under webfront (fs::File, fs::Multi, the fs::detail namespace) would be defined twice; in the
+# application's own namespace it is free.
+expect_failure(webfront_file "webfront_embed_directory(app \"${ui}\" CLASS File)" "webfront::fs::File meets a name WebFront declares")
+expect_failure(webfront_multi "webfront_embed_directory(app \"${ui}\" CLASS Multi NAMESPACE webfront::fs)" "meets a name WebFront declares")
+expect_failure(webfront_detail "webfront_embed_directory(app \"${ui}\" CLASS detail)" "meets a name WebFront declares")
+expect_failure(webfront_namespace "webfront_embed_directory(app \"${ui}\" CLASS UI NAMESPACE webfront::fs::File)" "meets a name WebFront declares")
+configure_case(own_namespace "webfront_embed_directory(app \"${ui}\" CLASS File NAMESPACE app)" result output)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "own_namespace: app::File must be accepted:\n${output}")
+endif()
+
+# Two targets whose names MAKE_C_IDENTIFIER makes equal (my-app, my_app) embed the same class side by side, each in a
+# directory and with a generator of its own.
+configure_case(similar_targets "add_library(my-app INTERFACE)
+add_library(my_app INTERFACE)
+webfront_embed_directory(my-app \"${ui}\" CLASS UI NAMESPACE app)
+webfront_embed_directory(my_app \"${ui}\" CLASS UI NAMESPACE app)
+foreach(target my-app my_app)
+    get_target_property(includes \${target} INTERFACE_INCLUDE_DIRECTORIES)
+    get_target_property(dependencies \${target} MANUALLY_ADDED_DEPENDENCIES)
+    message(STATUS \"\${target}: \${includes} \${dependencies}\")
+endforeach()" result output)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "similar_targets: both targets must be accepted:\n${output}")
+endif()
+string(REGEX MATCH "my-app: ([^ ]+) ([^\n]+)\n" dashed "${output}")
+set(dashed_dirs "${CMAKE_MATCH_1}")
+set(dashed_generator "${CMAKE_MATCH_2}")
+string(REGEX MATCH "my_app: ([^ ]+) ([^\n]+)\n" underscored "${output}")
+set(underscored_dirs "${CMAKE_MATCH_1}")
+set(underscored_generator "${CMAKE_MATCH_2}")
+if(NOT dashed OR NOT underscored OR dashed_dirs STREQUAL underscored_dirs OR dashed_generator STREQUAL underscored_generator
+        OR NOT underscored_dirs MATCHES "/webfront_embed/my_app$" OR NOT dashed_dirs MATCHES "/webfront_embed/my_app_[0-9a-f]+$")
+    message(FATAL_ERROR "similar_targets: each target needs its own directory and generator:\n${output}")
+endif()
+message(STATUS "similar_targets: ${dashed_generator} and ${underscored_generator}")

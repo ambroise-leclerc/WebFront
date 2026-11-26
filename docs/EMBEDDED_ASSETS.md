@@ -93,7 +93,8 @@ int main(int argc, char** argv) {
 
 - **What it serves.** Every file under the directory, by its path relative to it (`index.html`, `lib/chart.js`; `/`
   is `index.html`), with the bytes of the file. The server derives the MIME type from the extension, as for a file on
-  disk. `CLASS` defaults to `EmbeddedDirectory`, `NAMESPACE` to `webfront::fs` (a C++ keyword or reserved identifier is refused); the header is `<CLASS>.hpp`. `EXCLUDE`
+  disk. `CLASS` defaults to `EmbeddedDirectory`, `NAMESPACE` to `webfront::fs` (a C++ keyword, a reserved identifier, `open` and, under `webfront`, a name WebFront
+  declares such as `File` are refused); the header is `<CLASS>.hpp`. `EXCLUDE`
   takes regular expressions matched against the relative paths (above: hidden files such as `.DS_Store`). A path may
   hold letters, digits, `_ . - + @ ~` and spaces; another name stops the configuration and names the file (a name
   with `;`, which CMake splits, can only be renamed).

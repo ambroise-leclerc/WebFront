@@ -19,7 +19,7 @@ include_guard(GLOBAL)
 #
 # The build regenerates the header when a file of the directory changes, and configures again when a file is added or
 # removed (file(GLOB_RECURSE CONFIGURE_DEPENDS)). CLASS defaults to EmbeddedDirectory and NAMESPACE to webfront::fs; a
-# C++ keyword or a reserved identifier is refused in either.
+# C++ keyword, a reserved identifier, the member name open and, under webfront, a name WebFront declares are refused.
 # EXCLUDE drops the relative paths that match one of its regular expressions (for instance "(^|/)[.]" for hidden files
 # such as .DS_Store). A path may only hold letters, digits and the characters _ . - + @ ~ and space, without an empty,
 # "." or ".." part; another name fails the configuration and names the file. A directory reached through a symbolic link
@@ -61,9 +61,9 @@ private;protected;public;register;reinterpret_cast;requires;return;short;signed;
 struct;switch;template;this;thread_local;throw;true;try;typedef;typeid;typename;union;unsigned;using;virtual;void;volatile;\
 wchar_t;while;xor;xor_eq;")
     # The header must compile: a keyword, a reserved identifier or the name of a generated member would not.
-    if(reserved MATCHES ";${ARG_CLASS};" OR ARG_CLASS MATCHES "__|^Asset[0-9]+$")
+    if(reserved MATCHES ";${ARG_CLASS};" OR ARG_CLASS MATCHES "__|^Asset[0-9]+$|^open$")
         message(FATAL_ERROR "webfront_embed_directory: CLASS cannot be '${ARG_CLASS}': a C++ keyword, a reserved identifier "
-            "(with '__') or a name of the generated members (Asset<n>) would not compile")
+            "(with '__') or a name of the generated members (open, Asset<n>) would not compile")
     endif()
     string(REPLACE "::" ";" components "${ARG_NAMESPACE}")
     foreach(component IN LISTS components)
@@ -72,6 +72,30 @@ wchar_t;while;xor;xor_eq;")
                 "identifier (with '__', or '_' and a capital letter) would not compile or could meet a macro")
         endif()
     endforeach()
+    # Under webfront, a name WebFront declares itself (fs::File, fs::Multi...) would be defined twice. Any type, alias,
+    # concept or enumeration of that name in WebFront's headers is refused, whatever its namespace: the application has
+    # its own namespace for it.
+    if(ARG_NAMESPACE MATCHES "^webfront(::|$)")
+        list(SUBLIST components 1 -1 inner)
+        # A type, an alias (using NAME =), a concept or an enumeration may not take a name of the namespace or the class;
+        # a namespace may only meet the class (reopening webfront::fs is the point).
+        set(names "${ARG_CLASS}")
+        foreach(component IN LISTS inner)
+            string(APPEND names "|${component}")
+        endforeach()
+        set(declared "(class|struct|union|concept|enum)[ \t]+(${names})([^A-Za-z0-9_]|$)")
+        string(APPEND declared "|using[ \t]+(${names})[ \t]*=|namespace[ \t]+([A-Za-z0-9_]+::)*${ARG_CLASS}([^A-Za-z0-9_:]|$)")
+        file(GLOB_RECURSE headers "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../include/webfront/*.hpp")
+        foreach(header IN LISTS headers)
+            file(STRINGS "${header}" hits REGEX "${declared}" LIMIT_COUNT 1)
+            if(hits)
+                string(STRIP "${hits}" hits)
+                cmake_path(GET header FILENAME header_name)
+                message(FATAL_ERROR "webfront_embed_directory: ${ARG_NAMESPACE}::${ARG_CLASS} meets a name WebFront declares "
+                    "(${header_name}: '${hits}'). Choose another CLASS, or the application's own NAMESPACE.")
+            endif()
+        endforeach()
+    endif()
     cmake_path(ABSOLUTE_PATH directory BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" NORMALIZE)
     string(REGEX REPLACE "(.)/$" "\\1" directory "${directory}")
     if(directory MATCHES ";")
@@ -123,7 +147,14 @@ wchar_t;while;xor;xor_eq;")
     list(SORT kept)
     list(JOIN kept "\n" manifest)
 
+    # The name of the target in file and target names; a target that MAKE_C_IDENTIFIER changes (my-app, beside a my_app)
+    # keeps a digest of its own name, so that two targets never share a directory or a generator.
     string(MAKE_C_IDENTIFIER "${target}" name)
+    if(NOT name STREQUAL target)
+        string(SHA256 digest "${target}")
+        string(SUBSTRING "${digest}" 0 8 digest)
+        string(APPEND name "_${digest}")
+    endif()
     set(include_dir "${CMAKE_CURRENT_BINARY_DIR}/webfront_embed/${name}")
     set(header "${include_dir}/${ARG_CLASS}.hpp")
     set(manifest_file "${CMAKE_CURRENT_BINARY_DIR}/webfront_embed/${name}.${ARG_CLASS}.files")
