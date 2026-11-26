@@ -12,10 +12,13 @@
 
 #pragma once
 
+#include "BridgeError.hpp"
+#include "frontend/Frontend.hpp"
 #include "networking/Tasks.hpp"
 #include "Task.hpp"
 #include "UISubscribers.hpp"
 #include "utils/Json.hpp"
+#include "Watches.hpp"
 
 #include <algorithm>
 #include <array>
