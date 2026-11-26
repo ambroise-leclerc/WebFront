@@ -395,9 +395,11 @@ public:
         registered(app.template cppFunction<void, UI, std::uint32_t, std::string, std::string>(
             "webfront.commands.start",
             [owner = registry](UI ui, std::uint32_t id, const std::string& name, const std::string& arguments) {
+                admitWriter(ui);
                 owner->start(std::move(ui), id, name, arguments);
             }));
         registered(app.template cppFunction<void, UI, std::uint32_t>("webfront.commands.cancel", [owner = registry](UI ui, std::uint32_t id) {
+            admitWriter(ui);
             owner->cancel(ui, id);
         }));
         registry->keep(app.subscribeUIClosed([weak = std::weak_ptr(registry)](UI ui) {
@@ -427,6 +429,13 @@ public:
     }
 
 private:
+    static void admitWriter(const UI& ui) {
+        if constexpr (requires { typename App::FrontendProvider; }) {
+            if (frontend::providesViewProof<typename App::FrontendProvider>() && !ui.isLocalClient())
+                throw webfront::detail::makeBridgeError(inspect::code::denied, "This command requires an admitted application view");
+        }
+    }
+
     std::shared_ptr<commands::detail::Registry<UI>> registry;
 };
 

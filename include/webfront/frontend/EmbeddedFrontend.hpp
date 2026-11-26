@@ -103,6 +103,9 @@ struct ViewOptions {
 template <typename Derived>
 struct EmbeddedFrontend {
     static constexpr Action action{Action::closeServerAfterOpen};
+    static constexpr bool   providesViewProof() noexcept {
+        return true;
+    }
 
     /// The interface thread while open() runs the toolkit's loop (see UIExecutor.hpp).
     [[nodiscard]] static UIExecutor uiExecutor() {

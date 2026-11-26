@@ -59,6 +59,7 @@ namespace webfront::frontend {
  * An optional open(address, port, file, policy, window) overload also receives the application's WindowOptions.
  * An optional static UIExecutor uiExecutor() publishes the interface thread (UIExecutor.hpp): it is available while
  * open() runs the frontend's loop, and BasicWF::uiExecutor() forwards it.
+ * An optional static bool providesViewProof() reports whether the active frontend gives the launch proof to its view.
  * An optional static bool closeServerAfterOpen() overrides `action` at run time (NativeOrBrowserFrontend).
  * An optional static void launch(address, port, file) opens the interface and returns without waiting for it: BasicWF::start()
  * needs it, and a frontend whose window lives in open()'s loop does not offer it. A launch(address, port, file, policy)
@@ -83,6 +84,16 @@ concept FrontendType = requires(std::string_view port, std::string_view file) {
     { Frontend::initialize() } -> std::same_as<void>;
     { Frontend::open(port, file) } -> std::same_as<void>;
 } && std::same_as<std::remove_cvref_t<decltype(Frontend::action)>, Action>;
+
+/// Whether the active frontend gives the application window the bridge's launch proof.
+template <FrontendType Frontend>
+[[nodiscard]] bool providesViewProof() {
+    if constexpr (requires {
+                      { Frontend::providesViewProof() } -> std::same_as<bool>;
+                  })
+        return Frontend::providesViewProof();
+    return false;
+}
 
 // `action` describes what BasicWF should do after `open()` returns.
 // Keep the server running when `open()` only launches the UI, and ask BasicWF to
@@ -302,6 +313,9 @@ struct NativeOrBrowserFrontendFor {
     }
     [[nodiscard]] static bool usesNativeWindow() {
         return state().native.load();
+    }
+    [[nodiscard]] static bool providesViewProof() {
+        return usesNativeWindow() ? frontend::providesViewProof<Native>() : frontend::providesViewProof<Browser>();
     }
     /// Whether the server stops once open() returns: true for a native window, false for the browser.
     [[nodiscard]] static bool closeServerAfterOpen() {

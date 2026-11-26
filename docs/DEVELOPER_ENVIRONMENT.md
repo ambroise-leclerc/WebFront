@@ -460,7 +460,10 @@ environment's `mount`, not to the embedded bootstrap page):
 
   Attach brings the panel back to the page that detached it only, even when other pages of the application are open on
   the same origin. The project keeps the detached panels and the floating window's place in
-  `.webfront/developer/inspector-window.json`.
+  `.webfront/developer/inspector-window.json`. A save that reaches C++ completes or releases its transaction there,
+  even when its page closes. A page closed before the save reaches C++ may lose its latest choice.
+  With a frontend that proves its view, developer file writes and starting or cancelling native terminal commands
+  also require an admitted page. The system browser keeps origin-based access to those operations.
   The **Watches** panel lists the application's watches (`app.watch(name, source)`, declared after `bootstrap()`): their
   name, the kind of their root and where they were declared. It asks C++ for the revision of their table every 250 ms
   (Pause stops it), reads the list again when it changed, and adds or removes the watches that appeared or disappeared.

@@ -55,6 +55,15 @@ export function memoryBridge(storage = new Map()) {
             }
         },
     };
-    const bridge = {cppFunction: name => async (...args) => operations[name.replace('webfront.developer.', '')](...args)};
+    const bridge = {cppFunction: name => async (...args) => {
+        if (name === 'webfront.inspector.savePreferences') {
+            const path = '.webfront/developer/inspector-window.json';
+            const [expected, bytes] = args;
+            if (stateOf([path]) !== expected) throw new Error('The project changed since it was read; run the command again');
+            storage.set(path, bytes);
+            return;
+        }
+        return operations[name.replace('webfront.developer.', '')](...args);
+    }};
     return {bridge, storage, pending: () => transactions.size};
 }

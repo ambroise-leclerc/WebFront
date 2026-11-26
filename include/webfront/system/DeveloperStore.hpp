@@ -254,6 +254,23 @@ public:
         commitGroup(lines(ids), lines(paths), expected);
     }
 
+    /// A conditional publication of one small file, completed or aborted within one server call.
+    void publishFile(std::string destination, std::vector<std::uint8_t> bytes, const std::string& expected) {
+        const auto id = beginReplacing(destination, false);
+        try {
+            write(id, "output", 0, std::move(bytes));
+            commitGroup({id}, {destination}, expected);
+        } catch (...) {
+            std::scoped_lock lock(mutex);
+            if (const auto found = transactions.find(id); found != transactions.end()) {
+                std::error_code ignored;
+                std::filesystem::remove_all(found->second.staging, ignored);
+                transactions.erase(found);
+            }
+            throw;
+        }
+    }
+
     void abort(std::string id) {
         std::scoped_lock lock(mutex);
         const auto       found = transactions.find(id);

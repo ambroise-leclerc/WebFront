@@ -165,13 +165,13 @@ private:
         expose<&Store::entries, Bytes, std::string>("webfront.developer.entries");
         // For the bootstrap shipped with this C++: it republishes the environment only when a published file differs.
         expose<&Store::digests, Bytes, std::string>("webfront.developer.digests");
-        expose<&Store::beginReplacing, std::string, std::string, bool>("webfront.developer.begin");
-        expose<&Store::beginNew, std::string, std::string, bool>("webfront.developer.beginNew");
-        expose<&Store::write, void, std::string, std::string, std::uint64_t, Bytes>("webfront.developer.write");
-        expose<&Store::commit, void, std::string>("webfront.developer.commit");
-        expose<&Store::abort, void, std::string>("webfront.developer.abort");
+        exposeWrite<&Store::beginReplacing, std::string, std::string, bool>("webfront.developer.begin");
+        exposeWrite<&Store::beginNew, std::string, std::string, bool>("webfront.developer.beginNew");
+        exposeWrite<&Store::write, void, std::string, std::string, std::uint64_t, Bytes>("webfront.developer.write");
+        exposeWrite<&Store::commit, void, std::string>("webfront.developer.commit");
+        exposeWrite<&Store::abort, void, std::string>("webfront.developer.abort");
         expose<&Store::stateOfLines, std::string, std::string>("webfront.developer.state");
-        expose<&Store::commitGroupLines, void, std::string, std::string, std::string>("webfront.developer.commitGroup");
+        exposeWrite<&Store::commitGroupLines, void, std::string, std::string, std::string>("webfront.developer.commitGroup");
 #if !(defined(WEBFRONT_DISTRIBUTION) && WEBFRONT_DISTRIBUTION)
         registerInspectors();
 #endif
@@ -198,6 +198,12 @@ private:
             admit(ui);
             return ui.isEmbeddedView();
         });
+        this->template reservedCppFunction<void, Caller, std::string, std::vector<std::uint8_t>>(
+            "webfront.inspector.savePreferences",
+            [owned = store](Caller ui, std::string expected, std::vector<std::uint8_t> bytes) {
+                admit(ui);
+                owned->publishFile(".webfront/developer/inspector-window.json", std::move(bytes), expected);
+            });
         // The discovery of the watches (section 3): a read of the table, without calling any source.
         this->template reservedCppFunction<inspect::WatchPage, Caller, double, double, double>(
             "webfront.inspector.watches",
@@ -236,18 +242,30 @@ private:
             });
     }
 
+#endif
+
     /// Refuses a page that is neither the proven view nor, with trustLoopbackClients, a loopback page (ADR-027, section 2).
     static void admit(const typename Base::UI& ui) {
         if (!ui.isLocalClient())
             throw webfront::detail::makeBridgeError(inspect::code::denied,
                                                     "The inspectors answer only a view of the application (or a loopback page with trustLoopbackClients)");
     }
-#endif
 
     /// Registers a store operation as a bridge callback; the store stays alive as long as the callback.
     template <auto Member, typename Result, typename... Args>
     void expose(std::string name) {
         this->template cppFunction<Result, Args...>(std::move(name), [owned = store](Args... arguments) -> Result {
+            return ((*owned).*Member)(std::move(arguments)...);
+        });
+    }
+
+    /// Writes are restricted when the active frontend proves the application's view (ADR-027, section 2).
+    template <auto Member, typename Result, typename... Args>
+    void exposeWrite(std::string name) {
+        using Caller = typename Base::UI;
+        this->template cppFunction<Result, Caller, Args...>(std::move(name), [owned = store](Caller ui, Args... arguments) -> Result {
+            if (frontend::providesViewProof<Frontend>())
+                admit(ui);
             return ((*owned).*Member)(std::move(arguments)...);
         });
     }

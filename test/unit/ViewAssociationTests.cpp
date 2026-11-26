@@ -11,6 +11,7 @@
 
 #include "InjectableNetworking.hpp"
 #include "TemporaryDirectory.hpp"
+#include <webfront/Commands.hpp>
 #include <webfront/DeveloperApp.hpp>
 #include <webfront/networking/TCPNetworkingStdnet.hpp>
 #include <webfront/system/DefaultFS.hpp>
@@ -395,6 +396,9 @@ const Scenario inspectorContainersScenario{"The inspectors' containers follow th
 namespace {
 /// A frontend that opens secondary windows (WebKitGTK, WKWebView, WebView2 in this respect), counting the windows it opens.
 struct InspectorWindowFrontend {
+    static constexpr bool providesViewProof() noexcept {
+        return true;
+    }
     static constexpr frontend::Action action{frontend::Action::keepServerRunning};
     static void                       initialize() { }
     static void                       open(std::string_view, std::string_view) { }
@@ -469,6 +473,53 @@ const Scenario inspectorContainersWithWindows{
             then("the trusted page may open a window, and new connections are admitted", [&] {
                 require(ViewSocket::wrote(containersAnswer(true, true, true)));
             });
+        });
+      }
+};
+
+const Scenario developerWriteAccess{
+    "Developer writes and commands require an admitted client when the frontend proves its view",
+    {"view-association", "inspector"},
+    [] {
+        const std::string               path = "protected.txt";
+        const std::vector<std::uint8_t> bytes{'o', 'k'};
+        given("an unproven client of an embedded frontend", [&] {
+            freshNetwork();
+            AdmittedBrowser<InspectorWindowApp> browser{false, false};
+            Commands                            commands{browser.app};
+            const auto                          denied = [&](auto name, auto... arguments) {
+                const auto offset = ViewSocket::writtenText().size();
+                callWith(name, 7, arguments...);
+                require(ViewSocket::writtenText().find(inspect::code::denied, offset) != std::string::npos);
+            };
+            denied("webfront.developer.begin", path, false);
+            denied("webfront.developer.beginNew", path, false);
+            denied("webfront.developer.write", path, std::string{"output"}, std::uint64_t{0}, bytes);
+            denied("webfront.developer.commit", path);
+            denied("webfront.developer.abort", path);
+            denied("webfront.developer.commitGroup", path, path, path);
+            denied("webfront.commands.start", std::uint32_t{1}, path, std::string{"[]"});
+            denied("webfront.commands.cancel", std::uint32_t{1});
+            denied("webfront.inspector.savePreferences", path, bytes);
+            const auto offset = ViewSocket::writtenText().size();
+            callWith("webfront.developer.state", 7, path);
+            const auto response = ViewSocket::writtenText().substr(offset);
+            require(!response.empty() && !response.contains(inspect::code::denied));
+            require(!std::filesystem::exists(browser.project.path() / ".webfront/developer/staging"));
+        });
+        given("a proven client", [&] {
+            freshNetwork();
+            AdmittedBrowser<InspectorWindowApp> browser{false, true};
+            callWith("webfront.developer.begin", 7, path, false);
+            require(!ViewSocket::wrote(inspect::code::denied));
+            require(std::filesystem::is_directory(browser.project.path() / ".webfront/developer/staging"));
+        });
+        given("a system browser with the default trust policy", [&] {
+            freshNetwork();
+            AdmittedBrowser<InspectorApp> browser{false, false};
+            callWith("webfront.developer.begin", 7, path, false);
+            require(!ViewSocket::wrote(inspect::code::denied));
+            require(std::filesystem::is_directory(browser.project.path() / ".webfront/developer/staging"));
         });
       }
 };

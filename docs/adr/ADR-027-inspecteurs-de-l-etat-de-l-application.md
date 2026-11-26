@@ -696,7 +696,9 @@ recommencer la liste, pour qu'un observateur retiré entre deux pages ne reste p
 Le choix de chaque panneau et la place de la fenêtre flottante sont écrits comme des **changements** du fichier du
 projet, relu au moment de l'écriture et validé seulement s'il n'a pas changé depuis (sinon l'écriture recommence) :
 plusieurs pages d'un même projet ne défont pas leurs choix. Un détachement ou un rattachement est écrit aussitôt, la
-place après une courte pause.
+place après une courte pause. Un seul appel admis à `webfront.inspector.savePreferences` écrit la version
+conditionnelle, et C++ libère sa transaction en cas d'échec. Si la page ferme avant que cet appel arrive,
+le dernier changement peut être perdu.
 
 La même règle désactive « Détacher » quand aucun conteneur détaché ne donnerait l'accès.
 

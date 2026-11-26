@@ -111,12 +111,32 @@ describe('The inspectors', () => {
             } finally { jasmine.clock().uninstall(); }
         });
 
+        it('rejects a failed save and can save again from a later action', async () => {
+            const {bridge: memory, storage} = memoryBridge();
+            const calls = [];
+            let connected = false;
+            const bridge = {cppFunction: name => async (...args) => {
+                calls.push(name);
+                if (name === 'webfront.inspector.savePreferences' && !connected) throw new Error('Disconnected');
+                return memory.cppFunction(name)(...args);
+            }};
+            const store = preferencesStore(bridge);
+            store.detached('cpp.watches', true);
+            await expectAsync(store.saved()).toBeRejectedWithError('Disconnected');
+            expect(calls).toEqual(['webfront.developer.state', 'webfront.developer.read', 'webfront.inspector.savePreferences']);
+            expect(storage.has(preferencesPath)).toBeFalse();
+            connected = true;
+            store.detached('cpp.watches', true);
+            await store.saved();
+            expect([...parsePreferences(new TextDecoder().decode(storage.get(preferencesPath))).detached]).toEqual(['cpp.watches']);
+        });
+
         it('write again a change whose file changed between its read and its commit', async () => {
             const {bridge: memory, storage} = memoryBridge();
             let raced = false;
             const bridge = {cppFunction: name => async (...args) => {
                 // Another page commits between this page's read and its commit, once.
-                if (name === 'webfront.developer.commitGroup' && !raced) {
+                if (name === 'webfront.inspector.savePreferences' && !raced) {
                     raced = true;
                     storage.set(preferencesPath, encode(formatPreferences({detached: new Set(['typescript.bridge']), rect: null})));
                 }

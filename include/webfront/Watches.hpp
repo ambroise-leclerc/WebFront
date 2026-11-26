@@ -93,7 +93,7 @@ inline void appendVisible(std::string& visible, char c) {
     } else
         visible += c;
 }
-inline constexpr std::string_view ellipsis = "\u2026";
+inline constexpr std::string_view ellipsis = "\xE2\x80\xA6";
 }  // namespace detail
 
 /// A text of the application made safe to show and bounded: control characters become their visible pictures (U+2400

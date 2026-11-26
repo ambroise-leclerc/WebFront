@@ -893,6 +893,22 @@ const Scenario publicationPrepared{"A publication prepared from stale state is r
                                        });
                                    }};
 
+const Scenario conditionalFilePublication{"A failed single-file publication releases its destination", [] {
+                                              TemporaryDirectory project;
+                                              developer::Store   store{project.path()};
+                                              const std::string  path   = "preferences.json";
+                                              const auto         absent = store.state({path});
+                                              store.publishFile(path, bytes("first"), absent);
+                                              then("a conflicting save leaves the file intact and the next save can use the same path", [&] {
+                                                  requireThrows([&] {
+                                                      store.publishFile(path, bytes("stale"), absent);
+                                                  });
+                                                  requireEqual(store.read(path, 0), bytes("first"));
+                                                  store.publishFile(path, bytes("next"), store.state({path}));
+                                                  requireEqual(store.read(path, 0), bytes("next"));
+                                              });
+                                          }};
+
 const Scenario newDirectories{
     "New directories are durable once their parents are synchronized",
     [] {

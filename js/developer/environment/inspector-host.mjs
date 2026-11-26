@@ -3,7 +3,7 @@
 // the system browser (its own connection, admitted only by trustLoopbackClients), or a floating window of this page whose
 // frame opens no connection and borrows this page's bridge. Each panel can be detached and attached again; the choice and
 // the floating window's place are kept in the project, as the terminal's place is.
-import {readProject, call, writeChunks} from './io.mjs';
+import {readProject, call} from './io.mjs';
 import {clampRect, step, minimumSize, windowControls} from './workspace.mjs';
 import {inspectorPanels as panels, panelTitle, inspectorChannel} from './menu.mjs';
 
@@ -84,16 +84,12 @@ const preferenceConflict = /changed since it was read|already being written/;
 /** Applies `changes` to the choices as the project has them now, committed only if the file did not change meanwhile. */
 async function writePreferenceChanges(bridge, changes) {
     for (let attempt = 1; ; ++attempt) {
-        let id = null;
         try {
             const token = await call(bridge, 'state', preferencesPath);
             const text = formatPreferences(applyPreferenceChanges(await readPreferences(bridge), changes));
-            id = await call(bridge, 'begin', preferencesPath, false);
-            await writeChunks(bridge, {id, path: 'output', bytes: encoder.encode(text)});
-            await call(bridge, 'commitGroup', id, preferencesPath, token);
+            await bridge.cppFunction('webfront.inspector.savePreferences')(token, encoder.encode(text));
             return;
         } catch (error) {
-            if (id !== null) await call(bridge, 'abort', id).catch(() => {});
             if (attempt === 20 || !preferenceConflict.test(error?.message)) throw error;
             await new Promise(resolve => setTimeout(resolve, 10 + Math.random() * 40));
         }
@@ -115,20 +111,20 @@ export function preferencesStore(bridge, delay = 300) {
         if (!pending.panels.size && pending.rect === undefined) return writes;
         const changes = pending;
         pending = {panels: new Map(), rect: undefined};
-        writes = writes.then(() => writePreferenceChanges(bridge, changes)).catch(() => {});
+        writes = writes.catch(() => {}).then(() => writePreferenceChanges(bridge, changes));
         return writes;
     };
     return {
-        /** Remembers whether `id` is detached, at once: a page closed just after a detach keeps it. */
+        /** Starts saving the new detached state immediately. */
         detached(id, away) {
             pending.panels.set(id, away);
-            flush();
+            flush().catch(() => {});
         },
         /** Remembers the floating window's place once it stops changing. */
         place(rect) {
             pending.rect = rect;
             clearTimeout(timer);
-            timer = setTimeout(flush, delay);
+            timer = setTimeout(() => flush().catch(() => {}), delay);
         },
         saved: () => flush(),
     };
@@ -422,7 +418,7 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
         host.channel = channel;
     }
     // A place still waiting for its write is written when the page goes away (a detach is written at once).
-    view.addEventListener('pagehide', () => { store.saved(); });
+    view.addEventListener('pagehide', () => { store.saved().catch(() => {}); });
     // The frame of the floating window reaches its host here: the same origin, and no connection of its own.
     view.webfrontInspectorHost = host;
     return host;

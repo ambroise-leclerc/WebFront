@@ -56,14 +56,14 @@ const Scenario watchTexts{"The texts of a watch are bounded and made visible (AD
                                   });
                                   then("a long text is cut on a character boundary and ends with an ellipsis", [&] {
                                       const std::string long_(255, 'x');
-                                      const auto        cut = inspect::boundedText(long_ + "éé");  // the é crosses 256 bytes
+                                      const auto        cut = inspect::boundedText(long_ + "\xC3\xA9\xC3\xA9");  // the é crosses 256 bytes
                                       require(cut.size() <= inspect::maxTextBytes);
-                                      require(cut.ends_with("…"));
-                                      requireEqual(inspect::utf8Prefix("aé", 2), std::string_view{"a"});
+                                      require(cut.ends_with("\xE2\x80\xA6"));
+                                      requireEqual(inspect::utf8Prefix("a\xC3\xA9", 2), std::string_view{"a"});
                                   });
                                   then("a bound smaller than the ellipsis keeps the prefix that fits, without it", [&] {
                                       requireEqual(inspect::boundedText("abc", 1), std::string{"a"});
-                                      requireEqual(inspect::boundedText("\u00e9t\u00e9", 2), std::string{"\u00e9"});
+                                      requireEqual(inspect::boundedText("\xC3\xA9t\xC3\xA9", 2), std::string{"\xC3\xA9"});
                                       requireEqual(inspect::boundedText("abc", 0), std::string{});
                                   });
                                   then("a long location keeps the end of the path", [&] {
@@ -75,7 +75,7 @@ const Scenario watchTexts{"The texts of a watch are bounded and made visible (AD
                                       const auto text = inspect::locationText(std::string(90, '\t') + "/app.cpp", 17);
                                       require(text.size() <= inspect::maxTextBytes);
                                       require(text.ends_with("/app.cpp:17"));
-                                      require(text.starts_with("\u2026\u2409"));  // cut between two pictures, never inside one
+                                      require(text.starts_with("\xE2\x80\xA6\xE2\x90\x89"));  // cut between two pictures, never inside one
                                   });
                               });
                           }};
@@ -251,16 +251,16 @@ const Scenario watchPages{
             WatchRegistry registry;
             static_cast<void>(addWatch(registry, "line\none"));
             // Its visible form is another name: the names the application gave are what must be unique.
-            static_cast<void>(addWatch(registry, "line\u240Aone"));
+            static_cast<void>(addWatch(registry, "line\xE2\x90\x8Aone"));
             static_cast<void>(addWatch(registry, std::string(inspect::maxTextBytes - 1, 'n') + "\t"));  // the picture crosses the bound
             const auto names = namesOf(registry.page(0, 0, 10, 32768));
             then("the page shows them with their control characters visible", [&] {
-                requireEqual(names[0], std::string{"line\u240Aone"});
-                requireEqual(names[1], std::string{"line\u240Aone"});
+                requireEqual(names[0], std::string{"line\xE2\x90\x8Aone"});
+                requireEqual(names[1], std::string{"line\xE2\x90\x8Aone"});
             });
             then("a name that its visible form makes longer is cut within the bound", [&] {
                 require(names[2].size() <= inspect::maxTextBytes);
-                require(names[2].ends_with("\u2026"));
+                require(names[2].ends_with("\xE2\x80\xA6"));
             });
             then("a second watch of the same name is still refused", [&] {
                 checkThrows<std::invalid_argument>([&] {
