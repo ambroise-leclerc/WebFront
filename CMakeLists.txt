@@ -148,6 +148,8 @@ include(WebFrontAssets)
 webfront_add_embedded_assets()
 # Opt-in consumer test registration; inclusion alone downloads nothing and registers no tests.
 include(WebFrontJasmine)
+# webfront_embed_directory(): an application's interface directory embedded as a header-only provider, in pure CMake.
+include(WebFrontEmbedDirectory)
 
 # The webfront-agent launcher is gone (ADR-025): an application that enables automation serves MCP itself.
 if(DEFINED WEBFRONT_BUILD_AUTOMATION OR DEFINED WEBFRONT_AUTOMATION_FRONTEND)
