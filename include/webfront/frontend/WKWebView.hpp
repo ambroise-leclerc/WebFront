@@ -1172,6 +1172,10 @@ struct WindowHooks {
             dispatch_get_main_queue(),
             nullptr,
             +[](void*) {
+                // A block of the main queue has no autorelease pool of its own: without an event, the loop's pool is not
+                // drained, and what the window's closure autoreleased would keep its view, hence its page and its
+                // connection, until the next event of the application.
+                Object pool(send(type("NSAutoreleasePool"), "new"));
                 reapSecondaryWindows();
             });
     }
@@ -1249,6 +1253,9 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
                                                                          dispatch_get_main_queue(),
                                                                          &host,
                                                                          +[](void* context) {
+                                                                             // Its own pool, as for the reaping above: the work posted to the interface
+                                                                             // thread (closing a secondary window) releases what it autoreleased when it ends.
+                                                                             Object pool(send(type("NSAutoreleasePool"), "new"));
                                                                              static_cast<UIExecutorHost*>(context)->drain();
                                                                          });
                                                                  },
