@@ -402,6 +402,26 @@ describe('The view of a tree', () => {
         expect(rows(list)[2].querySelector('.value').textContent).toBe('B');
     });
 
+    it('writes against the value shown when the edition began, not the one a refresh read meanwhile', async () => {
+        const values = ['a', 'b'];
+        const {list, tree, view} = await shown(values);
+        view.edit('/#1');
+        const input = list.querySelector('input.edit');
+        input.value = 'mine';
+        input.dispatchEvent(new Event('input'));
+        // The application changes the value while the user types, and a pass reads it: the tree now holds 'theirs'.
+        values[1] = 'theirs';
+        await tree.refresh();
+        expect(tree.nodes.get('/#1').node.value).toBe('theirs');
+        list.querySelector('input.edit').dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter'}));
+        await tree.settled();
+        await new Promise(resolve => setTimeout(resolve));
+        // The user never saw 'theirs': the write is refused as stale, and the change of the application is kept.
+        expect(values[1]).toBe('theirs');
+        expect(rows(list)[2].querySelector('.note').textContent).toContain('read again');
+        expect(rows(list)[2].querySelector('.value').textContent).toBe('theirs');
+    });
+
     it('says why a write was not applied, beside the node', async () => {
         const {list, tree, view} = await shown(['a']);
         view.edit('/#0');

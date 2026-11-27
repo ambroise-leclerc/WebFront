@@ -265,8 +265,10 @@ export function createWatchTree({bridge, watch, count = pageCount, onUpdate = ()
         /**
          * Writes `text` into the node. Resolves with {code, message}: an empty code when the value was written, else why it
          * was not. A text longer than the bound is refused here, without a call. After a `stale` refusal the node is read again.
+         * `expected` is the value the user saw when the edition began; without it, the value the tree holds now. A pass may
+         * have refreshed the tree since: C++ must compare the object with what was displayed, not with what was read last.
          */
-        write(path, text) {
+        write(path, text, expected = undefined) {
             const bound = writeBound(limits, maxMessageBytes);
             if (utf8Bytes(text) > bound)
                 return Promise.resolve({code: codes.tooLarge, message: `The text is longer than ${bound} bytes`});
@@ -274,7 +276,7 @@ export function createWatchTree({bridge, watch, count = pageCount, onUpdate = ()
                 const entry = nodes.get(path);
                 if (!entry) return {code: codes.unknown, message: 'The node is no longer shown'};
                 let answer;
-                try { answer = await call(functions.write)(watch, revision, path, entry.node.value, text); }
+                try { answer = await call(functions.write)(watch, revision, path, expected ?? entry.node.value, text); }
                 catch (error) {
                     if (error?.code === codes.unknown) return fail(error);
                     // Rejected before any effect: nothing changed, the revision included. A stale revision is cured by reading again.
@@ -383,15 +385,15 @@ export function createTreeView({tree, list, view = globalThis}) {
     function edit(path) {
         const entry = tree.nodes.get(path);
         if (!entry || !(entry.node.flags & flags.writable)) return;
-        editing = {path, text: entry.node.value};
+        editing = {path, text: entry.node.value, expected: entry.node.value};  // what the user sees now, whatever is read later
         notes.delete(path);
         render();
         list.querySelector('input.edit')?.select();
     }
     async function commit() {
-        const {path, text} = editing;
+        const {path, text, expected} = editing;
         editing = null;
-        const answer = await tree.write(path, text).catch(error => ({code: error?.code ?? 'webfront.error', message: error?.message ?? String(error)}));
+        const answer = await tree.write(path, text, expected).catch(error => ({code: error?.code ?? 'webfront.error', message: error?.message ?? String(error)}));
         if (answer.code) notes.set(path, writeFailure(answer));
         render();
     }
