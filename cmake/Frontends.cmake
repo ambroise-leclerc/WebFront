@@ -440,6 +440,10 @@ function(webfront_add_browser_tests target frontend assets_directory lifecycle_t
         endif()
         set(lifecycle_modes no-bridge early-close rejected-ready navigation-failure path-encoding content-policy navigation-allow-list view-association stage-report)
         list(APPEND lifecycle_modes ui-executor native-window second-open host-close second-window)
+        # A closed secondary window disconnects at once, window after window (#702); WKWebView's page outlived its window.
+        if(frontend STREQUAL "WKWebView")
+            list(APPEND lifecycle_modes secondary-close)
+        endif()
         # CEF neither supports nor checks a secondary thread: nothing to observe there (docs/HOST_INTEGRATION.md).
         if(NOT frontend STREQUAL "CEF")
             list(APPEND lifecycle_modes host-thread)
