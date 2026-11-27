@@ -263,6 +263,18 @@ describe('The Packages panel of the inspectors', () => {
         expect(item(panel.tree, 'react-dom@19.3.1').getAttribute('aria-expanded')).toBe('false');
         expect(panel.selected).toBe('scheduler@0.20.0');
         expect(panel.detail.querySelector('h2').textContent).toBe('scheduler@0.20.0');
+        expect(item(panel.tree, 'scheduler@0.20.0').tabIndex).toBe(0);
+
+        // The selected package is under a folded one when the lock changes again: the folded package, which is shown, takes
+        // the Tab key, and stays folded.
+        key(item(panel.tree, '@app/kit@1.0.0'), 'ArrowLeft');
+        Object.assign(locked, Object.fromEntries([node('is-odd', '3.0.1')]));
+        await writeProject(storage, {wanted: {...dependencies, 'left-pad': '^1.3.0'}, lockRoots: {...roots(), 'left-pad': {requested: '^1.3.0', id: 'left-pad@1.3.0'}}, locked});
+        await panel.refresh();
+        expect(panel.summary.textContent).toBe('4 roots, 7 packages');
+        expect(item(panel.tree, '@app/kit@1.0.0').getAttribute('aria-expanded')).toBe('false');
+        expect([...panel.tree.querySelectorAll('[tabindex="0"]')]).toEqual([item(panel.tree, '@app/kit@1.0.0')]);
+        expect(panel.selected).toBe('scheduler@0.20.0');
 
         // The package shown is removed: its detail goes with it.
         delete locked['scheduler@0.20.0'];

@@ -265,7 +265,10 @@ export async function showPackagesPanel({page, view, body, status, bridge, load 
         // Paths that no longer exist are forgotten, so that the set stays bounded by the tree shown.
         const paths = new Set(items().map(item => item.dataset.path));
         for (const path of [...collapsed]) if (!paths.has(path)) collapsed.delete(path);
-        const start = (selected && first(selected)) || items()[0];
+        // The item that takes the Tab key is one that is shown: the selected package, or the folded package that hides it.
+        let start = (selected && first(selected)) || items()[0];
+        for (let above = start && parentItem(start); above; above = parentItem(above))
+            if (above.getAttribute('aria-expanded') === 'false') start = above;
         if (start) focusable(start);
     }
 
