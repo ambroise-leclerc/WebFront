@@ -87,7 +87,7 @@ function fakeRelay({wanted = true, pageSize = 200} = {}) {
 
 const sampleState = () => ({
     page: {label: 'interface', path: '/app/'}, ready: {state: 'resolved', reason: ''}, connection: 'linked', since: 1_700_000_000_000,
-    pendingTotal: 2, rejectedTotal: 1, jsTotal: 1, jsSaturated: false,
+    history: true, pendingTotal: 2, rejectedTotal: 1, jsTotal: 1, jsSaturated: false,
     pending: [{id: 3, name: 'app.save', elapsed: 1250}, {id: 4, name: 'app.load', elapsed: null}],
     rejections: [{id: 5, name: 'app.open', reason: 'app.missing: no such file', at: 1_700_000_001_000}],
     jsFunctions: [{id: 6, name: 'draw', calls: 12}],
@@ -408,6 +408,58 @@ describe('The panel of the bridge in the page', () => {
             expect(monitor.read().rejections.at(-1).reason).toBe('A rejection whose reason cannot be read');
         });
 
+        it('settles every call of the application even when the monitor fails, also as the bridge closes', async () => {
+            const bridge = fakeWebFront(), time = manualTime();
+            let broken = false;
+            const monitor = monitorOf(bridge, time, {now: () => { if (broken) throw new Error('clock gone'); return time.now(); }});
+            monitor.read();
+            const calls = [bridge.call('app.one'), bridge.call('app.two'), bridge.call('app.three')];
+            broken = true;
+            // As WebFront.js does on close: reject every pending call in turn, then clear them.
+            const closed = Object.assign(new Error('WebFront connection closed'), {code: 'webfront.disconnected'});
+            for (const pending of [...bridge.pendingCalls.values()]) expect(() => pending.reject(closed)).not.toThrow();
+            for (const call of calls) await expectAsync(call.promise).toBeRejectedWith(closed);
+            const answered = bridge.call('app.four');
+            answered.resolve('kept');
+            expect(await answered.promise).toBe('kept');
+        });
+
+        it('finds the pending calls of a bridge that predates the probe at each read, and learns ready from its Promise', async () => {
+            let rejectReady;
+            const ready = new Promise((resolve, reject) => { rejectReady = reject; });
+            ready.catch(() => {});
+            // A WebFront.js before #684: no probe, no readyError, pending calls without their name.
+            const old = {readySettled: false, state: 'handshaking', ready, pendingCalls: new Map()};
+            const time = manualTime();
+            const monitor = monitorOf(old, time);
+            const first = monitor.read();
+            expect('probe' in old).withContext('no probe is set on a bridge that would not read it').toBeFalse();
+            expect(monitor.observing).toBeFalse();
+            expect(first.history).toBeFalse();
+            expect(first.ready.state).toBe('pending');
+            let settle;
+            const promise = new Promise((resolve, reject) => { settle = {resolve, reject}; });
+            promise.catch(() => {});
+            old.pendingCalls.set(1, {...settle});
+            expect(monitor.read().pending.map(call => call.name)).toEqual(['(unknown)']);
+            expect(monitor.read().pending.length).withContext('found once, not at each read').toBe(1);
+            old.pendingCalls.get(1).reject(new Error('refused'));
+            old.pendingCalls.delete(1);
+            await expectAsync(promise).toBeRejected();
+            const after = monitor.read();
+            expect(after.pending).toEqual([]);
+            expect(after.rejections.map(rejection => rejection.reason)).toEqual(['refused']);
+            // ready was rejected: an old bridge is not shown "resolved".
+            old.readySettled = true;
+            old.state = 'closed';
+            expect(monitor.read().ready.state).toBe('unknown');
+            rejectReady(new Error('WebFront connection failed'));
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(monitor.read().ready).toEqual({state: 'rejected', reason: 'WebFront connection failed'});
+            expect(fromRows(toRows(monitor.read())).history).toBeFalse();
+        });
+
         it('starts from a new state when the page of the interface is loaded again', () => {
             const first = fakeWebFront(), second = fakeWebFront(), time = manualTime();
             let current = first;
@@ -695,6 +747,12 @@ describe('The panel of the bridge in the page', () => {
             expect(status.textContent).toContain('128 more pending calls');
             expect(status.textContent).toContain('104 more JavaScript functions');
             expect(status.textContent).not.toContain('at least');
+        });
+
+        it('says when the page\'s WebFront.js predates the inspectors', async () => {
+            const {status} = await setup(async () => read({...sampleState(), history: false}));
+            expect(status.textContent).toContain('predates the inspectors');
+            expect(describeReady({state: 'unknown', reason: ''})).toContain('not known yet');
         });
 
         it('says "at least" for the JavaScript functions it could not count by name', async () => {

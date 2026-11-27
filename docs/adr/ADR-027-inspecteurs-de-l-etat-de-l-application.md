@@ -845,7 +845,9 @@ appels. Cet état vit dans la page de l'application.
   n'enregistre rien. Il suit le pont de l'interface (le `webFront` du cadre de l'aperçu, là où l'application appelle
   C++), ou celui de la page hôte quand l'interface n'en a pas ; un cadre rechargé donne un nouvel état. Les appels en
   attente quand la sonde est posée (à la première lecture, ou après un bail échu) sont repris avec leur nom, sans durée
-  connue. Les appels de l'inspecteur lui-même
+  connue. Un pont d'un `WebFront.js` antérieur n'a pas de champ `probe` : le moniteur n'en pose pas, retrouve à chaque
+  lecture les appels en attente, apprend l'issue de `ready` par la Promise elle-même, et le panneau dit que l'historique
+  manque. Une exception du moniteur ne retient jamais le règlement d'une Promise de l'application. Les appels de l'inspecteur lui-même
   (`webfront.inspector.*`, `wfInspect.*`) ne sont pas suivis. Un appel suivi l'est jusqu'à sa réponse, même après le
   retrait de la sonde : il faut de toute façon le retirer des appels en attente, et son rejet éventuel reste donc listé. L'état est borné : 100 appels en attente (les plus
   anciens), 50 rejets (les plus récents), 100 fonctions JavaScript (les plus appelées, sur 1 000 noms comptés un par un),
@@ -860,7 +862,9 @@ appels. Cet état vit dans la page de l'application.
   `webfront.inspector.bridge(hôte, depuis, nombre)` rend une page `(lignes, suivant, publication, âge en ms, drapeaux)`
   dans `responseBudget` (drapeaux : 1 la page est annoncée et connectée, 2 elle a publié). Une ligne est un tuple
   `(genre, nom, détail, nombre, nombre)` : une liste de tuples des types existants (exception de l'ADR-003). `publication`
-  numérote l'état ; un lecteur qui la voit changer entre deux pages recommence.
+  numérote l'état. `suivant` est un curseur opaque qui nomme la publication lue par la première page : C++ garde aussi la
+  publication précédente, si bien qu'un lecteur termine la publication qu'il a commencée même si une autre arrive entre
+  deux pages ; un lecteur qui voit `publication` changer (elle a disparu) recommence.
 - **Rien n'est publié sans lecteur.** Une lecture ouvre un bail de 15 s (plus long que la plus lente des périodes d'un
   panneau) ; si la page ne publie pas, C++ le lui demande par `wfInspect.publish()`, une fois par seconde au plus. La page
   publie alors toutes les 250 ms, et s'arrête dès qu'une publication apprend que le bail est échu. Un panneau fermé ou en
@@ -870,7 +874,8 @@ appels. Cet état vit dans la page de l'application.
   et deux rappels chacune) et garde l'état publié de 16 d'entre elles : au-delà de 16 états, la page lue le moins
   récemment perd son état mais pas sa place, et une lecture la relance ; au-delà de 256 pages, elle perd sa place. Une page
   déconnectée est oubliée. Une page qui a perdu sa place s'annonce de nouveau quand son panneau est détaché, ou quand sa
-  publication est refusée (`unknown`) ; une nouvelle annonce garde le bail d'un lecteur. Un état appartient à la connexion qui s'est annoncée la dernière sous cet
+  publication est refusée (`unknown`) ; une nouvelle annonce garde le bail d'un lecteur, et celle de la même connexion
+  garde aussi son état. Un état appartient à la connexion qui s'est annoncée la dernière sous cet
   identifiant : la publication d'une autre connexion est refusée (`webfront.inspector.unavailable`). Une publication sans annonce est
   refusée (`webfront.inspector.unknown`).
 
