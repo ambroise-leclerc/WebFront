@@ -33,7 +33,9 @@ call, which the panel shows.
 
 This is a development tool, not a sandbox. Only a page that is admitted reads or writes a watch: the view of an embedded
 frontend, or a loopback page when the application chose `trustLoopbackClients` (see
-[the menu and the inspectors](DEVELOPER_ENVIRONMENT.md)).
+[the menu and the inspectors](DEVELOPER_ENVIRONMENT.md#the-page-interface-and-floating-terminal)). A watch is
+read-only unless its source writes, and only the panel writes it: the [MCP reads](#reading-a-watch-from-an-agent) never do.
+The application's own callbacks follow [their own contract](DEVELOPER_ENVIRONMENT.md#the-inspectors-and-the-applications-callbacks).
 
 ## Sources: one operation, one access
 
