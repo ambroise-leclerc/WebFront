@@ -86,10 +86,14 @@ export function createWatchTree({bridge, watch, count = pageCount, onUpdate = ()
     const waiting = [];
     let running = null;
 
+    /** Rejects what was waiting: its callers are told, none is left pending. */
+    const abandon = () => {
+        for (const {reject} of waiting.splice(0)) reject(Object.assign(new Error('The watch is gone'), {code: codes.unknown}));
+    };
     const fail = error => {
         if (error?.code === codes.unknown && !gone) {
             gone = true;
-            waiting.length = 0;
+            abandon();
             onGone();
         }
         throw error;
@@ -165,13 +169,18 @@ export function createWatchTree({bridge, watch, count = pageCount, onUpdate = ()
             return list(path, 0);
         }
         if (start === 0) for (const position of [...entry.positions.keys()]) if (position >= parent.children) remove(entry.positions.get(position));
+        // The whole page first, then what it replaced and no position names any more: two keyed elements that swapped
+        // their places are both kept.
+        const replaced = [];
         children.forEach((child, index) => {
             const position = start + index;
             const previous = entry.positions.get(position);
-            if (previous !== undefined && previous !== child.path && ![...entry.positions.values()].includes(child.path)) remove(previous);
+            if (previous !== undefined && previous !== child.path) replaced.push(previous);
             entry.positions.set(position, child.path);
             keep(child);
         });
+        const named = new Set(entry.positions.values());
+        for (const previous of replaced) if (!named.has(previous)) remove(previous);
         entry.next = page.next;
         onUpdate();
         for (const child of children)
@@ -221,6 +230,19 @@ export function createWatchTree({bridge, watch, count = pageCount, onUpdate = ()
         /** Resolves once every call asked so far is answered. */
         async settled() { while (running || waiting.length) await (running ?? Promise.resolve()).catch(() => {}); },
 
+        /**
+         * What is shown of a node and of each of its ancestors (kind, label, value, number of children), as one text; null
+         * when one of them is no longer shown. An edition keeps it, and is given up when it changed meanwhile.
+         */
+        shown(path) {
+            const parts = [];
+            for (let at = path; ; at = parentOf(at)) {
+                const entry = nodes.get(at);
+                if (!entry) return null;
+                parts.push([entry.node.kind, entry.node.label, entry.node.value, entry.node.children].join('\u0000'));
+                if (at === '') return parts.join('\u0001');
+            }
+        },
         /** Opens the watch: C++'s memory of it is emptied, then the root and its first children are read. */
         open() {
             return enqueue(async () => {
@@ -314,7 +336,7 @@ export function createWatchTree({bridge, watch, count = pageCount, onUpdate = ()
         /** Stops the tree: nothing more is sent. C++ frees its memory when the connection closes, or at the next open. */
         stop() {
             stopped = true;
-            waiting.length = 0;
+            abandon();
         },
     };
     return tree;
@@ -364,6 +386,7 @@ export function createTreeView({tree, list, view = globalThis}) {
     const notes = new Map();  // path, why the last write was not applied
     const full = new Map();   // path, the full value read
     let editing = null;       // {path, text}: kept across the renderings that a refresh causes
+    const positions = new Map();  // path, the position being typed in its "go to" field
     list.className = 'tree';
     list.setAttribute('role', 'tree');
 
@@ -385,14 +408,22 @@ export function createTreeView({tree, list, view = globalThis}) {
     function edit(path) {
         const entry = tree.nodes.get(path);
         if (!entry || !(entry.node.flags & flags.writable)) return;
-        editing = {path, text: entry.node.value, expected: entry.node.value};  // what the user sees now, whatever is read later
+        // What the user sees now, whatever is read later: the value, and what tells the node and its ancestors.
+        editing = {path, text: entry.node.value, expected: entry.node.value, shown: tree.shown(path)};
         notes.delete(path);
         render();
         list.querySelector('input.edit')?.select();
     }
     async function commit() {
-        const {path, text, expected} = editing;
+        const {path, text, expected, shown} = editing;
         editing = null;
+        // A refresh changed what the edition was started on (another key under the same rank, a list that grew): the text
+        // was typed for what is no longer there.
+        if (tree.shown(path) !== shown) {
+            notes.set(path, writeFailure({code: codes.stale, message: ''}));
+            render();
+            return;
+        }
         const answer = await tree.write(path, text, expected).catch(error => ({code: error?.code ?? 'webfront.error', message: error?.message ?? String(error)}));
         if (answer.code) notes.set(path, writeFailure(answer));
         render();
@@ -478,11 +509,16 @@ export function createTreeView({tree, list, view = globalThis}) {
                     input.max = String(node.children - 1);
                     input.placeholder = 'position';
                     input.setAttribute('aria-label', `Go to a position in ${node.label}`);
+                    input.value = positions.get(path) ?? '';
+                    input.addEventListener('input', () => positions.set(path, input.value));
                     input.addEventListener('keydown', event => {
                         const position = Number(input.value);
-                        if (event.key === 'Enter' && Number.isSafeInteger(position) && position >= 0 && position < node.children)
+                        if (event.key === 'Enter' && input.value !== '' && Number.isSafeInteger(position) && position >= 0 && position < node.children) {
+                            positions.delete(path);
                             report(tree.load(path, position));
+                        }
                     });
+                    jump.dataset.jump = path;
                     jump.append(input);
                     group.append(jump);
                 }
@@ -495,13 +531,17 @@ export function createTreeView({tree, list, view = globalThis}) {
     function render() {
         const focused = page.activeElement;
         const within = focused && list.contains(focused);
-        const where = within ? {path: focused.closest('li')?.dataset.path, name: focused.className.split(' ')[0]} : null;
+        const where = within
+            ? {path: focused.closest('li')?.dataset.path, jump: focused.closest('li')?.dataset.jump, name: focused.className.split(' ')[0]} : null;
+        for (const path of [...positions.keys()]) if (!tree.nodes.has(path)) positions.delete(path);
         for (const path of [...notes.keys()]) if (!tree.nodes.has(path)) notes.delete(path);
         for (const path of [...full.keys()]) if (!tree.nodes.has(path)) full.delete(path);
         if (editing && !tree.nodes.has(editing.path)) editing = null;
         list.replaceChildren(...(tree.nodes.has('') ? [row('', 0)] : []));
         if (tree.problem) list.append(element('li', 'note', tree.problem));
-        if (where?.path !== undefined) {
+        if (where?.jump !== undefined)
+            [...list.querySelectorAll('li')].find(candidate => candidate.dataset.jump === where.jump)?.querySelector('input')?.focus();
+        else if (where?.path !== undefined) {
             const item = [...list.querySelectorAll('li')].find(candidate => candidate.dataset.path === where.path);
             const again = item?.querySelector(`:scope > .row .${where.name || 'toggle'}`);
             again?.focus();

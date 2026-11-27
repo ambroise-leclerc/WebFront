@@ -326,6 +326,41 @@ describe('The tree of a watch', () => {
         await expectAsync(tree.fullValue('/#0')).toBeRejectedWithError(codes.stale);
     });
 
+    it('keeps two keyed elements that swapped their places when their page is read again', async () => {
+        const keyed = order => [[node('', 'sequence', 'rows', '', 2), ...order.map(key => node(`/k${key}`, 'integer', key, key === 'a' ? '1' : '2'))],
+            0, 0, false];
+        let order = ['a', 'b'], revision = 1;
+        const answers = {
+            [functions.limits]: () => limits,
+            [functions.reset]: () => ++revision,
+            [functions.children]: () => { const page = keyed(order); page[2] = ++revision; return page; },
+        };
+        const bridge = {cppFunction: name => async (...args) => answers[name](...args)};
+        const tree = createWatchTree({bridge, watch: 1});
+        await tree.open();
+        order = ['b', 'a'];
+        await tree.load('', 0);
+        expect([...tree.nodes.keys()].sort()).toEqual(['', '/ka', '/kb']);
+        expect([...tree.nodes.get('').positions.values()]).toEqual(['/kb', '/ka']);
+        // An element that left the page leaves the tree.
+        order = ['b', 'c'];
+        await tree.load('', 0);
+        expect([...tree.nodes.keys()].sort()).toEqual(['', '/kb', '/kc']);
+    });
+
+    it('settles what was waiting when it is stopped: no caller is left pending', async () => {
+        const bridge = fakeWatch(['a', 'b']);
+        const tree = createWatchTree({bridge, watch: 1});
+        await tree.open();
+        const release = bridge.hold(functions.fold);
+        const folding = tree.collapse('');
+        const unfolding = tree.expand('');  // waits behind the folding
+        tree.stop();
+        await expectAsync(unfolding).toBeRejectedWithError('The watch is gone');
+        release();
+        await folding;
+    });
+
     it('tells once that its watch is gone, and sends nothing more', async () => {
         const bridge = fakeWatch(['a']);
         let gone = 0;
@@ -420,6 +455,48 @@ describe('The view of a tree', () => {
         expect(values[1]).toBe('theirs');
         expect(rows(list)[2].querySelector('.note').textContent).toContain('read again');
         expect(rows(list)[2].querySelector('.value').textContent).toBe('theirs');
+    });
+
+    it('gives up an edition when a refresh changed what tells the node: its label, or an ancestor', async () => {
+        const values = ['a', 'b'];
+        const {bridge, list, tree, view} = await shown(values);
+        view.edit('/#1');
+        const input = list.querySelector('input.edit');
+        input.value = 'mine';
+        input.dispatchEvent(new Event('input'));
+        // Another element takes the place, with the same value: only its label tells it (a map whose key was replaced).
+        const changes = bridge.answers[functions.changes];
+        bridge.answers[functions.changes] = (...args) => {
+            bridge.answers[functions.changes] = changes;
+            const page = changes(...args);
+            return [[node('/#1', 'string', 'other key', 'b', 0, flags.writable)], 0, page[2], false];
+        };
+        await tree.refresh();
+        const before = bridge.calls.length;
+        list.querySelector('input.edit').dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter'}));
+        await tree.settled();
+        await new Promise(resolve => setTimeout(resolve));
+        expect(bridge.calls.length).withContext('no write is sent').toBe(before);
+        expect(values[1]).toBe('b');
+        expect(rows(list)[2].querySelector('.note').textContent).toContain('read again');
+    });
+
+    it('keeps the position being typed, and its focus, across a refresh', async () => {
+        const {list, tree} = await shown(Array.from({length: 300}, (unused, index) => `v${index}`), {pageSize: 3});
+        let input = list.querySelector('input.position');
+        input.focus();
+        input.value = '25';
+        input.dispatchEvent(new Event('input'));
+        await tree.refresh();
+        input = list.querySelector('input.position');
+        expect(input.value).toBe('25');
+        expect(document.activeElement).toBe(input);
+        input.value = '250';
+        input.dispatchEvent(new Event('input'));
+        input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter'}));
+        await tree.settled();
+        expect(tree.nodes.has('/#250')).toBeTrue();
+        expect(list.querySelector('input.position').value).toBe('');
     });
 
     it('says why a write was not applied, beside the node', async () => {
