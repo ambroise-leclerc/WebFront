@@ -34,6 +34,7 @@ The README introduces WebFront through the Game of Life walkthrough, demonstrati
 - `docs/PROJECT_STATUS.md`: current supported paths, validation scope and known limitations; completed work belongs in the changelog and Git history.
 - `docs/adr/README.md`: architecture decision index, Git history, tradeoffs and implementation rules; read the relevant ADRs before changing their contracts.
 - `docs/DEVELOPING_WITH_AGENTS.md`: what an agent developing a consuming application reads first (the model, the loop, each `wf` command in JSON and MCP); the README section, `wf help agents`, the starters' `AGENTS.md` and the `AgentGuidance` CTest case keep to it.
+- `docs/WATCHES.md`: the watches an application declares for the inspectors with `app.watch` (sources and their lock or executor, kinds rendered, writes, destruction of the handle, bounds); `include/webfront/Watches.hpp`, `WatchMemory.hpp` and `WatchValues.hpp` implement ADR-027 sections 3 to 6.
 - `docs/DEVELOPER_ENVIRONMENT.md`: the reference of the developer environment (`wf` commands, manifest and lock, TypeScript and `wf check`, tests, limits, distribution); `docs/EMBEDDED_ASSETS.md`: the core's embedded resources and their regeneration.
 
 The historical `webfront/` prototype and the former top-level `webtest/` are gone: use `test/unit/` for current C++ tests and `test/web/` for browser tests. Do not revive legacy code without a specific issue and regression coverage.

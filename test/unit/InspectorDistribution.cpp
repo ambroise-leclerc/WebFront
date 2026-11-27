@@ -42,7 +42,14 @@ const Scenario inspectorsAbsent{"A distribution build registers no inspector fun
                                                                      "webfront.inspector.readPreferences",
                                                                      "webfront.inspector.savePreferences",
                                                                      "webfront.inspector.openWindow",
-                                                                     "webfront.inspector.closeWindow"})
+                                                                     "webfront.inspector.closeWindow",
+                                                                     "webfront.inspector.limits",
+                                                                     "webfront.inspector.children",
+                                                                     "webfront.inspector.changes",
+                                                                     "webfront.inspector.value",
+                                                                     "webfront.inspector.fold",
+                                                                     "webfront.inspector.reset",
+                                                                     "webfront.inspector.write"})
                                                 require(!app.hasCppFunction(name));
                                         });
                                         then("nothing is recorded of the functions or of the calls to JavaScript", [&] {

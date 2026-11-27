@@ -400,6 +400,46 @@ const Scenario watchHandles{
                 require(!app.watch("byName", sharedValues));  // a function given by name
                 requireEqual(handle.id(), std::uint64_t{0});
             });
+            then("every form of watch() compiles and registers nothing there", [&] {
+                struct State {
+                    std::vector<int> values;
+                };
+                auto       state     = std::make_shared<State>();
+                const auto reference = [&value]() -> int& {
+                    return value;
+                };
+                const auto visitor = [&value](inspect::Visit<int> visit) {
+                    visit(value);
+                };
+                const auto mutator = [](int& target, std::string_view, std::string_view text) {
+                    target = static_cast<int>(text.size());
+                };
+                const auto owned = [](State& kept, inspect::Visit<std::vector<int>> visit) {
+                    visit(kept.values);
+                };
+                const auto ownedReference = [](State& kept) -> std::vector<int>& {
+                    return kept.values;
+                };
+                const auto ownedMutator = [](std::vector<int>& target, std::string_view, std::string_view) {
+                    target.clear();
+                };
+                require(!app.watch("executor", reference, app.uiExecutor()));
+                require(!app.watch("mutator", visitor, mutator));
+                require(!app.watch("both", reference, app.uiExecutor(), mutator));
+                require(!app.watch("owned", state, owned));
+                require(!app.watch("owned executor", state, ownedReference, app.uiExecutor()));
+                require(!app.watch("owned mutator", state, owned, ownedMutator));
+                require(!app.watch("owned both", state, ownedReference, app.uiExecutor(), ownedMutator));
+                // A source of an ordinary form is accepted with a state it keeps alive.
+                require(!app.watch("owned plain", state, visitor));
+                checkThrows<std::invalid_argument>([&] {
+                    static_cast<void>(app.watch("no state", std::shared_ptr<State>{}, owned));
+                });
+                static_assert(inspect::OwnedSourceShape<std::decay_t<decltype(owned)>, State>::writable);
+                static_assert(!inspect::OwnedSourceShape<std::decay_t<decltype(ownedReference)>, State>::visitor);
+                static_assert(inspect::WatchExecutor<frontend::UIExecutor> && !inspect::WatchExecutor<int>);
+                static_assert(inspect::WatchMutator<decltype(mutator), int> && !inspect::WatchMutator<decltype(mutator), const int>);
+            });
             then("an invalid name is refused all the same", [&] {
                 checkThrows<std::invalid_argument>([&] {
                     static_cast<void>(app.watch("", [&value]() -> const int& {

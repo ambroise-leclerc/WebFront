@@ -28,6 +28,7 @@
   "js/developer/environment/inspector.mjs",
   "js/developer/environment/inspector-packages.mjs",
   "js/developer/environment/inspector-registry.mjs",
+  "js/developer/environment/inspector-watches.mjs",
   "js/developer/environment/inspector.html",
   "js/developer/environment/tarball.mjs",
   "js/developer/environment/commands.mjs",

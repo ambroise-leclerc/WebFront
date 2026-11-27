@@ -4,6 +4,7 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
+| 1.3 | 2026-11-27 | Proposée | Ambroise Leclerc | Observateurs (#682) : précisions de la section « Précisions des observateurs » (6 bis) — `fold` répond par une page vide, `limits` par six nombres, la source propriétaire reçoit son état, le mutateur reçoit le texte déjà validé, un parent signalé « enfants modifiés » perd ses enfants en mémoire, la mémoire de 10 000 nœuds se compte par connexion et par observateur, `maxWriteTextBytes` tient compte de l'en-tête réel du texte, un formateur écrit pour `std::format_context` est accepté. | À renseigner après intégration. |
 | 1.2 | 2026-11-26 | Proposée | Ambroise Leclerc | Registre introspectable (#681) : pages `webfront.inspector.functions`, `jsFunctions` et `browsers` (section 7) ; enregistrements tenus par les gestionnaires, donc retirés avec une fonction d'espace ; fonctions `webfront.inspector.*` non listées ; durée mesurée pendant une fenêtre de 5 s après chaque lecture des fonctions ; appels vers JavaScript comptés par nom, 1 024 noms au plus, seulement une fois l'environnement monté ; `BasicWF::registeredFunctions()` pour l'application. | À renseigner après intégration. |
 | 1.1 | 2026-11-25 | Proposée | Ambroise Leclerc | Hôte détachable (#680) : `webfront.inspector.embedded()` dit à la page hôte si elle peut tourner dans un frontend intégré (vue prouvée, ou frontend actif qui transmet la preuve), ce qui décide de l'onglet du navigateur système ; `webfront.inspector.closeWindow(panneau, hôte)` ferme la fenêtre d'un panneau rattaché ; une fenêtre par panneau et par page hôte, qui seule le rattache ; choix et place conservés dans `inspector-window.json`, lus avec le jeton de leurs octets par `webfront.inspector.readPreferences()`. | À renseigner après intégration. |
 | 1.0 | 2026-11-25 | Proposée | Ambroise Leclerc | Décision initiale (#678, épique #677) : inspecteurs réservés à l'environnement développeur, accès réservé aux vues prouvées sauf autorisation explicite, nœuds d'arbre sur les types existants du pont, lecture et différences paginées, opérations entières sous le verrou ou sur l'exécuteur de l'application, modification à la demande de l'application, page unique `inspector.html` dans un conteneur choisi sur l'accès effectif. | À renseigner après intégration. |
@@ -627,6 +628,60 @@ un refus du mutateur (`webfront.inspector.refused`, avec le message de son excep
 éventuelle interruption : la Promise **se résout** avec ce code et la révision qui en résulte. Dans tous les cas l'objet
 est inchangé et l'inspecteur affiche la raison. Un mutateur fourni par l'application doit être tout ou rien ; c'est son
 contrat.
+
+### 6 bis. Précisions des observateurs (#682)
+
+L'implémentation (`Watches.hpp`, `WatchMemory.hpp`, `WatchValues.hpp`, guide [Observateurs](../WATCHES.md)) fixe ce que
+les sections 3 à 6 laissaient ouvert :
+
+- **Réponses.** `fold` répond par une page `(liste vide, 0, révision, resynchroniser)`, pour porter la resynchronisation
+  d'une révision périmée comme `children` et `changes`. `limits()` répond `(maxWriteTextBytes, responseBudget, nœuds de la
+  mémoire, octets d'un instantané, nombre maximal d'une page, nombre par défaut)`. `value` rend 0 comme décalage suivant
+  avec le dernier fragment, et l'instantané est libéré à ce moment : son identifiant ne lit plus rien ensuite.
+- **Première ouverture.** L'inspecteur ouvre un observateur par `reset`, qui lui donne la révision d'une mémoire vide,
+  puis par `children` de la racine. Un premier appel avec une révision inconnue reçoit une resynchronisation, ce qui
+  revient au même.
+- **Valeurs affichées.** `optional` montre `engaged` ou `nullopt`, `variant` montre `alternative <indice>`, un type décrit
+  le nom de sa description ; un tuple, une séquence et un tableau associatif n'ont pas de valeur, leurs enfants étant leur
+  contenu. Les membres d'un tuple, la valeur d'un `optional` et l'alternative d'un `variant` ont un segment `#` : l'indice
+  du membre, 0, ou l'indice de l'alternative, de sorte qu'un changement d'alternative change le chemin de l'enfant.
+- **« Enfants modifiés ».** Le drapeau a un seul sens, dans une page de `children` comme dans une passe : C++ a retiré de
+  sa mémoire tous les descendants de ce parent, et l'inspecteur relit la liste depuis la position 0, puis redéplie les
+  chemins qu'il avait dépliés et qui existent encore. Une passe le pose quand le nombre d'enfants d'un parent déplié a
+  changé, ou quand le segment d'un enfant chargé n'est plus celui que la mémoire a enregistré (clé déplacée, alternative
+  changée, `optional` vidé). Un nœud « retiré » n'est donc rapporté que par `children`, pour un chemin qui ne résout plus.
+- **Caractères de contrôle.** Une valeur qui en contient est affichée avec leurs images (section 4) : le texte montré
+  n'est plus celui de l'objet, et l'éditer réécrirait les images à la place des caractères. Un tel nœud n'est pas
+  modifiable, comme un nœud dont la valeur est tronquée.
+- **Mémoire.** La limite de 10 000 nœuds se compte par connexion **et par observateur**. Une page de `children` s'arrête
+  quand elle l'atteindrait et rend le `suivant` qui la reprend ; l'appel suivant est refusé (`webfront.inspector.limit`).
+- **Clés.** Les clés d'une `PagedSource` sont des chaînes (`key` rend un type convertible en `std::string`, `find` reçoit
+  un `std::string_view`). Un élément désigné par sa position sous un parent à clés (clé trop longue, dupliquée dans la
+  page, ou `key` qui lève) garde sa clé pour libellé quand elle se lit, et une passe ne compare pas sa clé.
+- **Source propriétaire.** Elle reçoit son état : `[](État& état, Visit<T> visit)` ou `[](État& état) -> T&`. Une source
+  des formes ordinaires est acceptée aussi, quand elle ne capture rien que l'état ne garde vivant.
+- **Mutateur.** `mutate(T& objet, std::string_view chemin, std::string_view texte)` : le texte a déjà été analysé pour le
+  genre du nœud, et le mutateur lève une exception pour refuser. Le chemin se décode par `inspect::parsePath`.
+- **Mémoire après une écriture.** Une écriture appliquée ne change pas la mémoire : la réponse ne porte pas de valeur, et
+  l'objet peut tenir une autre valeur que le texte (un mutateur qui l'ajuste). La passe suivante, ou une relecture du
+  nœud, transmet la valeur que l'objet tient ; l'inspecteur relit le nœud après chaque écriture.
+- **Entiers décrits.** Un champ entier n'accepte qu'un texte qui écrit exactement un entier (`1.0`, `1e1`, `2.50e1`) :
+  il est analysé chiffre à chiffre, jamais arrondi par un `double`, puis comparé exactement aux bornes.
+- **Champs décrits.** Le texte d'un champ est validé sans l'objet autant que la description le dit (genre, bornes, choix) ;
+  le type du membre, que seul son accesseur connaît, est vérifié à l'écriture, dont le refus résout la Promise avec
+  `webfront.inspector.refused`. La lecture d'un champ passe par son accesseur, qui copie un membre texte en entier : la
+  borne d'allocation de la section 3 ne vaut pas pour lui.
+- **Exécuteur.** Un exécuteur est tout objet dont `schedule()` rend un émetteur ; l'ordre des appels repose sur le sien,
+  qui doit exécuter dans l'ordre ce qu'on lui confie, comme la boucle d'un thread. Tous les appels d'un observateur à
+  exécuteur y passent, `fold`, `reset` et `value` compris. Un exécuteur sans boucle donne `webfront.inspector.unavailable`.
+- **Budget d'une requête.** `maxWriteTextBytes` vaut ce que `requestBudget` laisse une fois les autres arguments à leur
+  maximum (`writeRequestFixedBytes`) et l'en-tête du texte compté à sa taille réelle (2, 3 ou 5 octets) : la requête la
+  plus longue fait exactement `requestBudget`. Comme `minPageBytes` laisse déjà plus de 1 Kio au texte, l'assertion sur
+  `maxWriteTextBytes` ne peut échouer qu'avec celle sur `responseBudget`.
+- **Formateurs.** Un type est `formatted` quand `std::formattable` l'accepte, ou quand son `std::formatter` se construit
+  et formate dans un `std::format_context` : les formateurs écrits pour ce seul contexte, que `std::format` accepte,
+  échappent sinon au concept selon la bibliothèque.
+- **Diagnostics.** Ils vont au journal de l'application (`log::warn`).
 
 ### 7. Fichier et ligne d'enregistrement
 

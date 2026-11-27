@@ -112,3 +112,151 @@ describe('The inspectors\' registry', () => {
         expect(Number.isSafeInteger(tasks) && tasks >= rows.length).withContext(`tasks: ${tasks}`).toBeTrue();
     });
 });
+
+// The trees of the watches in a real browser (#682, ADR-027 sections 3 to 6): nodes and pages travel with the bridge's
+// existing types (lists of tuples, numbers, strings, a boolean), which the JavaScript codec decodes unchanged.
+describe('The inspectors\' watches', () => {
+    const inspector = name => hostBridge().cppFunction(`webfront.inspector.${name}`);
+    const flags = {writable: 1, truncated: 2, removed: 4, depthReached: 8, childrenChanged: 16};
+    let rows = 0, text = 0;
+
+    /** Reads a pass to its end from its first page; returns every node it told. */
+    async function finishPass(watch, page) {
+        const nodes = [...page[0]];
+        let [, next, revision] = page;
+        while (next !== 0) {
+            const [more, following, same, resync] = await inspector('changes')(watch, revision, next, 200);
+            expect(resync).toBeFalse();
+            expect(same).toBe(revision);
+            nodes.push(...more);
+            next = following;
+        }
+        return nodes;
+    }
+
+    beforeAll(async () => {
+        await hostBridge().ready;
+        [rows, text] = await webFront.cppFunction('watchFixture.declare')();
+    });
+    afterAll(() => webFront.cppFunction('watchFixture.remove')());
+
+    it('are refused to this frame, which is not a view of the application', async () => {
+        const calls = {limits: [], reset: [rows], children: [rows, '', 1, 0, 10], changes: [rows, 1, 0, 10], value: [rows, '', 0, 0],
+            fold: [rows, '', 1], write: [rows, 1, '/#0', 'row 0', 'x']};
+        for (const [name, args] of Object.entries(calls)) {
+            const error = await webFront.cppFunction(`webfront.inspector.${name}`)(...args).then(() => null, failure => failure);
+            expect(error?.code).withContext(name).toBe('webfront.inspector.denied');
+        }
+        expect(await webFront.cppFunction('watchFixture.row')(0)).toBe('row 0');
+    });
+
+    it('are discovered, then read page after page from the root', async () => {
+        const [descriptors] = await inspector('watches')(0, 0, 200);
+        const found = descriptors.find(descriptor => descriptor[0] === rows);
+        expect(found.slice(1, 3)).toEqual(['suite.rows', 'sequence']);
+        expect(found[3]).toMatch(/JasmineTest\.cpp:\d+$/);
+        expect(found[4]).toBeTrue();
+        const [maxWriteTextBytes, responseBudget, maxNodes, maxSnapshotBytes] = await inspector('limits')();
+        expect(responseBudget).toBeGreaterThanOrEqual(4096);
+        expect(maxWriteTextBytes).toBeGreaterThanOrEqual(1024);
+        expect([maxNodes, maxSnapshotBytes]).toEqual([10000, 16 * 1024 * 1024]);
+
+        const revision = await inspector('reset')(rows);
+        let [nodes, next, answered, resync] = await inspector('children')(rows, '', revision, 0, 200);
+        expect(resync).toBeFalse();
+        // (path, kind, label, value, children, flags): the first node is the parent, here the root.
+        expect(nodes[0]).toEqual(['', 'sequence', 'suite.rows', '', 500, 0]);
+        expect(nodes[1]).toEqual(['/#0', 'string', '[0]', 'row 0', 0, flags.writable]);
+        expect(nodes.length).toBe(201);
+        expect(next).toBe(200);
+        expect(answered).toBeGreaterThan(revision);
+        let read = 200;
+        while (next !== 0) {
+            [nodes, next, answered] = await inspector('children')(rows, '', answered, next, 200);
+            expect(nodes[0][0]).toBe('');
+            read += nodes.length - 1;
+        }
+        expect(read).toBe(500);
+        // A revision that is not the memory's: C++ emptied it, and says so.
+        [nodes, next, answered, resync] = await inspector('children')(rows, '', revision, 0, 10);
+        expect([nodes, next, resync]).toEqual([[], 0, true]);
+        expect((await inspector('children')(rows, '', answered, 0, 10))[0].length).toBe(11);
+    });
+
+    it('tell their differences by passes, which an unfolding interrupts without losing any', async () => {
+        let revision = await inspector('reset')(rows);
+        let next = 0;
+        do { [, next, revision] = await inspector('children')(rows, '', revision, next, 200); } while (next !== 0);
+        await webFront.cppFunction('watchFixture.changeAll')('changed');
+        const first = await inspector('changes')(rows, revision, 0, 50);
+        expect(first[0].length).toBe(50);
+        expect(first[0][0]).toEqual(['/#0', 'string', '[0]', 'changed 0', 0, flags.writable]);
+        expect(first[1]).toBe(50);
+        // An unfolding during the pass, with the revision of the pass: served at once, fresh, and no resynchronization.
+        const [page, , answered, resync] = await inspector('children')(rows, '', first[2], 100, 10);
+        expect(resync).toBeFalse();
+        expect(page[1].slice(0, 4)).toEqual(['/#100', 'string', '[100]', 'changed 100']);
+        // The next pass finds what the interrupted one had not served: 500, less the 50 served and the 10 just read.
+        const rest = await finishPass(rows, await inspector('changes')(rows, answered, 0, 200));
+        expect(rest.length).toBe(440);
+        expect(rest.some(node => node[0] === '/#49' || node[0] === '/#105')).toBeFalse();
+        expect(rest.every(node => node[3].startsWith('changed '))).toBeTrue();
+        await webFront.cppFunction('watchFixture.changeAll')('row');
+    });
+
+    it('write a value only where it still shows what was displayed', async () => {
+        const revision = await inspector('reset')(rows);
+        const [, , opened] = await inspector('children')(rows, '', revision, 0, 10);
+        const [written, code, message] = await inspector('write')(rows, opened, '/#3', 'row 3', 'écrit €');
+        expect([code, message]).toEqual(['', '']);
+        expect(written).toBeGreaterThan(opened);
+        expect(await webFront.cppFunction('watchFixture.row')(3)).toBe('écrit €');
+        // What the inspector showed is no longer true: the answer says so, with the revision to go on with.
+        const [after, stale] = await inspector('write')(rows, written, '/#3', 'row 3', 'again');
+        expect(stale).toBe('webfront.inspector.stale');
+        expect(await webFront.cppFunction('watchFixture.row')(3)).toBe('écrit €');
+        // A refusal seen before any effect rejects: a node that is not writable, an older revision.
+        const refused = await inspector('write')(rows, after, '', '', 'x').then(() => null, failure => failure);
+        expect(refused?.code).toBe('webfront.inspector.readOnly');
+        const old = await inspector('write')(rows, opened, '/#4', 'row 4', 'x').then(() => null, failure => failure);
+        expect(old?.code).toBe('webfront.inspector.stale');
+        // The memory keeps what was sent, not what was written: the node is read again, as the panel does, before it is
+        // written with what it shows now.
+        const [[reread], , current] = await inspector('children')(rows, '/#3', after, 0, 10);
+        expect(reread[3]).toBe('écrit €');
+        expect((await inspector('write')(rows, current, '/#3', 'écrit €', 'row 3'))[1]).toBe('');
+    });
+
+    it('give a full value by fragments of one snapshot, which never cut a character', async () => {
+        const revision = await inspector('reset')(text);
+        const [[root]] = await inspector('children')(text, '', revision, 0, 10);
+        expect(root.slice(0, 3)).toEqual(['', 'string', 'suite.text']);
+        expect(root[5]).toBe(flags.truncated);
+        expect(new TextEncoder().encode(root[3]).length).toBeLessThanOrEqual(256);
+        let [part, total, next, capped, snapshot] = await inspector('value')(text, '', 0, 0);
+        let whole = part, fragments = 1;
+        while (next !== 0) {
+            [part, total, next, capped] = await inspector('value')(text, '', snapshot, next);
+            expect(part.includes('�')).withContext('a fragment cut a character').toBeFalse();
+            whole += part;
+            ++fragments;
+        }
+        expect(fragments).toBeGreaterThan(2);
+        expect(capped).toBeFalse();
+        expect(total).toBe(new TextEncoder().encode(whole).length);
+        expect(whole).toBe('héllo € '.repeat(whole.length / 8));
+        expect(total).toBeGreaterThanOrEqual(100000);
+        // The snapshot was freed with its last fragment: its identifier no longer reads anything.
+        const late = await inspector('value')(text, '', snapshot, 4).then(() => null, failure => failure);
+        expect(late?.code).toBe('webfront.inspector.stale');
+    });
+
+    it('answer that a watch is gone once its handle is destroyed', async () => {
+        const revision = await inspector('reset')(rows);
+        await webFront.cppFunction('watchFixture.remove')();
+        const gone = await inspector('children')(rows, '', revision, 0, 10).then(() => null, failure => failure);
+        expect(gone?.code).toBe('webfront.inspector.unknown');
+        const [descriptors] = await inspector('watches')(0, 0, 200);
+        expect(descriptors.some(descriptor => descriptor[0] === rows)).toBeFalse();
+    });
+});

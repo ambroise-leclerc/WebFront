@@ -356,7 +356,7 @@ export function keptPeriod(view) {
     } catch { return periods[0]; }
 }
 
-function keepPeriod(view, period) {
+export function keepPeriod(view, period) {
     try { view.localStorage?.setItem(periodKey, String(period)); }
     catch { /* a convenience only: the choice lasts as long as the page */ }
 }
