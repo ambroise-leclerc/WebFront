@@ -55,6 +55,18 @@ describe('Developer automation', () => {
         expect(completed[5].exitCode).toBe(1);
     });
 
+    it('maps the package reads to wf list --tree, wf why and wf info, which read the lock', async () => {
+        const argvs=[];
+        const runner=createAutomationRunner({context:{},exclusive,inspector:{},
+            run:async argv => {argvs.push(argv); return {exitCode:0,output:'react@19.3.1',report:null};},
+            complete:async () => {}});
+        const listed=await runner.start({runId:'a',operation:'list',arguments:{}});
+        await runner.start({runId:'b',operation:'why',arguments:{package:'scheduler'}});
+        await runner.start({runId:'c',operation:'info',arguments:{package:'react@19.3.1'}});
+        expect(argvs).toEqual([['list','--tree'],['why','scheduler'],['info','react@19.3.1']]);
+        expect(listed.output).toBe('react@19.3.1');
+    });
+
     it('calls an application callback and reports only plain answers', async () => {
         const calls=[], completed=[];
         let slowStarted=false, finishSlow;
@@ -108,6 +120,8 @@ describe('Developer automation', () => {
             // Each run is read to its end before the next one starts: a second start while one runs is refused as busy.
             expect(text).toMatch(/operation: "create"[^\n]*\n\s*webfront\.result \{session: S, runId\}[^\n]*until the run ends; one run at a time\n\s*webfront\.start \{session: S, operation: "preview"/);
             expect(text).toContain('mcp.json');
+            expect(text).toContain('webfront.state.watches {session: S}');
+            expect(text).toContain('reads only');
             expect(text).not.toContain('webfront-agent');
             expect(text).toContain('docs/DEVELOPING_WITH_AGENTS.md');
         }

@@ -80,13 +80,13 @@ class Client:
         assert json.loads(result["content"][0]["text"]) == result["structuredContent"]
         return result["structuredContent"]
 
-    def initialize(self):
+    def initialize(self, tools=4):
         result = self.send("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
                                           "clientInfo": {"name": "WebFront-regression", "version": "1"}})
         assert result["protocolVersion"] == "2025-11-25", result
         assert "webfront.session" in result["instructions"], result
         self.send("notifications/initialized", notification=True)
-        assert len(self.send("tools/list")["tools"]) == 4
+        assert len(self.send("tools/list")["tools"]) == tools
         end = time.monotonic() + self.timeout
         while time.monotonic() < end:
             state = self.tool("session")
@@ -533,10 +533,10 @@ def session(args):
         setup.mkdir()
         with (root / "setup.log").open("w") as log:
             host = Host(args, setup, root, "setup", log,
-                        ["--grants", "init,create,install,restore,embed", "--timeout", "60", "--startup-timeout", "60"])
+                        ["--grants", "init,create,install,restore,embed,packages,state", "--timeout", "60", "--startup-timeout", "60"])
             try:
                 client = host.client(timeout=60)
-                client.initialize()
+                client.initialize(tools=14)  # the four tools of the session and the ten reads of the state
                 missing = client.run("create", {"starter": "nonexistent"}, state="failed")
                 assert "Unknown pinned starter" in missing["output"], missing
                 client.run("create", {"starter": "life", "directory": "ui"})
@@ -552,6 +552,33 @@ def session(args):
                 client.run("embed", {"entry": "ui/main.tsx", "output": "generated/LifeUI.hpp"})
                 header = setup / "generated/LifeUI.hpp"
                 assert header.is_file() and b"class LifeUI" in header.read_bytes(), "embed did not write the provider"
+                # The locked packages, read from the lock by the environment (ADR-027, section 10).
+                listed = client.run("list")["output"]
+                assert "react@19.3.1" in listed and "scheduler@" in listed, listed
+                assert "react-dom@19.3.1" in client.run("why", {"package": "scheduler"})["output"]
+                assert "react@19.3.1" in client.run("info", {"package": "react"})["output"]
+                client.run("why", {"package": "not-installed"}, state="failed")
+                # The state of the running application, read natively from the listener's thread while the server runs.
+                state = {"session": client.session}
+                watches = client.tool("state.watches", state)["watches"]
+                assert [watch["name"] for watch in watches] == ["host.stages"], watches
+                assert watches[0]["writable"] is False and "AutomationHost.cpp" in watches[0]["location"], watches
+                watch = {**state, "watch": watches[0]["id"]}
+                first = client.tool("state.children", watch)
+                assert first["resynchronize"] is True and first["nodes"] == [], first
+                page = client.tool("state.children", {**watch, "revision": first["revision"]})
+                assert [node["value"] for node in page["nodes"][1:]] == ["configured", "bootstrapped"], page
+                assert page["nodes"][0]["path"] == "" and page["nodes"][0]["children"] == 2 and page["next"] == 0, page
+                changes = client.tool("state.changes", {**watch, "revision": page["revision"]})
+                assert changes["nodes"] == [] and changes["resynchronize"] is False, changes
+                functions = client.tool("state.functions", state)["functions"]
+                assert any(row["name"] == "webfront.developer.read" for row in functions), functions
+                assert not any(row["name"].startswith("webfront.inspector.") for row in functions), functions
+                browsers = client.tool("state.browsers", state)
+                assert any(row["started"] and not row["closed"] for row in browsers["browsers"]) and browsers["tasks"] > 0, browsers
+                assert client.tool("state.limits", state)["maxNodes"] == 10000
+                assert client.tool("state.children", {**state, "watch": 999}, error=True)["code"] == "webfront.inspector.unknown"
+                assert client.tool("state.watches", {"session": "another"}, error=True)["code"] == "wrong_session"
                 client.close()
                 host.stop()
                 assert host.wait(timeout=30) == 0, host.logs()
