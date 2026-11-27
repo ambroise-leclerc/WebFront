@@ -28,7 +28,7 @@
   "js/developer/environment/inspector.mjs": "183ece8ad6581c458315211b3edea6fa2823c2212d3999e7e9e069a1e78309e5",
   "js/developer/environment/inspector-packages.mjs": "1c3f6350780b841784f83bc20ead2945157c48a1f136c47e3a7a90d89bea8522",
   "js/developer/environment/inspector-registry.mjs": "6653afc473fcef677d8b02541085943da3f7d15c5b64d23dafd43c750a9e28d8",
-  "js/developer/environment/inspector-watches.mjs": "468827504ab2be6c4d410fcbbe4390d400694fe51d49a72a03617f22141bd4d5",
+  "js/developer/environment/inspector-watches.mjs": "f5b8f901b86969bfe349d0e875cce9fba375d922f95f4fb213dc2f690083175e",
   "js/developer/environment/inspector-bridge.mjs": "4ccb520d2726fd1ec6ed145e55e99253a65726bcb77653a903074ec58b4be525",
   "js/developer/environment/inspector.html": "66bfb80d6bd29bc9aabf71e0dd9b163dfcd1f1c77d1a41818645af1a4f9b8616",
   "js/developer/environment/tarball.mjs": "1c1e1aea067910e1fec74e85b4bf9fbefed9b38187a04d8d2764f0b9a96fca39",

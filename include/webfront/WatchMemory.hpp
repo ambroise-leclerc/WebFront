@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <set>
@@ -101,8 +102,10 @@ struct Rendered {
         altered              = !cut && value != sink.text();
         count                = ops.container ? ops.size(view.node) : 0;
         // The number travels as a double: beyond 2^53 it would no longer be exact, and could not be read back.
-        if (count > static_cast<std::size_t>(maxExactNumber))
-            throw std::length_error("more elements than a page can tell (2^53)");
+        // Compared in integers: 2^53 does not fit a 32-bit size_t, where no count can pass it anyway.
+        if constexpr (std::numeric_limits<std::size_t>::digits > 53)
+            if (count >= (std::size_t{1} << 53))  // JavaScript's safe integers stop at 2^53 - 1
+                throw std::length_error("more elements than a page can tell (2^53 - 1)");
     } catch (const std::exception& error) {
         failed = true;
         value  = exceptionValue(error.what());

@@ -344,12 +344,15 @@ export function createWatchTree({bridge, watch, count = pageCount, onUpdate = ()
          * replaced starts again, a few times at most.
          */
         async fullValue(path, {attempts = 3} = {}) {
+            const closed = () => Object.assign(new Error('The tree is closed'), {code: codes.unknown});
             for (let attempt = 0; ; ++attempt) {
+                // Before each attempt too: a fragment refused as stale after the tree was closed starts no new reading.
+                if (stopped) throw closed();
                 try {
                     let [part, total, next, capped, snapshot] = await call(functions.value)(watch, path, 0, 0);
                     let text = part;
                     while (next !== 0) {
-                        if (stopped) throw Object.assign(new Error('The tree is closed'), {code: codes.unknown});
+                        if (stopped) throw closed();
                         [part, total, next, capped] = await call(functions.value)(watch, path, snapshot, next);
                         text += part;
                     }
