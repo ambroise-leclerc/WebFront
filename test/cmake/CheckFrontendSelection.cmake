@@ -442,6 +442,8 @@ foreach(case webkitgtk-display webkitgtk-linux cef-linux cef-macos cef-windows c
             set(expected_count 17)  # an engine without STARTUP_TRACE has no start-up case
         elseif(case STREQUAL "cef-linux")
             set(expected_count 15)  # no host-thread case: CEF has no secondary-thread path to observe
+        elseif(case STREQUAL "wkwebview-macos")
+            set(expected_count 19)  # with secondary-close (#702)
         else()
             set(expected_count 18)
         endif()
