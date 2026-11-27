@@ -601,6 +601,82 @@ const Scenario inspectorWindowAccess{
       }
 };
 
+const Scenario inspectorTreeAccess{
+    "The trees of the watches are read and written through the bridge by an admitted page only (ADR-027, sections 2, 3 and 6)",
+    {"view-association", "inspector"},
+    [] {
+        std::vector<int> grid{1, 2, 3};
+        const auto       visitor = [&grid](inspect::Visit<std::vector<int>> visit) {
+            visit(grid);
+        };
+        given("the proven view and a writable watch", [&] {
+            freshNetwork();
+            AdmittedBrowser<InspectorApp> browser{false, true};
+            auto                          watch = browser.app.watch("grid", visitor);
+            const auto                    id    = static_cast<double>(watch.id());
+            then("the functions of the trees are registered", [&] {
+                for (const auto* name : {"webfront.inspector.limits",
+                                         "webfront.inspector.children",
+                                         "webfront.inspector.changes",
+                                         "webfront.inspector.value",
+                                         "webfront.inspector.fold",
+                                         "webfront.inspector.reset",
+                                         "webfront.inspector.write"})
+                    require(browser.app.hasCppFunction(name));
+            });
+            then("the root and its children are read, a value is written, and the next pass is empty", [&] {
+                callWith("webfront.inspector.reset", 11, id);  // the memory of a first call has the revision 1: reset gives 2
+                callWith("webfront.inspector.children", 12, id, std::string{}, 2.0, 0.0, 200.0);
+                require(ViewSocket::wrote("sequence"));
+                require(ViewSocket::wrote("/#2"));
+                require(ViewSocket::wrote("[2]"));
+                callWith("webfront.inspector.write", 13, id, 3.0, std::string{"/#1"}, std::string{"2"}, std::string{"20"});
+                requireEqual(grid, std::vector<int>({1, 20, 3}));
+                callWith("webfront.inspector.value", 14, id, std::string{"/#1"}, 0.0, 0.0);
+                callWith("webfront.inspector.changes", 15, id, 4.0, 0.0, 200.0);
+                callWith("webfront.inspector.fold", 16, id, std::string{}, 5.0);
+                require(!ViewSocket::wrote(std::string_view{"webfront.inspector."}));  // no refusal among the answers
+            });
+            then("a watch on an executor that has no running loop answers unavailable, and its source is not called", [&] {
+                bool read    = false;
+                auto waiting = browser.app.watch(
+                    "waiting",
+                    [&]() -> std::vector<int>& {
+                        read = true;
+                        return grid;
+                    },
+                    browser.app.uiExecutor());
+                callWith("webfront.inspector.reset", 11, static_cast<double>(waiting.id()));
+                require(ViewSocket::wrote(inspect::code::unavailable));
+                require(!read);
+            });
+            then("a call for a watch that is gone is refused as unknown", [&] {
+                watch.reset();
+                callWith("webfront.inspector.reset", 11, id);
+                require(ViewSocket::wrote(inspect::code::unknown));
+            });
+        });
+        given("a page that is not admitted", [&] {
+            freshNetwork();
+            AdmittedBrowser<InspectorApp> browser{false, false};
+            auto                          watch = browser.app.watch("grid", visitor);
+            const auto                    id    = static_cast<double>(watch.id());
+            then("every function of the trees is refused as denied, and nothing is read or written", [&] {
+                callWithoutArgument("webfront.inspector.limits", 10);
+                callWith("webfront.inspector.reset", 11, id);
+                callWith("webfront.inspector.children", 12, id, std::string{}, 2.0, 0.0, 200.0);
+                callWith("webfront.inspector.changes", 13, id, 2.0, 0.0, 200.0);
+                callWith("webfront.inspector.value", 14, id, std::string{}, 0.0, 0.0);
+                callWith("webfront.inspector.fold", 15, id, std::string{}, 2.0);
+                callWith("webfront.inspector.write", 16, id, 2.0, std::string{"/#1"}, std::string{"2"}, std::string{"20"});
+                require(ViewSocket::wrote(inspect::code::denied));
+                require(!ViewSocket::wrote("sequence"));
+                requireEqual(grid, std::vector<int>({1, 2, 3}));
+            });
+        });
+      }
+};
+
 const Scenario inspectorWatchesAccess{
     "webfront.inspector.watches lists the application's watches to an admitted page only (ADR-027, sections 2 and 3)",
     {"view-association", "inspector"},

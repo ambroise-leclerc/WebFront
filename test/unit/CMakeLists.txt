@@ -80,7 +80,7 @@ list(APPEND TESTS_LIST WebKitGTKPolicyTests.cpp ContentPolicyTests.cpp HTTPServe
 list(APPEND TESTS_LIST FormsTests.cpp ReactStoreTests.cpp DomDocumentTests.cpp DomBatchTests.cpp JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)
 list(APPEND TESTS_LIST FileSystemTests.cpp NativeFSTests.cpp DownloadsTests.cpp StorageTests.cpp NativeStorageTests.cpp PtyTests.cpp)
 list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp ProfileLeaseTests.cpp SafePathTests.cpp UISubscribersTests.cpp)
-list(APPEND TESTS_LIST ReadBindingTests.cpp ViewAssociationTests.cpp WatchTests.cpp IntrospectionTests.cpp BroadcastTests.cpp SpaceTests.cpp WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp)
+list(APPEND TESTS_LIST ReadBindingTests.cpp ViewAssociationTests.cpp WatchTests.cpp WatchTreeTests.cpp WatchPassTests.cpp WatchWriteTests.cpp IntrospectionTests.cpp BroadcastTests.cpp SpaceTests.cpp WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp)
 list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp AutomationTests.cpp AutomationChannelTests.cpp AutomationDiscoveryTests.cpp AutomationMcpHttpTests.cpp JasmineConsumerTests.cpp HostTests.cpp LifeTests.cpp HostLoopTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp DeferredCallTests.cpp)
 list(APPEND TESTS_LIST Main.cpp ScenarioIsolation.cpp FrontendUrlTests.cpp ApplicationUrlTests.cpp FrontendContractTests.cpp UIExecutorTests.cpp NativeWindowTests.cpp WindowRegistryTests.cpp CommandsTests.cpp EmbeddedCoreAssetsTests.cpp)
 if(WEBFRONT_USE_MDDLOG)
@@ -524,6 +524,34 @@ add_executable(inspector_distribution Main.cpp InspectorDistribution.cpp)
 target_link_libraries(inspector_distribution PRIVATE WebFront WebFront::Bdd WebFront_test_hardening WebFront_warnings WebFront_options)
 target_compile_definitions(inspector_distribution PRIVATE WEBFRONT_DISTRIBUTION=1)
 add_test(NAME InspectorsAbsentFromDistribution COMMAND inspector_distribution)
+
+# Destroying the handle of a watch from its own visitor, when its source refers to the application's objects, cannot be made
+# safe: the process writes a diagnostic that names the watch and where it was declared, then terminates (ADR-027, section 5).
+add_executable(watch_terminates WatchTerminates.cpp)
+target_link_libraries(watch_terminates PRIVATE WebFront WebFront_test_hardening WebFront_warnings WebFront_options)
+add_test(NAME WatchDestroyedFromItsVisitor COMMAND watch_terminates)
+set_tests_properties(WatchDestroyedFromItsVisitor PROPERTIES
+    PASS_REGULAR_EXPRESSION "The watch 'values' declared at app.cpp:12 was destroyed from its own operation.*terminated"
+    FAIL_REGULAR_EXPRESSION "the process survived" TIMEOUT 60 LABELS fast)
+
+# A buffers policy too small for the inspectors does not compile with what the developer environment instantiates
+# (inspect::limitsOf), also when only its maxMessageSize is too small (ADR-027, section 3).
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT MSVC)
+  foreach(_case IN ITEMS "SMALL_BUFFER|an answer must hold a page of one node" "SMALL_MESSAGE|an answer must hold a page of one node"
+                         "SMALL_WRITE|a write must carry a text of 1 KiB")
+    string(REPLACE "|" ";" _case "${_case}")
+    list(GET _case 0 _name)
+    list(GET _case 1 _message)
+    add_test(NAME WatchPolicyRejects.${_name}
+        COMMAND ${CMAKE_CXX_COMPILER} -std=c++23 -fsyntax-only -I${PROJECT_SOURCE_DIR}/include
+            -DREJECT_${_name} ${CMAKE_CURRENT_SOURCE_DIR}/WatchPolicyRejects.cpp)
+    set_tests_properties(WatchPolicyRejects.${_name} PROPERTIES PASS_REGULAR_EXPRESSION "${_message}" TIMEOUT 60 LABELS fast)
+  endforeach()
+  # Without a small policy the same file compiles: the cases above fail only on their assertion.
+  add_test(NAME WatchPolicyRejects.NONE COMMAND ${CMAKE_CXX_COMPILER} -std=c++23 -fsyntax-only -I${PROJECT_SOURCE_DIR}/include
+      ${CMAKE_CURRENT_SOURCE_DIR}/WatchPolicyRejects.cpp)
+  set_tests_properties(WatchPolicyRejects.NONE PROPERTIES TIMEOUT 60 LABELS fast)
+endif()
 
 # A project outside WebFront finds the installed WebFrontBdd package, writes scenarios and has CTest discover them (#647).
 # Only the top-level project installs the package, so only it can run this check.
