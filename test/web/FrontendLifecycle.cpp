@@ -14,6 +14,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <concepts>
 #include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
@@ -27,6 +28,7 @@
 #include <stdexcept>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #ifndef WEBFRONT_TEST_FRONTEND
@@ -957,6 +959,113 @@ int checkSecondWindow() {
     return 0;
 }
 
+// What may still hold the view of a closed secondary window when the frontend releases it (#702): under WKWebView, a
+// reference the test takes, as the system may take one (an autorelease pool, an animation, a pending transaction). The
+// window's page must end all the same, when the window closes and not when the last reference goes.
+class LingeringView {
+#if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
+    id view = nullptr;
+#endif
+
+public:
+    void hold([[maybe_unused]] App& app, [[maybe_unused]] const std::string& page) {
+#if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
+        if constexpr (std::same_as<Frontend, webfront::frontend::WKWebViewFrontend>) {
+            namespace wk = webfront::frontend::detail::wkwebview;
+            webfront::frontend::invokeOnUIThread(app.uiExecutor(), [&] {
+                const auto& secondary = wk::Windows::instance().secondary;
+                const auto  found     = secondary.find(page);
+                if (found == secondary.end())
+                    throw std::runtime_error("The secondary window to hold is not open");
+                view = wk::send(found->second->view, "retain");
+            });
+        }
+#endif
+    }
+    void release([[maybe_unused]] App& app) {
+#if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
+        if (view)
+            webfront::frontend::invokeOnUIThread(app.uiExecutor(), [&] {
+                webfront::frontend::detail::wkwebview::send<void>(std::exchange(view, nullptr), "release");
+            });
+#endif
+    }
+};
+
+// A closed secondary window ends its page, hence its connection, with the window (#702): opened and closed several times
+// in a row, each window disconnects within a bound far below what an engine releasing its page lazily may take (WKWebView
+// kept the closed inspector window connected for more than thirty seconds). The first window stays connected throughout.
+// Every other pass, something still holds the closed window's view (LingeringView): the page must end all the same.
+int checkSecondaryClose() {
+    if constexpr (!App::supportsSecondaryWindow) {
+        return 0;
+    } else {
+        constexpr const char* page   = "second-window.html?name=closing";
+        constexpr int         passes = 5;
+        App                   app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+        lifecycleStage = LifecycleStage::startingInstrumented;
+        SecondWindows windows;
+        windows.setup(app);
+        std::string failure;
+        std::thread host([&] {
+            try {
+                const auto check = [&](bool condition, const std::string& message) {
+                    if (!condition)
+                        throw std::runtime_error(message);
+                };
+                // The connections the server holds, polled until `expected` or the bound.
+                const auto connections = [&](std::size_t expected, std::chrono::milliseconds bound) {
+                    const auto deadline = std::chrono::steady_clock::now() + bound;
+                    while (app.connectedBrowsers() != expected && std::chrono::steady_clock::now() < deadline)
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    return app.connectedBrowsers();
+                };
+                check(windows.ready("main"), "The first window did not connect");
+                check(connections(1, std::chrono::seconds(5)) == 1, "The first window is not the only connection");
+                for (int pass = 1; pass <= passes; ++pass) {
+                    const auto at = " (pass " + std::to_string(pass) + " of " + std::to_string(passes) + ")";
+                    app.openSecondaryWindow(page);
+                    check(windows.ready("closing"), "The secondary window did not connect" + at);
+                    check(connections(2, std::chrono::seconds(5)) == 2, "The secondary window is not the second connection" + at);
+                    LingeringView lingering;
+                    if (pass % 2 == 0)
+                        lingering.hold(app, page);
+                    check(app.requestClose(page), "The close request of the secondary window was refused" + at);
+                    for (int attempt = 0; attempt < 200 && app.requestClose(page); ++attempt)
+                        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+                    check(!app.requestClose(page), "The closed secondary window is still open" + at);
+                    const auto left = connections(1, std::chrono::seconds(3));
+                    lingering.release(app);
+                    check(left == 1, "The closed secondary window did not disconnect: " + std::to_string(left) + " connections" + at);
+                    windows.forget("closing");
+                    check(windows.window("main").template jsFunction<std::string>("windowTests.name")().get() == "main",
+                          "The first window is not usable after the secondary one closed" + at);
+                }
+                check(app.requestClose(), "The close request of the first window was refused");
+            } catch (const std::exception& error) {
+                failure = error.what();
+                app.requestClose();
+            }
+        });
+        struct Join {
+            SecondWindows& windows;
+            std::thread&   thread;
+            ~Join() {
+                windows.abandon();
+                thread.join();
+            }
+        };
+        {
+            Join join{windows, host};
+            app.show("second-window.html");
+            lifecycleStage = LifecycleStage::windowClosed;
+        }
+        if (!failure.empty())
+            throw std::runtime_error(failure);
+        return 0;
+    }
+}
+
 // The application on a thread of its own, for a frontend that allows it; the others must refuse with a diagnostic
 // instead of opening a window off the main thread.
 template <typename Application>
@@ -1083,6 +1192,7 @@ int run(std::string_view mode) {
     cases.emplace("second-open", checkSecondOpen);
     cases.emplace("host-close", checkHostClose);
     cases.emplace("second-window", checkSecondWindow);
+    cases.emplace("secondary-close", checkSecondaryClose);
     cases.emplace("startup-time", checkStartupTime);
     cases.emplace(
         "host-thread",

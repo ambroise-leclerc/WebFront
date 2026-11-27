@@ -350,6 +350,7 @@ struct Session {
             send<void>(view, "setUIDelegate:", static_cast<id>(nullptr));
             send<void>(view, "stopLoading");
             attach(view, nullptr);
+            endPage();
         }
         if (window) {
             send<void>(window, "setDelegate:", static_cast<id>(nullptr));
@@ -375,6 +376,23 @@ struct Session {
             attach(delegate, nullptr);
             send<void>(delegate, "release");
         }
+    }
+
+    /// Ends the view's page now, and with it the page's connection (#702). Releasing the view ends it only when the last
+    /// reference goes, and the system may hold one for a long while (an autorelease pool, an animation of the closing
+    /// window, a pending transaction): the closed inspector window of the developer journey stayed connected for more than
+    /// thirty seconds on the macOS runner. WebKit closes its page with `_close`, which it answers to since macOS 10.10 but
+    /// declares only in its private headers: it is called only when this runtime answers to it. Otherwise the view leaves the
+    /// document for an empty one, which stops the document's connections as it unloads (its delegates are already gone, so
+    /// no policy is asked for that navigation).
+    void endPage() noexcept {
+        if (send<BOOL>(view, "respondsToSelector:", sel_registerName("_close"))) {
+            send<void>(view, "_close");
+            return;
+        }
+        Object blank(text("about:blank"));
+        if (const auto address = send(type("NSURL"), "URLWithString:", blank.get()))
+            send(view, "loadRequest:", send(type("NSURLRequest"), "requestWithURL:", address));
     }
 
     /// Makes the window opaque, once: at the page's first frame, or when the delay has expired.
