@@ -744,6 +744,7 @@ makeWatch(std::string name, std::string location, Source&& source, std::shared_p
     core->access.writable = writable;
     auto kept             = std::make_shared<Stored>(std::forward<Source>(source));
     core->access.open     = [kept, owner](detail::FunctionRef<void(const detail::NodeRef&)> use) {
+        static_cast<void>(owner);  // kept alive by the watch even when the source does not receive it
         if constexpr (Shape::visitor) {
             bool          visited = false;
             Visit<Object> visit{[&](Object& object) {
