@@ -27,6 +27,31 @@ using namespace webfront;
 namespace watch_tree {
 using namespace watch_fixture;
 
+/// An element of a keyed source, with values of its own.
+struct KeyedItem {
+    std::string      key;
+    std::vector<int> values;
+};
+struct KeyedItems {
+    std::vector<KeyedItem>    items;
+    [[nodiscard]] std::size_t size() const {
+        return items.size();
+    }
+    void visit(std::size_t first, std::size_t count, auto&& each) {
+        for (std::size_t index = first; index < items.size() && index - first < count; ++index)
+            each(items[index].values);
+    }
+    [[nodiscard]] std::string key(std::size_t position) const {
+        return items.at(position).key;
+    }
+    [[nodiscard]] std::optional<std::size_t> find(std::string_view wanted) const {
+        for (std::size_t index = 0; index < items.size(); ++index)
+            if (items[index].key == wanted)
+                return index;
+        return std::nullopt;
+    }
+};
+
 struct Point {
     int x = 0;
     int y = 0;
@@ -743,6 +768,20 @@ const Scenario watchListsStayCoherent{"A list of children is read on one state, 
                                               } while (start != 0);
                                               requireEqual(read, std::vector<std::string>{"x", "a", "b", "c", "d"});
                                           });
+                                          then("with keys, a later page that brings back a key already served at another position starts the list again", [&] {
+                                              Keyed root;
+                                              for (const auto* name : {"a", "b", "c", "d"})
+                                                  root.items.push_back(Keyed{.name = name, .text = name, .items = {}, .keyFails = false, .visits = 0});
+                                              const auto id   = bench.watch("swapped", visiting(root));
+                                              auto       page = bench.open(id, 2);
+                                              requireEqual(pathsOf(page), std::vector<std::string>{"", "/ka", "/kb"});
+                                              std::swap(root.items[0], root.items[2]);  // c, b, a, d: the size and the place of b are kept
+                                              page = bench.children(id, "", revisionOf(page), 2, 2);
+                                              requireEqual(nodesOf(page).size(), std::size_t{1});
+                                              requireEqual(flagsOf(nodesOf(page).front()), flag::childrenChanged);
+                                              page = bench.children(id, "", revisionOf(page), 0, 10);
+                                              requireEqual(pathsOf(page), std::vector<std::string>{"", "/kc", "/kb", "/ka", "/kd"});
+                                          });
                                           then("with keys, an insertion that keeps the number of children is seen by the key of the last child served", [&] {
                                               Keyed root;
                                               for (const auto* name : {"a", "b", "c", "d"})
@@ -820,6 +859,25 @@ const Scenario watchKeys{
             requireEqual(std::get<1>(answer), std::string{code::stale});
             requireEqual(rows.rows[1].value, 2);
             requireEqual(rows.rows[4].value, 5);
+        });
+        then("under an element told by its position, every descendant is read-only, keyed or not", [&] {
+            KeyedItems items{
+                .items = {{std::string(inspect::maxKeyBytes + 1, 'k'), {1, 2}}, {"short", {3}}}
+            };
+            const auto id   = bench.watch("items", visiting(items));
+            auto       page = bench.open(id);
+            requireEqual(pathsOf(page), std::vector<std::string>({"", "/#0", "/kshort"}));
+            page = bench.children(id, "/#0", revisionOf(page));
+            requireEqual(pathsOf(page), std::vector<std::string>({"/#0", "/#0/#0", "/#0/#1"}));
+            checkEqual(flagsOf(nodesOf(page)[1]), 0u);
+            checkEqual(flagsOf(nodesOf(page)[2]), 0u);
+            requireEqual(codeOf([&] {
+                             return bench.write(id, revisionOf(page), "/#0/#1", "2", "9");
+                         }),
+                         std::string{code::readOnly});
+            // A branch whose whole path is keyed stays writable.
+            page = bench.children(id, "/kshort", revisionOf(page));
+            checkEqual(flagsOf(nodesOf(page)[1]), flag::writable);
         });
         then("a key that find() resolves to an element with another key is a node removed", [&] {
             struct Lying : Keyed {

@@ -27,6 +27,36 @@ using namespace std::chrono_literals;
 namespace watch_write {
 using namespace watch_fixture;
 
+/// A paged source that tells whether it is walking its elements.
+struct WalkedRows {
+    std::vector<int>          values{1, 2, 3};
+    bool                      visiting = false;
+    [[nodiscard]] std::size_t size() const {
+        return values.size();
+    }
+    void visit(std::size_t first, std::size_t count, auto&& each) {
+        visiting = true;
+        for (std::size_t index = first; index < values.size() && index - first < count; ++index)
+            each(values[index]);
+        visiting = false;
+    }
+};
+
+/// A paged source that fails once it gave the elements asked.
+struct FailingRows {
+    std::vector<int>          values{1, 2, 3};
+    bool                      failAfter = false;
+    [[nodiscard]] std::size_t size() const {
+        return values.size();
+    }
+    void visit(std::size_t first, std::size_t count, auto&& each) {
+        for (std::size_t index = first; index < values.size() && index - first < count; ++index)
+            each(values[index]);
+        if (failAfter)
+            throw std::runtime_error("after the element");
+    }
+};
+
 struct Player {
     std::string name;
     int         score = 0;
@@ -34,6 +64,10 @@ struct Player {
 struct Game {
     forms_fixture::Settings settings;
     int                     turn = 0;
+};
+/// A field whose upper bound is 2^53, where a double no longer tells two neighbouring integers apart.
+struct Big {
+    long long value = 0;
 };
 
 /// A keyed paged source of scores.
@@ -85,6 +119,15 @@ struct Gate {
     }
 };
 
+/// Opens a gate when it goes: declared after the futures that wait for the gate, it is destroyed before them, so that a
+/// failed assertion does not leave their destructors waiting for an operation held behind it.
+struct Opening {
+    Gate& gate;
+    ~Opening() {
+        gate.release();
+    }
+};
+
 using Small = http::CustomBuffersPolicy<8192, 8192, 32768, 8192>;
 
 /// A thread that runs a loop, as the thread that owns an object does: the executor of a watch.
@@ -110,6 +153,12 @@ Result await(ResultTask<Result> task) {
 }
 }  // namespace watch_write
 
+template <>
+struct webfront::inspect::Described<watch_write::Big> {
+    static webfront::forms::Description<watch_write::Big> description() {
+        return {.name = "Big", .fields = {webfront::forms::field("value", &watch_write::Big::value, "Value", webfront::forms::Bounds{0, 9007199254740992.0})}};
+    }
+};
 template <>
 struct webfront::inspect::Described<watch_write::Game> {
     static webfront::forms::Description<watch_write::Game> description() {
@@ -336,6 +385,28 @@ const Scenario watchMutators{
             require(values.empty());
             require(!resyncOf(bench.changes(id, std::get<0>(answer))));
         });
+        then("the mutator is called once the walk is over, outside the visit of a paged source", [&] {
+            WalkedRows rows;
+            bool       inVisit = true;
+            const auto id      = bench.watch("rows", visiting(rows), [&](WalkedRows& object, std::string_view, std::string_view) {
+                inVisit = object.visiting;
+                object.values.clear();  // would invalidate the walk if it were still running
+            });
+            const auto page    = bench.open(id);
+            const auto answer  = bench.write(id, revisionOf(page), "/#1", "2", "5");
+            requireEqual(std::get<1>(answer), std::string{});
+            require(!inVisit);
+            require(rows.values.empty());
+        });
+        then("a paged source that fails after it gave the element written does not make the write stale", [&] {
+            FailingRows rows;
+            const auto  id    = bench.watch("rows", visiting(rows));
+            const auto  page  = bench.open(id);
+            rows.failAfter    = true;
+            const auto answer = bench.write(id, revisionOf(page), "/#1", "2", "20");
+            requireEqual(std::get<1>(answer), std::string{});
+            requireEqual(rows.values[1], 20);
+        });
         then("a text that is not a value of a described field is refused before the mutator is called", [&] {
             Game       game;
             int        calls = 0;
@@ -350,6 +421,22 @@ const Scenario watchMutators{
                            std::string{code::parse});
             requireEqual(calls, 0);
             requireEqual(std::get<1>(bench.write(id, revisionOf(page), "/.0", "0", "42")), std::string{});
+            requireEqual(calls, 1);
+        });
+        then("a whole number is compared exactly with the bounds of its field", [&] {
+            Big        big;
+            int        calls = 0;
+            const auto id    = bench.watch("big", visiting(big), [&](Big&, std::string_view, std::string_view) {
+                ++calls;
+            });
+            const auto page  = bench.open(id);
+            // 2^53 + 1 rounds onto 2^53 as a double: it must still be refused.
+            requireEqual(codeOf([&] {
+                             return bench.write(id, revisionOf(page), "/.0", "0", "9007199254740993");
+                         }),
+                         std::string{code::parse});
+            requireEqual(calls, 0);
+            requireEqual(std::get<1>(bench.write(id, revisionOf(page), "/.0", "0", "9007199254740992")), std::string{});
             requireEqual(calls, 1);
         });
         then("a message of 1 MiB is cut to 256 bytes on a character, and the answer fits the smallest budget", [&] {
@@ -452,6 +539,34 @@ const Scenario watchRegistrations{
             requireEqual(value, 1);
             requireEqual(nodesOf(bench.open(second)).size(), std::size_t{1});
         });
+        then("a watch removed during the reading of a value publishes no snapshot, and keeps no memory", [&] {
+            struct State {
+                std::string    text = std::string(20'000, 't');
+                inspect::Watch handle;
+                bool           drop = false;
+            };
+            auto       state = std::make_shared<State>();
+            const auto id    = bench.owning("text", state, [](State& owned, Visit<const std::string> visit) {
+                visit(owned.text);
+                if (owned.drop)
+                    owned.handle.reset();  // removed once the value is formatted, before it is published
+            });
+            state->handle    = inspect::Watch{bench.registry, id};
+            static_cast<void>(bench.open(id));
+            // Another watch's snapshot, which the removed one must not replace.
+            std::string other(100'000, 'o');  // several fragments: the reading goes on after the removal
+            const auto  second = bench.watch("other", visiting(other));
+            static_cast<void>(bench.open(second));
+            const auto kept = bench.value(second, "");
+            state->drop     = true;
+            requireEqual(codeOf([&] {
+                             return bench.value(id, "");
+                         }),
+                         std::string{code::unknown});
+            require(bench.session->find(id) == nullptr);
+            require(std::get<2>(kept) > 0.0);  // the reading of the other watch has fragments left
+            requireEqual(std::get<0>(bench.value(second, "", std::get<4>(kept), std::get<2>(kept))).front(), 'o');
+        });
         then("removing a watch frees its memories and its snapshot, for every connection", [&] {
             std::string text(20'000, 't');
             bench.limits.responseBudget = inspect::minPageBytes;
@@ -503,6 +618,7 @@ const Scenario watchDestruction{"Destroying a watch's handle waits for an operat
                                             bench.registry->remove(id);  // outside the lock of the source
                                             removed = true;
                                         });
+                                        const Opening     opening{gate};
                                         std::this_thread::sleep_for(50ms);
                                         require(!removed);  // the operation still reads the application's objects
                                         gate.release();
@@ -526,9 +642,10 @@ const Scenario watchDestruction{"Destroying a watch's handle waits for an operat
                                             });
                                         });
                                         gate.waitInside();
-                                        auto removing = std::async(std::launch::async, [&] {
+                                        auto          removing = std::async(std::launch::async, [&] {
                                             bench.registry->remove(id);
                                         });
+                                        const Opening opening{gate};
                                         requireEventually([&] {
                                             return bench.diagnosticCount() == 1;
                                         });

@@ -707,18 +707,30 @@ struct FieldRender {
                     const auto number = forms::detail::parseFloating<double>(text);
                     // A text the double parser refuses may still be a whole number beyond 2^53: it is one when the whole
                     // text is read without an error (an empty text and a number too large both stop at its end, with one).
-                    const auto wholeAs = [text](auto parsed) {
+                    const auto wholeAs = [text](auto parsed) -> std::optional<decltype(parsed)> {
                         const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), parsed);
-                        return error == std::errc{} && end == text.data() + text.size();
+                        if (error == std::errc{} && end == text.data() + text.size())
+                            return parsed;
+                        return std::nullopt;
                     };
-                    const bool exact = wholeAs(0LL) || wholeAs(0ULL);
+                    const auto signedWhole = wholeAs(0LL);
+                    const auto bigWhole    = signedWhole ? std::nullopt : wholeAs(0ULL);
+                    const bool exact       = signedWhole || bigWhole;
                     if (!number && !exact)
                         throw ParseError("Not a number");
                     if (described->kind == forms::Kind::integer && !exact && std::trunc(*number) != *number)
                         throw ParseError("Not a whole number");
-                    if (number && described->range && (*number < described->range->min || *number > described->range->max))
-                        throw ParseError("Out of the bounds " + forms::detail::formatNumber(described->range->min) + " to "
-                                         + forms::detail::formatNumber(described->range->max));
+                    if (described->range) {
+                        // A whole number is compared exactly: as a double, 2^53 + 1 would round onto a bound of 2^53.
+                        const bool inside = signedWhole ? forms::detail::atLeast(*signedWhole, described->range->min)
+                                                              && forms::detail::atMost(*signedWhole, described->range->max)
+                                            : bigWhole  ? forms::detail::atLeast(*bigWhole, described->range->min)
+                                                              && forms::detail::atMost(*bigWhole, described->range->max)
+                                                        : *number >= described->range->min && *number <= described->range->max;
+                        if (!inside)
+                            throw ParseError("Out of the bounds " + forms::detail::formatNumber(described->range->min) + " to "
+                                             + forms::detail::formatNumber(described->range->max));
+                    }
                     break;
                 }
                 case forms::Kind::text:

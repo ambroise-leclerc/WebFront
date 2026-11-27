@@ -289,14 +289,17 @@ export function createWatchTree({bridge, watch, count = pageCount, onUpdate = ()
          * was not. A text longer than the bound is refused here, without a call. After a `stale` refusal the node is read again.
          * `expected` is the value the user saw when the edition began; without it, the value the tree holds now. A pass may
          * have refreshed the tree since: C++ must compare the object with what was displayed, not with what was read last.
+         * `shown` (tree.shown(path) when the edition began) is checked again just before the write is sent.
          */
-        write(path, text, expected = undefined) {
+        write(path, text, expected = undefined, shown = undefined) {
             const bound = writeBound(limits, maxMessageBytes);
             if (utf8Bytes(text) > bound)
                 return Promise.resolve({code: codes.tooLarge, message: `The text is longer than ${bound} bytes`});
             return enqueue(async () => {
                 const entry = nodes.get(path);
                 if (!entry) return {code: codes.unknown, message: 'The node is no longer shown'};
+                // A pass answered while the write waited may have changed what the edition was started on.
+                if (shown !== undefined && tree.shown(path) !== shown) return {code: codes.stale, message: ''};
                 let answer;
                 try { answer = await call(functions.write)(watch, revision, path, expected ?? entry.node.value, text); }
                 catch (error) {
@@ -424,7 +427,7 @@ export function createTreeView({tree, list, view = globalThis}) {
             render();
             return;
         }
-        const answer = await tree.write(path, text, expected).catch(error => ({code: error?.code ?? 'webfront.error', message: error?.message ?? String(error)}));
+        const answer = await tree.write(path, text, expected, shown).catch(error => ({code: error?.code ?? 'webfront.error', message: error?.message ?? String(error)}));
         if (answer.code) notes.set(path, writeFailure(answer));
         render();
     }
