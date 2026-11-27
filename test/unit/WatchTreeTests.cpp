@@ -286,122 +286,120 @@ const Scenario watchValueKinds{"Each kind of value is rendered as a node (ADR-02
                                    });
                                }};
 
-const Scenario watchSourcesRead{
-    "A watch reads through the source the application gives (ADR-027, section 5)",
-    {"inspector"},
-    [] {
-        Bench            bench;
-        std::vector<int> values{1, 2, 3};
-        then("a Visit<const T> shows the same tree, read-only", [&] {
-            const auto id   = bench.watch("values", [&](Visit<const std::vector<int>> visit) {
-                visit(values);
-            });
-            const auto page = bench.open(id);
-            requireEqual(valuesOf(page), std::vector<std::string>{"", "1", "2", "3"});
-            for (const auto& node : nodesOf(page))
-                checkEqual(flagsOf(node), 0u);
-            checkEqual(std::get<4>(std::get<0>(bench.registry->page(0, 0, 10, 4096)).front()), false);
-        });
-        then("the whole operation runs inside the visit, under the application's lock", [&] {
-            bool       locked = false;
-            int        reads  = 0;
-            const auto id     = bench.watch("locked", [&](Visit<const std::list<Wide>> visit) {
-                static const std::list<Wide> wides{
-                    Wide{.size = 1, .failing = false},
-                    Wide{.size = 2, .failing = false}
-                };
-                locked = true;
-                visit(wides);
-                locked = false;
-                ++reads;
-            });
-            // The formatter of each element runs while the source holds its "lock".
-            const auto page = bench.open(id);
-            requireEqual(valuesOf(page), std::vector<std::string>{"", "w", "ww"});
-            requireEqual(reads, 1);
-            require(!locked);
-        });
-        then("an accessor that returns a reference or a copy is read where the call runs, and never written", [&] {
-            const auto byReference = bench.watch("reference", [&]() -> std::vector<int>& {
-                return values;
-            });
-            const auto byCopy      = bench.watch("copy", [&] {
-                return values;
-            });
-            for (const auto id : {byReference, byCopy}) {
-                const auto page = bench.open(id);
-                requireEqual(valuesOf(page), std::vector<std::string>{"", "1", "2", "3"});
-                checkEqual(flagsOf(nodesOf(page)[1]), 0u);
-                requireEqual(codeOf([&] {
-                                 return bench.write(id, revisionOf(page), "/#0", "1", "9");
-                             }),
-                             std::string{code::readOnly});
-            }
-            requireEqual(values.front(), 1);
-        });
-        then("a source that does not give its object, or fails before giving it, rejects the call and changes nothing", [&] {
-            bool       give   = true;
-            bool       fail   = false;
-            const auto id     = bench.watch("shy", [&](Visit<const std::vector<int>> visit) {
-                if (fail)
-                    throw std::runtime_error("locked\nout");
-                if (give)
-                    visit(values);
-            });
-            const auto page   = bench.open(id);
-            const auto memory = bench.memory(id);
-            give              = false;
-            requireEqual(codeOf([&] {
-                             return bench.children(id, "", revisionOf(page));
-                         }),
-                         std::string{code::unavailable});
-            fail = true;
-            requireEqual(codeOf([&] {
-                             return bench.changes(id, revisionOf(page));
-                         }),
-                         std::string{"exception"});
-            check(messageOf([&] {
-                      return bench.changes(id, revisionOf(page));
-                  }).contains("locked\xE2\x90\x8Aout"));
-            requireEqual(static_cast<double>(memory->revision()), revisionOf(page));
-            requireEqual(memory->size(), std::size_t{4});
-        });
-        then("a source that fails after its visit is reported, and the answer is served", [&] {
-            const auto id   = bench.watch("late", [&](Visit<const std::vector<int>> visit) {
-                visit(values);
-                throw std::runtime_error("after the visit");
-            });
-            const auto page = bench.open(id);
-            requireEqual(nodesOf(page).size(), std::size_t{4});
-            require(bench.lastDiagnostic().contains("'late'"));
-            require(bench.lastDiagnostic().contains("after the visit"));
-        });
-        then("a wide character is shown as its number, and has no text to be written", [&] {
-            std::tuple<char16_t, wchar_t, char32_t, char8_t, signed char, unsigned short> characters{u'a', L'b', U'c', u8'd', 'e', 102};
-            const auto                                                                    id   = bench.watch("characters", visiting(characters));
-            const auto                                                                    page = bench.open(id);
-            requireEqual(valuesOf(page), std::vector<std::string>({"", "97", "98", "99", "100", "101", "102"}));
-            for (std::size_t index = 1; index <= 4; ++index) {
-                checkEqual(kindOf(nodesOf(page)[index]), std::string{"integer"});
-                checkEqual(flagsOf(nodesOf(page)[index]), 0u);
-            }
-            checkEqual(flagsOf(nodesOf(page)[5]), flag::writable);
-            requireEqual(std::get<1>(bench.write(id, revisionOf(page), "/#5", "102", "65535")), std::string{});
-            requireEqual(std::get<5>(characters), 65535);
-        });
-        then("a paged source that gives its elements by value is read through copies", [&] {
-            Squares    squares{.count = 1000};
-            const auto id   = bench.watch("squares", visiting(squares));
-            const auto page = bench.children(id, "", bench.reset(id), 0, 3);
-            requireEqual(valuesOf(page), std::vector<std::string>{"", "0", "1", "4"});
-            checkEqual(kindOf(nodesOf(page).front()), std::string{"sequence"});
-            checkEqual(flagsOf(nodesOf(page)[1]), 0u);  // a copy is not the object
-            requireEqual(nextOf(page), 3.0);
-            const auto last = bench.children(id, "", revisionOf(page), 999, 10);
-            requireEqual(valuesOf(last), std::vector<std::string>{"", "998001"});
-            requireEqual(nextOf(last), 0.0);
-        });
-    }};
+const Scenario watchSourcesRead{"A watch reads through the source the application gives (ADR-027, section 5)", {"inspector"}, [] {
+                                    Bench            bench;
+                                    std::vector<int> values{1, 2, 3};
+                                    then("a Visit<const T> shows the same tree, read-only", [&] {
+                                        const auto id   = bench.watch("values", [&](Visit<const std::vector<int>> visit) {
+                                            visit(values);
+                                        });
+                                        const auto page = bench.open(id);
+                                        requireEqual(valuesOf(page), std::vector<std::string>{"", "1", "2", "3"});
+                                        for (const auto& node : nodesOf(page))
+                                            checkEqual(flagsOf(node), 0u);
+                                        checkEqual(std::get<4>(std::get<0>(bench.registry->page(0, 0, 10, 4096)).front()), false);
+                                    });
+                                    then("the whole operation runs inside the visit, under the application's lock", [&] {
+                                        bool       locked = false;
+                                        int        reads  = 0;
+                                        const auto id     = bench.watch("locked", [&](Visit<const std::list<Wide>> visit) {
+                                            static const std::list<Wide> wides{
+                                                Wide{.size = 1, .failing = false},
+                                                Wide{.size = 2, .failing = false}
+                                            };
+                                            locked = true;
+                                            visit(wides);
+                                            locked = false;
+                                            ++reads;
+                                        });
+                                        // The formatter of each element runs while the source holds its "lock".
+                                        const auto page = bench.open(id);
+                                        requireEqual(valuesOf(page), std::vector<std::string>{"", "w", "ww"});
+                                        requireEqual(reads, 1);
+                                        require(!locked);
+                                    });
+                                    then("an accessor that returns a reference or a copy is read where the call runs, and never written", [&] {
+                                        const auto byReference = bench.watch("reference", [&]() -> std::vector<int>& {
+                                            return values;
+                                        });
+                                        const auto byCopy      = bench.watch("copy", [&] {
+                                            return values;
+                                        });
+                                        for (const auto id : {byReference, byCopy}) {
+                                            const auto page = bench.open(id);
+                                            requireEqual(valuesOf(page), std::vector<std::string>{"", "1", "2", "3"});
+                                            checkEqual(flagsOf(nodesOf(page)[1]), 0u);
+                                            requireEqual(codeOf([&] {
+                                                             return bench.write(id, revisionOf(page), "/#0", "1", "9");
+                                                         }),
+                                                         std::string{code::readOnly});
+                                        }
+                                        requireEqual(values.front(), 1);
+                                    });
+                                    then("a source that does not give its object, or fails before giving it, rejects the call and changes nothing", [&] {
+                                        bool       give   = true;
+                                        bool       fail   = false;
+                                        const auto id     = bench.watch("shy", [&](Visit<const std::vector<int>> visit) {
+                                            if (fail)
+                                                throw std::runtime_error("locked\nout");
+                                            if (give)
+                                                visit(values);
+                                        });
+                                        const auto page   = bench.open(id);
+                                        const auto memory = bench.memory(id);
+                                        give              = false;
+                                        requireEqual(codeOf([&] {
+                                                         return bench.children(id, "", revisionOf(page));
+                                                     }),
+                                                     std::string{code::unavailable});
+                                        fail = true;
+                                        requireEqual(codeOf([&] {
+                                                         return bench.changes(id, revisionOf(page));
+                                                     }),
+                                                     std::string{"exception"});
+                                        check(messageOf([&] {
+                                                  return bench.changes(id, revisionOf(page));
+                                              }).contains("locked\xE2\x90\x8Aout"));
+                                        requireEqual(static_cast<double>(memory->revision()), revisionOf(page));
+                                        requireEqual(memory->size(), std::size_t{4});
+                                    });
+                                    then("a source that fails after its visit is reported, and the answer is served", [&] {
+                                        const auto id   = bench.watch("late", [&](Visit<const std::vector<int>> visit) {
+                                            visit(values);
+                                            throw std::runtime_error("after the visit");
+                                        });
+                                        const auto page = bench.open(id);
+                                        requireEqual(nodesOf(page).size(), std::size_t{4});
+                                        require(bench.lastDiagnostic().contains("'late'"));
+                                        require(bench.lastDiagnostic().contains("after the visit"));
+                                    });
+                                    then("a wide character is shown as its number, and has no text to be written", [&] {
+                                        std::tuple<char16_t, wchar_t, char32_t, char8_t, signed char, unsigned short>
+                                                   characters{u'a', L'b', U'c', u8'd', static_cast<signed char>('e'), static_cast<unsigned short>(102)};
+                                        const auto id   = bench.watch("characters", visiting(characters));
+                                        const auto page = bench.open(id);
+                                        requireEqual(valuesOf(page), std::vector<std::string>({"", "97", "98", "99", "100", "101", "102"}));
+                                        for (std::size_t index = 1; index <= 4; ++index) {
+                                            checkEqual(kindOf(nodesOf(page)[index]), std::string{"integer"});
+                                            checkEqual(flagsOf(nodesOf(page)[index]), 0u);
+                                        }
+                                        checkEqual(flagsOf(nodesOf(page)[5]), flag::writable);
+                                        requireEqual(std::get<1>(bench.write(id, revisionOf(page), "/#5", "102", "65535")), std::string{});
+                                        requireEqual(std::get<5>(characters), 65535);
+                                    });
+                                    then("a paged source that gives its elements by value is read through copies", [&] {
+                                        Squares    squares{.count = 1000};
+                                        const auto id   = bench.watch("squares", visiting(squares));
+                                        const auto page = bench.children(id, "", bench.reset(id), 0, 3);
+                                        requireEqual(valuesOf(page), std::vector<std::string>{"", "0", "1", "4"});
+                                        checkEqual(kindOf(nodesOf(page).front()), std::string{"sequence"});
+                                        checkEqual(flagsOf(nodesOf(page)[1]), 0u);  // a copy is not the object
+                                        requireEqual(nextOf(page), 3.0);
+                                        const auto last = bench.children(id, "", revisionOf(page), 999, 10);
+                                        requireEqual(valuesOf(last), std::vector<std::string>{"", "998001"});
+                                        requireEqual(nextOf(last), 0.0);
+                                    });
+                                }};
 
 const Scenario watchPaths{"Paths are ASCII, reversible and bounded (ADR-027, section 3)", {"inspector"}, [] {
                               then("a key is percent-encoded, and decoded back", [&] {
