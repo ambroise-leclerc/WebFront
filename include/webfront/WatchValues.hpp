@@ -821,6 +821,16 @@ struct Render {
         return kindName(shape);
     }
 
+    /// The node of a child: constant under a constant object, whatever the child's own type gives (a tuple of references,
+    /// a container of pointers' targets), so that nothing under a read-only branch is offered to edition.
+    template <typename E>
+    static NodeRef child(E& element) noexcept {
+        if constexpr (std::is_const_v<T>)
+            return refOf(std::as_const(element));
+        else
+            return refOf(element);
+    }
+
     static void value(const NodeRef& node, TextSink& sink) {
         [[maybe_unused]] const auto& object = objectOf<const U>(node);
         if constexpr (shape == Shape::boolean)
@@ -875,9 +885,9 @@ struct Render {
         [[maybe_unused]] const auto one = [&](std::size_t index, auto& member) {
             if (index < first || index - first >= count)
                 return true;
-            ChildView child = indexedChild(index, refOf(member));
-            child.label     = std::to_string(index);
-            return each(child);
+            ChildView view = indexedChild(index, child(member));
+            view.label     = std::to_string(index);
+            return each(view);
         };
         static_cast<void>((one(I, std::get<I>(object)) && ...));
     }
@@ -887,10 +897,10 @@ struct Render {
         const auto one = [&](std::size_t index, auto* alternative) {
             if (alternative == nullptr)
                 return false;
-            ChildView child = indexedChild(0, refOf(*alternative));
-            child.rank      = index;
-            child.label     = std::to_string(index);
-            static_cast<void>(each(child));
+            ChildView view = indexedChild(0, child(*alternative));
+            view.rank      = index;
+            view.label     = std::to_string(index);
+            static_cast<void>(each(view));
             return true;
         };
         static_cast<void>((one(I, std::get_if<I>(&object)) || ...));
@@ -917,9 +927,9 @@ struct Render {
                 sink.append(std::string_view{error.what()});
             }
             auto [label, cut] = visibleText(sink.text(), maxTextBytes, true);
-            return each(ChildView{.position = position, .rank = position, .node = refOf(item.second), .label = std::move(label), .labelCut = cut});
+            return each(ChildView{.position = position, .rank = position, .node = child(item.second), .label = std::move(label), .labelCut = cut});
         } else
-            return each(indexedChild(position, refOf(item)));
+            return each(indexedChild(position, child(item)));
     }
 
     static void visit(const NodeRef& node, std::size_t first, std::size_t count, ChildFn each) {
@@ -928,7 +938,7 @@ struct Render {
             return;
         if constexpr (shape == Shape::optional) {
             if (first == 0 && object) {
-                ChildView child = indexedChild(0, refOf(*object));
+                ChildView child = indexedChild(0, Render::child(*object));
                 child.label     = "value";
                 static_cast<void>(each(child));
             }

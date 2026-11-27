@@ -407,6 +407,50 @@ describe('The tree of a watch', () => {
         bridge.answers[functions.children] = children;
     });
 
+    it('keeps unfolded a list whose next page the full memory refuses, so that it can be folded', async () => {
+        const bridge = fakeWatch(Array.from({length: 6}, (unused, index) => `v${index}`), {pageSize: 2});
+        const tree = createWatchTree({bridge, watch: 1});
+        await tree.open();
+        const children = bridge.answers[functions.children];
+        bridge.answers[functions.children] = () => { throw Object.assign(new Error('memory full'), {code: codes.limit}); };
+        await tree.load('', 2);
+        expect(tree.expanded.has('')).toBeTrue();
+        expect(tree.problem).toBe('memory full');
+        bridge.answers[functions.children] = children;
+    });
+
+    it('builds the tree again at the next refresh when the reading of a resynchronization fails', async () => {
+        const bridge = fakeWatch(['a', 'b']);
+        const tree = createWatchTree({bridge, watch: 1});
+        await tree.open();
+        bridge.answers[functions.reset]();  // the next pass answers a resynchronization
+        const children = bridge.answers[functions.children];
+        bridge.answers[functions.children] = () => { throw Object.assign(new Error('the executor has no loop'), {code: codes.unavailable}); };
+        await expectAsync(tree.refresh()).toBeRejected();
+        expect(tree.nodes.size).toBe(0);
+        bridge.answers[functions.children] = children;
+        expect(await tree.refresh()).toBeTrue();
+        expect([...tree.nodes.keys()]).toEqual(['', '/#0', '/#1']);
+    });
+
+    it('sends nothing more when it is closed while it opens, or while it reads a full value', async () => {
+        const bridge = fakeWatch(['abcdefgh']);
+        const opened = createWatchTree({bridge, watch: 1});
+        await opened.open();
+        const tree = createWatchTree({bridge, watch: 1});
+        const release = bridge.hold(functions.limits);
+        const opening = tree.open();
+        await Promise.resolve();
+        tree.stop();
+        const before = bridge.calls.length;
+        release();
+        await opening.catch(() => {});
+        expect(bridge.calls.slice(before).map(([name]) => name)).not.toContain(functions.reset);
+        const value = bridge.answers[functions.value];
+        bridge.answers[functions.value] = (...args) => { opened.stop(); return value(...args); };
+        await expectAsync(opened.fullValue('/#0')).toBeRejectedWithError('The tree is closed');
+    });
+
     it('tells once that its watch is gone, and sends nothing more', async () => {
         const bridge = fakeWatch(['a']);
         let gone = 0;
