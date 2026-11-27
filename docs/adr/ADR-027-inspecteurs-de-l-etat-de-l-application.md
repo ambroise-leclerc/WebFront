@@ -4,6 +4,7 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
+| 1.4 | 2026-11-28 | Proposée | Ambroise Leclerc | Outils MCP (#685) : la section 10 fixe les dix outils `webfront.state.*` sous le grant `state`, servis nativement et sans exécution ; lectures seules (ni `write`, ni préférences, ni fenêtres) ; une mémoire des observateurs propre à ces lectures, que `fold` et `reset` gèrent sans toucher l'application ni un panneau ; mêmes bornes que les pages ; refus aux codes `webfront.inspector.*` ; les packages passent par les opérations `list`, `why` et `info` de l'environnement, sous le grant `packages`. | Issue #685. |
 | 1.3 | 2026-11-27 | Proposée | Ambroise Leclerc | Observateurs (#682) : précisions de la section « Précisions des observateurs » (6 bis) — `fold` répond par une page vide, `limits` par six nombres, la source propriétaire reçoit son état, le mutateur reçoit le texte déjà validé, un parent signalé « enfants modifiés » perd ses enfants en mémoire, la mémoire de 10 000 nœuds se compte par connexion et par observateur, `maxWriteTextBytes` tient compte de l'en-tête réel du texte, un formateur écrit pour `std::format_context` est accepté. | À renseigner après intégration. |
 | 1.2 | 2026-11-26 | Proposée | Ambroise Leclerc | Registre introspectable (#681) : pages `webfront.inspector.functions`, `jsFunctions` et `browsers` (section 7) ; enregistrements tenus par les gestionnaires, donc retirés avec une fonction d'espace ; fonctions `webfront.inspector.*` non listées ; durée mesurée pendant une fenêtre de 5 s après chaque lecture des fonctions ; appels vers JavaScript comptés par nom, 1 024 noms au plus, seulement une fois l'environnement monté ; `BasicWF::registeredFunctions()` pour l'application. | À renseigner après intégration. |
 | 1.1 | 2026-11-25 | Proposée | Ambroise Leclerc | Hôte détachable (#680) : `webfront.inspector.embedded()` dit à la page hôte si elle peut tourner dans un frontend intégré (vue prouvée, ou frontend actif qui transmet la preuve), ce qui décide de l'onglet du navigateur système ; `webfront.inspector.closeWindow(panneau, hôte)` ferme la fenêtre d'un panneau rattaché ; une fenêtre par panneau et par page hôte, qui seule le rattache ; choix et place conservés dans `inspector-window.json`, lus avec le jeton de leurs octets par `webfront.inspector.readPreferences()`. | À renseigner après intégration. |
@@ -830,10 +831,49 @@ du menu et des inspecteurs à l'environnement passe par une nouvelle publication
 
 ### 10. MCP (facultatif)
 
-Si la story #685 est retenue, les lectures des sections 3 et 7 deviennent des outils MCP de l'application
+Les lectures des sections 3 et 7 sont des outils MCP de l'application
 ([ADR-025](ADR-025-mcp-http-dans-l-application.md)), sous ses grants et son authentification, pour qu'un agent lise
 l'état sans capture d'écran. L'écriture de la section 6 n'est pas exposée en MCP par cette décision : l'ouvrir à un agent
 demanderait un grant et une décision propres.
+
+**Outils (#685).** Le grant `state`, fixé par le propriétaire natif comme les autres, ajoute dix outils au catalogue de
+l'ADR-025 : `webfront.state.limits`, `functions`, `jsFunctions`, `browsers`, `watches`, `children`, `changes`, `value`,
+`fold` et `reset`. Sans le grant, `tools/list` ne les nomme pas et leur appel est un outil inconnu. Chacun prend
+l'identifiant de session (`session`), comme `webfront.result`, puis les arguments de la fonction `webfront.inspector.*` du
+même nom, par leur nom ; il répond un objet JSON dont les champs sont ceux du tuple, les drapeaux devenant des booléens.
+
+- **Lecture seule.** Ni `write`, ni `readPreferences`/`savePreferences`, ni `openWindow`/`closeWindow`, ni `containers`
+  ou `embedded` n'ont d'outil. `limits` ne donne pas la borne du texte d'une écriture. `fold` et `reset` sont exposés :
+  ils ne changent que la mémoire de ces lectures (voir plus bas), et un agent en a besoin pour libérer la mémoire bornée
+  d'un observateur.
+- **Servis nativement, sans exécution.** Ces outils ne passent pas par `webfront.start` ni par la page : ils répondent
+  tout de suite, pendant une opération et avant que la fenêtre soit prête, et sont refusés (`not_ready`) une fois la
+  session fermée. Une opération sur un observateur s'exécute là où celle d'une page s'exécuterait (thread du serveur, puis
+  exécuteur de l'observateur, dans l'ordre des demandes) ; l'appel d'outil l'attend, dix secondes au plus, puis répond
+  `webfront.inspector.unavailable` et demande l'arrêt de l'opération.
+- **Mêmes bornes.** Chaque outil appelle le code de la fonction de même nom avec le même `responseBudget` : pages et
+  différences paginées, valeur par fragments d'un instantané identifié, 10 000 nœuds par observateur. Le budget borne ce
+  qui est lu ; l'échappement JSON peut allonger la réponse, qui reste proportionnelle. Une suite d'octets qui n'est pas de
+  l'UTF-8 (valeur coupée où finit la place, octets quelconques) devient U+FFFD.
+- **Mémoire propre.** Ces lectures ont leur mémoire de chaque observateur, celle qu'aurait une connexion, distincte de
+  celle de tout panneau et commune aux clients MCP de l'application (seize sessions MCP au plus, ADR-025) : deux agents
+  qui déplient le même observateur partagent ses révisions. Elle vit autant que le registre des observateurs.
+- **Accès.** La règle de la section 2 (vue prouvée) ne s'applique pas : c'est le client MCP authentifié d'une session à
+  qui le propriétaire a donné `state` qui lit. Un refus de session ou de grant est consigné dans l'audit ; une lecture ne
+  l'est pas, pour qu'une interrogation périodique n'évince pas les décisions gardées.
+- **Refus.** Un refus des inspecteurs est une erreur d'outil dont le `code` est le leur (`webfront.inspector.unknown`,
+  `stale`, `limit`, `unavailable`) ; un argument d'un autre type, non entier ou hors bornes est `invalid_arguments`.
+- **Périmètre.** Les outils exigent l'environnement développeur : `enableAutomation` avec le grant `state` lève
+  `std::invalid_argument` sans `bootstrap("developer")`. L'automatisation ne compile pas en distribution (ADR-025), et
+  une construction de distribution n'a pas de lectures (`inspectorReads()` nul).
+
+**Packages.** L'arbre des packages n'a pas de fonction C++ : le panneau lit le lock par l'environnement
+(`dependencies.mjs`). Un agent passe par la même voie : les opérations `list` (le graphe de `wf list --tree`), `why` et
+`info` de `webfront.start`, exécutées par `wf` dans la page, sous le grant `packages`. Elles lisent le lock seul, sans
+réseau ni écriture, et demandent l'environnement 1.2.1. Le grant est distinct de `state` pour que les lectures natives
+restent utilisables avec un environnement épinglé plus ancien.
+
+L'état du pont dans la page (#684) n'a pas d'outil : il n'est pas dans le périmètre de #685.
 
 ## Options écartées
 

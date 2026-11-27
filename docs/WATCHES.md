@@ -217,3 +217,11 @@ this connection with the object, in one access, and answers the nodes that chang
 write never waits for the end of a pass: it interrupts it, and the next pass finds the rest. The protocol
 (`webfront.inspector.children`, `changes`, `value`, `fold`, `reset`, `limits`, `write`) is described in section 3 of the
 ADR; it uses the bridge's existing types only.
+
+## Reading a watch from an agent
+
+An application that enables [automation](AUTOMATION.md#reading-the-applications-state) with the `state` grant gives an MCP
+client the same reads as tools: `webfront.state.watches`, `children`, `changes`, `value`, `fold`, `reset` and `limits`. They
+run the same operations, in the same access window of the source and with the same bounds, on a memory of their own that
+no panel shares. They never write: a watch you made writable for the panel stays read-only for an agent.
+[Developing with an agent](DEVELOPING_WITH_AGENTS.md#reading-the-running-application-webfrontstate) gives the sequence.

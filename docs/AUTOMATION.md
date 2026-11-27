@@ -49,7 +49,7 @@ change them.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `grants` | none | The granted operations: `check`, `build`, `test`, `preview`, `inspect`, `interact` (click/fill), `call`, and the setup grants `init`, `create`, `install`, `restore`, `embed`. None leaves only session discovery. |
+| `grants` | none | The granted operations: `check`, `build`, `test`, `preview`, `inspect`, `interact` (click/fill), `call`, `packages` (`list`, `why`, `info`), the setup grants `init`, `create`, `install`, `restore`, `embed`, and `state` for the `webfront.state.*` tools that read the running application. None leaves only session discovery. |
 | `callbacks` | none | The application callbacks `call` may invoke, by exact name (see below). |
 | `mcpPort` | 0 | The port of the listener; 0 lets the OS choose. A chosen port is never replaced: when it is taken the activation throws a `std::system_error` that names the address, the port and the cause. |
 | `mcpToken` | absent | An application-supplied Bearer token, retained across launches if the application supplies the same value. Absent selects a fresh random token per session. Use a long random secret outside the project. |
@@ -204,6 +204,7 @@ Tool results include both `structuredContent` and its JSON spelling as text.
 | `webfront.start` | `{session, operation, arguments?}` | A new run ID and initial state, returned immediately. |
 | `webfront.result` | `{session, runId}` | Run state, bounded streamed output and final result. |
 | `webfront.cancel` | `{session, runId}` | Cooperative cancellation request and current state. |
+| `webfront.state.*` (ten tools) | `{session, ...}` | With the `state` grant only: the inspectors' reads, answered at once (see [Reading the application's state](#reading-the-applications-state)). |
 
 Operations and their arguments:
 
@@ -221,6 +222,45 @@ Operations and their arguments:
 | `click` | `{pageId, elementId}` | `interact` |
 | `fill` | `{pageId, elementId, value}` | `interact` |
 | `call` | `{callback, value?}` | `call` |
+| `list` | `{}` (the graph of `wf list --tree`) | `packages` |
+| `why`, `info` | `{package}` | `packages` |
+
+`list`, `why` and `info` read the lock, without network or write, and answer the text of the terminal commands. They run in
+environment 1.2.1 or later: with an older one, the native owner refuses the `packages` grant rather than ignore it.
+
+### Reading the application's state
+
+The `state` grant adds ten tools, `webfront.state.limits`, `functions`, `jsFunctions`, `browsers`, `watches`, `children`,
+`changes`, `value`, `fold` and `reset`: the reads of the [inspectors](DEVELOPER_ENVIRONMENT.md) of the developer
+environment (ADR-027, section 10), for an agent that would otherwise need a screenshot. Without the grant, `tools/list`
+does not name them and calling one is an unknown tool.
+
+- **Reads only.** The write of the inspectors (`webfront.inspector.write`) has no tool, whatever the application made
+  writable for its panel: giving it to an agent would need a grant and a decision of its own. `fold` and `reset` change
+  only the memory these reads keep of a watch, never the application nor what a panel shows.
+- **Answered natively, at once.** They take no run and do not need the developer window: they answer while an operation
+  runs and before the window is ready, and are refused once the session is closed. A read of a watch runs where a page's
+  would (on the server thread, then on the watch's executor) and its tool call waits for it, ten seconds at most
+  (`webfront.inspector.unavailable` past that).
+- **Same bounds, same answers.** Each tool calls the code of the `webfront.inspector.*` function of the same name with
+  the same budget: pages of 200 rows by default and 1 000 at most, passes of differences by pages, a whole value by
+  fragments of one identified snapshot (16 MiB at most), 10 000 nodes kept per watch. The tuples become JSON objects and the
+  flags become booleans; JSON escaping can make an answer longer than `responseBudget`, which bounds what is read, and a
+  byte sequence that is not UTF-8 is replaced by U+FFFD.
+- **One memory per application.** The reads have their own memory of each watch, distinct from every panel's and shared
+  by the MCP clients of the session: two agents unfolding the same watch at once see each other's revisions.
+- **Access by the grant, not by the view.** The inspectors answer a page only when it is a proven view of the
+  application; these tools answer the authenticated MCP client of a session whose owner granted `state`. The grant shows
+  the content of every watch and the last error of every function: give it for an application whose state you accept to
+  show to the agent. Reading the functions opens the timing window of the calls, as a panel does.
+- **Development only.** The tools need `bootstrap("developer")`: without it, enabling automation with the `state` grant
+  throws `std::invalid_argument`. Neither automation nor the inspectors exist in a distribution build.
+
+A refusal is a tool error whose `code` is the inspectors': `webfront.inspector.unknown`, `webfront.inspector.stale`,
+`webfront.inspector.limit` or `webfront.inspector.unavailable`; an argument of the wrong type or out of its bounds is
+`invalid_arguments`. A refused call is audited, a read is not: polling would evict the decisions the audit keeps.
+[Developing with an agent](DEVELOPING_WITH_AGENTS.md#reading-the-running-application-webfrontstate) has the arguments of
+each tool and the sequence that reads a watch.
 
 `name`, `starter`, `package` and `provider` refuse a leading `-`, a backslash and spaces; `directory` and `output` must be
 project-relative paths: `create` never replaces an existing directory (`wf` refuses it), while `embed` **replaces** its output header, as
