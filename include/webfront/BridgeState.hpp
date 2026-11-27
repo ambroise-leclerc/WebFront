@@ -147,7 +147,7 @@ public:
         while (holding > maxBridgeSources) {
             Source* oldest = nullptr;
             for (auto& entry : sources)
-                if (entry.second.publication != 0 && &entry.second != &source && (!oldest || entry.second.wantedUntil < oldest->wantedUntil))
+                if (entry.second.publication != 0 && (!oldest || entry.second.wantedUntil < oldest->wantedUntil))
                     oldest = &entry.second;
             if (!oldest)
                 break;

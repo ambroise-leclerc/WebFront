@@ -28,6 +28,20 @@ export const publishPeriod = 250;
 // --- Texts -----------------------------------------------------------------------------------------------------
 
 const encoder = new TextEncoder();
+
+/** A digest of fixed size of a text (FNV-1a over its UTF-16 units, 64 bits as two 32-bit halves), to tell two long names apart. */
+export function digest(text) {
+    let low = 0x84222325, high = 0xcbf29ce4;
+    for (let index = 0; index < text.length; ++index) {
+        low ^= text.charCodeAt(index);
+        // Multiplied by the 64-bit FNV prime 0x100000001b3, kept as two halves.
+        const lowProduct = Math.imul(low, 0x1b3) >>> 0;
+        const carry = Math.floor((low >>> 0) * 0x1b3 / 0x100000000);
+        high = (Math.imul(high, 0x1b3) + Math.imul(low, 0x100) + carry) >>> 0;
+        low = lowProduct;
+    }
+    return high.toString(16).padStart(8, '0') + (low >>> 0).toString(16).padStart(8, '0');
+}
 const controls = /[\u0000-\u001f\u007f]/g;
 
 /**
@@ -106,8 +120,9 @@ export function createBridgeMonitor({target, clock = () => performance.now(), no
             jsCall(name) {
                 try {
                     if (ownTraffic(name)) return;
-                    // A long name is kept by its bounded label: what the monitor keeps of a name never exceeds the bound.
-                    const key = typeof name === 'string' && name.length <= limits.text / 4 ? name : boundedText(name);
+                    // A long name is kept by its bounded label and a digest of the whole name: what the monitor keeps of a
+                    // name never exceeds the bound, and two names that share their label stay two functions.
+                    const key = typeof name === 'string' && name.length <= limits.text / 4 ? name : `${boundedText(name)}#${digest(String(name))}`;
                     const known = state.js.get(key);
                     if (known) ++known.calls;
                     else if (state.js.size < limits.jsNames) state.js.set(key, {id: ++sequence, name: boundedText(key), calls: 1});
@@ -312,8 +327,9 @@ export const readingAttempts = 8;
 /**
  * The state that the page `host` published, read page after page: `{state, age, source, published}`, where `age` is how
  * long ago it was published in milliseconds, `source` whether that page is connected and `published` whether it published
- * yet (`state` is null until then). A publication that arrives between two pages starts the read again; null after
- * `readingAttempts` such changes, or once `active()` is false.
+ * yet (`state` is null until then). A publication that arrives between two pages starts the read again; after
+ * `readingAttempts` such changes it throws, so that the panel says the state could not be read. Null once `active()` is
+ * false: the read is no longer wanted.
  */
 export async function readPublishedState(bridge, host, {active = () => true} = {}) {
     for (let attempt = 0; attempt < readingAttempts; ++attempt) {
@@ -336,7 +352,7 @@ export async function readPublishedState(bridge, host, {active = () => true} = {
         const published = (flags & 2) !== 0;
         return {state: published ? fromRows(rows) : null, age, source: (flags & 1) !== 0, published};
     }
-    return null;
+    throw new Error(`the page published a new state during each of ${readingAttempts} reads; trying again at the next period`);
 }
 
 // --- Panel -----------------------------------------------------------------------------------------------------

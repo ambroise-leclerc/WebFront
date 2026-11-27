@@ -2,7 +2,7 @@
 // inspector reads, the rows of a state, their publication to C++ for a detached panel, the read of what was published, and
 // the panel. A real bridge is followed in test/web/suite/specs/bridge-state-specs.mjs.
 import {createBridgeMonitor, createBridgePublisher, readPublishedState, toRows, fromRows, emptyState, boundedText, rejectionReason,
-    ownTraffic, interfaceTarget, defaultLease, showBridgePanel, bridgeSource, describeReady, formatTime, limits, readingAttempts, staleAfter,
+    ownTraffic, interfaceTarget, defaultLease, digest, showBridgePanel, bridgeSource, describeReady, formatTime, limits, readingAttempts, staleAfter,
     sourceFunction, publishFunction, bridgeFunction, publisherGlobal} from '../../../js/developer/environment/inspector-bridge.mjs';
 import {ownFunction} from '../../../js/developer/environment/inspector-registry.mjs';
 import {main} from '../../../js/developer/environment/inspector.mjs';
@@ -348,6 +348,23 @@ describe('The panel of the bridge in the page', () => {
             expect(fromRows(toRows(many)).jsSaturated).toBeTrue();
         });
 
+        it('tells apart two long names that share their label', () => {
+            const bridge = fakeWebFront(), time = manualTime();
+            const monitor = monitorOf(bridge, time);
+            monitor.read();
+            const shared = `app.${'x'.repeat(300)}`;
+            bridge.called(`${shared}.first`);
+            bridge.called(`${shared}.second`);
+            bridge.called(`${shared}.first`);
+            const state = monitor.read();
+            expect(state.jsFunctions.map(entry => entry.calls)).toEqual([2, 1]);
+            expect(state.jsTotal).toBe(2);
+            expect(digest(`${shared}.first`)).not.toBe(digest(`${shared}.second`));
+            expect(digest('a')).toMatch(/^[0-9a-f]{16}$/);
+            expect(digest('')).toBe('cbf29ce484222325');  // the FNV-1a offset basis
+            expect(digest('a')).toBe('af63dc4c8601ec8c');  // FNV-1a 64 of "a"
+        });
+
         it('keeps of a long name no more than its bounded label', () => {
             const bridge = fakeWebFront(), time = manualTime();
             const monitor = monitorOf(bridge, time);
@@ -582,7 +599,7 @@ describe('The panel of the bridge in the page', () => {
             expect((await readPublishedState(relay, 'host-a')).state).toEqual(sampleState());
             relay.onRead = from => { if (from === 3) ++relay.published.get('host-a').publication; };
             relay.calls.length = 0;
-            expect(await readPublishedState(relay, 'host-a')).toBeNull();
+            await expectAsync(readPublishedState(relay, 'host-a')).toBeRejectedWithError(/during each of 8 reads/);
             expect(relay.calls.length).toBe(2 * readingAttempts);
         });
 
@@ -709,6 +726,24 @@ describe('The panel of the bridge in the page', () => {
             view.fire();
             await panel.poller.settled();
             expect(status.textContent).toContain('Waiting for the page to publish');
+        });
+
+        it('says when the published state could not be read, keeps the rows, and clears it at the next read', async () => {
+            let busy = false;
+            const {panel, status, view} = await setup(async () => {
+                if (busy) throw new Error('the page published a new state during each of 8 reads; trying again at the next period');
+                return read(sampleState());
+            });
+            busy = true;
+            view.fire();
+            await panel.poller.settled();
+            expect(status.classList.contains('error')).toBeTrue();
+            expect(status.textContent).toContain('during each of 8 reads');
+            expect(column(panel.pending, 0)).toContain('app.save');
+            busy = false;
+            view.fire();
+            await panel.poller.settled();
+            expect(status.classList.contains('error')).toBeFalse();
         });
 
         it('says why a read failed, and clears it when a read succeeds', async () => {

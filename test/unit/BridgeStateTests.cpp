@@ -210,10 +210,14 @@ const Scenario bridgeStateLease{
         given("a page that did not announce itself", [&] {
             States states;
             Page   page;
-            then("its publication is refused as unknown", [&] {
-                checkThrows<BridgeError>([&] {
+            then("its publication is refused as unknown, the code on which a page announces itself again", [&] {
+                std::string code;
+                try {
                     states.publish("nobody", &page, someRows(1));
-                });
+                } catch (const BridgeError& error) {
+                    code = error.code();
+                }
+                requireEqual(code, std::string{inspect::code::unknown});
             });
         });
       }
@@ -316,6 +320,13 @@ const Scenario bridgeStateBounds{
                 requireEqual(flagsOf(first.page), double{inspect::bridge_flag::source});
                 require(std::get<0>(first.page).empty());
                 require(static_cast<bool>(first.ask));
+                require(std::get<0>(states.read(name(1), 0, 200, 32768, start + 100s).page) == someRows(1));
+            });
+            then("a page whose lease ended and that publishes last loses its own state, not a page read since", [&] {
+                // host1 is read now; host0, read the longest ago, publishes once more after its lease.
+                static_cast<void>(states.read(name(1), 0, 0, 32768, start + 100s));
+                require(!states.publish(name(0), &pages[0], someRows(3), start + 100s));
+                require(std::get<0>(states.read(name(0), 0, 200, 32768, start + 100s).page).empty());
                 require(std::get<0>(states.read(name(1), 0, 200, 32768, start + 100s).page) == someRows(1));
             });
             then("a read of that page asks it, and its next publication is kept", [&] {
