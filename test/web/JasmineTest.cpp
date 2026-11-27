@@ -866,6 +866,11 @@ private:
             caller.jsFunction("webfrontTests.receiveFromCaller")(token);
             return "cpp-result:" + token;
         });
+        // Calls a JavaScript function of the page that asks: the state of the bridge tells it (#684).
+        webFront->cppFunction("callBridgeStateSpecs", [](TestWF::UI caller, const string& token) {
+            caller.jsFunction("bridgeStateSpecs.called")(token);
+            return "called:" + token;
+        });
         webFront->cppFunction("browserReady", [this](TestWF::UI ui) {
             // Raw origin probes create extra sessions; bind calls to the document reporting ready.
             connectedUI = ui;

@@ -1025,6 +1025,42 @@ try {
                     assert(opened.length === 0, 'An embedded view must never open a tab of the inspectors');
                     floating().querySelector('.webfront-inspector-close').click();
                     assert(floating().hidden, 'The inspector window must close');
+
+                    // The Bridge entry shows the state of the bridge in the page of the interface (#684, ADR-027 section 8): the
+                    // attached panel reads it in this page, and a detached one reads what this page publishes to C++.
+                    const interfaceBridge = context.preview.contentWindow.webFront ?? webFront;
+                    assert(webFront.probe === null && interfaceBridge.probe === null, 'A bridge that no inspector reads must record nothing');
+                    await window.webfrontInspectorHost.open('typescript.bridge');
+                    await until(() => floating() && !floating().hidden, 'The Bridge entry must open the inspector in the floating window');
+                    const field = index => panel()?.querySelectorAll('dl.bridge dd')[index]?.textContent ?? '';
+                    await until(() => field(1) === 'resolved', () => `The Bridge panel must tell that ready is resolved: ${field(1)}`);
+                    assert(field(2) === 'linked', `The Bridge panel must tell the connection: ${field(2)}`);
+                    assert(interfaceBridge.probe !== null, 'The bridge of the interface must be followed while the panel reads');
+                    const tableRows = index => [...(panel()?.querySelectorAll('table.registry')[index]?.querySelectorAll('tbody tr') ?? [])]
+                        .map(row => [...row.children].map(cell => cell.textContent));
+                    // A call that C++ does not answer yet is pending, then gone; a rejected one is shown with its reason.
+                    const slow = interfaceBridge.cppFunction('test.slow')(600);
+                    await until(() => tableRows(0).some(row => row[0] === 'test.slow'), () => `A pending call must be shown: ${JSON.stringify(tableRows(0))}`);
+                    await slow;
+                    await until(() => !tableRows(0).some(row => row[0] === 'test.slow'), 'An answered call must leave the pending calls');
+                    await interfaceBridge.cppFunction('test.noSuchFunction')().catch(() => {});
+                    const rejected = () => tableRows(1).find(row => row[1] === 'test.noSuchFunction');
+                    await until(rejected, () => `A rejected Promise must be shown: ${JSON.stringify(tableRows(1))}`);
+                    assert(/^webfront\.notFound: /.test(rejected()[2]), `A rejection must be shown with its reason: ${rejected()[2]}`);
+                    // Detached, the panel reads the relay: this page publishes once a reader asks, and the state is the same.
+                    const {readPublishedState} = await import(`${location.origin}/webfront/developer/environment/inspector.mjs`);
+                    let relayed = null;
+                    await until(async () => (relayed = await readPublishedState(webFront, window.webfrontInspectorHost.id))?.state,
+                        () => `The page must publish the state of its bridge for a detached panel: ${JSON.stringify(relayed)}`);
+                    const attachedRejections = tableRows(1).map(row => [row[1], row[2]]).sort();
+                    const relayedRejections = relayed.state.rejections.map(rejection => [rejection.name, rejection.reason]).sort();
+                    assert(JSON.stringify(relayedRejections) === JSON.stringify(attachedRejections),
+                        `A detached panel must read the state that the attached one shows: ${JSON.stringify(relayedRejections)} instead of ${JSON.stringify(attachedRejections)}`);
+                    assert(relayed.state.ready.state === 'resolved' && relayed.state.connection === field(2) && relayed.source && relayed.published,
+                        `The relayed state must tell ready and the connection: ${JSON.stringify(relayed)}`);
+                    assert(`${relayed.state.page.label} (${relayed.state.page.path})` === field(0), `Both must name the same page: ${field(0)}`);
+                    floating().querySelector('.webfront-inspector-close').click();
+                    assert(floating().hidden, 'The inspector window must close');
                 } finally { window.open = open; }
             }
             assert(here.menus().length === 0, 'The menu must be closed');

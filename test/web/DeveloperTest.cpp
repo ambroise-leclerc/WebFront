@@ -317,10 +317,18 @@ public:
         app.cppFunction("test.unwatch", [this](std::string name) {
             watches.erase(name);
         });
+        // A call that answers later: the Bridge panel shows it pending meanwhile (#684).
+        app.cppFunction("test.slow", [this](double milliseconds) {
+            return answerAfter(&app, std::chrono::milliseconds(static_cast<int>(milliseconds)));
+        });
         subscription = app.subscribeUIStarted([injected = false](App::UI ui) mutable {
             if (!std::exchange(injected, true))
                 ui.addScript(runScript);
         });
+    }
+
+    static webfront::ResultTask<void> answerAfter(App* application, std::chrono::milliseconds delay) {
+        co_await application->resumeAfter(delay);
     }
 
     ~Part() {
