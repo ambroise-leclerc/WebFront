@@ -211,9 +211,11 @@ export function createAutomationRunner({run, exclusive, context, inspector, onSt
                         result = await exclusive(context, async () => ({exitCode:0, output:'', report:null,
                             data:request.operation === 'inspect' ? inspector.inspect() : inspector.action(request.operation,args)}));
                     } else {
-                        if (!['check','build','test','preview','init','create','install','restore','embed'].includes(request.operation)) throw new Error('Unknown automation operation');
+                        if (!['check','build','test','preview','init','create','install','restore','embed','list','why','info'].includes(request.operation)) throw new Error('Unknown automation operation');
                         const argv = [request.operation];
-                        if (request.operation === 'embed') {
+                        // The packages as the inspectors' panel shows them: the graph under the manifest's roots, read from the lock.
+                        if (request.operation === 'list') argv.push('--tree');
+                        else if (request.operation === 'embed') {
                             if (args.provider) argv.push(args.provider);
                             else if (args.entry && args.output) argv.push(args.entry, '--output', args.output);
                             else throw new Error('embed needs either provider, or entry together with output');

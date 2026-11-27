@@ -164,6 +164,11 @@ int main(int argc, char** argv) {
                        .integrity         = integrity,
                        .registry          = registry.empty() ? std::nullopt : std::optional<std::string>{"/driver/registry/"},
                        .manifestDirectory = manifest});
+        // What the `state` grant lets an agent read (ADR-027, section 10): a container of this process, on the server thread.
+        const std::vector<std::string> stages{"configured", "bootstrapped"};
+        [[maybe_unused]] const auto    watched = app.watch("host.stages", [&stages]() -> const std::vector<std::string>& {
+            return stages;
+        });
         auto automation = webfront::automation::enableAutomation(app,
                                                                  {.grants         = split(grants),
                                                                   .callbacks      = called.empty() ? std::vector<std::string>{} : split(callbacks),

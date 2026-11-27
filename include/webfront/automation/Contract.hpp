@@ -18,7 +18,7 @@ inline constexpr std::string_view contractSource = R"JSON({
  "type":"object","additionalProperties":false,"required":["session","operation"],
  "properties":{
    "session":{"type":"string","minLength":1},
-   "operation":{"type":"string","enum":["check","build","test","preview","inspect","click","fill","call","init","create","install","restore","embed"]},
+   "operation":{"type":"string","enum":["check","build","test","preview","inspect","click","fill","call","init","create","install","restore","embed","list","why","info"]},
    "arguments":{"type":"object","additionalProperties":false,"properties":{
      "entry":{"type":"string","maxLength":4096,"description":"Project-relative path or manifest entry; no leading option or path traversal."},
      "pattern":{"type":"string","maxLength":4096,"description":"Spec name substring, never a command option."},
@@ -29,7 +29,7 @@ inline constexpr std::string_view contractSource = R"JSON({
      "name":{"type":"string","maxLength":4096,"description":"Project name written by init; never a command option."},
      "starter":{"type":"string","maxLength":4096,"description":"Starter name for create, never a command option."},
      "directory":{"type":"string","maxLength":4096,"description":"Project-relative directory for create; wf refuses an existing one."},
-     "package":{"type":"string","maxLength":4096,"description":"One package name with optional range for install, from the configured registry; omit to install the locked graph."},
+     "package":{"type":"string","maxLength":4096,"description":"One package name with optional range for install, from the configured registry; omit to install the locked graph. The locked package that why and info describe."},
      "provider":{"type":"string","maxLength":4096,"description":"Manifest provider label for embed."},
      "output":{"type":"string","maxLength":4096,"description":"Project-relative provider header for embed with an entry; an existing file is replaced."}
    }}
@@ -38,7 +38,8 @@ inline constexpr std::string_view contractSource = R"JSON({
    "commandResult":{"type":"object","required":["exitCode","output","report"],"properties":{
      "exitCode":{"type":"integer","minimum":0,"maximum":255},"output":{"type":"string"},
      "cancelled":{"type":"boolean"},"report":{"type":["object","null"]},"diagnostics":{"type":"array"},"data":{"type":"object"},"truncated":{"type":"boolean"}}},
-   "errors":{"enum":["not_authorized","wrong_session","busy","invalid_arguments","not_ready","unknown_run","disconnected","timeout"]},
+   "errors":{"enum":["not_authorized","wrong_session","busy","invalid_arguments","not_ready","unknown_run","disconnected","timeout",
+              "webfront.inspector.unknown","webfront.inspector.stale","webfront.inspector.limit","webfront.inspector.unavailable"]},
    "run":{"type":"object","required":["runId","operation","state","cancelRequested","output","result"],"properties":{
      "runId":{"type":"string"},"operation":{"type":"string"},"state":{"enum":["queued","running","succeeded","failed","cancelled","timeout","disconnected"]},
      "cancelRequested":{"type":"boolean"},"output":{"type":"string"},"result":{"oneOf":[{"$ref":"#/$defs/commandResult"},{"type":"null"}]}}}
@@ -58,8 +59,12 @@ inline constexpr std::string_view contractSource = R"JSON({
    "create":{"permission":"create","since":"0.6.4","arguments":["starter","directory"],"required":["starter"]},
    "install":{"permission":"install","since":"0.6.4","arguments":["package"],"required":[]},
    "restore":{"permission":"restore","since":"0.6.4","arguments":[],"required":[]},
-   "embed":{"permission":"embed","since":"0.6.4","arguments":["provider","entry","output"],"required":[]}
- }
+   "embed":{"permission":"embed","since":"0.6.4","arguments":["provider","entry","output"],"required":[]},
+   "list":{"permission":"packages","since":"1.2.1","arguments":[],"required":[]},
+   "why":{"permission":"packages","since":"1.2.1","arguments":["package"],"required":["package"]},
+   "info":{"permission":"packages","since":"1.2.1","arguments":["package"],"required":["package"]}
+ },
+ "x-webfront-state":{"permission":"state","tools":"webfront.state.*"}
 })JSON";
 
 inline std::vector<std::string> contractStrings(std::string_view value) {
@@ -71,6 +76,10 @@ inline std::vector<std::string> contractStrings(std::string_view value) {
     reader.end();
     return strings;
 }
+/// The grant of the tools that read the state of the application (`webfront.state.*`, ADR-027 section 10). It names no
+/// operation of `webfront.start`: the reads answer at once, from native code.
+inline constexpr std::string_view statePermission = "state";
+
 class OperationError : public std::runtime_error {
 public:
     OperationError(std::string category, std::string message) : std::runtime_error(std::move(message)), code(std::move(category)) { }
