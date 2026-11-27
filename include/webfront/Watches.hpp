@@ -334,6 +334,10 @@ public:
             core = std::move(found->second);
             entries.erase(found);
             ++currentRevision;
+            // Closed in the same section as the erasure: an operation that found the watch before cannot start once the
+            // registry tells it is gone.
+            std::scoped_lock closing{core->lifecycle};
+            core->removed = true;
         }
         retire(*core);
         std::vector<std::shared_ptr<WatchSession>> open;
@@ -796,7 +800,9 @@ template <typename Shape, typename Source, typename State, typename Executor, ty
     // An accessor writes only through a non-constant reference, on the executor that owns the object.
     constexpr bool writable = !std::is_const_v<Object>
                               && (Shape::visitor || (detail::returnsReference<Stored, State, Shape::visitor, stateful>() && hasExecutor));
-    using Root              = std::conditional_t<writable, Object, const Object>;
+    // The object is read as what it is: a source of non-constant elements keeps the operations that only a non-constant
+    // object offers (a PagedSource's visit). Whether a value may be written is told by access.writable alone.
+    using Root = Object;
 
     auto core             = std::make_shared<detail::WatchCore>();
     core->name            = std::move(name);

@@ -221,8 +221,12 @@ void enter(Access& access, Use&& use) {
     const auto failure = [&](std::string_view what) {
         if (!entered)
             throw std::runtime_error("The watch's source failed: " + boundedText(what, maxTextBytes - 32));
-        if (access.diagnose)
-            access.diagnose("The source of the watch '" + access.label + "' threw after its visit: " + boundedText(what));
+        // The operation is done, a write may be applied: a diagnostic that fails does not replace its answer.
+        try {
+            if (access.diagnose)
+                access.diagnose("The source of the watch '" + access.label + "' threw after its visit: " + boundedText(what));
+        } catch (...) {  // NOLINT(bugprone-empty-catch): a diagnostic is not worth losing the answer
+        }
     };
     try {
         if (!access.open)
@@ -411,8 +415,6 @@ public:
                     code    = inspect::code::refused;
                     message = "The application refused the value";
                 }
-                if (applied)
-                    store(entry, render(view, std::string(at), positional, access.writable));
                 return true;
             });
             if (whole && reached && access.mutate) {
@@ -427,15 +429,9 @@ public:
                     message = "The application refused the value";
                 }
             }
-            // A mutator may have done anything to the object: nothing read before it is used again.
-            if (applied && access.mutate)
-                static_cast<void>(descend(rootView(access, root), segments, 0, false, [&](std::size_t level, const ChildView& view, bool positional) {
-                    if (level != segments.size())
-                        return true;
-                    if (const auto found = nodes.find(path); found != nodes.end())
-                        store(found->second, render(view, std::string(path), positional, access.writable));
-                    return true;
-                }));
+            // The memory keeps what the inspector was sent: the answer carries no value, and the object may hold another one
+            // than the text (a mutator that adjusts it, a member that normalizes it). The next pass, or a reading of the
+            // node, tells the value it holds now.
             // A source that fails after the value was assigned (a paged source that throws once it gave the element) does
             // not make the write stale: it was applied.
             if ((!whole || !reached) && !applied)

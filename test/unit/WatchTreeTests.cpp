@@ -412,6 +412,17 @@ const Scenario watchSourcesRead{"A watch reads through the source the applicatio
                                         requireEqual(std::get<1>(bench.write(id, revisionOf(page), "/#5", "102", "65535")), std::string{});
                                         requireEqual(std::get<5>(characters), 65535);
                                     });
+                                    then("an accessor that returns a non-constant reference without executor is read as it is, and not written", [&] {
+                                        Keyed root;
+                                        for (const auto* name : {"a", "b"})
+                                            root.items.push_back(Keyed{.name = name, .text = name, .items = {}, .keyFails = false, .visits = 0});
+                                        const auto id   = bench.watch("reference", [&]() -> Keyed& {
+                                            return root;  // a PagedSource whose visit is not constant
+                                        });
+                                        const auto page = bench.open(id);
+                                        requireEqual(pathsOf(page), std::vector<std::string>({"", "/ka", "/kb"}));
+                                        checkEqual(std::get<4>(std::get<0>(bench.registry->page(0, 0, 10, 4096)).back()), false);
+                                    });
                                     then("a paged source that gives its elements by value is read through copies", [&] {
                                         Squares    squares{.count = 1000};
                                         const auto id   = bench.watch("squares", visiting(squares));

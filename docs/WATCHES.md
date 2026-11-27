@@ -150,6 +150,9 @@ each of its ancestors** still show it (label, value, number of children); otherw
 object is left as it is, and the panel reads the node again. It is a compare-and-swap on what you saw. It cannot tell two
 elements without keys that look the same in every visible way: give such a container keys when the identity matters.
 
+The answer of a write carries no value, and the inspector's memory keeps what it was sent: the next pass, or a reading of
+the node, tells the value the object holds, also when a mutator stored another value than the text.
+
 To keep an invariant, pass a mutator, which replaces the assignment and throws to refuse:
 
 ```cpp

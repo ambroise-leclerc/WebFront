@@ -376,6 +376,37 @@ describe('The tree of a watch', () => {
         await folding;
     });
 
+    it('reads nothing more once it is stopped, also when a pass answers a resynchronization', async () => {
+        const bridge = fakeWatch(['a', 'b']);
+        const tree = createWatchTree({bridge, watch: 1});
+        await tree.open();
+        bridge.answers[functions.reset]();  // C++'s memory moved: the next pass resynchronizes
+        const release = bridge.hold(functions.changes);
+        const passing = tree.refresh();
+        await Promise.resolve();
+        tree.stop();  // the panel closes while the pass is awaited
+        const before = bridge.calls.length;
+        release();
+        await passing;
+        expect(bridge.calls.slice(before).some(([name]) => name === functions.children)).toBeFalse();
+    });
+
+    it('keeps a write that C++ confirmed when only the reading again fails', async () => {
+        const values = ['a', 'b'];
+        const bridge = fakeWatch(values);
+        const tree = createWatchTree({bridge, watch: 1});
+        await tree.open();
+        const children = bridge.answers[functions.children];
+        bridge.answers[functions.write] = (...args) => {
+            bridge.answers[functions.children] = () => { throw Object.assign(new Error('the executor has no loop'), {code: codes.unavailable}); };
+            return [bridge.revision + 1, '', ''];
+        };
+        const answer = await tree.write('/#1', 'B');
+        expect(answer.code).toBe('');
+        expect(answer.refresh).toContain('no loop');
+        bridge.answers[functions.children] = children;
+    });
+
     it('tells once that its watch is gone, and sends nothing more', async () => {
         const bridge = fakeWatch(['a']);
         let gone = 0;
@@ -512,6 +543,40 @@ describe('The view of a tree', () => {
         await tree.settled();
         expect(tree.nodes.has('/#250')).toBeTrue();
         expect(list.querySelector('input.position').value).toBe('');
+    });
+
+    it('does not load again by itself a window that failed: the user asks for it', async () => {
+        const bridge = fakeWatch(Array.from({length: 7}, (unused, index) => `v${index}`), {pageSize: 3});
+        const list = document.createElement('ul');
+        document.body.append(list);
+        const observed = [];
+        class FakeObserver {
+            constructor(callback) { this.callback = callback; observed.push(this); this.targets = []; }
+            observe(target) { this.targets.push(target); }
+            disconnect() { this.targets = []; }
+            fire() { this.callback(this.targets.map(target => ({target, isIntersecting: true}))); }
+        }
+        let shown = null;
+        const tree = createWatchTree({bridge, watch: 1, onUpdate: () => shown?.render()});
+        shown = createTreeView({tree, list, view: {IntersectionObserver: FakeObserver}});
+        await tree.open();
+        const children = bridge.answers[functions.children];
+        let refused = 0;
+        bridge.answers[functions.children] = () => { ++refused; throw Object.assign(new Error('the executor has no loop'), {code: codes.unavailable}); };
+        observed.at(-1).fire();
+        await tree.settled();
+        await new Promise(resolve => setTimeout(resolve));
+        expect(refused).toBe(1);
+        expect(list.querySelector('button.more').parentElement.textContent).toContain('could not be loaded');
+        observed.at(-1).fire();  // the window comes into view again: nothing is asked
+        await new Promise(resolve => setTimeout(resolve));
+        expect(refused).toBe(1);
+        bridge.answers[functions.children] = children;
+        list.querySelector('button.more').click();  // the user asks
+        await tree.settled();
+        await new Promise(resolve => setTimeout(resolve));
+        expect(tree.nodes.has('/#3')).toBeTrue();
+        list.remove();
     });
 
     it('says why a write was not applied, beside the node', async () => {

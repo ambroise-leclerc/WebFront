@@ -653,6 +653,51 @@ template <typename E>
 }
 
 /// The description of T, built once.
+/**
+ * The integer a decimal text writes exactly, in its plain form ("-12" for "-1.2e1", "1" for "1.0"), or nothing when the text
+ * is no number or not a whole one: the digits are moved by the exponent, never rounded through a double.
+ */
+[[nodiscard]] inline std::optional<std::string> exactInteger(std::string_view text) {
+    std::size_t at       = 0;
+    const bool  negative = at < text.size() && (text[at] == '-' || text[at] == '+') ? text[at++] == '-' : false;
+    std::string digits;
+    long long   point = -1;
+    for (; at < text.size() && ((text[at] >= '0' && text[at] <= '9') || text[at] == '.'); ++at) {
+        if (text[at] == '.') {
+            if (point >= 0)
+                return std::nullopt;
+            point = static_cast<long long>(digits.size());
+        } else
+            digits += text[at];
+    }
+    if (digits.empty())
+        return std::nullopt;
+    if (point < 0)
+        point = static_cast<long long>(digits.size());
+    long long exponent = 0;
+    if (at < text.size() && (text[at] == 'e' || text[at] == 'E')) {
+        const auto [end,
+                    error] = std::from_chars(text.data() + at + 1 + (text.size() > at + 1 && text[at + 1] == '+' ? 1 : 0), text.data() + text.size(), exponent);
+        if (error != std::errc{} || end != text.data() + text.size() || exponent < -4096 || exponent > 4096)
+            return std::nullopt;
+        at = text.size();
+    }
+    if (at != text.size())
+        return std::nullopt;
+    const long long whole = point + exponent;  // the number of digits before the point
+    if (whole < 0)
+        return digits.find_first_not_of('0') == std::string::npos ? std::optional<std::string>{"0"} : std::nullopt;
+    if (static_cast<std::size_t>(whole) < digits.size()) {
+        if (digits.find_first_not_of('0', static_cast<std::size_t>(whole)) != std::string::npos)
+            return std::nullopt;  // a fraction that is not zero
+        digits.resize(static_cast<std::size_t>(whole));
+    } else
+        digits.append(static_cast<std::size_t>(whole) - digits.size(), '0');
+    const auto first = digits.find_first_not_of('0');
+    digits           = first == std::string::npos ? std::string{"0"} : digits.substr(first);
+    return digits == "0" || !negative ? digits : '-' + digits;
+}
+
 template <typename T>
 [[nodiscard]] const forms::Description<T>& descriptionOf() {
     static const forms::Description<T> description = [] {
@@ -705,21 +750,27 @@ struct FieldRender {
                 case forms::Kind::integer:
                 case forms::Kind::number: {
                     const auto number = forms::detail::parseFloating<double>(text);
-                    // A text the double parser refuses may still be a whole number beyond 2^53: it is one when the whole
-                    // text is read without an error (an empty text and a number too large both stop at its end, with one).
-                    const auto wholeAs = [text](auto parsed) -> std::optional<decltype(parsed)> {
-                        const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), parsed);
-                        if (error == std::errc{} && end == text.data() + text.size())
+                    // An integer field takes exactly a whole number: "1.0" and "1e0" are, "1.00000000000000001" is not,
+                    // although a double reads it as 1.
+                    const auto plain = described->kind == forms::Kind::integer ? exactInteger(text) : std::nullopt;
+                    if (described->kind == forms::Kind::integer && !plain)
+                        throw ParseError("Not a whole number");
+                    // A whole number is read exactly, also beyond 2^53 where a double no longer tells neighbours apart: it
+                    // is one when the whole text is read without an error (an empty text, a number too large, stop with one).
+                    const auto exactText = plain ? std::string_view{*plain} : text;
+                    const auto exactAs   = [exactText](auto parsed) -> std::optional<decltype(parsed)> {
+                        const auto [end, error] = std::from_chars(exactText.data(), exactText.data() + exactText.size(), parsed);
+                        if (error == std::errc{} && end == exactText.data() + exactText.size())
                             return parsed;
                         return std::nullopt;
                     };
-                    const auto signedWhole = wholeAs(0LL);
-                    const auto bigWhole    = signedWhole ? std::nullopt : wholeAs(0ULL);
-                    const bool exact       = signedWhole || bigWhole;
+                    const auto signedWhole = exactAs(0LL);
+                    const auto bigWhole    = signedWhole ? std::nullopt : exactAs(0ULL);
+                    if (described->kind == forms::Kind::integer && !signedWhole && !bigWhole)
+                        throw ParseError("Out of the range of a whole number");
+                    const bool exact = signedWhole || bigWhole;
                     if (!number && !exact)
                         throw ParseError("Not a number");
-                    if (described->kind == forms::Kind::integer && !exact && std::trunc(*number) != *number)
-                        throw ParseError("Not a whole number");
                     if (described->range) {
                         // A whole number is compared exactly: as a double, 2^53 + 1 would round onto a bound of 2^53.
                         const bool inside = signedWhole ? forms::detail::atLeast(*signedWhole, described->range->min)
