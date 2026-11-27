@@ -104,8 +104,8 @@ struct Rendered {
         // The number travels as a double: beyond 2^53 it would no longer be exact, and could not be read back.
         // Compared in integers: 2^53 does not fit a 32-bit size_t, where no count can pass it anyway.
         if constexpr (std::numeric_limits<std::size_t>::digits > 53)
-            if (count > (std::size_t{1} << 53))
-                throw std::length_error("more elements than a page can tell (2^53)");
+            if (count >= (std::size_t{1} << 53))  // JavaScript's safe integers stop at 2^53 - 1
+                throw std::length_error("more elements than a page can tell (2^53 - 1)");
     } catch (const std::exception& error) {
         failed = true;
         value  = exceptionValue(error.what());
