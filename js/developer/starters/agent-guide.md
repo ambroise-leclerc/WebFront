@@ -13,6 +13,10 @@ backend.
   own window. `wf` installs npm packages, compiles TS/TSX, type-checks and runs Jasmine specs: no Node.js, no package manager.
 - Hand-written HTML with classic `<script>` JavaScript served through `WebFrontConfig::documentRoot` is **not** the development
   path: none of the tools below apply to it.
+- **A callback that acts checks its caller.** A `cppFunction` that writes the project or what the server serves, starts a
+  process, or exposes a sensitive state takes the calling `UI` first and checks `ui.isLocalClient()` before acting; WebFront
+  does not guard the application's own callbacks (`docs/DEVELOPING_WITH_AGENTS.md`):
+  `app.cppFunction("app.save", [&](webfront::NativeApp::UI ui, std::string text) { if (!ui.isLocalClient()) throw std::runtime_error("denied"); save(text); });`
 
 ```cpp
 #include <webfront/WebFront.hpp>
