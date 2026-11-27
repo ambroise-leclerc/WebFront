@@ -234,6 +234,12 @@
             this.littleEndian = false;
             this.nextCallId = 1;
             this.pendingCalls = new Map();
+            /// What an inspector of the developer environment installs to follow this bridge, null otherwise: its
+            /// `call(name, resolve, reject)` returns the pair that settles a call to C++ in its place, and its `jsCall(name)`
+            /// is told each JavaScript function that C++ calls. Without one the bridge records nothing.
+            this.probe = null;
+            /// Why `ready` was rejected, null otherwise.
+            this.readyError = null;
             this.readySettled = false;
             this.readyPromise = new Promise((resolve, reject) => {
                 this.resolveReady = resolve;
@@ -314,6 +320,7 @@
         settleReadyRejected(error) {
             if (this.readySettled || this.state === "linked") return;
             this.readySettled = true;
+            this.readyError = error;
             this.rejectReady(error);
         }
 
@@ -397,6 +404,7 @@
             const [parameters, parameterBytes] = this.decodeParameters(count - 1, payload, nameBytes);
             if (nameBytes + parameterBytes !== payloadSize)
                 throw new Error("Function call contains trailing payload data");
+            this.probe?.jsCall(names[0]);
             let execution;
             try {
                 execution = this.executeFunction(names[0], parameters);
@@ -645,6 +653,8 @@
 
         callCppFunction(name, args) {
             return new Promise((resolve, reject) => {
+                if (this.probe)
+                    [resolve, reject] = this.probe.call(name, resolve, reject);
                 let callId = 0;
                 try {
                     if (this.state !== "linked")
@@ -664,7 +674,7 @@
                     let cursor = 8;
                     for (const value of values)
                         cursor += this.encodeParameter(value, view, cursor);
-                    this.pendingCalls.set(callId, {resolve, reject});
+                    this.pendingCalls.set(callId, {resolve, reject, name});
                     this.socket.send(buffer);
                 } catch (error) {
                     if (callId !== 0)
