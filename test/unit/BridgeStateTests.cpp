@@ -4,7 +4,7 @@
 //
 // WebFront — tests/unit
 // Role: The relay of the state of a page's bridge: announcement, lease of the publications, bounded pages (#684).
-// Thread: single-threaded | Alloc: unrestricted
+// Thread: worker-safe | Alloc: unrestricted
 // LLM: tests of inspect::BridgeStates with an injected clock; the access rules and the wire are in ViewAssociationTests.cpp
 
 #include <webfront/BridgeState.hpp>
