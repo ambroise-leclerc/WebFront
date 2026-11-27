@@ -35,6 +35,7 @@
 #include "Channel.hpp"
 #include "Discovery.hpp"
 #include "McpHttp.hpp"
+#include "StateTools.hpp"
 
 #include <atomic>
 #include <cstdlib>
@@ -79,8 +80,9 @@ template <typename Duration>
 }
 
 struct AutomationOptions {
-    /// Granted operations (`check`, `build`, `test`, `preview`, `inspect`, `interact`, and the setup grants). None
-    /// leaves only session discovery.
+    /// Granted operations (`check`, `build`, `test`, `preview`, `inspect`, `interact`, `packages`, and the setup grants),
+    /// and `state` for the `webfront.state.*` tools that read the running application (registered functions, browsers,
+    /// tasks and watches; never a write). None leaves only session discovery.
     std::vector<std::string> grants{};
     /// The application callbacks the `call` grant may invoke (`callbacks = {"bf.render"}`): an explicit list of names, never a
     /// pattern. The agent sees the names, gives them one string at most and reads a scalar or list back; `webfront.*` names are
@@ -249,8 +251,23 @@ private:
             throw std::invalid_argument("Automation startupTimeout must be positive");
         if (options.closeGrace < std::chrono::milliseconds::zero())
             throw std::invalid_argument("Automation closeGrace must not be negative");
-        return std::make_shared<Session>(
-            SessionOptions{.project = app.projectDirectory(), .allow = options.grants, .timeout = options.timeout, .callbacks = options.callbacks});
+        return std::make_shared<Session>(SessionOptions{.project   = app.projectDirectory(),
+                                                        .allow     = options.grants,
+                                                        .timeout   = options.timeout,
+                                                        .callbacks = options.callbacks,
+                                                        .state     = stateOf(app, options)});
+    }
+    // The reader of the `state` grant: the inspectors' reads of an application that bootstrapped the developer environment
+    // (ADR-027, section 10). None without the grant, so that nothing of the application is reachable by default; none either
+    // for an application without inspectors, whose `state` grant the session then refuses.
+    static StateReader stateOf(App& app, const AutomationOptions& options) {
+        if (std::ranges::find(options.grants, statePermission) == options.grants.end())
+            return {};
+        if constexpr (requires { app.inspectorReads(); }) {
+            if (auto reads = app.inspectorReads())
+                return state::stateReader(std::move(reads));
+        }
+        return {};
     }
     // `directory`, or a new directory named after the session in the (private) discovery directory. The records of the
     // instances that ended without closing (a forced end) are removed first, with the private directories named after them.
