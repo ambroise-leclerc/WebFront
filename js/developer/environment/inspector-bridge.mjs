@@ -96,7 +96,15 @@ export function createBridgeMonitor({target, clock = () => performance.now(), no
     function follow(bridge) {
         const known = states.get(bridge);
         if (known) return known;
-        const state = {bridge, since: now(), pending: new Set(), tracked: new WeakSet(), rejections: [], rejected: 0, js: new Map(), jsOthers: 0};
+        const state = {bridge, since: now(), pending: new Set(), tracked: new WeakSet(), rejections: [], rejected: 0, js: new Map(), jsOthers: 0,
+            // A bridge of a WebFront.js before #684 has no `probe` field, which it would never read: setting one would show
+            // nothing. Its pending calls are then adopted at each read, without the history of what settled in between.
+            probes: 'probe' in bridge, ready: null};
+        // A bridge before #684 has no `readyError`: what `ready` became is learnt from the Promise itself.
+        if (!('readyError' in bridge) && typeof bridge.ready?.then === 'function') {
+            bridge.ready.then(() => { state.ready = {state: 'resolved', reason: ''}; },
+                error => { state.ready = {state: 'rejected', reason: rejectionReason(error)}; });
+        }
         const settle = (entry, failed, error) => {
             if (!state.pending.delete(entry)) return;
             if (!failed) return;
@@ -107,7 +115,13 @@ export function createBridgeMonitor({target, clock = () => performance.now(), no
         const track = (name, started, resolve, reject) => {
             const entry = {id: ++sequence, name: boundedText(name), started};
             state.pending.add(entry);
-            const settlers = [value => { settle(entry, false); resolve(value); }, error => { settle(entry, true, error); reject(error); }];
+            // The application's Promise is settled whatever the monitor does: an exception of the monitor (its clock, the
+            // reason of a rejection) neither keeps a call pending nor stops the bridge rejecting the others when it closes.
+            const quietly = (failed, error) => {
+                try { settle(entry, failed, error); }
+                catch { /* never the application's problem */ }
+            };
+            const settlers = [value => { quietly(false); resolve(value); }, error => { quietly(true, error); reject(error); }];
             state.tracked.add(settlers[0]);
             return settlers;
         };
@@ -146,7 +160,12 @@ export function createBridgeMonitor({target, clock = () => performance.now(), no
     }
 
     function install() {
-        if (!followed || followed.bridge.probe === followed.probe) return;
+        if (!followed) return;
+        if (!followed.probes) {
+            followed.adopt();
+            return;
+        }
+        if (followed.bridge.probe === followed.probe) return;
         followed.adopt();
         followed.bridge.probe = followed.probe;
     }
@@ -173,7 +192,7 @@ export function createBridgeMonitor({target, clock = () => performance.now(), no
 
     return {
         /** Whether the probe is in the bridge now. */
-        get observing() { return Boolean(followed) && followed.bridge.probe === followed.probe; },
+        get observing() { return Boolean(followed?.probes) && followed.bridge.probe === followed.probe; },
         read() {
             let current = null;
             try { current = target(); }
@@ -196,10 +215,14 @@ export function createBridgeMonitor({target, clock = () => performance.now(), no
             const jsFunctions = [...followed.js.values()].sort((a, b) => b.calls - a.calls || a.id - b.id).slice(0, limits.jsFunctions)
                 .map(entry => ({...entry}));
             const settled = Boolean(bridge.readySettled);
+            const ready = !('readyError' in bridge)
+                ? followed.ready ?? {state: settled ? 'unknown' : 'pending', reason: ''}
+                : {state: !settled ? 'pending' : bridge.readyError ? 'rejected' : 'resolved', reason: settled && bridge.readyError ? rejectionReason(bridge.readyError) : ''};
             return {
                 page: {label: boundedText(current.label ?? ''), path: boundedText(current.path ?? '')},
-                ready: {state: !settled ? 'pending' : bridge.readyError ? 'rejected' : 'resolved',
-                    reason: settled && bridge.readyError ? rejectionReason(bridge.readyError) : ''},
+                ready,
+                // Without a probe, only the calls pending now are known: neither their durations nor what settled meanwhile.
+                history: followed.probes,
                 connection: boundedText(bridge.state ?? 'unknown', 16),
                 since: followed.since,
                 pendingTotal: followed.pending.size,
@@ -230,7 +253,7 @@ export function interfaceTarget(frame) {
 
 /** The state of a page without a bridge. */
 export const emptyState = () => ({page: {label: '', path: ''}, ready: {state: 'none', reason: ''}, connection: 'none', since: 0,
-    pendingTotal: 0, rejectedTotal: 0, jsTotal: 0, jsSaturated: false, pending: [], rejections: [], jsFunctions: []});
+    history: true, pendingTotal: 0, rejectedTotal: 0, jsTotal: 0, jsSaturated: false, pending: [], rejections: [], jsFunctions: []});
 
 // --- Rows ------------------------------------------------------------------------------------------------------
 
@@ -242,7 +265,7 @@ export function toRows(state) {
     return [
         ['page', state.page.label, state.page.path, state.since, 0],
         ['ready', state.ready.state, state.ready.reason, 0, 0],
-        ['connection', state.connection, '', 0, 0],
+        ['connection', state.connection, '', state.history ? 0 : 1, 0],
         ['counts', '', '', state.pendingTotal, state.rejectedTotal],
         ['jsCount', '', '', state.jsTotal, state.jsSaturated ? 1 : 0],
         ...state.pending.map(call => ['pending', call.name, '', call.id, call.elapsed ?? -1]),
@@ -264,7 +287,7 @@ export function fromRows(rows) {
             throw unreadable();
         if (kind === 'page') Object.assign(state, {page: {label: name, path: detail}, since: first});
         else if (kind === 'ready') state.ready = {state: name, reason: detail};
-        else if (kind === 'connection') state.connection = name;
+        else if (kind === 'connection') Object.assign(state, {connection: name, history: first === 0});
         else if (kind === 'counts') Object.assign(state, {pendingTotal: first, rejectedTotal: second});
         else if (kind === 'jsCount') Object.assign(state, {jsTotal: first, jsSaturated: second !== 0});
         else if (kind === 'pending') state.pending.push({id: first, name, elapsed: second < 0 ? null : second});
@@ -386,6 +409,7 @@ const readyTexts = {
     pending: 'pending: the handshake is not acknowledged yet',
     resolved: 'resolved',
     rejected: 'rejected',
+    unknown: 'settled: this page\'s WebFront.js does not tell how, and its outcome is not known yet',
     none: 'this page has no WebFront bridge',
 };
 
@@ -448,6 +472,7 @@ export async function showBridgePanel({page, view, header, body, status, source}
             state.jsTotal > state.jsFunctions.length
                 ? `${state.jsSaturated ? 'at least ' : ''}${state.jsTotal - state.jsFunctions.length} more JavaScript functions` : ''].filter(Boolean);
         status.textContent = [last.age > staleAfter ? `The page published this state ${formatDuration(last.age)} ago.` : '',
+            state.history ? '' : 'This page\'s WebFront.js predates the inspectors: the calls are found at each read, without their durations; a call made and settled between two reads, and the JavaScript calls, are not seen.',
             hidden.length ? `Not shown: ${hidden.join(', ')}.` : ''].filter(Boolean).join(' ');
     };
     const toolbar = createToolbar(page, view, {searchLabel: 'Search the calls', onSearch: text => { search = text; show(); }});

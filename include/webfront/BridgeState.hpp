@@ -43,14 +43,19 @@ inline constexpr std::size_t maxBridgeAnnouncements = 256;
 inline constexpr std::chrono::seconds bridgeLease{15};
 /// A page that should publish and did not for this long is asked again, at most once per such duration.
 inline constexpr std::chrono::seconds bridgeAskAgain{1};
+/// The cursors of the pages of a state count rows in units of this, more than a state holds (maxBridgeRows).
+inline constexpr std::uint64_t bridgeCursorStride = 1024;
 
 /// A row of the state of a bridge, as the page writes it (inspector-bridge.mjs): (kind, name, detail, number, number).
 /// The kinds are the page's vocabulary ("page", "ready", "connection", "counts", "pending", "rejected", "js"): C++
 /// relays the rows without reading them, and only bounds them.
 using BridgeRow = std::tuple<std::string, std::string, std::string, double, double>;
-/// A page of the state: (rows, next, publication, age in milliseconds, flags). `next` is the index of the first row of
-/// the following page, 0 at the end. `publication` numbers the state the rows belong to, 0 before the first one: a reader
-/// that sees it change between two pages starts again. The flags are those of bridge_flag.
+/// A page of the state: (rows, next, publication, age in milliseconds, flags). `next` is the cursor of the following page,
+/// 0 at the end: it names the publication the first page read and the place in it, so that the following pages read the
+/// same publication even after a newer one (the previous one is kept). `publication` numbers the state the rows belong to,
+/// 0 before the first one: a reader that sees it change between two pages (that publication is gone) starts again. The
+/// flags are those of bridge_flag.
+/// A cursor is publication × bridgeCursorStride + index; a cursor below the stride is an index in the latest publication.
 using BridgePage = std::tuple<std::vector<BridgeRow>, double, double, double, double>;
 
 /// The bits of the flags of a BridgePage.
@@ -83,9 +88,10 @@ public:
     /**
      * The page `host` announces that it can publish the state of its bridge: `owner` identifies its connection (a value
      * that compares equal only for the same one), `ask` asks it to start (called on a reader's thread, outside the lock),
-     * `alive` tells whether its connection is still there and admitted. An earlier source of the same identifier (the page
-     * was loaded again, or announces itself again) is replaced and its state forgotten, but a reader's lease is kept.
-     * Returns whether a reader is waiting for it now.
+     * `alive` tells whether its connection is still there and admitted. The same connection announcing itself again (its
+     * Bridge panel was detached again) keeps its state; another connection under the same identifier (the page was loaded
+     * again) replaces it and its state is forgotten. A reader's lease is kept either way. Returns whether a reader is
+     * waiting for it now.
      */
     template <typename Owner>
     bool announce(const std::string& host, Owner owner, std::function<void()> ask, std::function<bool()> alive, Clock::time_point now = Clock::now()) {
@@ -100,10 +106,13 @@ public:
         // A reader may have asked before the page announced itself (a detached panel outlives a reload of its page).
         auto wanted = readers.contains(host) ? readers[host] : Clock::time_point{};
         readers.erase(host);
-        auto& source       = sources[host];
-        wanted             = (std::max)(wanted, source.wantedUntil);  // a source that announces itself again keeps its reader
-        source             = Source{};
-        source.owner       = std::move(owner);
+        auto& source    = sources[host];
+        wanted          = (std::max)(wanted, source.wantedUntil);  // a source that announces itself again keeps its reader
+        const auto same = std::any_cast<Owner>(&source.owner);
+        if (!same || !(*same == owner)) {
+            source       = Source{};
+            source.owner = std::move(owner);
+        }
         source.ask         = std::move(ask);
         source.alive       = std::move(alive);
         source.wantedUntil = wanted;
@@ -135,10 +144,13 @@ public:
         const auto holder = std::any_cast<Owner>(&source.owner);
         if (!holder || !(*holder == owner))
             throw webfront::detail::makeBridgeError(code::unavailable, "Another page publishes the state of its bridge under this identifier");
-        source.rows        = std::move(rows);
-        source.publication = ++publications;
-        source.publishedAt = now;
-        const bool wanted  = now < source.wantedUntil;
+        // The previous publication stays readable, so that a reader that began it reads it to its end.
+        source.previousRows        = std::exchange(source.rows, std::move(rows));
+        source.previousPublication = source.publication;
+        source.previousPublishedAt = source.publishedAt;
+        source.publication         = ++publications;
+        source.publishedAt         = now;
+        const bool wanted          = now < source.wantedUntil;
         // The rows of at most maxBridgeSources pages are kept: the page read the longest ago loses its state, not its place,
         // so that a read finds it, asks it and gets its state again.
         std::size_t holding = 0;
@@ -151,18 +163,21 @@ public:
                     oldest = &entry.second;
             if (!oldest)
                 break;
-            oldest->rows.clear();
-            oldest->rows.shrink_to_fit();
-            oldest->publication = 0;
+            oldest->rows                = {};
+            oldest->previousRows        = {};
+            oldest->publication         = 0;
+            oldest->previousPublication = 0;
             --holding;
         }
         return wanted;
     }
 
     /**
-     * The page that webfront.inspector.bridge(host, from, count) answers: the rows of the last publication from index
-     * `from`, at most `count` and as many as fit `budget`. A read renews the lease of the source, and gives the request
-     * to make to a source that is not publishing.
+     * The page that webfront.inspector.bridge(host, from, count) answers: the rows from the cursor `from` (0 for the first
+     * page of the latest publication, else the `next` of the page before), at most `count` and as many as fit `budget`.
+     * A cursor of a publication that is neither the latest nor the one before gives an empty last page under the latest
+     * publication, which the reader sees changed. A read renews the lease of the source, and gives the request to make to
+     * a source that is not publishing.
      */
     [[nodiscard]] Read read(const std::string& host, double from, double count, std::size_t budget, Clock::time_point now = Clock::now()) {
         const auto       first  = detail::pageNumber(from, "cursor");
@@ -190,25 +205,40 @@ public:
             source.askedAt = now;
             result.ask     = source.ask;
         }
+        // The publication the cursor names: the latest, the one before it, or one that is gone (nothing to serve).
+        const auto                          named       = first / bridgeCursorStride;
+        const auto*                         state       = &source.rows;
+        auto                                served      = source.publication;
+        auto                                publishedAt = source.publishedAt;
+        std::uint64_t                       start       = first % bridgeCursorStride;
+        static const std::vector<BridgeRow> none;
+        if (named != 0 && named != source.publication) {
+            if (named == source.previousPublication) {
+                state       = &source.previousRows;
+                served      = source.previousPublication;
+                publishedAt = source.previousPublishedAt;
+            } else
+                state = &none;
+        }
         std::vector<BridgeRow> rows;
         std::size_t            used = 0;
         double                 next = 0;
-        for (std::size_t index = static_cast<std::size_t>(std::min<std::uint64_t>(first, source.rows.size())); index < source.rows.size(); ++index) {
-            const auto& row   = source.rows[index];
+        for (std::size_t index = static_cast<std::size_t>(std::min<std::uint64_t>(start, state->size())); index < state->size(); ++index) {
+            const auto& row   = (*state)[index];
             const auto  bytes = detail::encodedTuple + 2 * detail::encodedNumber + detail::encodedText(std::get<0>(row).size())
                                 + detail::encodedText(std::get<1>(row).size()) + detail::encodedText(std::get<2>(row).size());
             if (rows.size() == wanted || used + bytes > room) {
-                next = static_cast<double>(index);
+                next = static_cast<double>(served * bridgeCursorStride + index);
                 break;
             }
             used += bytes;
             rows.push_back(row);
         }
         // `now` may have been read before a publication that took the lock first: an age is never negative.
-        const auto age = source.publication == 0 ? 0.0 : (std::max)(0.0, std::chrono::duration<double, std::milli>(now - source.publishedAt).count());
+        const auto age = served == 0 ? 0.0 : (std::max)(0.0, std::chrono::duration<double, std::milli>(now - publishedAt).count());
         result.page    = BridgePage{std::move(rows),
                                     next,
-                                    static_cast<double>(source.publication),
+                                    static_cast<double>(served),
                                     age,
                                     static_cast<double>(bridge_flag::source | (source.publication != 0 ? bridge_flag::published : 0u))};
         return result;
@@ -228,6 +258,9 @@ private:
         std::vector<BridgeRow> rows;
         std::uint64_t          publication = 0;
         Clock::time_point      publishedAt;
+        std::vector<BridgeRow> previousRows;  // the publication before, for a reader that began it
+        std::uint64_t          previousPublication = 0;
+        Clock::time_point      previousPublishedAt;
         Clock::time_point      wantedUntil;
         Clock::time_point      askedAt;
     };

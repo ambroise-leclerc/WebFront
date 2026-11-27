@@ -169,8 +169,16 @@ const Scenario bridgeStateLease{
             page.announce(states, "host-4", start);
             static_cast<void>(states.read("host-4", 0, 200, 32768, start + 1s));
             states.publish("host-4", &page, someRows(2), start + 1s);
-            then("it is told that its reader still waits, and starts from an empty state", [&] {
+            then("the same connection is told that its reader still waits, and keeps the state it published", [&] {
                 require(page.announce(states, "host-4", start + 2s));
+                const auto kept = states.read("host-4", 0, 200, 32768, start + 2s).page;
+                require(std::get<0>(kept) == someRows(2));
+                requireEqual(std::get<2>(kept), 1.0);
+                requireEqual(flagsOf(kept), double{inspect::bridge_flag::source | inspect::bridge_flag::published});
+            });
+            then("another connection under the same identifier is told that the reader waits, and starts from an empty state", [&] {
+                Page reloaded;
+                require(reloaded.announce(states, "host-4", start + 2s));
                 const auto fresh = states.read("host-4", 0, 200, 32768, start + 2s).page;
                 require(std::get<0>(fresh).empty());
                 requireEqual(flagsOf(fresh), double{inspect::bridge_flag::source});
@@ -205,6 +213,38 @@ const Scenario bridgeStateLease{
             states.publish("host-6", &page, someRows(1), start + 5ms);
             then("the age it gives is zero, never negative", [&] {
                 requireEqual(std::get<3>(states.read("host-6", 0, 200, 32768, start).page), 0.0);
+            });
+        });
+        given("a reader of a state of several pages while the page publishes again", [&] {
+            States                          states;
+            Page                            page;
+            const States::Clock::time_point start{1000s};
+            page.announce(states, "host-7", start);
+            states.publish("host-7", &page, someRows(inspect::maxBridgeRows - 1), start);
+            const auto first = states.read("host-7", 0, 200, 32768, start).page;
+            requireEqual(std::get<0>(first).size(), std::size_t{200});
+            states.publish("host-7", &page, someRows(3), start + 250ms);
+            then("the next page is that of the publication it began, not of the newer one", [&] {
+                const auto second = states.read("host-7", std::get<1>(first), 200, 32768, start + 260ms).page;
+                requireEqual(std::get<2>(second), std::get<2>(first));
+                requireEqual(std::get<0>(second).size(), std::size_t{inspect::maxBridgeRows - 1 - 200});
+                requireEqual(std::get<1>(second), 0.0);
+                auto all = std::get<0>(first);
+                all.insert(all.end(), std::get<0>(second).begin(), std::get<0>(second).end());
+                require(all == someRows(inspect::maxBridgeRows - 1));
+                requireEqual(std::get<3>(second), 260.0);
+            });
+            then("a new read starts on the newer publication", [&] {
+                const auto latest = states.read("host-7", 0, 200, 32768, start + 260ms).page;
+                require(std::get<0>(latest) == someRows(3));
+                requireEqual(std::get<2>(latest), 2.0);
+            });
+            then("once two newer ones came, the publication it began is gone: an empty page under the latest one", [&] {
+                states.publish("host-7", &page, someRows(4), start + 500ms);
+                const auto gone = states.read("host-7", std::get<1>(first), 200, 32768, start + 510ms).page;
+                require(std::get<0>(gone).empty());
+                requireEqual(std::get<1>(gone), 0.0);
+                requireEqual(std::get<2>(gone), 3.0);
             });
         });
         given("a page that did not announce itself", [&] {
@@ -283,7 +323,7 @@ const Scenario bridgeStateBounds{
                 then("a page holds at most the count asked, and a count of 0 gives the publication alone", [&] {
                     const auto two = states.read("host", 0, 2, 32768, start).page;
                     requireEqual(std::get<0>(two).size(), std::size_t{2});
-                    requireEqual(std::get<1>(two), 2.0);
+                    requireEqual(std::get<1>(two), double(1 * inspect::bridgeCursorStride + 2));
                     const auto none = states.read("host", 0, 0, 32768, start).page;
                     require(std::get<0>(none).empty());
                     requireEqual(std::get<2>(none), 1.0);
