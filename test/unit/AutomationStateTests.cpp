@@ -320,6 +320,10 @@ const Scenario stateToolsRead{
                          {{"watch", "0"}},
                          {{"watch", "1"}, {"count", "1001"}},
                          {{"watch", "1"}, {"count", "1e9"}},
+                         {{"watch", "1.00000000000000001"}},
+                         {{"watch", "1"}, {"count", "1.00000000000000001"}},
+                         {{"watch", "1"}, {"start", "9007199254740993.0"}},
+                         {{"watch", "1"}, {"start", "1e400"}},
                          {{"watch", "1"}, {"path", "7"}},
                          {{"watch", "1"}, {"text", "\"x\""}},
                          {}})
@@ -336,6 +340,19 @@ const Scenario stateToolsRead{
                 requireEqual(client.refused("webfront.state.functions",
                                             {
                                                 {"count", "1001"}}),
+                             std::string{"invalid_arguments"});
+            });
+            then("2^53 is accepted however it is written, and the next whole number is not", [&] {
+                for (const auto* spelling : {"9007199254740992", "9007199254740992.0", "9.007199254740992e15"})
+                    requireEqual(client
+                                     .read("webfront.state.functions",
+                                           {
+                                               {"after", spelling}})
+                                     .raw("next"),
+                                 std::string{"0"});
+                requireEqual(client.refused("webfront.state.functions",
+                                            {
+                                                {"after", "9007199254740993"}}),
                              std::string{"invalid_arguments"});
             });
             then("a whole number may be written as JSON allows it, 1.0 or 1e0", [&] {
@@ -514,6 +531,24 @@ const Scenario packageReads{"The locked packages are read by operations of their
                                         }
                                         require(session.versionedOperations().empty());
                                     });
+                                });
+                            }};
+
+const Scenario stateNumbers{"An argument of the state tools is read from its exact decimal value", {"automation"}, [] {
+                                using webfront::automation::state::detail::wholeNumber;
+                                then("every JSON spelling of a whole number gives its value", [&] {
+                                    for (const auto* spelling : {"1", "1.0", "1e0", "10E-1", "0.1e1", "100e-2", "-0", "0.000"})
+                                        require(wholeNumber(spelling)
+                                                == (std::string_view{spelling} == "-0" || std::string_view{spelling} == "0.000"
+                                                        ? std::optional<std::int64_t>{0}
+                                                        : std::optional<std::int64_t>{1}));
+                                    requireEqual(wholeNumber("9007199254740992.0").value_or(-1), std::int64_t{9007199254740992});
+                                    requireEqual(wholeNumber("9.007199254740992e15").value_or(-1), std::int64_t{9007199254740992});
+                                    requireEqual(wholeNumber("9007199254740993").value_or(-1), std::int64_t{9007199254740993});
+                                });
+                                then("a fraction, however small, a huge number or another token gives nothing", [&] {
+                                    for (const auto* token : {"1.00000000000000001", "1.5", "1e-1", "1e19", "1e400", "123456789012345678901", "\"1\"", "x"})
+                                        require(!wholeNumber(token).has_value());
                                 });
                             }};
 
