@@ -1032,7 +1032,8 @@ try {
                         assert(await webFront.cppFunction('webfront.inspector.closeWindow')('cpp.watches', window.webfrontInspectorHost.id) === true, 'The panel\'s window must close');
                         assert(await webFront.cppFunction('webfront.inspector.closeWindow')('cpp.watches', window.webfrontInspectorHost.id) === false,
                             'The closed inspector window must be gone');
-                        // A closed view's connection ends when its engine releases the page: WKWebView may take seconds.
+                        // A closed view's connection ends with its page, which the frontend closes with the window (#702); the
+                        // bound only covers a loaded runner.
                         // On failure, the connections as the registry tells them (#681): identifier, flags, path, space, pending counts.
                         await eventually(async () => await webFront.cppFunction('test.views')() === views,
                             async () => `The closed inspector window must disconnect: ${JSON.stringify(
