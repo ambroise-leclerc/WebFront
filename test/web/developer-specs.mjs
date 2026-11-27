@@ -959,6 +959,17 @@ try {
                     // A watch registered while the inspector is open appears, and disappears once removed (ADR-027, section 3).
                     await webFront.cppFunction('test.watch')('integration');
                     await until(() => listed().includes('integration'), `A registered watch must appear in the inspector: ${listed()}`);
+                    // Its content unfolds as a tree, read through the bridge of the page that holds the frame (#682): here a
+                    // string, which this watch does not let the inspector write.
+                    const watched = [...frame.contentDocument.querySelectorAll('ul.watches > li')]
+                        .find(item => item.querySelector('.name')?.textContent === 'integration');
+                    watched.querySelector('button.toggle').click();
+                    await until(() => watched.querySelector('ul.tree li[role="treeitem"] .kind'), 'The watch must unfold its content');
+                    const root = watched.querySelector('ul.tree li[role="treeitem"]');
+                    assert(root.querySelector('.kind').textContent === 'string' && root.querySelector('.label').textContent === 'integration',
+                        `The tree must show the watched string: ${root.textContent}`);
+                    assert(root.querySelector('.value').textContent !== '' && !root.querySelector('.value').classList.contains('writable'),
+                        `The watched string must be shown, read-only: ${root.textContent}`);
                     // The list that showed it must be the one that loses it: the same document, still shown.
                     const shownDocument = frame.contentDocument, shownList = shownDocument.querySelector('ul.watches');
                     const inShownList = () => [...shownList.querySelectorAll('li .name')].map(item => item.textContent).includes('integration');
