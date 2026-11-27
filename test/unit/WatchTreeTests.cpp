@@ -14,6 +14,7 @@
 
 #include <bitset>
 #include <format>
+#include <limits>
 #include <list>
 #include <map>
 #include <optional>
@@ -128,6 +129,17 @@ struct Rows {
             if (rows[index].id == wanted)
                 return index;
         return std::nullopt;
+    }
+};
+
+/// A paged source that tells more elements than a double counts exactly, and computes none of them.
+struct Endless {
+    [[nodiscard]] std::size_t size() const {
+        return std::numeric_limits<std::size_t>::max();
+    }
+    void visit(std::size_t first, std::size_t count, auto&& each) const {
+        for (std::size_t index = 0; index < count && index < 3; ++index)
+            each(first + index);
     }
 };
 
@@ -422,6 +434,32 @@ const Scenario watchSourcesRead{"A watch reads through the source the applicatio
                                         const auto page = bench.open(id);
                                         requireEqual(pathsOf(page), std::vector<std::string>({"", "/ka", "/kb"}));
                                         checkEqual(std::get<4>(std::get<0>(bench.registry->page(0, 0, 10, 4096)).back()), false);
+                                    });
+                                    then("a paged source that tells more elements than 2^53 is shown as such, and never converted out of range", [&] {
+                                        Endless    endless;
+                                        const auto id   = bench.watch("endless", visiting(endless));
+                                        const auto page = bench.open(id);
+                                        requireEqual(nodesOf(page).size(), std::size_t{1});
+                                        requireEqual(kindOf(nodesOf(page).front()), std::string{"opaque"});
+                                        require(valueOf(nodesOf(page).front()).contains("2^53"));
+                                        requireEqual(countOf(nodesOf(page).front()), std::size_t{0});
+                                    });
+                                    then("under a constant branch nothing is writable, even what a tuple of references gives", [&] {
+                                        int                                                  target = 1;
+                                        std::tuple<const std::tuple<int&>, std::tuple<int&>> outer{std::tuple<int&>{target}, std::tuple<int&>{target}};
+                                        const auto                                           id   = bench.watch("outer", visiting(outer));
+                                        auto                                                 page = bench.open(id);
+                                        page                                                      = bench.children(id, "/#0", revisionOf(page));
+                                        requireEqual(pathsOf(page), std::vector<std::string>({"/#0", "/#0/#0"}));
+                                        checkEqual(flagsOf(nodesOf(page)[1]), 0u);
+                                        requireEqual(codeOf([&] {
+                                                         return bench.write(id, revisionOf(page), "/#0/#0", "1", "5");
+                                                     }),
+                                                     std::string{code::readOnly});
+                                        requireEqual(target, 1);
+                                        // The same reference under a branch that is not constant stays writable.
+                                        page = bench.children(id, "/#1", revisionOf(page));
+                                        checkEqual(flagsOf(nodesOf(page)[1]), flag::writable);
                                     });
                                     then("a paged source that gives its elements by value is read through copies", [&] {
                                         Squares    squares{.count = 1000};
@@ -792,6 +830,24 @@ const Scenario watchListsStayCoherent{"A list of children is read on one state, 
                                               requireEqual(flagsOf(nodesOf(page).front()), flag::childrenChanged);
                                               page = bench.children(id, "", revisionOf(page), 0, 10);
                                               requireEqual(pathsOf(page), std::vector<std::string>{"", "/kc", "/kb", "/ka", "/kd"});
+                                          });
+                                          then("with keys, an element served that was replaced before the next page makes the list start again", [&] {
+                                              Keyed root;
+                                              for (const auto* name : {"a", "b", "c", "d"})
+                                                  root.items.push_back(Keyed{.name = name, .text = name, .items = {}, .keyFails = false, .visits = 0});
+                                              const auto id   = bench.watch("replaced", visiting(root));
+                                              auto       page = bench.open(id, 2);
+                                              requireEqual(pathsOf(page), std::vector<std::string>{"", "/ka", "/kb"});
+                                              root.items[0].name = "x";  // the size and the place of b are kept, no key served comes back
+                                              page               = bench.children(id, "", revisionOf(page), 2, 2);
+                                              requireEqual(nodesOf(page).size(), std::size_t{1});
+                                              requireEqual(flagsOf(nodesOf(page).front()), flag::childrenChanged);
+                                              page = bench.children(id, "", revisionOf(page), 0, 10);
+                                              requireEqual(pathsOf(page), std::vector<std::string>{"", "/kx", "/kb", "/kc", "/kd"});
+                                              // Unchanged, a list goes on where it was asked.
+                                              page = bench.children(id, "", revisionOf(page), 0, 2);
+                                              page = bench.children(id, "", revisionOf(page), 2, 2);
+                                              requireEqual(pathsOf(page), std::vector<std::string>{"", "/kc", "/kd"});
                                           });
                                           then("with keys, an insertion that keeps the number of children is seen by the key of the last child served", [&] {
                                               Keyed root;
