@@ -316,6 +316,10 @@ const Scenario stateToolsRead{
                          {{"watch", "1"}, {"count", "-1"}},
                          {{"watch", "9007199254740993"}},
                          {{"watch", "1"}, {"start", "9007199254740993"}},
+                         {{"watch", "1"}, {"start", "9.007199254740993e15"}},
+                         {{"watch", "0"}},
+                         {{"watch", "1"}, {"count", "1001"}},
+                         {{"watch", "1"}, {"count", "1e9"}},
                          {{"watch", "1"}, {"path", "7"}},
                          {{"watch", "1"}, {"text", "\"x\""}},
                          {}})
@@ -324,6 +328,25 @@ const Scenario stateToolsRead{
                                             {
                                                 {"watch", "1"}}),
                              std::string{"invalid_arguments"});
+                // The bounds that tools/list announces, checked before the application is reached.
+                requireEqual(client.refused("webfront.state.reset",
+                                            {
+                                                {"watch", "0"}}),
+                             std::string{"invalid_arguments"});
+                requireEqual(client.refused("webfront.state.functions",
+                                            {
+                                                {"count", "1001"}}),
+                             std::string{"invalid_arguments"});
+            });
+            then("a whole number may be written as JSON allows it, 1.0 or 1e0", [&] {
+                for (const auto* spelling : {"1.0", "1e0", "10E-1"})
+                    requireEqual(rows(client
+                                          .read("webfront.state.functions",
+                                                {
+                                                    {"count", spelling}})
+                                          .raw("functions"))
+                                     .size(),
+                                 std::size_t{1});
             });
             then("another session's identifier is refused and audited", [&] {
                 requireEqual(client.refused("webfront.state.watches", {}, "someone-else"), std::string{"wrong_session"});

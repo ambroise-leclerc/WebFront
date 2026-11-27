@@ -163,19 +163,38 @@ namespace detail {
     return value ? "true" : "false";
 }
 
-/// The whole number `key` of the arguments, `fallback` when it is absent. Its bounds are checked by the read itself, as
-/// for a page; a fraction or an exponent is refused here, every argument of these tools being an identifier, a count or a cursor.
-[[nodiscard]] inline double numberOf(const Object& arguments, std::string_view key, double fallback = 0) {
+/// The whole number `key` of the arguments, `fallback` when it is absent, refused (std::invalid_argument) out of
+/// [minimum, maximum]: the bounds the schema of tools/list announces. Every JSON spelling of a whole number is accepted
+/// (`1`, `1.0`, `1e0`, as JSON Schema's `integer`). A number from 2^53 on is no longer exact as a double, so that one is
+/// read from its digits: 2^53 + 1 would otherwise round into the bounds.
+[[nodiscard]] inline double
+numberOf(const Object& arguments, std::string_view key, double fallback = 0, double minimum = 0, double maximum = inspect::maxExactNumber) {
     if (!arguments.has(key))
         return fallback;
-    const auto   raw = arguments.raw(key);
-    std::int64_t value{};
+    const auto raw     = arguments.raw(key);
+    const auto refused = [&] {
+        return std::invalid_argument("Argument " + std::string(key) + " must be a whole number from " + number(minimum) + " to " + number(maximum));
+    };
+    double value{};
+    if (!json::detail::isNumber(raw))
+        throw refused();
     const auto [end, error] = std::from_chars(raw.data(), raw.data() + raw.size(), value);
-    // Beyond 2^53 a whole number is no longer exact as a double: it would round into the bounds the read checks.
-    constexpr auto exact = static_cast<std::int64_t>(inspect::maxExactNumber);
-    if (error != std::errc{} || end != raw.data() + raw.size() || value > exact || value < -exact)
-        throw std::invalid_argument("Argument " + std::string(key) + " must be a whole number up to 2^53");
-    return static_cast<double>(value);
+    if (error != std::errc{} || end != raw.data() + raw.size() || !std::isfinite(value) || value != std::floor(value) || value < minimum || value > maximum)
+        throw refused();
+    if (std::abs(value) >= inspect::maxExactNumber) {
+        std::int64_t exact{};
+        const auto [last, failure] = std::from_chars(raw.data(), raw.data() + raw.size(), exact);
+        if (failure != std::errc{} || last != raw.data() + raw.size() || static_cast<double>(exact) != value || exact != static_cast<std::int64_t>(value))
+            throw refused();
+    }
+    return value;
+}
+
+/// The identifier of a watch, which the registry never gives as 0.
+[[nodiscard]] inline double watchOf(const Object& arguments) {
+    if (!arguments.has("watch"))
+        throw std::invalid_argument("Missing argument: watch");
+    return numberOf(arguments, "watch", 0, 1);
 }
 
 [[nodiscard]] inline double required(const Object& arguments, std::string_view key) {
@@ -231,7 +250,7 @@ template <typename Rows, typename Row>
     return [reads = std::move(reads)](std::string_view name, const Object& arguments) -> std::string {
         using namespace detail;
         const auto count = [&] {
-            return numberOf(arguments, "count", static_cast<double>(inspect::defaultPageCount));
+            return numberOf(arguments, "count", static_cast<double>(inspect::defaultPageCount), 0, static_cast<double>(inspect::maxPageCount));
         };
         try {
             if (name == "webfront.state.limits") {
@@ -304,7 +323,7 @@ template <typename Rows, typename Row>
             }
             if (name == "webfront.state.children") {
                 arguments.only({"watch", "path", "revision", "start", "count"});
-                const auto watch = required(arguments, "watch"), revision = numberOf(arguments, "revision"), start = numberOf(arguments, "start");
+                const auto watch = watchOf(arguments), revision = numberOf(arguments, "revision"), start = numberOf(arguments, "start");
                 const auto wanted = count();
                 return page(reads->template wait<inspect::Page>([reads, watch, path = pathOf(arguments, false), revision, start, wanted] {
                     return reads->children(watch, path, revision, start, wanted);
@@ -312,7 +331,7 @@ template <typename Rows, typename Row>
             }
             if (name == "webfront.state.changes") {
                 arguments.only({"watch", "revision", "cursor", "count"});
-                const auto watch = required(arguments, "watch"), revision = required(arguments, "revision"), cursor = numberOf(arguments, "cursor");
+                const auto watch = watchOf(arguments), revision = required(arguments, "revision"), cursor = numberOf(arguments, "cursor");
                 const auto wanted = count();
                 return page(reads->template wait<inspect::Page>([reads, watch, revision, cursor, wanted] {
                     return reads->changes(watch, revision, cursor, wanted);
@@ -320,7 +339,7 @@ template <typename Rows, typename Row>
             }
             if (name == "webfront.state.value") {
                 arguments.only({"watch", "path", "snapshot", "offset"});
-                const auto watch = required(arguments, "watch"), snapshot = numberOf(arguments, "snapshot"), offset = numberOf(arguments, "offset");
+                const auto watch = watchOf(arguments), snapshot = numberOf(arguments, "snapshot"), offset = numberOf(arguments, "offset");
                 const auto [fragment, size, next, capped, identifier] = reads->template wait<inspect::ValueAnswer>(
                     [reads, watch, path = pathOf(arguments, true), snapshot, offset] {
                         return reads->value(watch, path, snapshot, offset);
@@ -330,14 +349,14 @@ template <typename Rows, typename Row>
             }
             if (name == "webfront.state.fold") {
                 arguments.only({"watch", "path", "revision"});
-                const auto watch = required(arguments, "watch"), revision = required(arguments, "revision");
+                const auto watch = watchOf(arguments), revision = required(arguments, "revision");
                 return page(reads->template wait<inspect::Page>([reads, watch, path = pathOf(arguments, true), revision] {
                     return reads->fold(watch, path, revision);
                 }));
             }
             if (name == "webfront.state.reset") {
                 arguments.only({"watch"});
-                const auto watch = required(arguments, "watch");
+                const auto watch = watchOf(arguments);
                 return "{\"revision\":" + number(reads->template wait<double>([reads, watch] {
                            return reads->reset(watch);
                        }))
