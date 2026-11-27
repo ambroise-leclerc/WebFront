@@ -789,7 +789,8 @@ appels. Cet état vit dans la page de l'application.
   C++), ou celui de la page hôte quand l'interface n'en a pas ; un cadre rechargé donne un nouvel état. Les appels en
   attente quand la sonde est posée (à la première lecture, ou après un bail échu) sont repris avec leur nom, sans durée
   connue. Les appels de l'inspecteur lui-même
-  (`webfront.inspector.*`, `wfInspect.*`) ne sont pas suivis. L'état est borné : 100 appels en attente (les plus
+  (`webfront.inspector.*`, `wfInspect.*`) ne sont pas suivis. Un appel suivi l'est jusqu'à sa réponse, même après le
+  retrait de la sonde : il faut de toute façon le retirer des appels en attente, et son rejet éventuel reste donc listé. L'état est borné : 100 appels en attente (les plus
   anciens), 50 rejets (les plus récents), 100 fonctions JavaScript (les plus appelées, sur 1 000 noms comptés un par un),
   textes de 256 octets coupés sur une frontière de caractère, caractères de contrôle rendus visibles.
 - **Panneau rattaché.** L'iframe de la fenêtre flottante lit le moniteur de sa page hôte
