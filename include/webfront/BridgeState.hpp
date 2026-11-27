@@ -14,6 +14,7 @@
 #include "Watches.hpp"
 
 #include <algorithm>
+#include <any>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -77,12 +78,14 @@ public:
     };
 
     /**
-     * The page `host` announces that it can publish the state of its bridge: `ask` asks it to start (called on a
-     * reader's thread, outside the lock), `alive` tells whether its connection is still there and admitted. An earlier source of the
-     * same identifier (the page was loaded again) is replaced and its state forgotten. Returns whether a reader is
-     * waiting for it now.
+     * The page `host` announces that it can publish the state of its bridge: `owner` identifies its connection (a value
+     * that compares equal only for the same one), `ask` asks it to start (called on a reader's thread, outside the lock),
+     * `alive` tells whether its connection is still there and admitted. An earlier source of the same identifier (the page
+     * was loaded again, or announces itself again) is replaced and its state forgotten, but a reader's lease is kept.
+     * Returns whether a reader is waiting for it now.
      */
-    bool announce(const std::string& host, std::function<void()> ask, std::function<bool()> alive, Clock::time_point now = Clock::now()) {
+    template <typename Owner>
+    bool announce(const std::string& host, Owner owner, std::function<void()> ask, std::function<bool()> alive, Clock::time_point now = Clock::now()) {
         std::scoped_lock lock{mutex};
         std::erase_if(sources, [&](const auto& entry) {
             return entry.first != host && !entry.second.alive();
@@ -92,10 +95,12 @@ public:
                 return entry.second.wantedUntil;
             }));
         // A reader may have asked before the page announced itself (a detached panel outlives a reload of its page).
-        const auto wanted = readers.contains(host) ? readers[host] : Clock::time_point{};
+        auto wanted = readers.contains(host) ? readers[host] : Clock::time_point{};
         readers.erase(host);
         auto& source       = sources[host];
+        wanted             = (std::max)(wanted, source.wantedUntil);  // a source that announces itself again keeps its reader
         source             = Source{};
+        source.owner       = std::move(owner);
         source.ask         = std::move(ask);
         source.alive       = std::move(alive);
         source.wantedUntil = wanted;
@@ -106,9 +111,12 @@ public:
      * The page `host` publishes the state of its bridge. Each text is made safe and bounded (boundedText). Returns
      * whether a reader still asks for it: the page stops publishing when not.
      * @throws std::invalid_argument for more than maxBridgeRows rows; nothing is kept then
-     * @throws BridgeError `webfront.inspector.unknown` when the page did not announce itself
+     * @throws BridgeError `webfront.inspector.unknown` when the page did not announce itself (or lost its place: it
+     *         announces itself again), `webfront.inspector.unavailable` when another connection announced itself under
+     *         this identifier since: the state shown is that of the latest one only
      */
-    bool publish(const std::string& host, std::vector<BridgeRow> rows, Clock::time_point now = Clock::now()) {
+    template <typename Owner>
+    bool publish(const std::string& host, const Owner& owner, std::vector<BridgeRow> rows, Clock::time_point now = Clock::now()) {
         if (rows.size() > maxBridgeRows)
             throw std::invalid_argument("The state of a bridge holds at most " + std::to_string(maxBridgeRows) + " rows");
         for (auto& [kind, name, text, first, second] : rows) {
@@ -120,7 +128,10 @@ public:
         const auto       found = sources.find(host);
         if (found == sources.end())
             throw webfront::detail::makeBridgeError(code::unknown, "This page did not announce the state of its bridge");
-        auto& source       = found->second;
+        auto&      source = found->second;
+        const auto holder = std::any_cast<Owner>(&source.owner);
+        if (!holder || !(*holder == owner))
+            throw webfront::detail::makeBridgeError(code::unavailable, "Another page publishes the state of its bridge under this identifier");
         source.rows        = std::move(rows);
         source.publication = ++publications;
         source.publishedAt = now;
@@ -172,7 +183,8 @@ public:
             used += bytes;
             rows.push_back(row);
         }
-        const auto age = source.publication == 0 ? 0.0 : std::chrono::duration<double, std::milli>(now - source.publishedAt).count();
+        // `now` may have been read before a publication that took the lock first: an age is never negative.
+        const auto age = source.publication == 0 ? 0.0 : (std::max)(0.0, std::chrono::duration<double, std::milli>(now - source.publishedAt).count());
         result.page    = BridgePage{std::move(rows),
                                     next,
                                     static_cast<double>(source.publication),
@@ -189,6 +201,7 @@ public:
 
 private:
     struct Source {
+        std::any               owner;
         std::function<void()>  ask;
         std::function<bool()>  alive;
         std::vector<BridgeRow> rows;

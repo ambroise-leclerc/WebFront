@@ -87,7 +87,7 @@ function fakeRelay({wanted = true, pageSize = 200} = {}) {
 
 const sampleState = () => ({
     page: {label: 'interface', path: '/app/'}, ready: {state: 'resolved', reason: ''}, connection: 'linked', since: 1_700_000_000_000,
-    pendingTotal: 2, rejectedTotal: 1, jsTotal: 1,
+    pendingTotal: 2, rejectedTotal: 1, jsTotal: 1, jsSaturated: false,
     pending: [{id: 3, name: 'app.save', elapsed: 1250}, {id: 4, name: 'app.load', elapsed: null}],
     rejections: [{id: 5, name: 'app.open', reason: 'app.missing: no such file', at: 1_700_000_001_000}],
     jsFunctions: [{id: 6, name: 'draw', calls: 12}],
@@ -144,6 +144,17 @@ describe('The panel of the bridge in the page', () => {
             expect(rejectionReason(new Error('plain'))).toBe('plain');
             expect(rejectionReason('a string')).toBe('a string');
             expect(rejectionReason(undefined)).toBe('undefined');
+        });
+
+        it('read the message of an error of another frame, which is not an Error of this page', () => {
+            const frame = document.createElement('iframe');
+            document.body.append(frame);
+            try {
+                const foreign = Object.assign(new frame.contentWindow.Error('the user said no'), {code: 'denied'});
+                expect(foreign instanceof Error).toBeFalse();
+                expect(rejectionReason(foreign)).toBe('denied: the user said no');
+                expect(rejectionReason(new frame.contentWindow.TypeError('not a wire value'))).toBe('not a wire value');
+            } finally { frame.remove(); }
         });
 
         it('tell the inspectors\' own traffic, which the registry panel hides too', () => {
@@ -306,8 +317,11 @@ describe('The panel of the bridge in the page', () => {
             const many = monitor.read();
             expect(many.jsFunctions.length).toBe(limits.jsFunctions);
             expect(many.jsFunctions[0].name).toBe('draw');
-            // Past the names it keeps, the others are counted together as one more.
+            // Past the names it keeps, the others are counted together as one more, and the count is no longer exact.
             expect(many.jsTotal).toBe(limits.jsNames + 1);
+            expect(many.jsSaturated).toBeTrue();
+            expect(state.jsSaturated).toBeFalse();
+            expect(fromRows(toRows(many)).jsSaturated).toBeTrue();
         });
 
         it('does not show the inspectors\' own traffic', () => {
@@ -352,6 +366,27 @@ describe('The panel of the bridge in the page', () => {
             expect(state.pendingTotal).toBe(0);
             expect(first.probe).toBeNull();
             expect(second.probe).not.toBeNull();
+        });
+
+        it('wraps a pending call once, however many times the target comes back to its bridge', async () => {
+            const page = fakeWebFront(), time = manualTime();
+            let current = page;
+            const monitor = createBridgeMonitor({target: () => ({bridge: current, label: 'this page', path: '/'}), clock: time.clock, now: time.now, timers: time});
+            monitor.read();
+            const call = page.call('app.long');
+            const wrapped = [...page.pendingCalls.values()][0].resolve;
+            for (let reload = 0; reload < 3; ++reload) {
+                current = fakeWebFront();  // the interface's frame has a bridge
+                monitor.read();
+                current = page;            // the frame is loaded again: back to the page's own bridge
+                expect(monitor.read().pending.map(entry => entry.name)).toEqual(['app.long']);
+            }
+            expect([...page.pendingCalls.values()][0].resolve).withContext('the call keeps the wrapper it had').toBe(wrapped);
+            call.reject(new Error('failed once'));
+            await expectAsync(call.promise).toBeRejected();
+            const state = monitor.read();
+            expect(state.rejectedTotal).toBe(1);
+            expect(state.pending).toEqual([]);
         });
 
         it('gives the state of a page without a bridge, and of a target that cannot be read', () => {
@@ -605,6 +640,12 @@ describe('The panel of the bridge in the page', () => {
             expect(status.textContent).toContain('The page published this state 5.00 s ago.');
             expect(status.textContent).toContain('128 more pending calls');
             expect(status.textContent).toContain('104 more JavaScript functions');
+            expect(status.textContent).not.toContain('at least');
+        });
+
+        it('says "at least" for the JavaScript functions it could not count by name', async () => {
+            const {status} = await setup(async () => read({...sampleState(), jsTotal: 1001, jsSaturated: true}));
+            expect(status.textContent).toContain('at least 1000 more JavaScript functions');
         });
 
         it('waits for a page that has not published yet, and says when that page is not connected', async () => {
@@ -620,8 +661,17 @@ describe('The panel of the bridge in the page', () => {
             view.fire();
             await panel.poller.settled();
             expect(status.textContent).toContain('is not connected');
-            // What was read last stays shown.
+            // What was read last stays shown, and searching it does not hide that the page is gone.
             expect(column(panel.pending, 0)).toContain('app.save');
+            panel.toolbar.search.value = 'save';
+            panel.toolbar.search.dispatchEvent(new Event('input'));
+            expect(column(panel.pending, 0)).toEqual(['app.save']);
+            expect(status.textContent).toContain('is not connected');
+            // The page comes back and has not published yet: the status says so.
+            answer = {state: null, age: 0, source: true, published: false};
+            view.fire();
+            await panel.poller.settled();
+            expect(status.textContent).toContain('Waiting for the page to publish');
         });
 
         it('says why a read failed, and clears it when a read succeeds', async () => {

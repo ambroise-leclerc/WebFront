@@ -810,7 +810,9 @@ appels. Cet état vit dans la page de l'application.
 - **Bornes du relais.** Un état de plus de 256 lignes est refusé (`std::invalid_argument`) sans remplacer le précédent ;
   chaque texte est borné par `boundedText` (256 octets, 16 pour le genre). C++ garde l'état de 16 pages au plus : une page
   déconnectée est oubliée, et au-delà la page lue le moins récemment cède sa place. Une page qui a perdu sa place
-  s'annonce de nouveau quand son panneau est détaché, ou quand sa publication est refusée. Une publication sans annonce est
+  s'annonce de nouveau quand son panneau est détaché, ou quand sa publication est refusée (`unknown`) ; une nouvelle
+  annonce garde le bail d'un lecteur. Un état appartient à la connexion qui s'est annoncée la dernière sous cet
+  identifiant : la publication d'une autre connexion est refusée (`webfront.inspector.unavailable`). Une publication sans annonce est
   refusée (`webfront.inspector.unknown`).
 
 Les deux panneaux affichent les mêmes lignes : le panneau rattaché passe l'état du moniteur par le même encodage en

@@ -34,6 +34,7 @@ struct Page {
     bool announce(States& states, const std::string& host, States::Clock::time_point now) {
         return states.announce(
             host,
+            this,
             [this] {
                 ++asked;
             },
@@ -92,7 +93,7 @@ const Scenario bridgeStateLease{
                     });
                 });
                 andWhen("the page publishes", [&] {
-                    const bool goOn = states.publish("host-1", someRows(3), start + 1s + 200ms);
+                    const bool goOn = states.publish("host-1", &page, someRows(3), start + 1s + 200ms);
                     then("it is told to go on: a reader read less than the lease ago", [&] {
                         require(goOn);
                     });
@@ -106,8 +107,8 @@ const Scenario bridgeStateLease{
                         require(!static_cast<bool>(next.ask));
                     });
                     then("a publication made after the lease is told to stop", [&] {
-                        require(states.publish("host-1", someRows(1), start + 1s + inspect::bridgeLease - 1ms));
-                        require(!states.publish("host-1", someRows(1), start + 1s + inspect::bridgeLease));
+                        require(states.publish("host-1", &page, someRows(1), start + 1s + inspect::bridgeLease - 1ms));
+                        require(!states.publish("host-1", &page, someRows(1), start + 1s + inspect::bridgeLease));
                     });
                     then("a read after the publications stopped asks the page to start again", [&] {
                         const auto late = states.read("host-1", 0, 200, 32768, start + 60s);
@@ -144,7 +145,7 @@ const Scenario bridgeStateLease{
             Page                            page;
             const States::Clock::time_point start{1000s};
             page.announce(states, "host-3", start);
-            states.publish("host-3", someRows(2), start);
+            states.publish("host-3", &page, someRows(2), start);
             page.alive      = false;
             const auto read = states.read("host-3", 0, 200, 32768, start + 1s);
             then("its state is forgotten: a read finds no source", [&] {
@@ -161,11 +162,57 @@ const Scenario bridgeStateLease{
                 });
             });
         });
+        given("a page that an inspector reads, which announces itself again", [&] {
+            States                          states;
+            Page                            page;
+            const States::Clock::time_point start{1000s};
+            page.announce(states, "host-4", start);
+            static_cast<void>(states.read("host-4", 0, 200, 32768, start + 1s));
+            states.publish("host-4", &page, someRows(2), start + 1s);
+            then("it is told that its reader still waits, and starts from an empty state", [&] {
+                require(page.announce(states, "host-4", start + 2s));
+                const auto fresh = states.read("host-4", 0, 200, 32768, start + 2s).page;
+                require(std::get<0>(fresh).empty());
+                requireEqual(flagsOf(fresh), double{inspect::bridge_flag::source});
+            });
+            then("after the lease, it is told that no reader waits", [&] {
+                require(!page.announce(states, "host-4", start + 1s + inspect::bridgeLease));
+            });
+        });
+        given("two connections that announce themselves under one identifier", [&] {
+            States                          states;
+            Page                            earlier, later;
+            const States::Clock::time_point start{1000s};
+            earlier.announce(states, "host-5", start);
+            later.announce(states, "host-5", start);
+            states.publish("host-5", &later, someRows(2), start);
+            then("the publication of the earlier one is refused as unavailable, and the state stays that of the later one", [&] {
+                std::string code;
+                try {
+                    states.publish("host-5", &earlier, someRows(5), start);
+                } catch (const BridgeError& error) {
+                    code = error.code();
+                }
+                requireEqual(code, std::string{inspect::code::unavailable});
+                require(std::get<0>(states.read("host-5", 0, 200, 32768, start).page) == someRows(2));
+            });
+        });
+        given("a read whose time was taken just before a publication", [&] {
+            States                          states;
+            Page                            page;
+            const States::Clock::time_point start{1000s};
+            page.announce(states, "host-6", start);
+            states.publish("host-6", &page, someRows(1), start + 5ms);
+            then("the age it gives is zero, never negative", [&] {
+                requireEqual(std::get<3>(states.read("host-6", 0, 200, 32768, start).page), 0.0);
+            });
+        });
         given("a page that did not announce itself", [&] {
             States states;
+            Page   page;
             then("its publication is refused as unknown", [&] {
                 checkThrows<BridgeError>([&] {
-                    states.publish("nobody", someRows(1));
+                    states.publish("nobody", &page, someRows(1));
                 });
             });
         });
@@ -182,10 +229,10 @@ const Scenario bridgeStateBounds{
             const States::Clock::time_point start{1000s};
             page.announce(states, "host", start);
             when("it publishes more rows than a state holds", [&] {
-                states.publish("host", someRows(2), start);
+                states.publish("host", &page, someRows(2), start);
                 then("the publication is refused and the earlier state is kept", [&] {
                     checkThrows<std::invalid_argument>([&] {
-                        states.publish("host", someRows(inspect::maxBridgeRows + 1), start);
+                        states.publish("host", &page, someRows(inspect::maxBridgeRows + 1), start);
                     });
                     require(std::get<0>(states.read("host", 0, 200, 32768, start).page) == someRows(2));
                 });
@@ -193,7 +240,7 @@ const Scenario bridgeStateBounds{
             when("it publishes texts longer than the bound, with control characters", [&] {
                 Rows rows;
                 rows.emplace_back(std::string(40, 'k'), std::string(1000, 'n'), std::string("a\nb\x7f"), 1.0, 2.0);
-                states.publish("host", std::move(rows), start);
+                states.publish("host", &page, std::move(rows), start);
                 const auto stored = std::get<0>(states.read("host", 0, 200, 32768, start).page);
                 then("each text is cut to its bound and the controls are made visible", [&] {
                     requireEqual(stored.size(), std::size_t{1});
@@ -206,7 +253,7 @@ const Scenario bridgeStateBounds{
                 });
             });
             when("it publishes a full state of the longest rows", [&] {
-                states.publish("host", someRows(inspect::maxBridgeRows, inspect::maxTextBytes), start);
+                states.publish("host", &page, someRows(inspect::maxBridgeRows, inspect::maxTextBytes), start);
                 then("the smallest budget still serves it, page after page, each within the budget", [&] {
                     Rows        all;
                     double      cursor = 0;

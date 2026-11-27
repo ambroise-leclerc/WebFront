@@ -28,7 +28,7 @@
   "js/developer/environment/inspector.mjs": "921221e5fa982b6f9c12c42dfba56d079d514bb67fc12756f7ac17f96e1f5f7c",
   "js/developer/environment/inspector-packages.mjs": "1c3f6350780b841784f83bc20ead2945157c48a1f136c47e3a7a90d89bea8522",
   "js/developer/environment/inspector-registry.mjs": "1388b779477cd6c4c7f858e00a09d89e5af86f5afdf39c253d419eb67d7c2e81",
-  "js/developer/environment/inspector-bridge.mjs": "f52bf3debe6eba1d27cd8f7fdbbe432c61ca6b9392724f3a065ed85592e4993a",
+  "js/developer/environment/inspector-bridge.mjs": "71ccb96bce65eca9033e744fe4e5b352b2d437b7d256234d9dfbcb30d13ca0e3",
   "js/developer/environment/inspector.html": "66bfb80d6bd29bc9aabf71e0dd9b163dfcd1f1c77d1a41818645af1a4f9b8616",
   "js/developer/environment/tarball.mjs": "1c1e1aea067910e1fec74e85b4bf9fbefed9b38187a04d8d2764f0b9a96fca39",
   "js/developer/environment/commands.mjs": "a759f48584b78aed79e9965fd202d2ec108a6948ef6f1b8d689fed87a458b265",

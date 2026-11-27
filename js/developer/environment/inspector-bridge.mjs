@@ -50,8 +50,10 @@ export function boundedText(value, limit = limits.text) {
 /** Why a Promise was rejected, as a text: the code of an error that has one, then its message. */
 export function rejectionReason(error) {
     try {
-        const message = error instanceof Error ? String(error.message) : String(error);
-        const code = error !== null && typeof error === 'object' && typeof error.code === 'string' ? error.code : '';
+        // By its `message`, not by its constructor: an error of the interface's frame is not an Error of this page.
+        const described = error !== null && typeof error === 'object';
+        const message = described && typeof error.message === 'string' ? error.message : String(error);
+        const code = described && typeof error.code === 'string' ? error.code : '';
         return boundedText(code && code !== 'webfront.error' ? `${code}: ${message}` : message);
     } catch { return 'A rejection whose reason cannot be read'; }
 }
@@ -70,8 +72,13 @@ export const ownTraffic = name => typeof name === 'string' && (name.startsWith('
  */
 export function createBridgeMonitor({target, clock = () => performance.now(), now = () => Date.now(), timers = globalThis, lease = defaultLease}) {
     let followed = null, sequence = 0, until = 0, timer = null;
+    // The state of each bridge it followed, kept while that bridge lives: the target goes back to the page's own bridge
+    // each time the interface's frame is loaded again, and a call that is already followed must not be wrapped again.
+    const states = new WeakMap();
 
     function follow(bridge) {
+        const known = states.get(bridge);
+        if (known) return known;
         const state = {bridge, since: now(), pending: new Set(), tracked: new WeakSet(), rejections: [], rejected: 0, js: new Map(), jsOthers: 0};
         const settle = (entry, failed, error) => {
             if (!state.pending.delete(entry)) return;
@@ -114,6 +121,7 @@ export function createBridgeMonitor({target, clock = () => performance.now(), no
                 }
             } catch { /* a bridge of another version: only the calls made from now on are followed */ }
         };
+        states.set(bridge, state);
         return state;
     }
 
@@ -174,6 +182,8 @@ export function createBridgeMonitor({target, clock = () => performance.now(), no
                 pendingTotal: followed.pending.size,
                 rejectedTotal: followed.rejected,
                 jsTotal: followed.js.size + (followed.jsOthers ? 1 : 0),
+                // Past the names it keeps, calls are counted without their name: how many other functions is not known.
+                jsSaturated: followed.jsOthers > 0,
                 pending,
                 rejections: followed.rejections.map(entry => ({...entry})),
                 jsFunctions,
@@ -197,7 +207,7 @@ export function interfaceTarget(frame) {
 
 /** The state of a page without a bridge. */
 export const emptyState = () => ({page: {label: '', path: ''}, ready: {state: 'none', reason: ''}, connection: 'none', since: 0,
-    pendingTotal: 0, rejectedTotal: 0, jsTotal: 0, pending: [], rejections: [], jsFunctions: []});
+    pendingTotal: 0, rejectedTotal: 0, jsTotal: 0, jsSaturated: false, pending: [], rejections: [], jsFunctions: []});
 
 // --- Rows ------------------------------------------------------------------------------------------------------
 
@@ -211,7 +221,7 @@ export function toRows(state) {
         ['ready', state.ready.state, state.ready.reason, 0, 0],
         ['connection', state.connection, '', 0, 0],
         ['counts', '', '', state.pendingTotal, state.rejectedTotal],
-        ['jsCount', '', '', state.jsTotal, 0],
+        ['jsCount', '', '', state.jsTotal, state.jsSaturated ? 1 : 0],
         ...state.pending.map(call => ['pending', call.name, '', call.id, call.elapsed ?? -1]),
         ...state.rejections.map(rejection => ['rejected', rejection.name, rejection.reason, rejection.id, rejection.at]),
         ...state.jsFunctions.map(called => ['js', called.name, '', called.id, called.calls]),
@@ -233,7 +243,7 @@ export function fromRows(rows) {
         else if (kind === 'ready') state.ready = {state: name, reason: detail};
         else if (kind === 'connection') state.connection = name;
         else if (kind === 'counts') Object.assign(state, {pendingTotal: first, rejectedTotal: second});
-        else if (kind === 'jsCount') state.jsTotal = first;
+        else if (kind === 'jsCount') Object.assign(state, {jsTotal: first, jsSaturated: second !== 0});
         else if (kind === 'pending') state.pending.push({id: first, name, elapsed: second < 0 ? null : second});
         else if (kind === 'rejected') state.rejections.push({id: first, name, reason: detail, at: second});
         else if (kind === 'js') state.jsFunctions.push({id: first, name, calls: second});
@@ -372,7 +382,7 @@ export const staleAfter = 3000;
  * when nothing was read: the attached panel gives the monitor of its host page, the detached one the relay.
  */
 export async function showBridgePanel({page, view, header, body, status, source}) {
-    let search = '', failed = false, data = null;
+    let search = '', failed = false, data = null, last = null;
     const summary = page.createElement('dl');
     summary.className = 'bridge';
     const field = label => {
@@ -397,18 +407,24 @@ export async function showBridgePanel({page, view, header, body, status, source}
         pending.render(filterRows(state.pending, search, ['name']));
         rejections.render(filterRows(state.rejections, search, ['name', 'reason']));
         called.render(filterRows(state.jsFunctions, search, ['name']));
-        // A failed read stays told until a read succeeds.
-        if (failed) return;
-        status.classList.remove('error');
-        const hidden = [state.pendingTotal > state.pending.length ? `${state.pendingTotal - state.pending.length} more pending calls` : '',
-            state.jsTotal > state.jsFunctions.length ? `${state.jsTotal - state.jsFunctions.length} more JavaScript functions` : ''].filter(Boolean);
-        status.textContent = [data.age > staleAfter ? `The page published this state ${formatDuration(data.age)} ago.` : '',
-            hidden.length ? `Not shown: ${hidden.join(', ')}.` : ''].filter(Boolean).join(' ');
+        tell();
     };
-    const waiting = read => {
+    // The status tells the last read, whatever is shown: a failed read stays told until a read succeeds, and a page that
+    // is gone or has not published stays told while the rows read earlier are kept and searched.
+    const tell = () => {
+        if (failed || !last) return;
         status.classList.remove('error');
-        status.textContent = read.source ? 'Waiting for the page to publish the state of its bridge…'
-            : 'The page that opened this panel is not connected: its bridge cannot be read.';
+        if (!last.state) {
+            status.textContent = last.source ? 'Waiting for the page to publish the state of its bridge…'
+                : 'The page that opened this panel is not connected: its bridge cannot be read.';
+            return;
+        }
+        const {state} = last;
+        const hidden = [state.pendingTotal > state.pending.length ? `${state.pendingTotal - state.pending.length} more pending calls` : '',
+            state.jsTotal > state.jsFunctions.length
+                ? `${state.jsSaturated ? 'at least ' : ''}${state.jsTotal - state.jsFunctions.length} more JavaScript functions` : ''].filter(Boolean);
+        status.textContent = [last.age > staleAfter ? `The page published this state ${formatDuration(last.age)} ago.` : '',
+            hidden.length ? `Not shown: ${hidden.join(', ')}.` : ''].filter(Boolean).join(' ');
     };
     const toolbar = createToolbar(page, view, {searchLabel: 'Search the calls', onSearch: text => { search = text; show(); }});
     header.insertBefore(toolbar.pause, header.children[1] ?? null);
@@ -423,8 +439,9 @@ export async function showBridgePanel({page, view, header, body, status, source}
         read: ({active}) => source({active}),
         onData: read => {
             failed = false;
-            if (read.state) { data = read; show(); }
-            else if (!data || !read.source) waiting(read);
+            last = read;
+            if (read.state) data = read;
+            if (data) show(); else tell();
         },
         onError: error => {
             failed = true;

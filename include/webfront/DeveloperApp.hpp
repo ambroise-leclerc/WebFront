@@ -254,6 +254,7 @@ private:
             requireHost(host);
             return bridges->announce(
                 host,
+                ui,
                 [ui] {
                     ui.jsFunction("wfInspect.publish")();
                 },
@@ -266,7 +267,7 @@ private:
             [bridges](Caller ui, std::string host, std::vector<inspect::BridgeRow> rows) {
                 admit(ui);
                 requireHost(host);
-                return bridges->publish(host, std::move(rows));
+                return bridges->publish(host, ui, std::move(rows));
             });
         this->template reservedCppFunction<inspect::BridgePage, Caller, std::string, double, double>(
             "webfront.inspector.bridge",

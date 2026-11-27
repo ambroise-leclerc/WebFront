@@ -1079,10 +1079,13 @@ try {
                     const tableRows = index => [...(panel()?.querySelectorAll('table.registry')[index]?.querySelectorAll('tbody tr') ?? [])]
                         .map(row => [...row.children].map(cell => cell.textContent));
                     // A call that C++ does not answer yet is pending, then gone; a rejected one is shown with its reason.
-                    const slow = interfaceBridge.cppFunction('test.slow')(600);
-                    await until(() => tableRows(0).some(row => row[0] === 'test.slow'), () => `A pending call must be shown: ${JSON.stringify(tableRows(0))}`);
-                    await slow;
-                    await until(() => !tableRows(0).some(row => row[0] === 'test.slow'), 'An answered call must leave the pending calls');
+                    // C++ answers test.hold only once test.letGo was called: the call stays pending for as long as the panel needs.
+                    const held = interfaceBridge.cppFunction('test.hold')();
+                    try {
+                        await until(() => tableRows(0).some(row => row[0] === 'test.hold'), () => `A pending call must be shown: ${JSON.stringify(tableRows(0))}`);
+                    } finally { await interfaceBridge.cppFunction('test.letGo')(); }
+                    await held;
+                    await until(() => !tableRows(0).some(row => row[0] === 'test.hold'), 'An answered call must leave the pending calls');
                     await interfaceBridge.cppFunction('test.noSuchFunction')().catch(() => {});
                     const rejected = () => tableRows(1).find(row => row[1] === 'test.noSuchFunction');
                     await until(rejected, () => `A rejected Promise must be shown: ${JSON.stringify(tableRows(1))}`);

@@ -85,23 +85,28 @@ describe('The state of the bridge in the page', () => {
 
     it('shows a call that is pending with its duration, then no longer once C++ answered', async () => {
         followed = follow(webFront);
-        const answer = webFront.cppFunction('deferredEcho')('still pending', 400);
-        await new Promise(resolve => setTimeout(resolve, 50));
-        const pending = followed.pending().find(call => call.name === 'deferredEcho');
-        expect(pending).withContext(JSON.stringify(followed.pending())).toBeDefined();
-        expect(pending.elapsed).toBeGreaterThanOrEqual(40);
+        // C++ answers heldEcho only once releaseHeldEcho was called: the call is pending for as long as the spec looks.
+        const answer = webFront.cppFunction('heldEcho')('still pending');
+        try {
+            await new Promise(resolve => setTimeout(resolve, 50));
+            const pending = followed.pending().find(call => call.name === 'heldEcho');
+            expect(pending).withContext(JSON.stringify(followed.pending())).toBeDefined();
+            expect(pending.elapsed).toBeGreaterThanOrEqual(40);
+        } finally { await webFront.cppFunction('releaseHeldEcho')(); }
 
-        expect(await answer).toBe('deferred:still pending');
-        expect(followed.pending().some(call => call.name === 'deferredEcho')).toBeFalse();
+        expect(await answer).toBe('held:still pending');
+        expect(followed.pending().some(call => call.name === 'heldEcho')).toBeFalse();
         expect(followed.rejections()).toEqual([]);
     });
 
     it('lets an inspector adopt a call that was made before it came, by its name', async () => {
-        const answer = webFront.cppFunction('deferredEcho')('made before', 300);
-        followed = follow(webFront);
-        expect(followed.pending().find(call => call.name === 'deferredEcho')?.elapsed).toBeNull();
-        expect(await answer).toBe('deferred:made before');
-        expect(followed.pending().some(call => call.name === 'deferredEcho')).toBeFalse();
+        const answer = webFront.cppFunction('heldEcho')('made before');
+        try {
+            followed = follow(webFront);
+            expect(followed.pending().find(call => call.name === 'heldEcho')?.elapsed).toBeNull();
+        } finally { await webFront.cppFunction('releaseHeldEcho')(); }
+        expect(await answer).toBe('held:made before');
+        expect(followed.pending().some(call => call.name === 'heldEcho')).toBeFalse();
     });
 
     it('shows a rejected Promise with its function, its reason and its time', async () => {
@@ -162,7 +167,7 @@ describe('The state of the bridge in the page', () => {
                 expect(asked).withContext('C++ asked the page to publish').toBe(1);
 
                 followed = follow(webFront);
-                const pendingCall = webFront.cppFunction('deferredEcho')('relayed', 400);
+                const pendingCall = webFront.cppFunction('heldEcho')('relayed');
                 await expectAsync(webFront.cppFunction('throwCodedFromCpp')()).toBeRejected();
                 const published = followed.rows();
                 expect(published.map(row => row[0])).toEqual(['ready', 'connection', 'pending', 'rejected']);
@@ -176,14 +181,16 @@ describe('The state of the bridge in the page', () => {
                 expect(read.flags).toBe(3);
                 expect(read.rows[0].slice(0, 2)).toEqual(['ready', 'resolved']);
                 expect(read.rows[1].slice(0, 2)).toEqual(['connection', 'linked']);
-                expect(read.rows[2].slice(0, 2)).toEqual(['pending', 'deferredEcho']);
+                expect(read.rows[2].slice(0, 2)).toEqual(['pending', 'heldEcho']);
                 expect(read.rows[3].slice(0, 3)).toEqual(['rejected', 'throwCodedFromCpp', 'denied: the user said no']);
-                expect(await pendingCall).toBe('deferred:relayed');
+                await webFront.cppFunction('releaseHeldEcho')();
+                expect(await pendingCall).toBe('held:relayed');
                 // A state of more rows than the relay keeps is refused, and the earlier one stays.
                 const tooMany = Array.from({length: 257}, (unused, index) => ['js', `f${index}`, '', index, 1]);
                 await expectAsync(host.cppFunction(relay.publish)(relayHost, host.list(tooMany))).toBeRejected();
                 expect((await readRelay(host, relayHost)).rows).toEqual(published);
             } finally {
+                await webFront.cppFunction('releaseHeldEcho')().catch(() => {});
                 if (publisher === undefined) delete page.wfInspect; else page.wfInspect = publisher;
             }
         });

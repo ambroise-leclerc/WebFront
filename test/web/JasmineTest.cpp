@@ -242,6 +242,7 @@ public:
 
 private:
     TestWF*                           webFront{};
+    atomic<bool>                      echoHeld{false};  // heldEcho answers once releaseHeldEcho cleared it
     optional<RejectedWebSocketServer> rejectedWebSocket;
     optional<TaskHandle>              cancelledTask;
     TestState                         state;
@@ -444,6 +445,12 @@ private:
 
     using Record = tuple<string, double, bool, vector<uint8_t>>;
 
+    /// Answers once `holding` is false; after thirty seconds at most, so that a failed spec does not keep the call for ever.
+    static ResultTask<string> heldEcho(TestWF* app, string value, atomic<bool>* holding) {
+        for (int waits = 0; waits < 3000 && holding->load(); ++waits)
+            co_await app->resumeAfter(chrono::milliseconds(10));
+        co_return "held:" + value;
+    }
     static ResultTask<string> deferredEcho(TestWF* app, string value, int delayMs) {
         co_await app->resumeAfter(chrono::milliseconds(delayMs));
         co_return "deferred:" + value;
@@ -461,6 +468,14 @@ private:
         });
         webFront->cppFunction("deferredEcho", [this](string value, int delayMs) {
             return deferredEcho(webFront, std::move(value), delayMs);
+        });
+        // A call that stays pending until the spec releases it: the state of the bridge shows it meanwhile (#684).
+        webFront->cppFunction("heldEcho", [this](string value) {
+            echoHeld = true;
+            return heldEcho(webFront, std::move(value), &echoHeld);
+        });
+        webFront->cppFunction("releaseHeldEcho", [this] {
+            echoHeld = false;
         });
         webFront->cppFunction("deferredFailure", [this]() {
             return deferredFailure(webFront, "rejected after a delay");
