@@ -440,7 +440,8 @@ const Scenario watchSourcesRead{"A watch reads through the source the applicatio
                                         if constexpr (std::numeric_limits<std::size_t>::digits <= 53)
                                             return;  // a 32-bit size_t cannot tell more than 2^53 elements
                                         // JavaScript reads a count exactly up to 2^53 - 1 (Number.isSafeInteger): from 2^53 on, refused.
-                                        for (const std::size_t count : {std::numeric_limits<std::size_t>::max(), std::size_t{1} << 53}) {
+                                        for (const std::size_t count :
+                                             {std::numeric_limits<std::size_t>::max(), static_cast<std::size_t>(std::uint64_t{1} << 53)}) {
                                             Endless    endless{.count = count};
                                             const auto id   = bench.watch("endless " + std::to_string(count), visiting(endless));
                                             const auto page = bench.open(id);
@@ -449,7 +450,7 @@ const Scenario watchSourcesRead{"A watch reads through the source the applicatio
                                             require(valueOf(nodesOf(page).front()).contains("2^53 - 1"));
                                             requireEqual(countOf(nodesOf(page).front()), std::size_t{0});
                                         }
-                                        Endless    largest{.count = (std::size_t{1} << 53) - 1};
+                                        Endless    largest{.count = static_cast<std::size_t>((std::uint64_t{1} << 53) - 1)};
                                         const auto id   = bench.watch("largest", visiting(largest));
                                         const auto page = bench.open(id, 3);
                                         requireEqual(kindOf(nodesOf(page).front()), std::string{"sequence"});
