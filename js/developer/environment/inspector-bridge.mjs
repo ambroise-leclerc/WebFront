@@ -72,7 +72,7 @@ export function createBridgeMonitor({target, clock = () => performance.now(), no
     let followed = null, sequence = 0, until = 0, timer = null;
 
     function follow(bridge) {
-        const state = {bridge, since: now(), pending: new Set(), pendingTotal: 0, rejections: [], rejected: 0, js: new Map(), jsOthers: 0};
+        const state = {bridge, since: now(), pending: new Set(), tracked: new WeakSet(), rejections: [], rejected: 0, js: new Map(), jsOthers: 0};
         const settle = (entry, failed, error) => {
             if (!state.pending.delete(entry)) return;
             if (!failed) return;
@@ -83,7 +83,9 @@ export function createBridgeMonitor({target, clock = () => performance.now(), no
         const track = (name, started, resolve, reject) => {
             const entry = {id: ++sequence, name: boundedText(name), started};
             state.pending.add(entry);
-            return [value => { settle(entry, false); resolve(value); }, error => { settle(entry, true, error); reject(error); }];
+            const settlers = [value => { settle(entry, false); resolve(value); }, error => { settle(entry, true, error); reject(error); }];
+            state.tracked.add(settlers[0]);
+            return settlers;
         };
         // Nothing here may throw: a probe that fails must never fail a call of the application.
         state.probe = {
@@ -101,17 +103,25 @@ export function createBridgeMonitor({target, clock = () => performance.now(), no
                 } catch { /* never the application's problem */ }
             },
         };
-        // The calls made before the probe came: their name is known, not when they started.
-        try {
-            for (const call of bridge.pendingCalls?.values() ?? []) {
-                if (typeof call?.resolve !== 'function' || typeof call?.reject !== 'function' || ownTraffic(call.name)) continue;
-                [call.resolve, call.reject] = track(call.name ?? '(unknown)', null, call.resolve, call.reject);
-            }
-        } catch { /* a bridge of another version: only the calls made from now on are followed */ }
+        // The calls made while no probe was there (before the first read, or between two leases): their name is known, not
+        // when they started. A call that is already followed is left as it is.
+        state.adopt = () => {
+            try {
+                for (const call of bridge.pendingCalls?.values() ?? []) {
+                    if (typeof call?.resolve !== 'function' || typeof call?.reject !== 'function' || state.tracked.has(call.resolve)
+                        || ownTraffic(call.name)) continue;
+                    [call.resolve, call.reject] = track(call.name ?? '(unknown)', null, call.resolve, call.reject);
+                }
+            } catch { /* a bridge of another version: only the calls made from now on are followed */ }
+        };
         return state;
     }
 
-    const install = () => { if (followed && followed.bridge.probe !== followed.probe) followed.bridge.probe = followed.probe; };
+    function install() {
+        if (!followed || followed.bridge.probe === followed.probe) return;
+        followed.adopt();
+        followed.bridge.probe = followed.probe;
+    }
     function release() {
         timers.clearTimeout(timer);
         timer = null;
@@ -244,10 +254,20 @@ export function createBridgePublisher({monitor, bridge, host, view, period = pub
     async function publish() {
         timer = null;
         let wanted = false;
+        let forgotten = false;
         try { wanted = await bridge.cppFunction(publishFunction)(host, bridge.list(toRows(monitor.read()))); }
-        catch { /* the connection is gone, or the page is no longer admitted: a later request starts again */ }
+        catch (error) {
+            // The connection is gone, or the page is no longer admitted: a later request starts again. A page that the relay
+            // forgot (it keeps a bounded number of them) announces itself again.
+            forgotten = error?.code === 'webfront.inspector.unknown';
+        }
         if (wanted === true && !stopped) timer = view.setTimeout(publish, period);
         else running = false;
+        if (forgotten && !stopped) announce();
+    }
+    async function announce() {
+        try { if (await bridge.cppFunction(sourceFunction)(host) === true) start(); }
+        catch { /* an older library: the attached panel still reads the monitor */ }
     }
     function start() {
         if (running || stopped) return;
@@ -258,10 +278,7 @@ export function createBridgePublisher({monitor, bridge, host, view, period = pub
     return {
         get running() { return running; },
         start,
-        async announce() {
-            try { if (await bridge.cppFunction(sourceFunction)(host) === true) start(); }
-            catch { /* an older library: the attached panel still reads the monitor */ }
-        },
+        announce,
         stop() {
             stopped = true;
             view.clearTimeout(timer);

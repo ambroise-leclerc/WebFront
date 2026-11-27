@@ -787,7 +787,8 @@ appels. Cet état vit dans la page de l'application.
   qui pose la sonde à sa première lecture et la retire cinq secondes après la dernière : un pont que personne n'inspecte
   n'enregistre rien. Il suit le pont de l'interface (le `webFront` du cadre de l'aperçu, là où l'application appelle
   C++), ou celui de la page hôte quand l'interface n'en a pas ; un cadre rechargé donne un nouvel état. Les appels en
-  attente à l'arrivée de la sonde sont repris avec leur nom, sans durée connue. Les appels de l'inspecteur lui-même
+  attente quand la sonde est posée (à la première lecture, ou après un bail échu) sont repris avec leur nom, sans durée
+  connue. Les appels de l'inspecteur lui-même
   (`webfront.inspector.*`, `wfInspect.*`) ne sont pas suivis. L'état est borné : 100 appels en attente (les plus
   anciens), 50 rejets (les plus récents), 100 fonctions JavaScript (les plus appelées, sur 1 000 noms comptés un par un),
   textes de 256 octets coupés sur une frontière de caractère, caractères de contrôle rendus visibles.
@@ -807,7 +808,8 @@ appels. Cet état vit dans la page de l'application.
   pause laisse donc la page se taire, et la sonde quitter le pont.
 - **Bornes du relais.** Un état de plus de 256 lignes est refusé (`std::invalid_argument`) sans remplacer le précédent ;
   chaque texte est borné par `boundedText` (256 octets, 16 pour le genre). C++ garde l'état de 16 pages au plus : une page
-  déconnectée est oubliée, et au-delà la page lue le moins récemment cède sa place. Une publication sans annonce est
+  déconnectée est oubliée, et au-delà la page lue le moins récemment cède sa place. Une page qui a perdu sa place
+  s'annonce de nouveau quand son panneau est détaché, ou quand sa publication est refusée. Une publication sans annonce est
   refusée (`webfront.inspector.unknown`).
 
 Les deux panneaux affichent les mêmes lignes : le panneau rattaché passe l'état du moniteur par le même encodage en

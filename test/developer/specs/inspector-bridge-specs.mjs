@@ -261,6 +261,26 @@ describe('The panel of the bridge in the page', () => {
             expect(state.rejections.map(rejection => rejection.name)).toEqual(['app.slow']);
         });
 
+        it('adopts, when it reads again, the calls made after its probe left, and follows once those it already followed', async () => {
+            const bridge = fakeWebFront(), time = manualTime();
+            const monitor = monitorOf(bridge, time, {lease: 1000});
+            monitor.read();
+            const followedCall = bridge.call('app.followed');
+            time.advance(2000);
+            expect(bridge.probe).toBeNull();
+            const between = bridge.call('app.between');
+            const state = monitor.read();
+            expect(state.pending.map(({name, elapsed}) => [name, elapsed])).toEqual([['app.followed', 2000], ['app.between', null]]);
+            expect(state.pendingTotal).toBe(2);
+            between.reject(new Error('seen after all'));
+            followedCall.resolve();
+            await followedCall.promise;
+            const after = monitor.read();
+            expect(after.pending).toEqual([]);
+            expect(after.rejections.map(({name, reason}) => [name, reason])).toEqual([['app.between', 'seen after all']]);
+            expect(after.rejectedTotal).toBe(1);
+        });
+
         it('shows the oldest pending calls within its bound, and counts them all', () => {
             const bridge = fakeWebFront(), time = manualTime();
             const monitor = monitorOf(bridge, time);
@@ -429,6 +449,27 @@ describe('The panel of the bridge in the page', () => {
             const {relay, publisher} = setup({wanted: true});
             await publisher.announce();
             await settled();
+            expect(relay.published.get('host-a').publication).toBe(1);
+            expect(publisher.running).toBeTrue();
+            publisher.stop();
+        });
+
+        it('announces itself again when the relay forgot the page, and goes on publishing if a panel waits', async () => {
+            const {relay, publisher} = setup({wanted: true});
+            const answer = relay.cppFunction;
+            let forgotten = true;
+            relay.cppFunction = name => async (...args) => {
+                if (name === publishFunction && forgotten) {
+                    relay.calls.push([name, args[0]]);
+                    throw Object.assign(new Error('This page did not announce the state of its bridge'), {code: 'webfront.inspector.unknown'});
+                }
+                if (name === sourceFunction) forgotten = false;
+                return answer(name)(...args);
+            };
+            publisher.start();
+            await settled();
+            await settled();
+            expect(relay.calls.map(call => call[0])).toEqual([publishFunction, sourceFunction, publishFunction]);
             expect(relay.published.get('host-a').publication).toBe(1);
             expect(publisher.running).toBeTrue();
             publisher.stop();

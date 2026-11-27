@@ -380,6 +380,8 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
      * window closed meanwhile) is closed then: the panel stays in the floating window, or closed.
      */
     async function openDetached(id, container) {
+        // The relay keeps a bounded number of pages: one that lost its place announces itself again when its panel is detached.
+        if (id === 'typescript.bridge' && containers?.host) publisher.announce();
         if (container === 'window') {
             const rect = shown(), started = action;
             const attempt = {cancelled: false};
