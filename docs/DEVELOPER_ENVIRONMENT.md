@@ -494,6 +494,20 @@ environment's `mount`, not to the embedded bootstrap page):
   callback has not answered yet. It also gives the number of running tasks of the server's scope (connections, bridge
   loops and the application's coroutines) and the application's terminal commands (`webfront::Commands`).
 
+  The **Packages** panel shows the locked packages as a tree, what `wf list --tree`, `wf why` and `wf info` say as text:
+  the roots of the manifest with the range each was requested with, then under each package its dependencies with the
+  range that asks for them. A `peer` or `optional` dependency is marked; a package that comes again is marked `deduped`
+  and is not opened again (the Right arrow goes from it to the place where its dependencies are listed); a package
+  locked in several versions shows how many. The tree is walked with the arrow keys, Home and End; Left and Right fold
+  and unfold. The search field lists the packages whose name holds what is typed, every version of them. A click on a
+  package (or Enter) shows its detail: whether it is a root, its description, license, integrity, directory and files,
+  its dependencies and dependents, its `wf exec` entries, and the chains of `wf why` from the roots, in which each
+  package is a link to its own detail. The panel reads the manifest and the lock through the project reads of the
+  environment (`webfront.developer.read`), in the manifest directory the application chose; it uses no network and writes
+  nothing. Every second it asks whether either file changed and reads them again when one did, so the tree follows
+  `wf install` and `wf restore`; it warns when the lock no longer matches the manifest. The names and texts of packages
+  are not trusted: they are shown as text, never as HTML, with their control characters made visible.
+
   The **Bridge** panel shows the state of the bridge in the page of the interface (the `webFront` of the preview frame,
   or of the developer page while no interface has one): whether `webFront.ready` is pending, resolved or rejected and
   why, the state of the connection, the `cppFunction` calls that C++ has not answered yet and for how long, the Promises
@@ -505,7 +519,7 @@ environment's `mount`, not to the embedded bootstrap page):
   The inspectors' own calls are not shown. Attached, the panel reads the page directly; detached, its window does not
   see the page, so the page publishes the same state to C++ every 250 ms while the panel reads, and stops within
   fifteen seconds of its last read (`webfront.inspector.bridgeSource`, `publishBridge` and `bridge`, admitted pages
-  only). The **Packages** panel comes with the next versions of the environment.
+  only).
 
 The tab is a button (`aria-expanded`, `aria-haspopup="menu"`, 44 px target), its menu a `menu` of `menuitem`s of 44 px,
 and the window a non-modal dialog. The interface stays in the preview

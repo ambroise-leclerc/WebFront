@@ -2,10 +2,11 @@
 // bridge. In a window or a tab of its own it opens its own connection; in the floating window of a page (?frame=1) it opens
 // none and borrows that page's bridge, since the adapters give the proof of the view to the main frame only. The panel of the
 // watches lists them by webfront.inspector.watches and follows the registrations and removals (section 3, "Découverte"). The
-// panels of the functions and of the browsers are in inspector-registry.mjs (#681, section 7), the panel of the bridge in the
-// page in inspector-bridge.mjs (#684).
+// panels of the functions and of the browsers are in inspector-registry.mjs (#681, section 7), the one of the packages in
+// inspector-packages.mjs (#683), the one of the bridge in the page in inspector-bridge.mjs (#684).
 import {inspectorPanels as panels, panelTitle, inspectorChannel as channelName} from './menu.mjs';
 import {showFunctionsPanel, showBrowsersPanel, registryStyles} from './inspector-registry.mjs';
+import {showPackagesPanel, packagesStyles} from './inspector-packages.mjs';
 import {showBridgePanel, bridgeSource, bridgeStyles} from './inspector-bridge.mjs';
 
 // What a page of the application's origin reads a published state with, as a detached Bridge panel does.
@@ -202,10 +203,6 @@ ul.watches .kind{color:#d7fa85;font-family:ui-monospace,monospace;font-size:12px
 ul.watches .location{grid-column:1/3;color:#a9b3c4;font-size:12px;overflow-wrap:anywhere}
 ul.watches .writable{color:#8fd0ff;font-size:12px}`;
 
-const placeholders = {
-    'typescript.packages': 'The tree of the locked packages comes with the next versions of the environment.',
-};
-
 /** Renders the list of the watches in `list`, one item per watch, kept by id so that a removal removes its item. */
 export function renderWatches(list, watches) {
     const page = list.ownerDocument;
@@ -258,7 +255,7 @@ export async function main(view = window) {
     page.title = `WebFront inspector: ${panelTitle(id)}`;
     reloadWhenRestored(view);
     const style = page.createElement('style');
-    style.textContent = styles + registryStyles + bridgeStyles;
+    style.textContent = styles + registryStyles + packagesStyles + bridgeStyles;
     page.head.append(style);
     const header = page.createElement('header');
     const heading = page.createElement('h1');
@@ -307,12 +304,9 @@ export async function main(view = window) {
         const show = id === 'cpp.functions' ? showFunctionsPanel : showBrowsersPanel;
         return {bridge, ...await show({page, view, header, body, status, bridge})};
     }
+    if (id === 'typescript.packages') return {bridge, ...await showPackagesPanel({page, view, header, body, status, bridge})};
     if (id === 'typescript.bridge')
         return {bridge, ...await showBridgePanel({page, view, header, body, status, source: bridgeSource({view, bridge, framed, host: params.get('host')})})};
-    if (id !== 'cpp.watches') {
-        status.textContent = placeholders[id];
-        return {bridge};
-    }
     const list = page.createElement('ul');
     list.className = 'watches';
     list.setAttribute('aria-label', 'Watches');

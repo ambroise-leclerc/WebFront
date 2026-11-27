@@ -379,6 +379,11 @@ describe('The inspectors', () => {
             } finally { inspector.close(); }
         });
 
+        // Waits for what a message of the channel causes, two seconds at most: the expectation that follows says what is missing.
+        async function delivered(done) {
+            for (let waited = 0; !done() && waited < 2000; waited += 5) await new Promise(resolve => setTimeout(resolve, 5));
+        }
+
         it('attaches a panel again only in the page that detached it', async () => {
             const {host: mine} = await testHost({containers: admitted(true), hostId: 'host-a'});
             const {host: other, storage: otherStorage} = await testHost({containers: admitted(true), hostId: 'host-b'});
@@ -387,7 +392,8 @@ describe('The inspectors', () => {
                 const answers = [];
                 inspector.addEventListener('message', ({data}) => { if (data?.type === 'attached') answers.push(data.id); });
                 inspector.postMessage({type: 'attach', panel: 'cpp.watches', host: 'host-a', id: 'request-a'});
-                await new Promise(resolve => setTimeout(resolve, 50));
+                await delivered(() => answers.length > 0);
+                await new Promise(resolve => setTimeout(resolve, 50));  // and nobody else answers
                 expect(answers).toEqual(['request-a']);
                 expect(mine.shownPanel).toBe('cpp.watches');
                 expect(other.shownPanel).toBeNull();
@@ -419,12 +425,13 @@ describe('The inspectors', () => {
             const {host, calls} = await testHost({containers: admitted(true), closeWindow: () => new Promise(resolve => { closed = resolve; })});
             await host.detach('cpp.watches');
             const answer = askAttach('cpp.watches', 'request-close');  // answered once the close is over
-            await new Promise(resolve => setTimeout(resolve, 20));
+            const names = () => calls.map(([name]) => name).filter(name => name.endsWith('Window'));
+            // The request crosses the channel in its own time (more than 20 ms on a loaded WebView2 runner): waited for, not timed.
+            await delivered(() => names().includes('webfront.inspector.closeWindow'));
             expect(host.preferences.detached.has('cpp.watches')).toBeFalse();
             // The user detaches it again while the close is in progress: the window opens only once the close is over.
             const detaching = host.detach('cpp.watches');
             await new Promise(resolve => setTimeout(resolve));
-            const names = () => calls.map(([name]) => name).filter(name => name.endsWith('Window'));
             expect(names()).toEqual(['webfront.inspector.openWindow', 'webfront.inspector.closeWindow']);
             closed(true);
             expect((await answer).closer).toBe('host');

@@ -158,9 +158,49 @@ try {
     }
     let lock;
     if (wants('app')) {
-        await execute(['install', 'react@19.3.1', 'react-dom@19.3.1'], context);
-        lock = await runtime.readLock(webFront);
-        assert(lock.manifestDigest?.length === 64, 'The lock must record the digest of the manifest dependencies');
+        // The Packages panel of the inspectors (#683), in the inspector's page with a connection of its own, as a detached tab
+        // has: it reads the project of Life, which has no lock yet, and follows the lock that wf install writes.
+        const packages = document.createElement('iframe');
+        packages.title = 'WebFront inspector: packages';
+        packages.style.cssText = 'position:fixed;left:0;top:0;width:760px;height:520px;border:0;z-index:2147483647;background:#141821';
+        packages.src = '/webfront/developer/environment/inspector.html?panel=typescript.packages';
+        document.body.append(packages);
+        try {
+            const panel = () => packages.contentDocument;
+            const tree = () => [...(panel()?.querySelectorAll('ul.packages [role=treeitem]') ?? [])].map(item => {
+                const row = item.querySelector(':scope > .row');
+                return [item.getAttribute('aria-level'), row.querySelector('.package-name').textContent,
+                    ...[...row.querySelectorAll('.badge')].map(badge => badge.textContent)].join(' ');
+            });
+            const shown = () => `${panel()?.querySelector('.status:not(.attach-status)')?.textContent} ${JSON.stringify(tree())}`;
+            const slowly = {attempts: 600};
+            await eventually(() => /No installed packages/.test(panel()?.querySelector('.status:not(.attach-status)')?.textContent ?? ''),
+                () => `The Packages panel must say that a project without a lock has no package: ${shown()}`, slowly);
+            assert(tree().length === 0, `A project without a lock has no tree: ${shown()}`);
+
+            await execute(['install', 'react@19.3.1', 'react-dom@19.3.1'], context);
+            lock = await runtime.readLock(webFront);
+            assert(lock.manifestDigest?.length === 64, 'The lock must record the digest of the manifest dependencies');
+
+            // The lock changed: the panel reads it again by itself. react-dom brings scheduler and its peer react.
+            await eventually(() => tree().length === 4, () => `The Packages panel must follow the lock that wf install wrote: ${shown()}`, slowly);
+            const lines = tree();
+            assert(lines[0] === '1 react@19.3.1' && lines[1] === '1 react-dom@19.3.1' && lines[2] === '2 react@19.3.1 peer' && /^2 scheduler@\S+$/.test(lines[3]),
+                `The Packages panel must show the packages of Life under their roots: ${shown()}`);
+            assert(panel().querySelector('.summary').textContent === '2 roots, 3 packages', `The panel must count the roots and the packages: ${shown()}`);
+            // One click on a package gives what wf info and wf why say of it.
+            [...panel().querySelectorAll('ul.packages .package-name')].find(name => name.textContent.startsWith('scheduler@')).click();
+            const detail = () => panel().querySelector('.package-detail');
+            assert(!detail().hidden && /^react-dom@19\.3\.1 \(root, 19\.3\.1\) > scheduler@/.test(detail().querySelector('ol.chains li').textContent),
+                `A click on a package must give its chains from the roots: ${detail().textContent}`);
+            assert(/License\s*MIT/.test(detail().querySelector('dl').textContent) && /sha512-/.test(detail().querySelector('dl').textContent),
+                `A click on a package must describe it: ${detail().textContent}`);
+            const search = panel().querySelector('input[type=search]');
+            search.value = 'dom';
+            search.dispatchEvent(new Event('input'));
+            const found = [...panel().querySelectorAll('ul.matches button')].map(button => button.textContent);
+            assert(found.length === 1 && found[0] === 'react-dom@19.3.1', `The search must find the packages by name: ${found}`);
+        } finally { packages.remove(); }
     }
     const manifest = JSON.parse(new TextDecoder().decode(await readFile('webfront.project.json')));
     if (wants('app')) assert(manifest.dependencies.react === '19.3.1' && manifest.dependencies['react-dom'] === '19.3.1', 'The manifest must record the requested ranges');

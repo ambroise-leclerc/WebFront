@@ -35,6 +35,7 @@
       "test/developer/specs/inspector-specs.mjs",
       "test/developer/specs/inspector-registry-specs.mjs",
       "test/developer/specs/inspector-bridge-specs.mjs",
+      "test/developer/specs/inspector-packages-specs.mjs",
       "test/developer/specs/files-specs.mjs",
       "test/developer/specs/dependencies-specs.mjs",
       "test/developer/specs/distribution-specs.mjs"
