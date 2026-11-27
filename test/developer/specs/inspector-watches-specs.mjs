@@ -407,6 +407,66 @@ describe('The tree of a watch', () => {
         bridge.answers[functions.children] = children;
     });
 
+    it('keeps unfolded a list whose next page the full memory refuses, so that it can be folded', async () => {
+        const bridge = fakeWatch(Array.from({length: 6}, (unused, index) => `v${index}`), {pageSize: 2});
+        const tree = createWatchTree({bridge, watch: 1});
+        await tree.open();
+        const children = bridge.answers[functions.children];
+        bridge.answers[functions.children] = () => { throw Object.assign(new Error('memory full'), {code: codes.limit}); };
+        await tree.load('', 2);
+        expect(tree.expanded.has('')).toBeTrue();
+        expect(tree.problem).toBe('memory full');
+        bridge.answers[functions.children] = children;
+    });
+
+    it('builds the tree again at the next refresh when the reading of a resynchronization fails', async () => {
+        const bridge = fakeWatch(['a', 'b']);
+        const tree = createWatchTree({bridge, watch: 1});
+        await tree.open();
+        bridge.answers[functions.reset]();  // the next pass answers a resynchronization
+        const children = bridge.answers[functions.children];
+        bridge.answers[functions.children] = () => { throw Object.assign(new Error('the executor has no loop'), {code: codes.unavailable}); };
+        await expectAsync(tree.refresh()).toBeRejected();
+        expect(tree.nodes.size).toBe(0);
+        bridge.answers[functions.children] = children;
+        expect(await tree.refresh()).toBeTrue();
+        expect([...tree.nodes.keys()]).toEqual(['', '/#0', '/#1']);
+    });
+
+    it('sends nothing more when it is closed while it opens, or while it reads a full value', async () => {
+        const bridge = fakeWatch(['abcdefgh']);
+        const opened = createWatchTree({bridge, watch: 1});
+        await opened.open();
+        const tree = createWatchTree({bridge, watch: 1});
+        const release = bridge.hold(functions.limits);
+        const opening = tree.open();
+        await Promise.resolve();
+        tree.stop();
+        const before = bridge.calls.length;
+        release();
+        await opening.catch(() => {});
+        expect(bridge.calls.slice(before).map(([name]) => name)).not.toContain(functions.reset);
+        const value = bridge.answers[functions.value];
+        bridge.answers[functions.value] = (...args) => { opened.stop(); return value(...args); };
+        await expectAsync(opened.fullValue('/#0')).toBeRejectedWithError('The tree is closed');
+    });
+
+    it('starts no new reading of a full value once it is closed, even after a fragment refused as stale', async () => {
+        const bridge = fakeWatch(['abcdefgh']);
+        const tree = createWatchTree({bridge, watch: 1});
+        await tree.open();
+        const value = bridge.answers[functions.value];
+        bridge.answers[functions.value] = (...args) => {
+            if (args[2] === 0) return value(...args);  // the first fragment of an attempt
+            tree.stop();                               // closed while the next fragment is awaited
+            throw Object.assign(new Error('replaced'), {code: codes.stale});
+        };
+        const before = bridge.calls.length;
+        await expectAsync(tree.fullValue('/#0')).toBeRejectedWithError('The tree is closed');
+        const initial = bridge.calls.slice(before).filter(([name, , , snapshot]) => name === functions.value && snapshot === 0);
+        expect(initial.length).withContext('no initial request after the closure').toBe(1);
+    });
+
     it('tells once that its watch is gone, and sends nothing more', async () => {
         const bridge = fakeWatch(['a']);
         let gone = 0;

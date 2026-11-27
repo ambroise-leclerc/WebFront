@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <set>
@@ -100,6 +101,11 @@ struct Rendered {
         std::tie(value, cut) = visibleText(sink.text(), maxTextBytes, true);
         altered              = !cut && value != sink.text();
         count                = ops.container ? ops.size(view.node) : 0;
+        // The number travels as a double: beyond 2^53 it would no longer be exact, and could not be read back.
+        // Compared in 64-bit integers, where 2^53 fits whatever the width of size_t: a 32-bit count never reaches it, and no
+        // shift or conversion out of range is compiled there. JavaScript's safe integers stop at 2^53 - 1.
+        if (static_cast<std::uint64_t>(count) >= std::uint64_t{1} << 53)
+            throw std::length_error("more elements than a page can tell (2^53 - 1)");
     } catch (const std::exception& error) {
         failed = true;
         value  = exceptionValue(error.what());
@@ -637,6 +643,19 @@ private:
                     consistent = false;
                 }
             }
+            // With keys, every element served must still be where it was: one replaced before the last one served keeps
+            // the number of children and the place of that last one (one call of key() per position the memory holds).
+            if (consistent && ops.keyed)
+                for (const auto& [position, loaded] : entry.positions) {
+                    const std::string_view segment = std::string_view{loaded}.substr(path.size() + 1);
+                    if (!segment.starts_with('k'))
+                        continue;
+                    const auto key = usableKey(view.node, position);
+                    if (!key || 'k' + encodeKey(*key) != segment) {
+                        consistent = false;
+                        break;
+                    }
+                }
             if (!consistent) {
                 dropDescendants(path, nullptr);
                 entry.positions.clear();
