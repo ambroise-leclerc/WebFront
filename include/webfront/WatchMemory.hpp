@@ -176,7 +176,7 @@ inline bool descend(const ChildView& here, std::span<const Segment> segments, st
             ops.visit(here.node, *position, 1, [&](const ChildView& child) {
                 ChildView named                       = child;
                 std::tie(named.label, named.labelCut) = visibleText(segment.key, maxTextBytes, true);
-                found                                 = descend(named, segments.subspan(1), level + 1, false, at);
+                found                                 = descend(named, segments.subspan(1), level + 1, positional, at);
                 return false;
             });
         } else {
@@ -187,7 +187,7 @@ inline bool descend(const ChildView& here, std::span<const Segment> segments, st
                 return false;
             ops.visit(here.node, position, 1, [&](const ChildView& child) {
                 if (child.rank == segment.number)
-                    found = descend(child, segments.subspan(1), level + 1, ops.keyed, at);
+                    found = descend(child, segments.subspan(1), level + 1, positional || ops.keyed, at);
                 return false;
             });
         }
@@ -397,11 +397,12 @@ public:
                 if (std::get<3>(now.node) != expected || now.ops != entry.ops || now.aux != entry.aux || (flagsOf(now.node) & flag::writable) == 0)
                     return false;
                 reached = true;
+                // A mutator may change the container being walked: it is called once the walk is over. An assignment writes
+                // the node where it is.
+                if (access.mutate)
+                    return true;
                 try {
-                    if (access.mutate)
-                        access.mutate(root.object, path, text);
-                    else
-                        apply(view.node);
+                    apply(view.node);
                     applied = true;
                 } catch (const std::exception& error) {
                     code    = inspect::code::refused;
@@ -410,12 +411,23 @@ public:
                     code    = inspect::code::refused;
                     message = "The application refused the value";
                 }
-                // The assignment wrote the node in place. A mutator may have done anything to the object, the container that
-                // held the node included: nothing read before it is used again.
-                if (applied && !access.mutate)
+                if (applied)
                     store(entry, render(view, std::string(at), positional, access.writable));
                 return true;
             });
+            if (whole && reached && access.mutate) {
+                try {
+                    access.mutate(root.object, path, text);
+                    applied = true;
+                } catch (const std::exception& error) {
+                    code    = inspect::code::refused;
+                    message = boundedText(error.what());
+                } catch (...) {
+                    code    = inspect::code::refused;
+                    message = "The application refused the value";
+                }
+            }
+            // A mutator may have done anything to the object: nothing read before it is used again.
             if (applied && access.mutate)
                 static_cast<void>(descend(rootView(access, root), segments, 0, false, [&](std::size_t level, const ChildView& view, bool positional) {
                     if (level != segments.size())
@@ -424,7 +436,9 @@ public:
                         store(found->second, render(view, std::string(path), positional, access.writable));
                     return true;
                 }));
-            if (!whole || !reached)
+            // A source that fails after the value was assigned (a paged source that throws once it gave the element) does
+            // not make the write stale: it was applied.
+            if ((!whole || !reached) && !applied)
                 code = inspect::code::stale;
             answer = {static_cast<double>(++current), std::move(code), std::move(message)};
         });
@@ -653,7 +667,8 @@ private:
             std::optional<std::string> key;
         };
         std::vector<Pending> pending;
-        std::size_t          fresh = 0;  // the entries the page adds to the memory
+        std::size_t          fresh = 0;      // the entries the page adds to the memory
+        bool                 moved = false;  // a key of this page was served at another position
         const auto           each  = [&](const ChildView& child) {
             ChildView  shown = child;
             const auto key   = usableKey(view.node, child.position);
@@ -661,12 +676,20 @@ private:
                 std::tie(shown.label, shown.labelCut) = visibleText(*key, maxTextBytes, true);
             const auto told     = numberSegment(ops.letter, child.rank);
             const auto childAt  = childPath(path, key ? 'k' + encodeKey(*key) : told);
-            auto       rendered = render(shown, childAt, ops.keyed && !key, access.writable);
+            auto       rendered = render(shown, childAt, positional || (ops.keyed && !key), access.writable);
             // A keyed child may yet be told by its position (a key that another child of the page has too): the page keeps
             // room for the longer of its two paths.
             const auto longer = (std::max)(childAt.size(), path.size() + 1 + told.size());
             const auto bytes  = nodeBytes(rendered.node) + stringBytes(longer) - stringBytes(childAt.size());
             const bool added  = !nodes.contains(childAt);
+            if (start > 0 && key) {
+                // A key served at another position of this list: the source moved its elements between two pages.
+                for (const auto& [position, loaded] : entry.positions)
+                    if (loaded == childAt && position != child.position) {
+                        moved = true;
+                        return false;
+                    }
+            }
             if (used + bytes > budget || (added && nodes.size() + fresh >= limits.maxNodes))
                 return false;
             used  += bytes;
@@ -680,6 +703,14 @@ private:
         } catch (...) {
             // A paged source that fails while it gives its elements: the page serves those it gave, and ends there.
             failed = true;
+        }
+        if (moved) {
+            // As when the number of children changed (rule 2): the list starts again from its first position.
+            dropDescendants(path, nullptr);
+            entry.positions.clear();
+            entry.lastKey.reset();
+            std::get<5>(served.front()) = static_cast<double>(flagsOf(served.front()) | flag::childrenChanged);
+            return 0;
         }
 
         // Two elements of a page with the same key break the key's contract: both are told by their position, and neither
@@ -785,7 +816,7 @@ private:
                     ++visited;
                     const std::string_view recorded = std::string_view{loaded->second}.substr(path.size() + 1);
                     ChildView              shown    = child;
-                    bool                   byPlace  = false;
+                    bool                   byPlace  = positional;  // under a parent told by its position, so is every child
                     // A keyed child is labelled by its key, also when it is told by its position (a key that repeats).
                     const auto key = usableKey(view.node, child.position);
                     if (key)
@@ -796,7 +827,7 @@ private:
                             return false;
                         }
                     } else {
-                        byPlace = ops.keyed;
+                        byPlace = positional || ops.keyed;
                         if (numberSegment(ops.letter, ops.keyed ? child.position : child.rank) != recorded) {
                             structure = true;
                             return false;

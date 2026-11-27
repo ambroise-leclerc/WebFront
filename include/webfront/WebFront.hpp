@@ -2113,8 +2113,13 @@ private:
             document->close();
         domDocuments.clear();
         std::map<WebLinkId, Connection> released;
-        std::scoped_lock                lock{linksMutex};
-        released.swap(webLinks);
+        {
+            std::scoped_lock lock{linksMutex};
+            released.swap(webLinks);
+        }
+        // Their closure is not reported during shutdown: what the inspectors kept for them is freed here.
+        for (const auto& [id, connection] : released)
+            forgetInspectorSession(connection.generation);
     }
 
     /// The type-erased handler of a C++ function, as cppFunction<R, Args...> registers it.

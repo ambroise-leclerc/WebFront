@@ -246,6 +246,18 @@ public:
         std::scoped_lock lock{mutex};
         return snapshot.has_value();
     }
+    /// Frees what this connection keeps of a watch: its memory and, when it is the watch's, the snapshot.
+    void drop(std::uint64_t watch) noexcept {
+        std::shared_ptr<detail::Memory> released;
+        std::optional<detail::Snapshot> snapshotReleased;
+        std::scoped_lock                lock{mutex};
+        if (const auto found = memories.find(watch); found != memories.end()) {
+            released = std::move(found->second);
+            memories.erase(found);
+        }
+        if (snapshot && snapshot->watch == watch)
+            snapshotReleased.swap(snapshot);
+    }
 
 private:
     friend class WatchRegistry;
@@ -421,7 +433,7 @@ private:
      * it was removed is replaced by the terminal refusal: its revision would be that of a memory that no longer exists.
      */
     template <typename Operation>
-    static auto perform(Core& core, Operation&& operation, const bool* written = nullptr) {
+    static auto perform(Core& core, Operation&& operation, const bool* written = nullptr, WatchSession* session = nullptr) {
         {
             std::scoped_lock lock{core.lifecycle};
             if (core.removed)
@@ -436,9 +448,17 @@ private:
                 core.idle.notify_all();
             }
         };
+        // A watch removed while the operation ran: what the operation kept for the connection (a memory it created again)
+        // is freed, since the removal may have cleaned the session before.
         const auto removed = [&] {
-            std::scoped_lock lock{core.lifecycle};
-            return core.removed;
+            {
+                std::scoped_lock lock{core.lifecycle};
+                if (!core.removed)
+                    return false;
+            }
+            if (session != nullptr)
+                session->drop(core.id);
+            return true;
         };
         Done done{core};
         try {
@@ -451,6 +471,13 @@ private:
                 throw gone(written != nullptr && *written);
             throw;
         }
+    }
+
+    /// Whether the watch is being removed. Read under a session's lock, it orders a publication in that session with the
+    /// removal, which takes the session's lock after it marks the watch.
+    [[nodiscard]] static bool removing(Core& core) {
+        std::scoped_lock lock{core.lifecycle};
+        return core.removed;
     }
 
 public:
@@ -503,30 +530,46 @@ public:
                   double                               count,
                   const Limits&                        limits) {
         const auto core = find(watch);
-        return perform(*core, [&] {
-            return from->memory(core->id)->children(core->access, path, revision, start, count, limits);
-        });
+        return perform(
+            *core,
+            [&] {
+                return from->memory(core->id)->children(core->access, path, revision, start, count, limits);
+            },
+            nullptr,
+            from.get());
     }
 
     Page changes(const std::shared_ptr<WatchSession>& from, double watch, double revision, double cursor, double count, const Limits& limits) {
         const auto core = find(watch);
-        return perform(*core, [&] {
-            return from->memory(core->id)->changes(core->access, revision, cursor, count, limits);
-        });
+        return perform(
+            *core,
+            [&] {
+                return from->memory(core->id)->changes(core->access, revision, cursor, count, limits);
+            },
+            nullptr,
+            from.get());
     }
 
     Page fold(const std::shared_ptr<WatchSession>& from, double watch, std::string_view path, double revision) {
         const auto core = find(watch);
-        return perform(*core, [&] {
-            return from->memory(core->id)->fold(path, revision);
-        });
+        return perform(
+            *core,
+            [&] {
+                return from->memory(core->id)->fold(path, revision);
+            },
+            nullptr,
+            from.get());
     }
 
     double reset(const std::shared_ptr<WatchSession>& from, double watch) {
         const auto core = find(watch);
-        return perform(*core, [&] {
-            return from->memory(core->id)->reset();
-        });
+        return perform(
+            *core,
+            [&] {
+                return from->memory(core->id)->reset();
+            },
+            nullptr,
+            from.get());
     }
 
     WriteAnswer write(const std::shared_ptr<WatchSession>& from,
@@ -543,7 +586,8 @@ public:
             [&] {
                 return from->memory(core->id)->write(core->access, revision, path, expected, text, limits, applied);
             },
-            &applied);
+            &applied,
+            from.get());
     }
 
     /**
@@ -555,30 +599,38 @@ public:
     ValueAnswer
     value(const std::shared_ptr<WatchSession>& from, double watch, std::string_view path, double snapshotAsked, double offsetAsked, const Limits& limits) {
         const auto core = find(watch);
-        return perform(*core, [&]() -> ValueAnswer {
-            const auto snapshot = wholeNumber(snapshotAsked, "snapshot"), offset = wholeNumber(offsetAsked, "offset");
-            const auto room = limits.responseBudget - responseHeaderBytes;
-            if (snapshot == 0) {
-                if (offset != 0)
-                    throw detail::refusal(code::stale, "A new reading starts at the offset 0");
-                auto [text, capped] = from->memory(core->id)->value(core->access, path, limits.maxSnapshotBytes);
+        return perform(
+            *core,
+            [&]() -> ValueAnswer {
+                const auto snapshot = wholeNumber(snapshotAsked, "snapshot"), offset = wholeNumber(offsetAsked, "offset");
+                const auto room = limits.responseBudget - responseHeaderBytes;
+                if (snapshot == 0) {
+                    if (offset != 0)
+                        throw detail::refusal(code::stale, "A new reading starts at the offset 0");
+                    auto [text, capped] = from->memory(core->id)->value(core->access, path, limits.maxSnapshotBytes);
+                    std::scoped_lock lock{from->mutex};
+                    if (from->closed)
+                        throw webfront::detail::makeBridgeError(bridge_code::disconnected, "The connection is closed");
+                    // A watch removed meanwhile publishes nothing: its snapshot would replace another watch's, and nothing would
+                    // free it. A removal that comes after the publication frees it (it takes this lock once the watch is marked).
+                    if (removing(*core))
+                        throw gone(false);
+                    from->snapshot = detail::Snapshot{.id     = ++from->snapshots,
+                                                      .watch  = core->id,
+                                                      .path   = std::string(path),
+                                                      .text   = std::move(text),
+                                                      .next   = 0,
+                                                      .capped = capped};
+                    return fragment(*from, room);
+                }
                 std::scoped_lock lock{from->mutex};
-                if (from->closed)
-                    throw webfront::detail::makeBridgeError(bridge_code::disconnected, "The connection is closed");
-                from->snapshot = detail::Snapshot{.id     = ++from->snapshots,
-                                                  .watch  = core->id,
-                                                  .path   = std::string(path),
-                                                  .text   = std::move(text),
-                                                  .next   = 0,
-                                                  .capped = capped};
+                const auto&      kept = from->snapshot;
+                if (!kept || kept->id != snapshot || kept->watch != core->id || kept->path != path || kept->next != offset || offset == 0)
+                    throw detail::refusal(code::stale, "The snapshot is no longer the connection's: read the value again");
                 return fragment(*from, room);
-            }
-            std::scoped_lock lock{from->mutex};
-            const auto&      kept = from->snapshot;
-            if (!kept || kept->id != snapshot || kept->watch != core->id || kept->path != path || kept->next != offset || offset == 0)
-                throw detail::refusal(code::stale, "The snapshot is no longer the connection's: read the value again");
-            return fragment(*from, room);
-        });
+            },
+            nullptr,
+            from.get());
     }
 
     /// The bounds of the operations, as webfront.inspector.limits answers them.
@@ -723,6 +775,12 @@ template <typename Stored, typename State, bool visitor, bool stateful>
 }
 }  // namespace detail
 
+#ifdef _MSC_VER
+   // A source that always throws (a test of a failing source, an application's placeholder) makes the returns of the
+    // closure below provably unreachable for that instantiation; MSVC flags it under /WX. It is expected, not a bug.
+    #pragma warning(push)
+    #pragma warning(disable : 4702)
+#endif
 /// Builds a watch from its source, and optionally the state it owns, its executor and its mutator (BasicWF::watch).
 template <typename Shape, typename Source, typename State, typename Executor, typename Mutator>
 [[nodiscard]] std::shared_ptr<detail::WatchCore> makeWatch(std::string               name,
@@ -784,6 +842,9 @@ template <typename Shape, typename Source, typename State, typename Executor, ty
     }
     return core;
 }
+#ifdef _MSC_VER
+    #pragma warning(pop)
+#endif
 
 /**
  * @brief The handle of a watch, as UISubscription is the handle of a subscription: the watch exists while it lives, and

@@ -293,6 +293,21 @@ describe('The tree of a watch', () => {
         expect((await tree.write('/#1', 'B')).code).toBe('');
     });
 
+    it('checks what the edition was started on just before it sends the write', async () => {
+        const bridge = fakeWatch(['a', 'b']);
+        const tree = createWatchTree({bridge, watch: 1});
+        await tree.open();
+        const shown = tree.shown('/#1');
+        const release = bridge.hold(functions.fold);
+        const folding = tree.collapse('/#0');  // the write waits behind it
+        const writing = tree.write('/#1', 'B', 'b', shown);
+        tree.nodes.get('/#1').node.label = 'another';  // what a pass answered meanwhile would change
+        release();
+        await folding;
+        expect((await writing).code).toBe(codes.stale);
+        expect(bridge.calls.some(([name]) => name === functions.write)).toBeFalse();
+    });
+
     it('refuses in the page, without a call, a text longer than the bound', async () => {
         const bridge = fakeWatch(['a']);
         const tree = createWatchTree({bridge, watch: 1});
