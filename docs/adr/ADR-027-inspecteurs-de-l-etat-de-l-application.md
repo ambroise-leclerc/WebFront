@@ -651,6 +651,9 @@ les sections 3 à 6 laissaient ouvert :
   chemins qu'il avait dépliés et qui existent encore. Une passe le pose quand le nombre d'enfants d'un parent déplié a
   changé, ou quand le segment d'un enfant chargé n'est plus celui que la mémoire a enregistré (clé déplacée, alternative
   changée, `optional` vidé). Un nœud « retiré » n'est donc rapporté que par `children`, pour un chemin qui ne résout plus.
+- **Caractères de contrôle.** Une valeur qui en contient est affichée avec leurs images (section 4) : le texte montré
+  n'est plus celui de l'objet, et l'éditer réécrirait les images à la place des caractères. Un tel nœud n'est pas
+  modifiable, comme un nœud dont la valeur est tronquée.
 - **Mémoire.** La limite de 10 000 nœuds se compte par connexion **et par observateur**. Une page de `children` s'arrête
   quand elle l'atteindrait et rend le `suivant` qui la reprend ; l'appel suivant est refusé (`webfront.inspector.limit`).
 - **Clés.** Les clés d'une `PagedSource` sont des chaînes (`key` rend un type convertible en `std::string`, `find` reçoit

@@ -142,7 +142,8 @@ to fold some.
 A watch is read-only unless its source writes: a `Visit<T>` of a non-constant `T`, or a non-constant reference on an
 executor. A copy never writes. In a writable watch the panel edits in place (Enter writes, Escape cancels) the booleans,
 numbers, `std::string`, `std::bitset<N>` (N binary digits) and the fields of a described type, within their bounds and
-choices. A node whose label or value is cut, a constant member, and a keyed element shown by its position are not writable.
+choices. A node whose label or value is cut, a text that holds a control character (shown as its picture, which an edition
+would write back in its place), a constant member, and a keyed element shown by its position are not writable.
 
 A write carries what the panel displayed. Inside the same access as the assignment, WebFront checks that the target **and
 each of its ancestors** still show it (label, value, number of children); otherwise the write is refused as stale, the

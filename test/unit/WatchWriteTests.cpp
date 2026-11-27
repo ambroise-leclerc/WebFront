@@ -151,6 +151,12 @@ const Scenario watchWrites{"A value is written only where the application allows
                                then("each writable kind parses its own text", [&] {
                                    checkEqual(std::get<1>(write("/#1", "name", "other\nname")), std::string{});
                                    checkEqual(std::get<1>(board), std::string{"other\nname"});
+                                   // The value now shows a control character as its picture: writing what is shown would replace it, so the node
+                                   // is no longer writable.
+                                   checkEqual(codeOf([&] {
+                                                  return bench.write(id, revisionOf(page), "/#1", "other\xE2\x90\x8Aname", "x");
+                                              }),
+                                              std::string{code::readOnly});
                                    checkEqual(std::get<1>(write("/#2", "false", "true")), std::string{});
                                    check(std::get<2>(board));
                                    checkEqual(std::get<1>(write("/#3", "0001", "1010")), std::string{});
@@ -236,7 +242,7 @@ const Scenario watchWritesDescribed{"The fields of a described type are written 
                                             auto                    answer = bench.write(id, revisionOf(page), "/.0", "5", "9");
                                             requireEqual(std::get<1>(answer), std::string{});
                                             requireEqual(settings.speed, 9);
-                                            for (const std::string_view text : {"11", "0", "2.5", "fast"})
+                                            for (const std::string_view text : {"11", "0", "2.5", "fast", "", "99999999999999999999999999", "-"})
                                                 checkEqual(codeOf([&] {
                                                                return bench.write(id, std::get<0>(answer), "/.0", "9", text);
                                                            }),
@@ -278,57 +284,96 @@ const Scenario watchWritesDescribed{"The fields of a described type are written 
                                         });
                                     }};
 
-const Scenario watchMutators{"The application's mutator applies a write its own way, or refuses it (ADR-027, section 6)", {"inspector"}, [] {
-                                 Bench            bench;
-                                 std::vector<int> values{1, 2, 3};
-                                 then("it receives the object, the path and the text, in place of the assignment", [&] {
-                                     std::string seenPath, seenText;
-                                     const auto  id     = bench.watch("values",
-                                                                      visiting(values),
-                                                                      [&](std::vector<int>& object, std::string_view path, std::string_view text) {
-                                                                     seenPath = path;
-                                                                     seenText = text;
-                                                                     object.assign(3, 7);  // its own way: keeps an invariant of the application
-                                                                      });
-                                     const auto  page   = bench.open(id);
-                                     const auto  answer = bench.write(id, revisionOf(page), "/#1", "2", "5");
-                                     requireEqual(std::get<1>(answer), std::string{});
-                                     requireEqual(seenPath, std::string{"/#1"});
-                                     requireEqual(seenText, std::string{"5"});
-                                     requireEqual(values, std::vector<int>({7, 7, 7}));
-                                     // The memory holds what the target shows now; the other nodes are found by the next pass.
-                                     requireEqual(pathsOf(bench.changes(id, std::get<0>(answer))), std::vector<std::string>({"/#0", "/#2"}));
-                                     // The text was parsed for the node first: the mutator is not called for a text that is not a number.
-                                     seenText.clear();
-                                     checkEqual(codeOf([&] {
-                                                    return bench.write(id, std::get<0>(answer), "/#1", "7", "seven");
-                                                }),
-                                                std::string{code::stale});  // the revision moved with the pass: refused before anything
-                                     require(seenText.empty());
-                                 });
-                                 then("a message of 1 MiB is cut to 256 bytes on a character, and the answer fits the smallest budget", [&] {
-                                     // 254 bytes then characters of 3 bytes: the first of them straddles the bound.
-                                     std::string message(254, 'm');
-                                     while (message.size() < 1024 * 1024)
-                                         message += "\xE2\x82\xAC";
-                                     const auto id     = bench.watch("values", visiting(values), [&](std::vector<int>&, std::string_view, std::string_view) {
-                                         throw std::runtime_error(message);
-                                     });
-                                     const auto page   = bench.open(id);
-                                     const auto answer = bench.write(id, revisionOf(page), "/#1", "2", "5");
-                                     requireEqual(std::get<1>(answer), std::string{code::refused});
-                                     const auto& text = std::get<2>(answer);
-                                     require(text.size() <= inspect::maxTextBytes);
-                                     requireEqual(text, std::string(253, 'm') + "\xE2\x80\xA6");  // back to a whole character, then the ellipsis
-                                     require(std::get<0>(answer) != revisionOf(page));
-                                     requireEqual(values[1], 2);
-                                     const auto bytes = 8 + 2 + 9 + inspect::detail::stringBytes(std::get<1>(answer).size())
-                                                        + inspect::detail::stringBytes(text.size());
-                                     require(bytes <= inspect::minPageBytes);
-                                     // The revision was received: the next call is not a resynchronization.
-                                     require(!resyncOf(bench.changes(id, std::get<0>(answer))));
-                                 });
-                             }};
+const Scenario watchMutators{
+    "The application's mutator applies a write its own way, or refuses it (ADR-027, section 6)",
+    {"inspector"},
+    [] {
+        Bench            bench;
+        std::vector<int> values{1, 2, 3};
+        then("it receives the object, the path and the text, in place of the assignment", [&] {
+            std::string seenPath, seenText;
+            const auto  id     = bench.watch("values", visiting(values), [&](std::vector<int>& object, std::string_view path, std::string_view text) {
+                seenPath = path;
+                seenText = text;
+                object.assign(3, 7);  // its own way: keeps an invariant of the application
+            });
+            const auto  page   = bench.open(id);
+            const auto  answer = bench.write(id, revisionOf(page), "/#1", "2", "5");
+            requireEqual(std::get<1>(answer), std::string{});
+            requireEqual(seenPath, std::string{"/#1"});
+            requireEqual(seenText, std::string{"5"});
+            requireEqual(values, std::vector<int>({7, 7, 7}));
+            // The memory holds what the target shows now; the other nodes are found by the next pass.
+            requireEqual(pathsOf(bench.changes(id, std::get<0>(answer))), std::vector<std::string>({"/#0", "/#2"}));
+            // The text was parsed for the node first: the mutator is not called for a text that is not a number.
+            seenText.clear();
+            checkEqual(codeOf([&] {
+                           return bench.write(id, std::get<0>(answer), "/#1", "7", "seven");
+                       }),
+                       std::string{code::stale});  // the revision moved with the pass: refused before anything
+            require(seenText.empty());
+        });
+        then("a mutator may replace the container that held the node: nothing read before it is used again", [&] {
+            const auto id     = bench.watch("values", visiting(values), [](std::vector<int>& object, std::string_view, std::string_view text) {
+                object = std::vector<int>(1000, std::stoi(std::string(text)));  // the former elements are freed
+            });
+            const auto page   = bench.open(id);
+            const auto answer = bench.write(id, revisionOf(page), "/#1", "2", "5");
+            requireEqual(std::get<1>(answer), std::string{});
+            requireEqual(values.size(), std::size_t{1000});
+            // The target was read again in the new container; the pass tells what else changed.
+            const auto pass = bench.changes(id, std::get<0>(answer));
+            requireEqual(pathsOf(pass), std::vector<std::string>{""});
+            requireEqual(flagsOf(nodesOf(pass).front()), flag::childrenChanged);
+        });
+        then("a mutator may remove the node it was asked to write", [&] {
+            const auto id     = bench.watch("values", visiting(values), [](std::vector<int>& object, std::string_view, std::string_view) {
+                object.clear();
+            });
+            const auto page   = bench.open(id);
+            const auto answer = bench.write(id, revisionOf(page), "/#1", "2", "5");
+            requireEqual(std::get<1>(answer), std::string{});
+            require(values.empty());
+            require(!resyncOf(bench.changes(id, std::get<0>(answer))));
+        });
+        then("a text that is not a value of a described field is refused before the mutator is called", [&] {
+            Game       game;
+            int        calls = 0;
+            const auto id    = bench.watch("game", visiting(game), [&](Game&, std::string_view, std::string_view) {
+                ++calls;
+            });
+            const auto page  = bench.open(id);
+            for (const std::string_view text : {"", "-", "1e", "101", "99999999999999999999999999"})
+                checkEqual(codeOf([&] {
+                               return bench.write(id, revisionOf(page), "/.0", "0", text);
+                           }),
+                           std::string{code::parse});
+            requireEqual(calls, 0);
+            requireEqual(std::get<1>(bench.write(id, revisionOf(page), "/.0", "0", "42")), std::string{});
+            requireEqual(calls, 1);
+        });
+        then("a message of 1 MiB is cut to 256 bytes on a character, and the answer fits the smallest budget", [&] {
+            // 254 bytes then characters of 3 bytes: the first of them straddles the bound.
+            std::string message(254, 'm');
+            while (message.size() < 1024 * 1024)
+                message += "\xE2\x82\xAC";
+            const auto id     = bench.watch("values", visiting(values), [&](std::vector<int>&, std::string_view, std::string_view) {
+                throw std::runtime_error(message);
+            });
+            const auto page   = bench.open(id);
+            const auto answer = bench.write(id, revisionOf(page), "/#1", "2", "5");
+            requireEqual(std::get<1>(answer), std::string{code::refused});
+            const auto& text = std::get<2>(answer);
+            require(text.size() <= inspect::maxTextBytes);
+            requireEqual(text, std::string(253, 'm') + "\xE2\x80\xA6");  // back to a whole character, then the ellipsis
+            require(std::get<0>(answer) != revisionOf(page));
+            requireEqual(values[1], 2);
+            const auto bytes = 8 + 2 + 9 + inspect::detail::stringBytes(std::get<1>(answer).size()) + inspect::detail::stringBytes(text.size());
+            require(bytes <= inspect::minPageBytes);
+            // The revision was received: the next call is not a resynchronization.
+            require(!resyncOf(bench.changes(id, std::get<0>(answer))));
+        });
+    }};
 
 const Scenario watchWriteRequestBudget{
     "A write request fits the message size, its text bounded on both sides (ADR-027, section 3, \"Budget d'une requête\")",
@@ -377,29 +422,33 @@ const Scenario watchRegistrations{
             bench.registry->remove(first);
             const auto second = bench.watch("value", visiting(value));
             require(second != first);
-            for (const auto& call : std::vector<std::function<void()>>{[&] {
-                                                                           static_cast<void>(bench.children(first, "", revisionOf(page)));
-                                                                       },
-                                                                       [&] {
-                                                                           static_cast<void>(bench.changes(first, revisionOf(page)));
-                                                                       },
-                                                                       [&] {
-                                                                           static_cast<void>(bench.fold(first, "", revisionOf(page)));
-                                                                       },
-                                                                       [&] {
-                                                                           static_cast<void>(bench.reset(first));
-                                                                       },
-                                                                       [&] {
-                                                                           static_cast<void>(bench.value(first, ""));
-                                                                       },
-                                                                       [&] {
-                                                                           static_cast<void>(bench.write(first, revisionOf(page), "", "1", "2"));
-                                                                       }})
+            // Each call of the inspectors, on the watch that is gone.
+            const auto refused = [&](auto&& call) {
                 checkEqual(codeOf([&] {
                                call();
                                return 0;
                            }),
                            std::string{code::unknown});
+            };
+            const auto old = revisionOf(page);
+            refused([&] {
+                static_cast<void>(bench.children(first, "", old));
+            });
+            refused([&] {
+                static_cast<void>(bench.changes(first, old));
+            });
+            refused([&] {
+                static_cast<void>(bench.fold(first, "", old));
+            });
+            refused([&] {
+                static_cast<void>(bench.reset(first));
+            });
+            refused([&] {
+                static_cast<void>(bench.value(first, ""));
+            });
+            refused([&] {
+                static_cast<void>(bench.write(first, old, "", "1", "2"));
+            });
             requireEqual(value, 1);
             requireEqual(nodesOf(bench.open(second)).size(), std::size_t{1});
         });
@@ -626,16 +675,23 @@ const Scenario watchExecutors{"With an executor, a watch's operations run on the
                                   });
                                   then("calls sent together are run one by one, in order: the second, with the same revision, is stale", [&] {
                                       const auto revision = bench.reset(id);  // nothing runs yet: the loop has not started
-                                      auto       both     = std::async(std::launch::async, [&] {
-                                          return networking::ex::sync_wait(networking::ex::when_all(children(revision), children(revision)));
-                                      });
-                                      std::this_thread::sleep_for(20ms);
+                                      // Two calls with the same revision, asked one after the other while the executor's loop has not started.
+                                      const auto ask = [&] {
+                                          return std::async(std::launch::async, [&] {
+                                              return await(children(revision));
+                                          });
+                                      };
+                                      auto earlier = ask();
+                                      std::this_thread::sleep_for(50ms);
+                                      auto later = ask();
+                                      std::this_thread::sleep_for(50ms);
                                       requireEqual(reads.load(), 0);  // queued on the executor, not run where they were asked
                                       owner.start();
-                                      const auto [first, second] = *both.get();
-                                      require(!resyncOf(first));
-                                      requireEqual(nodesOf(first).size(), std::size_t{4});
-                                      require(resyncOf(second));
+                                      const auto answered = earlier.get();
+                                      const auto stale    = later.get();
+                                      require(!resyncOf(answered));
+                                      requireEqual(nodesOf(answered).size(), std::size_t{4});
+                                      require(resyncOf(stale));
                                   });
                                   then("an operation queued when the watch is removed is refused without calling the source", [&] {
                                       const auto revision = bench.reset(id);

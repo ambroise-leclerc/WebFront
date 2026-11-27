@@ -603,7 +603,8 @@ struct NodeOps {
     bool container   = false;                                                 // may have children
     bool keyed       = false;                                                 // its children have keys
     bool alternative = false;                                                 // its one child is told by the rank of an alternative, not by its position
-    char letter      = '#';                                                   // of its children's segments
+    bool direct      = true;  // reaches a child's position at once; false for a range that is walked from its start
+    char letter      = '#';   // of its children's segments
 };
 
 template <typename T>
@@ -704,11 +705,13 @@ struct FieldRender {
                 case forms::Kind::integer:
                 case forms::Kind::number: {
                     const auto number = forms::detail::parseFloating<double>(text);
-                    // "0" underflows nothing; a text the double parser refuses may still be a whole number beyond 2^53.
-                    long long          whole = 0;
-                    unsigned long long big   = 0;
-                    const bool         exact = std::from_chars(text.data(), text.data() + text.size(), whole).ptr == text.data() + text.size()
-                                               || std::from_chars(text.data(), text.data() + text.size(), big).ptr == text.data() + text.size();
+                    // A text the double parser refuses may still be a whole number beyond 2^53: it is one when the whole
+                    // text is read without an error (an empty text and a number too large both stop at its end, with one).
+                    const auto wholeAs = [text](auto parsed) {
+                        const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), parsed);
+                        return error == std::errc{} && end == text.data() + text.size();
+                    };
+                    const bool exact = wholeAs(0LL) || wholeAs(0ULL);
                     if (!number && !exact)
                         throw ParseError("Not a number");
                     if (described->kind == forms::Kind::integer && !exact && std::trunc(*number) != *number)
@@ -741,6 +744,7 @@ struct FieldRender {
                                  .container   = false,
                                  .keyed       = false,
                                  .alternative = false,
+                                 .direct      = true,
                                  .letter      = '#'};
 };
 
@@ -928,7 +932,7 @@ struct Render {
                 return [value = input == "true"](const NodeRef& target) {
                     objectOf<U>(target) = value;
                 };
-            } else if constexpr (shape == Shape::integer || shape == Shape::real) {
+            } else if constexpr (parsedInteger || shape == Shape::real) {
                 const auto parsed = forms::detail::parseNumber<U>(input);
                 if (!parsed)
                     throw ParseError(std::is_floating_point_v<U> ? "Not a finite number" : "Not a whole number of the value's type");
@@ -953,11 +957,13 @@ struct Render {
         };
     }
 
-    static constexpr bool editable    = !std::is_const_v<T>
-                                        && (shape == Shape::boolean || shape == Shape::integer || shape == Shape::real || shape == Shape::bitset
-                                            || std::is_same_v<U, std::string>);
-    static constexpr bool hasChildren = shape == Shape::optional || shape == Shape::variant || shape == Shape::tuple || shape == Shape::map
-                                        || shape == Shape::sequence || shape == Shape::paged || shape == Shape::described;
+    /// The integers a text is parsed into: a wide character type is shown as its number, and has no text of its own to write.
+    static constexpr bool parsedInteger = shape == Shape::integer && requires(const char* text, U& value) { std::from_chars(text, text, value); };
+    static constexpr bool editable      = !std::is_const_v<T>
+                                          && (shape == Shape::boolean || parsedInteger || shape == Shape::real || shape == Shape::bitset
+                                              || std::is_same_v<U, std::string>);
+    static constexpr bool hasChildren   = shape == Shape::optional || shape == Shape::variant || shape == Shape::tuple || shape == Shape::map
+                                          || shape == Shape::sequence || shape == Shape::paged || shape == Shape::described;
 
     static constexpr NodeOps ops{.kind        = &kind,
                                  .value       = &value,
@@ -969,6 +975,7 @@ struct Render {
                                  .container   = hasChildren,
                                  .keyed       = KeyedPagedSource<T>,
                                  .alternative = shape == Shape::variant,
+                                 .direct      = !((shape == Shape::map || shape == Shape::sequence) && !std::ranges::random_access_range<T>),
                                  .letter      = shape == Shape::described ? '.' : '#'};
 };
 

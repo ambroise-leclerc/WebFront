@@ -725,8 +725,12 @@ template <typename Stored, typename State, bool visitor, bool stateful>
 
 /// Builds a watch from its source, and optionally the state it owns, its executor and its mutator (BasicWF::watch).
 template <typename Shape, typename Source, typename State, typename Executor, typename Mutator>
-[[nodiscard]] std::shared_ptr<detail::WatchCore>
-makeWatch(std::string name, std::string location, Source&& source, std::shared_ptr<State> owner, Executor executor, Mutator mutator) {
+[[nodiscard]] std::shared_ptr<detail::WatchCore> makeWatch(std::string               name,
+                                                           std::string               location,
+                                                           Source&&                  source,
+                                                           std::shared_ptr<State>    owner,
+                                                           [[maybe_unused]] Executor executor,
+                                                           [[maybe_unused]] Mutator  mutator) {
     using Stored               = std::decay_t<Source>;  // a function given by name is kept as a pointer
     using Object               = typename Shape::Object;
     constexpr bool stateful    = requires { requires Shape::stateful; };

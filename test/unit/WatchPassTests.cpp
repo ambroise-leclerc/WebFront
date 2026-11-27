@@ -10,6 +10,7 @@
 #include "WatchHarness.hpp"
 
 #include <format>
+#include <list>
 #include <optional>
 #include <variant>
 
@@ -46,6 +47,22 @@ struct Rows {
             if (rows[index].first == wanted)
                 return index;
         return std::nullopt;
+    }
+};
+
+/// A paged source that fails after its first element while `failing` is set.
+struct Failing {
+    std::vector<int>          values{1, 2, 3};
+    bool                      failing = false;
+    [[nodiscard]] std::size_t size() const {
+        return values.size();
+    }
+    void visit(std::size_t first, std::size_t count, auto&& each) {
+        for (std::size_t index = first; index < values.size() && index - first < count; ++index) {
+            each(values[index]);
+            if (failing)
+                throw std::runtime_error("the source failed");
+        }
     }
 };
 
@@ -140,6 +157,20 @@ const Scenario watchChanges{"A pass of differences tells what changed since the 
                                     checkEqual(flagsOf(nodesOf(pass)[1]), flag::childrenChanged);
                                     checkEqual(valueOf(nodesOf(pass)[1]), std::string{"alternative 1"});
                                     requireEqual(bench.memory(other)->size(), std::size_t{3});
+                                });
+                                then("a container without random access is read in one walk, whatever the windows loaded", [&] {
+                                    std::list<int> chain(1000, 0);
+                                    const auto     other           = bench.watch("chain", visiting(chain));
+                                    auto           loaded          = bench.children(other, "", bench.reset(other), 0, 10);
+                                    loaded                         = bench.children(other, "", revisionOf(loaded), 900, 10);
+                                    loaded                         = bench.children(other, "", revisionOf(loaded), 500, 10);
+                                    *std::next(chain.begin(), 5)   = 1;
+                                    *std::next(chain.begin(), 505) = 2;
+                                    *std::next(chain.begin(), 909) = 3;
+                                    *std::next(chain.begin(), 700) = 4;  // not loaded: not told
+                                    const auto pass                = bench.changes(other, revisionOf(loaded));
+                                    requireEqual(pathsOf(pass), std::vector<std::string>({"/#5", "/#505", "/#909"}));
+                                    requireEqual(valuesOf(pass), std::vector<std::string>({"1", "2", "3"}));
                                 });
                                 then("a pass of several pages is read in the set it kept, whatever the object becomes meanwhile", [&] {
                                     std::vector<int> values(1000, 0);
@@ -429,6 +460,22 @@ const Scenario watchPassAtomicity{
             // And a pass tells it like any other change.
             fragiles[5].failing = false;
             requireEqual(pathsOf(bench.changes(id, revisionOf(page))), std::vector<std::string>{"/#5"});
+        });
+        then("a paged source that fails while it gives its elements: the page serves what it gave, under its revision", [&] {
+            Failing    source;
+            const auto id   = bench.watch("failing", visiting(source));
+            auto       page = bench.open(id);
+            requireEqual(nodesOf(page).size(), std::size_t{4});
+            source.failing = true;
+            page           = bench.children(id, "", revisionOf(page));
+            require(!resyncOf(page));
+            requireEqual(pathsOf(page), std::vector<std::string>({"", "/#0"}));
+            requireEqual(nextOf(page), 0.0);
+            requireEqual(revisionOf(page), static_cast<double>(bench.memory(id)->revision()));
+            // A pass over a source that fails tells its children changed, and answers.
+            const auto pass = bench.changes(id, revisionOf(page));
+            require(!resyncOf(pass));
+            requireEqual(revisionOf(pass), static_cast<double>(bench.memory(id)->revision()));
         });
         then("after an interruption, an exception of key() makes its elements elements without a key", [&] {
             Rows rows{

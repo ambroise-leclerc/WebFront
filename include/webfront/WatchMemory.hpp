@@ -83,19 +83,22 @@ struct Rendered {
 /**
  * Reads a node. Nothing here fails: an exception of a formatter or of a paged source becomes the node's value, with the
  * kind `opaque`. A node is writable when the watch is, its type has an editor, and what is shown of it is whole and
- * tells it exactly: neither its label nor its value cut, and not a keyed element told by its position.
+ * tells it exactly: neither its label nor its value cut, its value shown as it is (a control character is shown as its
+ * picture, which an edition would write back in its place), and not a keyed element told by its position.
  */
 [[nodiscard]] inline Rendered render(const ChildView& view, std::string path, bool positional, bool writable) {
     const auto& ops = *view.node.ops;
     std::string kind, value;
-    std::size_t count  = 0;
-    bool        cut    = false;
-    bool        failed = false;
+    std::size_t count   = 0;
+    bool        cut     = false;
+    bool        altered = false;
+    bool        failed  = false;
     try {
         kind = ops.kind(view.node);
         TextSink sink{maxTextBytes + 1};  // one byte more than what is shown tells that it is cut
         ops.value(view.node, sink);
         std::tie(value, cut) = visibleText(sink.text(), maxTextBytes, true);
+        altered              = !cut && value != sink.text();
         count                = ops.container ? ops.size(view.node) : 0;
     } catch (const std::exception& error) {
         failed = true;
@@ -111,7 +114,7 @@ struct Rendered {
     }
     unsigned flags = cut ? flag::truncated : 0u;
     Editor   editor;
-    if (writable && !failed && !cut && !view.labelCut && !positional && ops.editor != nullptr) {
+    if (writable && !failed && !cut && !altered && !view.labelCut && !positional && ops.editor != nullptr) {
         try {
             editor = ops.editor(view.node);
         } catch (...) {
@@ -407,10 +410,20 @@ public:
                     code    = inspect::code::refused;
                     message = "The application refused the value";
                 }
-                if (applied)
+                // The assignment wrote the node in place. A mutator may have done anything to the object, the container that
+                // held the node included: nothing read before it is used again.
+                if (applied && !access.mutate)
                     store(entry, render(view, std::string(at), positional, access.writable));
                 return true;
             });
+            if (applied && access.mutate)
+                static_cast<void>(descend(rootView(access, root), segments, 0, false, [&](std::size_t level, const ChildView& view, bool positional) {
+                    if (level != segments.size())
+                        return true;
+                    if (const auto found = nodes.find(path); found != nodes.end())
+                        store(found->second, render(view, std::string(path), positional, access.writable));
+                    return true;
+                }));
             if (!whole || !reached)
                 code = inspect::code::stale;
             answer = {static_cast<double>(++current), std::move(code), std::move(message)};
@@ -641,7 +654,7 @@ private:
         };
         std::vector<Pending> pending;
         std::size_t          fresh = 0;  // the entries the page adds to the memory
-        ops.visit(view.node, start, count, [&](const ChildView& child) {
+        const auto           each  = [&](const ChildView& child) {
             ChildView  shown = child;
             const auto key   = usableKey(view.node, child.position);
             if (key)
@@ -660,7 +673,14 @@ private:
             fresh += added ? 1 : 0;
             pending.push_back({.position = child.position, .node = std::move(rendered), .key = key});
             return pending.size() < count;
-        });
+        };
+        bool failed = false;
+        try {
+            ops.visit(view.node, start, count, each);
+        } catch (...) {
+            // A paged source that fails while it gives its elements: the page serves those it gave, and ends there.
+            failed = true;
+        }
 
         // Two elements of a page with the same key break the key's contract: both are told by their position, and neither
         // is writable (ADR-027, section 5).
@@ -705,7 +725,7 @@ private:
             entry.lastPosition = pending.back().position;
         }
         const auto after = start + pending.size();
-        return after < total ? after : 0;
+        return after < total && !failed ? after : 0;
     }
 
     /// Removes a node and its descendants.
@@ -747,17 +767,18 @@ private:
             return;
         const auto& ops       = *view.node.ops;
         bool        structure = now.ops != entry.ops || childrenOf(now.node) != childrenOf(entry.node);
-        // Each run of loaded positions is walked once (rule 3): a container without random access is not walked per child.
+        // A container that reaches a position at once is read by runs of loaded positions. Any other is walked once, from
+        // its first loaded position to its last (rule 3): each visit starts again from its beginning.
         for (auto run = entry.positions.begin(); run != entry.positions.end() && !structure;) {
             auto        last   = run;
-            std::size_t length = 1;
-            for (auto following = std::next(run); following != entry.positions.end() && following->first == last->first + 1; ++following) {
+            std::size_t length = 1;  // the loaded positions of the run
+            for (auto following = std::next(run); following != entry.positions.end() && (!ops.direct || following->first == last->first + 1); ++following) {
                 last = following;
                 ++length;
             }
             std::size_t visited = 0;
             try {
-                ops.visit(view.node, run->first, length, [&](const ChildView& child) {
+                ops.visit(view.node, run->first, last->first - run->first + 1, [&](const ChildView& child) {
                     const auto loaded = entry.positions.find(child.position);
                     if (loaded == entry.positions.end())
                         return true;
