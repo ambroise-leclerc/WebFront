@@ -704,11 +704,13 @@ struct FieldRender {
                 case forms::Kind::integer:
                 case forms::Kind::number: {
                     const auto number = forms::detail::parseFloating<double>(text);
-                    // "0" underflows nothing; a text the double parser refuses may still be a whole number beyond 2^53.
-                    long long          whole = 0;
-                    unsigned long long big   = 0;
-                    const bool         exact = std::from_chars(text.data(), text.data() + text.size(), whole).ptr == text.data() + text.size()
-                                               || std::from_chars(text.data(), text.data() + text.size(), big).ptr == text.data() + text.size();
+                    // A text the double parser refuses may still be a whole number beyond 2^53: it is one when the whole
+                    // text is read without an error (an empty text and a number too large both stop at its end, with one).
+                    const auto wholeAs = [text](auto parsed) {
+                        const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), parsed);
+                        return error == std::errc{} && end == text.data() + text.size();
+                    };
+                    const bool exact = wholeAs(0LL) || wholeAs(0ULL);
                     if (!number && !exact)
                         throw ParseError("Not a number");
                     if (described->kind == forms::Kind::integer && !exact && std::trunc(*number) != *number)

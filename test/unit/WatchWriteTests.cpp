@@ -236,7 +236,7 @@ const Scenario watchWritesDescribed{"The fields of a described type are written 
                                             auto                    answer = bench.write(id, revisionOf(page), "/.0", "5", "9");
                                             requireEqual(std::get<1>(answer), std::string{});
                                             requireEqual(settings.speed, 9);
-                                            for (const std::string_view text : {"11", "0", "2.5", "fast"})
+                                            for (const std::string_view text : {"11", "0", "2.5", "fast", "", "99999999999999999999999999", "-"})
                                                 checkEqual(codeOf([&] {
                                                                return bench.write(id, std::get<0>(answer), "/.0", "9", text);
                                                            }),
@@ -305,6 +305,22 @@ const Scenario watchMutators{"The application's mutator applies a write its own 
                                                 }),
                                                 std::string{code::stale});  // the revision moved with the pass: refused before anything
                                      require(seenText.empty());
+                                 });
+                                 then("a text that is not a value of a described field is refused before the mutator is called", [&] {
+                                     Game       game;
+                                     int        calls = 0;
+                                     const auto id    = bench.watch("game", visiting(game), [&](Game&, std::string_view, std::string_view) {
+                                         ++calls;
+                                     });
+                                     const auto page  = bench.open(id);
+                                     for (const std::string_view text : {"", "-", "1e", "101", "99999999999999999999999999"})
+                                         checkEqual(codeOf([&] {
+                                                        return bench.write(id, revisionOf(page), "/.0", "0", text);
+                                                    }),
+                                                    std::string{code::parse});
+                                     requireEqual(calls, 0);
+                                     requireEqual(std::get<1>(bench.write(id, revisionOf(page), "/.0", "0", "42")), std::string{});
+                                     requireEqual(calls, 1);
                                  });
                                  then("a message of 1 MiB is cut to 256 bytes on a character, and the answer fits the smallest budget", [&] {
                                      // 254 bytes then characters of 3 bytes: the first of them straddles the bound.
