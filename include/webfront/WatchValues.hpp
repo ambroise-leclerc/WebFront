@@ -958,7 +958,9 @@ struct Render {
     }
 
     /// The integers a text is parsed into: a wide character type is shown as its number, and has no text of its own to write.
-    static constexpr bool parsedInteger = shape == Shape::integer && requires(const char* text, U& value) { std::from_chars(text, text, value); };
+    /// The types are named: whether std::from_chars takes one of them depends on the standard library.
+    static constexpr bool parsedInteger = shape == Shape::integer && !std::is_same_v<U, wchar_t> && !std::is_same_v<U, char8_t> && !std::is_same_v<U, char16_t>
+                                          && !std::is_same_v<U, char32_t>;
     static constexpr bool editable      = !std::is_const_v<T>
                                           && (shape == Shape::boolean || parsedInteger || shape == Shape::real || shape == Shape::bitset
                                               || std::is_same_v<U, std::string>);
