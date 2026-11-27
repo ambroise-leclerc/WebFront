@@ -664,6 +664,11 @@ les sections 3 à 6 laissaient ouvert :
   des formes ordinaires est acceptée aussi, quand elle ne capture rien que l'état ne garde vivant.
 - **Mutateur.** `mutate(T& objet, std::string_view chemin, std::string_view texte)` : le texte a déjà été analysé pour le
   genre du nœud, et le mutateur lève une exception pour refuser. Le chemin se décode par `inspect::parsePath`.
+- **Mémoire après une écriture.** Une écriture appliquée ne change pas la mémoire : la réponse ne porte pas de valeur, et
+  l'objet peut tenir une autre valeur que le texte (un mutateur qui l'ajuste). La passe suivante, ou une relecture du
+  nœud, transmet la valeur que l'objet tient ; l'inspecteur relit le nœud après chaque écriture.
+- **Entiers décrits.** Un champ entier n'accepte qu'un texte qui écrit exactement un entier (`1.0`, `1e1`, `2.50e1`) :
+  il est analysé chiffre à chiffre, jamais arrondi par un `double`, puis comparé exactement aux bornes.
 - **Champs décrits.** Le texte d'un champ est validé sans l'objet autant que la description le dit (genre, bornes, choix) ;
   le type du membre, que seul son accesseur connaît, est vérifié à l'écriture, dont le refus résout la Promise avec
   `webfront.inspector.refused`. La lecture d'un champ passe par son accesseur, qui copie un membre texte en entier : la

@@ -265,7 +265,7 @@ const Scenario watchPassInterrupted{
             requireEqual(values[2999], 7);
             require(std::get<0>(answer) != revisionOf(pass));
             const auto missing = finish(bench, id, bench.changes(id, std::get<0>(answer), 0, 1000));
-            requireEqual(missing.size(), std::size_t{1995});  // the write is in the memory: it is not a difference
+            requireEqual(missing.size(), std::size_t{1996});  // the write is told by the pass, as any other change
         });
         then("by a write whose target is in a page not served: it is compared with what the user sees, and refused as stale", [&] {
             changeUpTo(3000);
