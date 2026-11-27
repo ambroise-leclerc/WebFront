@@ -1937,6 +1937,10 @@ private:
 
     /// The browsers connected now, in the order of their identifiers, as the inspectors show them; `caller` is the one that asks.
     [[nodiscard]] std::vector<inspect::BrowserInfo> inspectedBrowsers(const UI& caller) const {
+        return inspectedBrowsers(&caller);
+    }
+    /// The same when native code asks (`caller` null): no browser is the caller.
+    [[nodiscard]] std::vector<inspect::BrowserInfo> inspectedBrowsers(const UI* caller) const {
         struct Seen {
             inspect::BrowserInfo                   info;
             std::shared_ptr<WebLink<Net, Policy>>  link;
@@ -1953,7 +1957,7 @@ private:
                 info.localClient  = !connection.closed && (connection.viewAssociated || (trustLoopbackClients && connection.loopbackPeer));
                 info.started      = connection.stage == Connection::Stage::started;
                 info.closed       = connection.closed;
-                info.caller       = caller == UI{const_cast<BasicWF&>(*this), id, connection.generation};
+                info.caller       = caller != nullptr && *caller == UI{const_cast<BasicWF&>(*this), id, connection.generation};
                 info.path         = connection.path;
                 info.space        = connection.space ? connection.space->path : std::string{};
                 seen.push_back({std::move(info), connection.link, connection.deferredCalls});
