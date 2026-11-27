@@ -42,6 +42,12 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   `webfront::Commands`. From environment 0.9.1, a project that has a preview opens
   on its interface over the whole window, with the terminal in a floating window behind a tab on the window's edge. See the
   [developer reference](DEVELOPER_ENVIRONMENT.md).
+- **State inspectors (development only).** The menu of the environment's tab opens the inspectors of the running
+  application ([ADR-027](adr/ADR-027-inspecteurs-de-l-etat-de-l-application.md)): the registered C++ functions, the
+  connected browsers and tasks, the [watches](WATCHES.md) the application declares with `app.watch`, the locked packages
+  and the state of the bridge in the page. A panel opens in a floating window of the page and detaches to a native
+  secondary window with WebKitGTK, WKWebView and WebView2, or to a tab of the system browser with `trustLoopbackClients`.
+  See [the inspectors](DEVELOPER_ENVIRONMENT.md#the-page-interface-and-floating-terminal).
 - **Distribution.** `wf embed` generates the application's compressed C++ provider. An interface kept as a plain
   directory, with no build step, is embedded from CMake alone by `webfront_embed_directory()` (identity encoded; see
   [embedded assets](EMBEDDED_ASSETS.md#embedding-an-interface-directory-from-cmake)).
@@ -178,6 +184,18 @@ are retained for investigation; diagnostics alone do not establish a correction.
   restricts browser origins and navigation. The optional [TLS listener](TLS.md) adds HTTPS and WSS
   with TLS 1.3 and ChaCha20-Poly1305. Each listener admits 16 concurrent handshakes on the I/O thread.
   Client authentication remains an application responsibility.
+- The state inspectors and their reserved `webfront.inspector.*` functions exist only in the developer environment; a
+  distribution build compiles none of them, and `app.watch` returns an empty handle there. They answer only an admitted
+  page (`ui.isLocalClient()`): the view of an embedded frontend, which proves itself, and, only when the application sets
+  `trustLoopbackClients`, any loopback page. With the system browser they are therefore refused by default. When the
+  frontend proves its view, the environment's project writes and the start or cancellation of terminal commands are
+  reserved to admitted pages too; with the system browser, which proves no view, they stay open to every client the origin
+  check admits. The application's own callbacks are not guarded: one that acts must check `ui.isLocalClient()` itself
+  ([ADR-027](adr/ADR-027-inspecteurs-de-l-etat-de-l-application.md), section 2). An inspector writes only a value the
+  application made writable; a write is refused as stale unless the target and its ancestors still show what was
+  displayed, which cannot detect a move between two elements without keys that are identical in every visible way. A late
+  page of a large container without random access (`std::list`, `std::map`) is reached by a linear walk, under the
+  application's lock; a `PagedSource` pages itself. See [Watches](WATCHES.md).
 - `fs::NativeStorage` confines writable storage to a declared root while resolving each path, but
   on POSIX it cannot prevent the effective user or the superuser from moving a directory out of the
   root during an operation: it detects such a move before a commit and after each operation, at

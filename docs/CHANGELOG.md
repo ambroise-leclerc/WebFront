@@ -13,6 +13,7 @@ these entries stays in the GitHub releases and the Git history.
 ### Breaking
 - A custom frontend whose `open()` takes `const ViewLaunch&` declares `static bool providesViewProof()`, `true` when it gives the proof to its view and `false` otherwise, or the developer environment no longer compiles with it: undeclared, its proven view would leave project writes and C++ commands unguarded (#680, ADR-027, `docs/FRONTENDS.md`).
 - `cppFunction` (and `Space::cppFunction`) refuses the names starting with `webfront.inspector.`, reserved to the inspectors, with `std::invalid_argument`: rename such a function, and its `webFront.cppFunction(...)` calls in the page, to a name of your own (#680, ADR-027).
+- An external tool that wrote the project through the bridge (`webfront.developer.begin`, `beginNew`, `write`, `commit`, `commitGroup`, `abort`) or started terminal commands (`webfront.commands.start`, `cancel`) is refused with `webfront.inspector.denied` when the application's frontend proves its view: run it in that view, use the MCP automation, or set `trustLoopbackClients` knowingly; nothing changes with the system browser (#680, ADR-027, `docs/DEVELOPER_ENVIRONMENT.md`).
 
 ### Added
 - Open the inspectors from the WebFront tab's menu of the developer environment: each panel shows in a floating window of the page and can be detached to a native secondary window (WebKitGTK, WKWebView, WebView2) or, with `trustLoopbackClients`, a tab of the system browser; the choice and the place are kept per project (#680, ADR-027, `docs/DEVELOPER_ENVIRONMENT.md`).
@@ -41,7 +42,8 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Changed
 - Destroying the handle of a watch (`inspect::Watch`) waits for an operation of the inspectors in progress on another thread: destroy it outside every lock its source takes, or declare the watch with the state it owns (#682, ADR-027, `docs/WATCHES.md`).
-- The inspectors show where each `cppFunction` was registered; existing calls of `cppFunction` and `Space::cppFunction` compile unchanged (#681, ADR-027).
+- `cppFunction` and `Space::cppFunction` take a last, defaulted `std::source_location`, which the inspectors show; existing calls compile unchanged, the explicit `cppFunction<R, Args...>` form included (#681, ADR-027).
+- Document the security contract of the application's callbacks: one that writes the project or what the server serves, starts a process or exposes a sensitive state takes the calling `UI` and checks `ui.isLocalClient()`, since WebFront guards only its own functions (#686, ADR-027, `docs/DEVELOPING_WITH_AGENTS.md`).
 - `WebFront.js` opens its WebSocket on the directory of the page (`ws://host/dir/` instead of `ws://host`), which tells the server a page's space (#671) and lets an application be deployed under a sub-path of a site (#672).
 - A request whose path holds a control character (`%00`...) is refused with 400, as a `..` already was, instead of being looked up as a file (#672).
 - A `+` in the path of a file request is a literal `+`, as for the routes, the spaces and `ui.path()`: `/a+b.html` serves `a+b.html`, no longer `a b.html`, which `/a%20b.html` names (#672).
