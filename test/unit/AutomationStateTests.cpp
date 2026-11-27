@@ -314,6 +314,8 @@ const Scenario stateToolsRead{
                          {{"watch", "\"1\""}},
                          {{"watch", "1.5"}},
                          {{"watch", "1"}, {"count", "-1"}},
+                         {{"watch", "9007199254740993"}},
+                         {{"watch", "1"}, {"start", "9007199254740993"}},
                          {{"watch", "1"}, {"path", "7"}},
                          {{"watch", "1"}, {"text", "\"x\""}},
                          {}})
@@ -361,8 +363,14 @@ const Scenario stateToolsNeedTheGrant{
                 requireEqual(rows(tools).size(), std::size_t{4});
                 require(tools.find("webfront.state.") == std::string::npos);
             });
-            then("a read is an unknown tool, and the controller refuses it too", [&] {
-                require(client.answer("webfront.state.watches").has("error"));
+            then("a read asked through MCP is an unknown tool, and its refusal is audited", [&] {
+                require(Object(automation->controller()->describe()).raw("audit").find("webfront.state.watches") == std::string::npos);
+                requireEqual(Object(client.answer("webfront.state.watches").raw("error")).string("message"), std::string{"Unknown tool"});
+                const auto audit = Object(automation->controller()->describe()).raw("audit");
+                require(audit.find("\"denied\"") != std::string::npos);
+                require(audit.find("webfront.state.watches") != std::string::npos);
+            });
+            then("the controller refuses a read too", [&] {
                 const auto identity = Object(automation->controller()->describe()).string("session");
                 try {
                     static_cast<void>(automation->controller()->read("webfront.state.watches", Object("{\"session\":" + json::quote(identity) + "}")));
@@ -406,6 +414,19 @@ const Scenario stateToolsNeedTheGrant{
                 const auto answer = session.read("webfront.state.children", Object("{\"session\":" + json::quote(identity) + ",\"watch\":3}"));
                 requireEqual(answer, std::string{"{\"ok\":true}"});
                 requireEqual(asked, std::string{"webfront.state.children{\"watch\":3}"});
+            });
+            then("a refusal whose message is no UTF-8 text still answers JSON that a client can decode", [&] {
+                Session failing{
+                    {.project = root.path() / "project", .allow = {"state"}, .state = [](std::string_view, const Object&) -> std::string {
+                         throw OperationError("webfront.inspector.unavailable", "source failed: \xFF\xC3");
+                     }}};
+                Client     client{failing};
+                const auto result = client.call("webfront.state.watches");
+                requireEqual(result.raw("isError"), std::string{"true"});
+                requireEqual(Object(result.raw("structuredContent")).string("error"), std::string{"source failed: \xEF\xBF\xBD\xEF\xBF\xBD"});
+                checkNothrow([&] {
+                    validateInput(result.raw("structuredContent"));
+                });
             });
             then("a read is not audited, so that polling does not evict the refusals", [&] {
                 static_cast<void>(session.read("webfront.state.limits", Object("{\"session\":" + json::quote(identity) + "}")));

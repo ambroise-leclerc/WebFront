@@ -171,8 +171,10 @@ namespace detail {
     const auto   raw = arguments.raw(key);
     std::int64_t value{};
     const auto [end, error] = std::from_chars(raw.data(), raw.data() + raw.size(), value);
-    if (error != std::errc{} || end != raw.data() + raw.size())
-        throw std::invalid_argument("Argument " + std::string(key) + " must be a whole number");
+    // Beyond 2^53 a whole number is no longer exact as a double: it would round into the bounds the read checks.
+    constexpr auto exact = static_cast<std::int64_t>(inspect::maxExactNumber);
+    if (error != std::errc{} || end != raw.data() + raw.size() || value > exact || value < -exact)
+        throw std::invalid_argument("Argument " + std::string(key) + " must be a whole number up to 2^53");
     return static_cast<double>(value);
 }
 

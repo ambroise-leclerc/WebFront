@@ -80,8 +80,16 @@ public:
             const Object arguments{params.raw("arguments", "{}")};
             // The state tools exist only for a session that was granted them: tools/list does not name them otherwise.
             const bool reading = state::isTool(name) && offersState();
-            if (name != "webfront.session" && name != "webfront.start" && name != "webfront.result" && name != "webfront.cancel" && !reading)
+            if (name != "webfront.session" && name != "webfront.start" && name != "webfront.result" && name != "webfront.cancel" && !reading) {
+                // A read asked without the grant stays an unknown tool for the client, and the session audits the refusal.
+                if (state::isTool(name)) {
+                    try {
+                        static_cast<void>(readState(name, arguments));
+                    } catch (const std::exception&) {  // NOLINT(bugprone-empty-catch): the refusal is the answer below
+                    }
+                }
                 return error(id, -32602, "Unknown tool");
+            }
             try {
                 std::string value;
                 if (name == "webfront.session") {
@@ -99,20 +107,20 @@ public:
             } catch (const OperationError& failure) {
                 return success(id,
                                toolResult(objectJson({
-                                              {"error", json::quote(failure.what())},
-                                              { "code",   json::quote(failure.code)}
+                                              {"error", state::detail::text(failure.what())},
+                                              { "code",           json::quote(failure.code)}
                 }),
                                           true));
             } catch (const TransportError& failure) {
                 // A mutation may have started before the response was lost: the agent must not retry it blindly.
                 return success(id,
                                toolResult(objectJson({
-                                              {"error", json::quote(std::string(failure.what()) + "; the outcome of this call is unknown")},
-                                              { "code",                                                        json::quote("disconnected")}
+                                              {"error", state::detail::text(std::string(failure.what()) + "; the outcome of this call is unknown")},
+                                              { "code",                                                                json::quote("disconnected")}
                 }),
                                           true));
             } catch (const std::exception& failure) {
-                return success(id, toolResult("{\"code\":\"invalid_arguments\",\"error\":" + json::quote(failure.what()) + "}", true));
+                return success(id, toolResult("{\"code\":\"invalid_arguments\",\"error\":" + state::detail::text(failure.what()) + "}", true));
             }
         } catch (const std::exception& failure) {
             if (notification)
