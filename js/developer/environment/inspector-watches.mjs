@@ -144,11 +144,13 @@ export function createWatchTree({bridge, watch, count = pageCount, onUpdate = ()
     async function resynchronize(answered) {
         revision = answered;
         nodes.clear();
-        await list('', 0);
+        if (!stopped) await list('', 0);
     }
 
     /** One page of the children of `path` from `start`, then the unfolded children that came back. Runs inside the queue. */
     async function list(path, start) {
+        // A tree stopped while a call was awaited reads nothing more: it would change C++'s memory of a closed panel.
+        if (stopped) return;
         let page;
         try { page = readNodePage(await call(functions.children)(watch, path, revision, start, count)); }
         catch (error) {
@@ -312,9 +314,12 @@ export function createWatchTree({bridge, watch, count = pageCount, onUpdate = ()
                 const [answered, code, message] = answer;
                 revision = answered;
                 // Written or not, what the node shows now is read again: the parent of a leaf gives it with its siblings' state.
-                await list(path, 0);
+                // A reading that fails does not undo what C++ answered: the write is not to be sent again.
+                let refresh = '';
+                try { await list(path, 0); }
+                catch (error) { refresh = error?.message ?? String(error); }
                 onUpdate();
-                return {code, message};
+                return refresh ? {code, message, refresh} : {code, message};
             });
         },
         /**
@@ -407,6 +412,16 @@ export function createTreeView({tree, list, view = globalThis}) {
         return made;
     };
     const report = work => Promise.resolve(work).catch(() => {}).finally(render);
+    // The windows that failed to load, by "path@from": they are loaded again only when the user asks, never as they come
+    // into view, which would ask again and again.
+    const failedLoads = new Map();
+    const load = (path, from) => {
+        const key = `${path}@${from}`;
+        failedLoads.delete(key);
+        return Promise.resolve(tree.load(path, from))
+            .catch(error => { failedLoads.set(key, error?.message ?? String(error)); })
+            .finally(render);
+    };
 
     function edit(path) {
         const entry = tree.nodes.get(path);
@@ -429,6 +444,7 @@ export function createTreeView({tree, list, view = globalThis}) {
         }
         const answer = await tree.write(path, text, expected, shown).catch(error => ({code: error?.code ?? 'webfront.error', message: error?.message ?? String(error)}));
         if (answer.code) notes.set(path, writeFailure(answer));
+        else if (answer.refresh) notes.set(path, `Written; the value could not be read again: ${answer.refresh}`);
         render();
     }
 
@@ -491,8 +507,12 @@ export function createTreeView({tree, list, view = globalThis}) {
             let expected = 0;
             const gap = (from, to) => {
                 const more = element('li');
-                more.append(button('more', from === to - 1 ? `[${from}] not loaded` : `[${from}] to [${to - 1}] not loaded`,
-                    `Load the children of ${node.label} from ${from}`, () => report(tree.load(path, from))));
+                const key = `${path}@${from}`;
+                const loader = button('more', from === to - 1 ? `[${from}] not loaded` : `[${from}] to [${to - 1}] not loaded`,
+                    `Load the children of ${node.label} from ${from}`, () => load(path, from));
+                loader.dataset.load = key;
+                more.append(loader);
+                if (failedLoads.has(key)) more.append(element('span', 'note', `could not be loaded: ${failedLoads.get(key)}`));
                 more.dataset.from = String(from);
                 return more;
             };
@@ -518,7 +538,7 @@ export function createTreeView({tree, list, view = globalThis}) {
                         const position = Number(input.value);
                         if (event.key === 'Enter' && input.value !== '' && Number.isSafeInteger(position) && position >= 0 && position < node.children) {
                             positions.delete(path);
-                            report(tree.load(path, position));
+                            load(path, position);
                         }
                     });
                     jump.dataset.jump = path;
@@ -555,7 +575,7 @@ export function createTreeView({tree, list, view = globalThis}) {
             observer?.disconnect();
             observer = new view.IntersectionObserver(entries => {
                 for (const entry of entries)
-                    if (entry.isIntersecting && !tree.busy) entry.target.click();
+                    if (entry.isIntersecting && !tree.busy && !failedLoads.has(entry.target.dataset.load)) entry.target.click();
             });
             for (const more of list.querySelectorAll('button.more')) observer.observe(more);
         }

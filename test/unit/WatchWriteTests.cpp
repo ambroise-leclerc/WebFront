@@ -189,19 +189,23 @@ const Scenario watchWrites{"A value is written only where the application allows
                                    std::get<2>(page) = std::get<0>(answer);  // the inspector adopts the revision of every answer
                                    return answer;
                                };
-                               then("an accepted write changes the object, the memory, and gives a new revision", [&] {
+                               then("an accepted write changes the object, gives a new revision, and the next pass tells the value", [&] {
                                    const auto before = revisionOf(page);
                                    const auto answer = write("/#0/#1", "2", "20");
                                    requireEqual(std::get<1>(answer), std::string{});
                                    require(std::get<0>(answer) != before);
                                    requireEqual(std::get<0>(board)[1], 20);
-                                   require(nodesOf(bench.changes(id, std::get<0>(answer))).empty());  // the memory already holds the new value
+                                   // The memory keeps what the inspector was sent: the next pass tells the value written, as any other change.
+                                   const auto pass = bench.changes(id, std::get<0>(answer));
+                                   requireEqual(pathsOf(pass), std::vector<std::string>{"/#0/#1"});
+                                   requireEqual(valuesOf(pass), std::vector<std::string>{"20"});
                                });
                                then("each writable kind parses its own text", [&] {
                                    checkEqual(std::get<1>(write("/#1", "name", "other\nname")), std::string{});
                                    checkEqual(std::get<1>(board), std::string{"other\nname"});
                                    // The value now shows a control character as its picture: writing what is shown would replace it, so the node
                                    // is no longer writable.
+                                   page = bench.children(id, "/#1", revisionOf(page));  // the node read again, as the panel does
                                    checkEqual(codeOf([&] {
                                                   return bench.write(id, revisionOf(page), "/#1", "other\xE2\x90\x8Aname", "x");
                                               }),
@@ -352,8 +356,10 @@ const Scenario watchMutators{
             requireEqual(seenPath, std::string{"/#1"});
             requireEqual(seenText, std::string{"5"});
             requireEqual(values, std::vector<int>({7, 7, 7}));
-            // The memory holds what the target shows now; the other nodes are found by the next pass.
-            requireEqual(pathsOf(bench.changes(id, std::get<0>(answer))), std::vector<std::string>({"/#0", "/#2"}));
+            // The next pass tells what the object holds now, the target included: 7, not the text written.
+            const auto pass = bench.changes(id, std::get<0>(answer));
+            requireEqual(pathsOf(pass), std::vector<std::string>({"/#0", "/#1", "/#2"}));
+            requireEqual(valuesOf(pass), std::vector<std::string>({"7", "7", "7"}));
             // The text was parsed for the node first: the mutator is not called for a text that is not a number.
             seenText.clear();
             checkEqual(codeOf([&] {
@@ -414,14 +420,54 @@ const Scenario watchMutators{
                 ++calls;
             });
             const auto page  = bench.open(id);
-            for (const std::string_view text : {"", "-", "1e", "101", "99999999999999999999999999"})
+            for (const std::string_view text : {"", "-", "1e", "101", "99999999999999999999999999", "1.00000000000000001", "1e-1", "1.5"})
                 checkEqual(codeOf([&] {
                                return bench.write(id, revisionOf(page), "/.0", "0", text);
                            }),
                            std::string{code::parse});
             requireEqual(calls, 0);
-            requireEqual(std::get<1>(bench.write(id, revisionOf(page), "/.0", "0", "42")), std::string{});
+            auto answer = bench.write(id, revisionOf(page), "/.0", "0", "42");
+            requireEqual(std::get<1>(answer), std::string{});
             requireEqual(calls, 1);
+            // The written forms of a whole number are taken, never through a rounding double. This mutator changes nothing:
+            // the field still shows 0, under the revision of each answer.
+            for (const std::string_view text : {"1.0", "1e1", "2.50e1", "0.5e1", "-0", "+7"}) {
+                answer = bench.write(id, std::get<0>(answer), "/.0", "0", text);
+                checkEqual(std::get<1>(answer), std::string{});
+            }
+            requireEqual(calls, 7);
+            requireEqual(inspect::detail::exactInteger("2.50e1").value_or("none"), std::string{"25"});
+            requireEqual(inspect::detail::exactInteger("-1.2e1").value_or("none"), std::string{"-12"});
+            requireEqual(inspect::detail::exactInteger("1.00000000000000001").value_or("none"), std::string{"none"});
+            requireEqual(inspect::detail::exactInteger("100e-2").value_or("none"), std::string{"1"});
+            requireEqual(inspect::detail::exactInteger(".").value_or("none"), std::string{"none"});
+        });
+        then("a diagnostic that fails does not replace the answer of a write that was applied", [&] {
+            bench.registry->diagnostic = [](std::string_view) {
+                throw std::runtime_error("the diagnostics are down");
+            };
+            bool       failAfter = false;
+            const auto id        = bench.watch("late", [&](Visit<std::vector<int>> visit) {
+                visit(values);
+                if (failAfter)
+                    throw std::runtime_error("after the visit");
+            });
+            const auto page      = bench.open(id);
+            failAfter            = true;
+            const auto answer    = bench.write(id, revisionOf(page), "/#1", "2", "20");
+            requireEqual(std::get<1>(answer), std::string{});
+            requireEqual(values[1], 20);
+        });
+        then("a mutator that stores another value than the text: the next pass tells the one stored", [&] {
+            const auto id     = bench.watch("values", visiting(values), [](std::vector<int>& object, std::string_view, std::string_view text) {
+                object[1] = std::stoi(std::string(text)) - 5;  // the application adjusts the value
+            });
+            const auto page   = bench.open(id);
+            const auto answer = bench.write(id, revisionOf(page), "/#1", "2", "20");
+            requireEqual(std::get<1>(answer), std::string{});
+            const auto pass = bench.changes(id, std::get<0>(answer));
+            requireEqual(pathsOf(pass), std::vector<std::string>{"/#1"});
+            requireEqual(valuesOf(pass), std::vector<std::string>{"15"});
         });
         then("a whole number is compared exactly with the bounds of its field", [&] {
             Big        big;
@@ -619,7 +665,11 @@ const Scenario watchDestruction{"Destroying a watch's handle waits for an operat
                                             removed = true;
                                         });
                                         const Opening     opening{gate};
-                                        std::this_thread::sleep_for(50ms);
+                                        // The registry forgets the watch before it waits for the operation: once it is gone
+                                        // from the registry, the removal has begun.
+                                        requireEventually([&] {
+                                            return !bench.registry->contains(id);
+                                        });
                                         require(!removed);  // the operation still reads the application's objects
                                         gate.release();
                                         removing.get();
@@ -798,17 +848,18 @@ const Scenario watchExecutors{"With an executor, a watch's operations run on the
                                               return await(children(revision));
                                           });
                                       };
-                                      auto earlier = ask();
-                                      std::this_thread::sleep_for(50ms);
-                                      auto later = ask();
-                                      std::this_thread::sleep_for(50ms);
+                                      // Whichever is queued first is served first; the other one then carries a revision
+                                      // that is no longer the memory's. Nothing here depends on the order the threads ran.
+                                      auto first  = ask();
+                                      auto second = ask();
                                       requireEqual(reads.load(), 0);  // queued on the executor, not run where they were asked
                                       owner.start();
-                                      const auto answered = earlier.get();
-                                      const auto stale    = later.get();
-                                      require(!resyncOf(answered));
+                                      const auto one   = first.get();
+                                      const auto other = second.get();
+                                      require(resyncOf(one) != resyncOf(other));
+                                      const auto& answered = resyncOf(one) ? other : one;
                                       requireEqual(nodesOf(answered).size(), std::size_t{4});
-                                      require(resyncOf(stale));
+                                      requireEqual(reads.load(), 1);  // the stale one never reached the source
                                   });
                                   then("an operation queued when the watch is removed is refused without calling the source", [&] {
                                       const auto revision = bench.reset(id);

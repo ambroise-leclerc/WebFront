@@ -220,7 +220,11 @@ describe('The inspectors\' watches', () => {
         expect(refused?.code).toBe('webfront.inspector.readOnly');
         const old = await inspector('write')(rows, opened, '/#4', 'row 4', 'x').then(() => null, failure => failure);
         expect(old?.code).toBe('webfront.inspector.stale');
-        expect((await inspector('write')(rows, after, '/#3', 'écrit €', 'row 3'))[1]).toBe('');
+        // The memory keeps what was sent, not what was written: the node is read again, as the panel does, before it is
+        // written with what it shows now.
+        const [[reread], , current] = await inspector('children')(rows, '/#3', after, 0, 10);
+        expect(reread[3]).toBe('écrit €');
+        expect((await inspector('write')(rows, current, '/#3', 'écrit €', 'row 3'))[1]).toBe('');
     });
 
     it('give a full value by fragments of one snapshot, which never cut a character', async () => {

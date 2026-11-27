@@ -662,15 +662,35 @@ const Scenario inspectorTreeAccess{
             auto                          watch = browser.app.watch("grid", visitor);
             const auto                    id    = static_cast<double>(watch.id());
             then("every function of the trees is refused as denied, and nothing is read or written", [&] {
-                callWithoutArgument("webfront.inspector.limits", 10);
-                callWith("webfront.inspector.reset", 11, id);
-                callWith("webfront.inspector.children", 12, id, std::string{}, 2.0, 0.0, 200.0);
-                callWith("webfront.inspector.changes", 13, id, 2.0, 0.0, 200.0);
-                callWith("webfront.inspector.value", 14, id, std::string{}, 0.0, 0.0);
-                callWith("webfront.inspector.fold", 15, id, std::string{}, 2.0);
-                callWith("webfront.inspector.write", 16, id, 2.0, std::string{"/#1"}, std::string{"2"}, std::string{"20"});
-                require(ViewSocket::wrote(inspect::code::denied));
-                require(!ViewSocket::wrote("sequence"));
+                // Each answer on its own: one function that answered would not hide behind the refusal of another.
+                const auto refused = [](auto&& call) {
+                    const auto offset = ViewSocket::writtenText().size();
+                    call();
+                    const auto answer = ViewSocket::writtenText().substr(offset);
+                    check(answer.contains(inspect::code::denied));
+                    check(!answer.contains("sequence"));
+                };
+                refused([] {
+                    callWithoutArgument("webfront.inspector.limits", 10);
+                });
+                refused([&] {
+                    callWith("webfront.inspector.reset", 11, id);
+                });
+                refused([&] {
+                    callWith("webfront.inspector.children", 12, id, std::string{}, 2.0, 0.0, 200.0);
+                });
+                refused([&] {
+                    callWith("webfront.inspector.changes", 13, id, 2.0, 0.0, 200.0);
+                });
+                refused([&] {
+                    callWith("webfront.inspector.value", 14, id, std::string{}, 0.0, 0.0);
+                });
+                refused([&] {
+                    callWith("webfront.inspector.fold", 15, id, std::string{}, 2.0);
+                });
+                refused([&] {
+                    callWith("webfront.inspector.write", 16, id, 2.0, std::string{"/#1"}, std::string{"2"}, std::string{"20"});
+                });
                 requireEqual(grid, std::vector<int>({1, 2, 3}));
             });
         });
