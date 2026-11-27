@@ -317,10 +317,24 @@ public:
         app.cppFunction("test.unwatch", [this](std::string name) {
             watches.erase(name);
         });
+        // A call that answers only once the page lets it go: the Bridge panel shows it pending meanwhile (#684).
+        app.cppFunction("test.hold", [this] {
+            held = true;
+            return answerOnceLetGo(&app, &held);
+        });
+        app.cppFunction("test.letGo", [this] {
+            held = false;
+        });
         subscription = app.subscribeUIStarted([injected = false](App::UI ui) mutable {
             if (!std::exchange(injected, true))
                 ui.addScript(runScript);
         });
+    }
+
+    /// Completes once `holding` is false; after thirty seconds at most, so that a failed spec does not keep the call for ever.
+    static webfront::ResultTask<void> answerOnceLetGo(App* application, std::atomic<bool>* holding) {
+        for (int waits = 0; waits < 3000 && holding->load(); ++waits)
+            co_await application->resumeAfter(std::chrono::milliseconds(10));
     }
 
     ~Part() {
@@ -383,7 +397,8 @@ private:
     std::shared_ptr<CommandStates>                  states;
     webfront::Commands<App>                         commands;
     webfront::UISubscription                        subscription;
-    std::map<std::string, webfront::inspect::Watch> watches;  // used on the server thread only
+    std::map<std::string, webfront::inspect::Watch> watches;      // used on the server thread only
+    std::atomic<bool>                               held{false};  // test.hold answers once test.letGo cleared it
 };
 }  // namespace
 

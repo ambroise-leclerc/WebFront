@@ -9,6 +9,7 @@ import './content-policy-specs.mjs';
 import './dom-specs.mjs';
 import './spaces-specs.mjs';
 import './inspector-specs.mjs';
+import './bridge-state-specs.mjs';
 import { importedValue } from './module-fixture.mjs';
 import './async-diagnostics.js';
 

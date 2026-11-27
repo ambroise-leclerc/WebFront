@@ -4,6 +4,7 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
+| 1.5 | 2026-11-28 | Proposée | Ambroise Leclerc | État du pont dans la page (#684, section 8) : sonde `probe` de `WebFront.js`, posée seulement pendant qu'un inspecteur lit ; moniteur de la page hôte, qui suit le pont de l'interface ; relais `webfront.inspector.bridgeSource`, `publishBridge` et `bridge`, sous la règle d'accès de la section 2, où la page ne publie que pendant qu'un panneau détaché lit (bail de 15 s) ; état borné à 256 lignes de textes de 256 octets, pour 16 pages au plus. | À renseigner après intégration. |
 | 1.4 | 2026-11-28 | Proposée | Ambroise Leclerc | Outils MCP (#685) : la section 10 fixe les dix outils `webfront.state.*` sous le grant `state`, servis nativement et sans exécution ; lectures seules (ni `write`, ni préférences, ni fenêtres) ; une mémoire des observateurs propre à ces lectures, que `fold` et `reset` gèrent sans toucher l'application ni un panneau ; mêmes bornes que les pages ; refus aux codes `webfront.inspector.*` ; les packages passent par les opérations `list`, `why` et `info` de l'environnement, sous le grant `packages`. | Issue #685. |
 | 1.3 | 2026-11-27 | Proposée | Ambroise Leclerc | Observateurs (#682) : précisions de la section « Précisions des observateurs » (6 bis) — `fold` répond par une page vide, `limits` par six nombres, la source propriétaire reçoit son état, le mutateur reçoit le texte déjà validé, un parent signalé « enfants modifiés » perd ses enfants en mémoire, la mémoire de 10 000 nœuds se compte par connexion et par observateur, `maxWriteTextBytes` tient compte de l'en-tête réel du texte, un formateur écrit pour `std::format_context` est accepté. | À renseigner après intégration. |
 | 1.2 | 2026-11-26 | Proposée | Ambroise Leclerc | Registre introspectable (#681) : pages `webfront.inspector.functions`, `jsFunctions` et `browsers` (section 7) ; enregistrements tenus par les gestionnaires, donc retirés avec une fonction d'espace ; fonctions `webfront.inspector.*` non listées ; durée mesurée pendant une fenêtre de 5 s après chaque lecture des fonctions ; appels vers JavaScript comptés par nom, 1 024 noms au plus, seulement une fois l'environnement monté ; `BasicWF::registeredFunctions()` pour l'application. | À renseigner après intégration. |
@@ -822,8 +823,54 @@ La même règle désactive « Détacher » quand aucun conteneur détaché ne do
 Chaque panneau a une action « Détacher / Rattacher », désactivée avec sa raison quand aucun conteneur détaché n'est
 disponible. Le choix est conservé par projet dans `.webfront/developer/`, comme `terminal-window.json`.
 
-L'état du pont dans la page (#684) vit dans la page de l'application. Détaché, le panneau le lit par un relais C++ :
-la page publie son état par un appel réservé, et l'inspecteur le lit comme un observateur, sous la même règle d'accès.
+**État du pont dans la page (#684).** Le panneau **État TypeScript ▸ Pont** montre `webFront.ready` (en attente,
+résolue, ou rejetée avec sa raison), l'état de la connexion, les appels `cppFunction` en attente avec leur durée, les
+Promises rejetées récemment (fonction, raison, heure) et les fonctions JavaScript que C++ appelle, avec le nombre de leurs
+appels. Cet état vit dans la page de l'application.
+
+- **Sonde.** `WebFront.js` ne garde rien pour l'inspecteur : chaque appel en attente porte seulement son nom, et `ready`
+  la raison de son rejet (`readyError`). Le pont a un champ `probe`, nul par défaut. Quand il est posé, `callCppFunction`
+  lui confie la paire qui règle la Promise (`probe.call(nom, resolve, reject)` rend la paire à utiliser) et
+  `callJsFunction` lui annonce chaque fonction appelée par C++ (`probe.jsCall(nom)`). Sans sonde, un appel coûte un test
+  de nullité : ni horloge, ni table. Le format binaire ne change pas ; les ressources du cœur restent dans la liste et le
+  budget de l'ADR-016.
+- **Moniteur.** La page hôte (celle qui tient l'onglet, `inspector-host.mjs`) crée un moniteur (`inspector-bridge.mjs`)
+  qui pose la sonde à sa première lecture et la retire quinze secondes après la dernière (plus que la plus lente des
+  périodes d'un panneau, pour qu'un panneau qui lit ne laisse aucun moment sans sonde) : un pont que personne n'inspecte
+  n'enregistre rien. Il suit le pont de l'interface (le `webFront` du cadre de l'aperçu, là où l'application appelle
+  C++), ou celui de la page hôte quand l'interface n'en a pas ; un cadre rechargé donne un nouvel état. Les appels en
+  attente quand la sonde est posée (à la première lecture, ou après un bail échu) sont repris avec leur nom, sans durée
+  connue. Les appels de l'inspecteur lui-même
+  (`webfront.inspector.*`, `wfInspect.*`) ne sont pas suivis. Un appel suivi l'est jusqu'à sa réponse, même après le
+  retrait de la sonde : il faut de toute façon le retirer des appels en attente, et son rejet éventuel reste donc listé. L'état est borné : 100 appels en attente (les plus
+  anciens), 50 rejets (les plus récents), 100 fonctions JavaScript (les plus appelées, sur 1 000 noms comptés un par un),
+  textes de 256 octets coupés sur une frontière de caractère, caractères de contrôle rendus visibles ; un nom long est
+  compté sous son libellé borné.
+- **Panneau rattaché.** L'iframe de la fenêtre flottante lit le moniteur de sa page hôte
+  (`window.parent.webfrontInspectorHost.bridgeState`), sans passer par C++.
+- **Panneau détaché : relais par C++.** Une autre fenêtre ne voit pas la page, et `BroadcastChannel` n'est pas garanti
+  entre les vues natives. Trois fonctions réservées, sous la règle d'accès de la section 2, relaient l'état :
+  `webfront.inspector.bridgeSource(hôte)` annonce la page hôte et répond si un panneau attend déjà ;
+  `webfront.inspector.publishBridge(hôte, lignes)` publie l'état et répond s'il faut continuer ;
+  `webfront.inspector.bridge(hôte, depuis, nombre)` rend une page `(lignes, suivant, publication, âge en ms, drapeaux)`
+  dans `responseBudget` (drapeaux : 1 la page est annoncée et connectée, 2 elle a publié). Une ligne est un tuple
+  `(genre, nom, détail, nombre, nombre)` : une liste de tuples des types existants (exception de l'ADR-003). `publication`
+  numérote l'état ; un lecteur qui la voit changer entre deux pages recommence.
+- **Rien n'est publié sans lecteur.** Une lecture ouvre un bail de 15 s (plus long que la plus lente des périodes d'un
+  panneau) ; si la page ne publie pas, C++ le lui demande par `wfInspect.publish()`, une fois par seconde au plus. La page
+  publie alors toutes les 250 ms, et s'arrête dès qu'une publication apprend que le bail est échu. Un panneau fermé ou en
+  pause laisse donc la page se taire, et la sonde quitter le pont.
+- **Bornes du relais.** Un état de plus de 256 lignes est refusé (`std::invalid_argument`) sans remplacer le précédent ;
+  chaque texte est borné par `boundedText` (256 octets, 16 pour le genre). C++ connaît 256 pages au plus (un identifiant
+  et deux rappels chacune) et garde l'état publié de 16 d'entre elles : au-delà de 16 états, la page lue le moins
+  récemment perd son état mais pas sa place, et une lecture la relance ; au-delà de 256 pages, elle perd sa place. Une page
+  déconnectée est oubliée. Une page qui a perdu sa place s'annonce de nouveau quand son panneau est détaché, ou quand sa
+  publication est refusée (`unknown`) ; une nouvelle annonce garde le bail d'un lecteur. Un état appartient à la connexion qui s'est annoncée la dernière sous cet
+  identifiant : la publication d'une autre connexion est refusée (`webfront.inspector.unavailable`). Une publication sans annonce est
+  refusée (`webfront.inspector.unknown`).
+
+Les deux panneaux affichent les mêmes lignes : le panneau rattaché passe l'état du moniteur par le même encodage en
+lignes que le relais.
 
 ### 9. Ressources
 

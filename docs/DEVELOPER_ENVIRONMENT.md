@@ -509,8 +509,20 @@ environment's `mount`, not to the embedded bootstrap page):
   environment (`webfront.developer.read`), in the manifest directory the application chose; it uses no network and writes
   nothing. Every second it asks whether either file changed and reads them again when one did, so the tree follows
   `wf install` and `wf restore`; it warns when the lock no longer matches the manifest. The names and texts of packages
-  are not trusted: they are shown as text, never as HTML, with their control characters made visible. The Bridge panel
-  comes with the next versions of the environment.
+  are not trusted: they are shown as text, never as HTML, with their control characters made visible.
+
+  The **Bridge** panel shows the state of the bridge in the page of the interface (the `webFront` of the preview frame,
+  or of the developer page while no interface has one): whether `webFront.ready` is pending, resolved or rejected and
+  why, the state of the connection, the `cppFunction` calls that C++ has not answered yet and for how long, the Promises
+  rejected lately (function, reason with its error code, time; the 50 latest), and the JavaScript functions that C++
+  called with the number of their calls. `WebFront.js` records nothing by itself: the page that holds the tab installs
+  a probe in the bridge at the panel's first read and removes it fifteen seconds after the last one. A call made before
+  that is listed without a duration, and the rejections and the JavaScript calls are those seen while a panel reads; a
+  call that the panel saw pending is followed to its answer, so its rejection is listed even if the panel closed meanwhile.
+  The inspectors' own calls are not shown. Attached, the panel reads the page directly; detached, its window does not
+  see the page, so the page publishes the same state to C++ every 250 ms while the panel reads, and stops within
+  fifteen seconds of its last read (`webfront.inspector.bridgeSource`, `publishBridge` and `bridge`, admitted pages
+  only).
 
 The tab is a button (`aria-expanded`, `aria-haspopup="menu"`, 44 px target), its menu a `menu` of `menuitem`s of 44 px,
 and the window a non-modal dialog. The interface stays in the preview
