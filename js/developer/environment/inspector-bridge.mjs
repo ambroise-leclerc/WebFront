@@ -17,8 +17,11 @@ export const publisherGlobal = 'wfInspect';
  * and the bytes of a text. Together they stay under the 256 rows that C++ keeps for a page.
  */
 export const limits = Object.freeze({pending: 100, rejections: 50, jsFunctions: 100, jsNames: 1000, text: 256});
-/** A monitor keeps its probe in the bridge this long after its last read, in milliseconds. */
-export const defaultLease = 5000;
+/**
+ * A monitor keeps its probe in the bridge this long after its last read, in milliseconds: longer than the slowest period of
+ * a panel (5 s), so that a panel that reads never leaves a moment without a probe.
+ */
+export const defaultLease = 15000;
 /** A page publishes at this period while a detached panel reads, in milliseconds. */
 export const publishPeriod = 250;
 
@@ -103,9 +106,11 @@ export function createBridgeMonitor({target, clock = () => performance.now(), no
             jsCall(name) {
                 try {
                     if (ownTraffic(name)) return;
-                    const known = state.js.get(name);
+                    // A long name is kept by its bounded label: what the monitor keeps of a name never exceeds the bound.
+                    const key = typeof name === 'string' && name.length <= limits.text / 4 ? name : boundedText(name);
+                    const known = state.js.get(key);
                     if (known) ++known.calls;
-                    else if (state.js.size < limits.jsNames) state.js.set(name, {id: ++sequence, name: boundedText(name), calls: 1});
+                    else if (state.js.size < limits.jsNames) state.js.set(key, {id: ++sequence, name: boundedText(key), calls: 1});
                     else ++state.jsOthers;
                 } catch { /* never the application's problem */ }
             },
@@ -135,6 +140,9 @@ export function createBridgeMonitor({target, clock = () => performance.now(), no
         timer = null;
         try { if (followed && followed.bridge.probe === followed.probe) followed.bridge.probe = null; }
         catch { /* the frame of the bridge is gone */ }
+        // No strong reference to a bridge that is not observed: the frame of an interface that was loaded again can go. Its
+        // state stays in `states` for as long as that bridge lives, and the calls already followed settle through it.
+        followed = null;
     }
     function renew() {
         until = clock() + lease;

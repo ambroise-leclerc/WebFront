@@ -2,7 +2,7 @@
 // inspector reads, the rows of a state, their publication to C++ for a detached panel, the read of what was published, and
 // the panel. A real bridge is followed in test/web/suite/specs/bridge-state-specs.mjs.
 import {createBridgeMonitor, createBridgePublisher, readPublishedState, toRows, fromRows, emptyState, boundedText, rejectionReason,
-    ownTraffic, interfaceTarget, showBridgePanel, bridgeSource, describeReady, formatTime, limits, readingAttempts, staleAfter,
+    ownTraffic, interfaceTarget, defaultLease, showBridgePanel, bridgeSource, describeReady, formatTime, limits, readingAttempts, staleAfter,
     sourceFunction, publishFunction, bridgeFunction, publisherGlobal} from '../../../js/developer/environment/inspector-bridge.mjs';
 import {ownFunction} from '../../../js/developer/environment/inspector-registry.mjs';
 import {main} from '../../../js/developer/environment/inspector.mjs';
@@ -186,6 +186,30 @@ describe('The panel of the bridge in the page', () => {
             expect(bridge.probe).not.toBeNull();
         });
 
+        it('keeps its probe longer than the slowest period of a panel, so that a panel that reads never misses a call', () => {
+            expect(defaultLease).toBeGreaterThan(5000 * 2);
+            const bridge = fakeWebFront(), time = manualTime();
+            const monitor = monitorOf(bridge, time);
+            for (let read = 0; read < 4; ++read) {
+                monitor.read();
+                time.advance(5000 + 500);  // the period, and the time a slow read takes
+                expect(bridge.probe).withContext(`after read ${read}`).not.toBeNull();
+            }
+        });
+
+        it('lets go of a bridge it no longer observes, and finds its state again when it observes it anew', async () => {
+            const bridge = fakeWebFront(), time = manualTime();
+            const monitor = monitorOf(bridge, time);
+            monitor.read();
+            const call = bridge.call('app.slow');
+            monitor.release();
+            expect(monitor.observing).toBeFalse();
+            call.reject(new Error('while released'));
+            await expectAsync(call.promise).toBeRejected();
+            const state = monitor.read();
+            expect(state.rejections.map(entry => entry.name)).toEqual(['app.slow']);
+        });
+
         it('never removes a probe that is not its own', () => {
             const bridge = fakeWebFront(), time = manualTime();
             const monitor = monitorOf(bridge, time);
@@ -322,6 +346,19 @@ describe('The panel of the bridge in the page', () => {
             expect(many.jsSaturated).toBeTrue();
             expect(state.jsSaturated).toBeFalse();
             expect(fromRows(toRows(many)).jsSaturated).toBeTrue();
+        });
+
+        it('keeps of a long name no more than its bounded label', () => {
+            const bridge = fakeWebFront(), time = manualTime();
+            const monitor = monitorOf(bridge, time);
+            monitor.read();
+            const long = name => `${name}.${'x'.repeat(100_000)}`;
+            bridge.called(long('a'));
+            bridge.called(long('a'));
+            bridge.called(long('b'));
+            const state = monitor.read();
+            expect(state.jsFunctions.map(entry => entry.calls)).toEqual([2, 1]);
+            expect(state.jsFunctions.every(entry => new TextEncoder().encode(entry.name).length <= limits.text)).toBeTrue();
         });
 
         it('does not show the inspectors\' own traffic', () => {

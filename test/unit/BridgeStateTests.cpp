@@ -297,32 +297,60 @@ const Scenario bridgeStateBounds{
                 });
             });
         });
-        given("more pages than the relay keeps", [&] {
+        given("more pages that published than the relay keeps the states of", [&] {
             States                          states;
             std::vector<Page>               pages(inspect::maxBridgeSources + 1);
             const States::Clock::time_point start{1000s};
-            for (std::size_t index = 0; index < inspect::maxBridgeSources; ++index) {
+            const auto                      name = [](std::size_t index) {
+                return "host" + std::to_string(index);
+            };
+            for (std::size_t index = 0; index < pages.size(); ++index) {
+                pages[index].announce(states, name(index), start);
+                // Each page is read, later than the one before, then publishes.
+                static_cast<void>(states.read(name(index), 0, 0, 32768, start + std::chrono::seconds(index)));
+                states.publish(name(index), &pages[index], someRows(1), start + std::chrono::seconds(index));
+            }
+            then("the page read the longest ago loses its state, not its place", [&] {
+                requireEqual(states.sourceCount(), pages.size());
+                const auto first = states.read(name(0), 0, 200, 32768, start + 100s);
+                requireEqual(flagsOf(first.page), double{inspect::bridge_flag::source});
+                require(std::get<0>(first.page).empty());
+                require(static_cast<bool>(first.ask));
+                require(std::get<0>(states.read(name(1), 0, 200, 32768, start + 100s).page) == someRows(1));
+            });
+            then("a read of that page asks it, and its next publication is kept", [&] {
+                auto first = states.read(name(0), 0, 200, 32768, start + 100s);
+                first.ask();
+                requireEqual(pages[0].asked, 1);
+                require(states.publish(name(0), &pages[0], someRows(2), start + 101s));
+                require(std::get<0>(states.read(name(0), 0, 200, 32768, start + 101s).page) == someRows(2));
+            });
+        });
+        given("more pages announced than the relay knows", [&] {
+            States                          states;
+            std::vector<Page>               pages(inspect::maxBridgeAnnouncements + 1);
+            const States::Clock::time_point start{1000s};
+            for (std::size_t index = 0; index < inspect::maxBridgeAnnouncements; ++index) {
                 pages[index].announce(states, "host" + std::to_string(index), start);
-                // Every page but the first is read, each later than the one before.
                 if (index > 0)
                     static_cast<void>(states.read("host" + std::to_string(index), 0, 0, 32768, start + std::chrono::seconds(index)));
             }
             when("one more announces itself", [&] {
-                pages.back().announce(states, "last", start + 100s);
+                pages.back().announce(states, "last", start + 1000s);
                 then("it takes the place of the page that was read the longest ago", [&] {
-                    requireEqual(states.sourceCount(), inspect::maxBridgeSources);
-                    requireEqual(flagsOf(states.read("host0", 0, 0, 32768, start + 100s).page), 0.0);
-                    requireEqual(flagsOf(states.read("host1", 0, 0, 32768, start + 100s).page), double{inspect::bridge_flag::source});
-                    requireEqual(flagsOf(states.read("last", 0, 0, 32768, start + 100s).page), double{inspect::bridge_flag::source});
+                    requireEqual(states.sourceCount(), inspect::maxBridgeAnnouncements);
+                    requireEqual(flagsOf(states.read("host0", 0, 0, 32768, start + 1000s).page), 0.0);
+                    requireEqual(flagsOf(states.read("host1", 0, 0, 32768, start + 1000s).page), double{inspect::bridge_flag::source});
+                    requireEqual(flagsOf(states.read("last", 0, 0, 32768, start + 1000s).page), double{inspect::bridge_flag::source});
                 });
             });
             when("pages disconnected before another one announces itself", [&] {
                 pages[3].alive = false;
                 pages[4].alive = false;
-                pages.back().announce(states, "last", start + 100s);
+                pages.back().announce(states, "last", start + 1000s);
                 then("those are forgotten first, and no connected page loses its place", [&] {
-                    requireEqual(states.sourceCount(), inspect::maxBridgeSources - 1);
-                    requireEqual(flagsOf(states.read("host0", 0, 0, 32768, start + 100s).page), double{inspect::bridge_flag::source});
+                    requireEqual(states.sourceCount(), inspect::maxBridgeAnnouncements - 1);
+                    requireEqual(flagsOf(states.read("host0", 0, 0, 32768, start + 1000s).page), double{inspect::bridge_flag::source});
                 });
             });
         });

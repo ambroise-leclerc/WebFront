@@ -32,9 +32,12 @@ namespace webfront::inspect {
 
 /// A published state holds at most this many rows; a publication of more is refused.
 inline constexpr std::size_t maxBridgeRows = 256;
-/// The states of at most this many pages are kept; a page that announces itself past it takes the place of the one that
-/// was read the longest ago.
+/// The states of at most this many pages are kept: past it, the state of the page read the longest ago is dropped, and that
+/// page publishes it again when it is read.
 inline constexpr std::size_t maxBridgeSources = 16;
+/// At most this many pages are known at once, each by its identifier and the two callbacks of its connection; past it, a
+/// page that announces itself takes the place of the one that was read the longest ago.
+inline constexpr std::size_t maxBridgeAnnouncements = 256;
 /// A page publishes for this long after an inspector read its state: longer than the slowest period of a panel (5 s), so
 /// that a panel that reads keeps its page publishing, and a panel that is paused or closed lets it stop.
 inline constexpr std::chrono::seconds bridgeLease{15};
@@ -90,7 +93,7 @@ public:
         std::erase_if(sources, [&](const auto& entry) {
             return entry.first != host && !entry.second.alive();
         });
-        if (!sources.contains(host) && sources.size() >= maxBridgeSources)
+        if (!sources.contains(host) && sources.size() >= maxBridgeAnnouncements)
             sources.erase(std::ranges::min_element(sources, {}, [](const auto& entry) {
                 return entry.second.wantedUntil;
             }));
@@ -135,7 +138,25 @@ public:
         source.rows        = std::move(rows);
         source.publication = ++publications;
         source.publishedAt = now;
-        return now < source.wantedUntil;
+        const bool wanted  = now < source.wantedUntil;
+        // The rows of at most maxBridgeSources pages are kept: the page read the longest ago loses its state, not its place,
+        // so that a read finds it, asks it and gets its state again.
+        std::size_t holding = 0;
+        for (const auto& entry : sources)
+            holding += entry.second.publication != 0 ? 1 : 0;
+        while (holding > maxBridgeSources) {
+            Source* oldest = nullptr;
+            for (auto& entry : sources)
+                if (entry.second.publication != 0 && &entry.second != &source && (!oldest || entry.second.wantedUntil < oldest->wantedUntil))
+                    oldest = &entry.second;
+            if (!oldest)
+                break;
+            oldest->rows.clear();
+            oldest->rows.shrink_to_fit();
+            oldest->publication = 0;
+            --holding;
+        }
+        return wanted;
     }
 
     /**

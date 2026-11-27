@@ -513,7 +513,7 @@ environment's `mount`, not to the embedded bootstrap page):
   why, the state of the connection, the `cppFunction` calls that C++ has not answered yet and for how long, the Promises
   rejected lately (function, reason with its error code, time; the 50 latest), and the JavaScript functions that C++
   called with the number of their calls. `WebFront.js` records nothing by itself: the page that holds the tab installs
-  a probe in the bridge at the panel's first read and removes it five seconds after the last one. A call made before
+  a probe in the bridge at the panel's first read and removes it fifteen seconds after the last one. A call made before
   that is listed without a duration, and the rejections and the JavaScript calls are those seen while a panel reads; a
   call that the panel saw pending is followed to its answer, so its rejection is listed even if the panel closed meanwhile.
   The inspectors' own calls are not shown. Attached, the panel reads the page directly; detached, its window does not

@@ -784,7 +784,8 @@ appels. Cet état vit dans la page de l'application.
   de nullité : ni horloge, ni table. Le format binaire ne change pas ; les ressources du cœur restent dans la liste et le
   budget de l'ADR-016.
 - **Moniteur.** La page hôte (celle qui tient l'onglet, `inspector-host.mjs`) crée un moniteur (`inspector-bridge.mjs`)
-  qui pose la sonde à sa première lecture et la retire cinq secondes après la dernière : un pont que personne n'inspecte
+  qui pose la sonde à sa première lecture et la retire quinze secondes après la dernière (plus que la plus lente des
+  périodes d'un panneau, pour qu'un panneau qui lit ne laisse aucun moment sans sonde) : un pont que personne n'inspecte
   n'enregistre rien. Il suit le pont de l'interface (le `webFront` du cadre de l'aperçu, là où l'application appelle
   C++), ou celui de la page hôte quand l'interface n'en a pas ; un cadre rechargé donne un nouvel état. Les appels en
   attente quand la sonde est posée (à la première lecture, ou après un bail échu) sont repris avec leur nom, sans durée
@@ -792,7 +793,8 @@ appels. Cet état vit dans la page de l'application.
   (`webfront.inspector.*`, `wfInspect.*`) ne sont pas suivis. Un appel suivi l'est jusqu'à sa réponse, même après le
   retrait de la sonde : il faut de toute façon le retirer des appels en attente, et son rejet éventuel reste donc listé. L'état est borné : 100 appels en attente (les plus
   anciens), 50 rejets (les plus récents), 100 fonctions JavaScript (les plus appelées, sur 1 000 noms comptés un par un),
-  textes de 256 octets coupés sur une frontière de caractère, caractères de contrôle rendus visibles.
+  textes de 256 octets coupés sur une frontière de caractère, caractères de contrôle rendus visibles ; un nom long est
+  compté sous son libellé borné.
 - **Panneau rattaché.** L'iframe de la fenêtre flottante lit le moniteur de sa page hôte
   (`window.parent.webfrontInspectorHost.bridgeState`), sans passer par C++.
 - **Panneau détaché : relais par C++.** Une autre fenêtre ne voit pas la page, et `BroadcastChannel` n'est pas garanti
@@ -808,10 +810,11 @@ appels. Cet état vit dans la page de l'application.
   publie alors toutes les 250 ms, et s'arrête dès qu'une publication apprend que le bail est échu. Un panneau fermé ou en
   pause laisse donc la page se taire, et la sonde quitter le pont.
 - **Bornes du relais.** Un état de plus de 256 lignes est refusé (`std::invalid_argument`) sans remplacer le précédent ;
-  chaque texte est borné par `boundedText` (256 octets, 16 pour le genre). C++ garde l'état de 16 pages au plus : une page
-  déconnectée est oubliée, et au-delà la page lue le moins récemment cède sa place. Une page qui a perdu sa place
-  s'annonce de nouveau quand son panneau est détaché, ou quand sa publication est refusée (`unknown`) ; une nouvelle
-  annonce garde le bail d'un lecteur. Un état appartient à la connexion qui s'est annoncée la dernière sous cet
+  chaque texte est borné par `boundedText` (256 octets, 16 pour le genre). C++ connaît 256 pages au plus (un identifiant
+  et deux rappels chacune) et garde l'état publié de 16 d'entre elles : au-delà de 16 états, la page lue le moins
+  récemment perd son état mais pas sa place, et une lecture la relance ; au-delà de 256 pages, elle perd sa place. Une page
+  déconnectée est oubliée. Une page qui a perdu sa place s'annonce de nouveau quand son panneau est détaché, ou quand sa
+  publication est refusée (`unknown`) ; une nouvelle annonce garde le bail d'un lecteur. Un état appartient à la connexion qui s'est annoncée la dernière sous cet
   identifiant : la publication d'une autre connexion est refusée (`webfront.inspector.unavailable`). Une publication sans annonce est
   refusée (`webfront.inspector.unknown`).
 
