@@ -603,7 +603,8 @@ struct NodeOps {
     bool container   = false;                                                 // may have children
     bool keyed       = false;                                                 // its children have keys
     bool alternative = false;                                                 // its one child is told by the rank of an alternative, not by its position
-    char letter      = '#';                                                   // of its children's segments
+    bool direct      = true;  // reaches a child's position at once; false for a range that is walked from its start
+    char letter      = '#';   // of its children's segments
 };
 
 template <typename T>
@@ -743,6 +744,7 @@ struct FieldRender {
                                  .container   = false,
                                  .keyed       = false,
                                  .alternative = false,
+                                 .direct      = true,
                                  .letter      = '#'};
 };
 
@@ -930,7 +932,7 @@ struct Render {
                 return [value = input == "true"](const NodeRef& target) {
                     objectOf<U>(target) = value;
                 };
-            } else if constexpr (shape == Shape::integer || shape == Shape::real) {
+            } else if constexpr (parsedInteger || shape == Shape::real) {
                 const auto parsed = forms::detail::parseNumber<U>(input);
                 if (!parsed)
                     throw ParseError(std::is_floating_point_v<U> ? "Not a finite number" : "Not a whole number of the value's type");
@@ -955,11 +957,13 @@ struct Render {
         };
     }
 
-    static constexpr bool editable    = !std::is_const_v<T>
-                                        && (shape == Shape::boolean || shape == Shape::integer || shape == Shape::real || shape == Shape::bitset
-                                            || std::is_same_v<U, std::string>);
-    static constexpr bool hasChildren = shape == Shape::optional || shape == Shape::variant || shape == Shape::tuple || shape == Shape::map
-                                        || shape == Shape::sequence || shape == Shape::paged || shape == Shape::described;
+    /// The integers a text is parsed into: a wide character type is shown as its number, and has no text of its own to write.
+    static constexpr bool parsedInteger = shape == Shape::integer && requires(const char* text, U& value) { std::from_chars(text, text, value); };
+    static constexpr bool editable      = !std::is_const_v<T>
+                                          && (shape == Shape::boolean || parsedInteger || shape == Shape::real || shape == Shape::bitset
+                                              || std::is_same_v<U, std::string>);
+    static constexpr bool hasChildren   = shape == Shape::optional || shape == Shape::variant || shape == Shape::tuple || shape == Shape::map
+                                          || shape == Shape::sequence || shape == Shape::paged || shape == Shape::described;
 
     static constexpr NodeOps ops{.kind        = &kind,
                                  .value       = &value,
@@ -971,6 +975,7 @@ struct Render {
                                  .container   = hasChildren,
                                  .keyed       = KeyedPagedSource<T>,
                                  .alternative = shape == Shape::variant,
+                                 .direct      = !((shape == Shape::map || shape == Shape::sequence) && !std::ranges::random_access_range<T>),
                                  .letter      = shape == Shape::described ? '.' : '#'};
 };
 

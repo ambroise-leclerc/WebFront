@@ -284,73 +284,96 @@ const Scenario watchWritesDescribed{"The fields of a described type are written 
                                         });
                                     }};
 
-const Scenario watchMutators{"The application's mutator applies a write its own way, or refuses it (ADR-027, section 6)", {"inspector"}, [] {
-                                 Bench            bench;
-                                 std::vector<int> values{1, 2, 3};
-                                 then("it receives the object, the path and the text, in place of the assignment", [&] {
-                                     std::string seenPath, seenText;
-                                     const auto  id     = bench.watch("values",
-                                                                      visiting(values),
-                                                                      [&](std::vector<int>& object, std::string_view path, std::string_view text) {
-                                                                     seenPath = path;
-                                                                     seenText = text;
-                                                                     object.assign(3, 7);  // its own way: keeps an invariant of the application
-                                                                      });
-                                     const auto  page   = bench.open(id);
-                                     const auto  answer = bench.write(id, revisionOf(page), "/#1", "2", "5");
-                                     requireEqual(std::get<1>(answer), std::string{});
-                                     requireEqual(seenPath, std::string{"/#1"});
-                                     requireEqual(seenText, std::string{"5"});
-                                     requireEqual(values, std::vector<int>({7, 7, 7}));
-                                     // The memory holds what the target shows now; the other nodes are found by the next pass.
-                                     requireEqual(pathsOf(bench.changes(id, std::get<0>(answer))), std::vector<std::string>({"/#0", "/#2"}));
-                                     // The text was parsed for the node first: the mutator is not called for a text that is not a number.
-                                     seenText.clear();
-                                     checkEqual(codeOf([&] {
-                                                    return bench.write(id, std::get<0>(answer), "/#1", "7", "seven");
-                                                }),
-                                                std::string{code::stale});  // the revision moved with the pass: refused before anything
-                                     require(seenText.empty());
-                                 });
-                                 then("a text that is not a value of a described field is refused before the mutator is called", [&] {
-                                     Game       game;
-                                     int        calls = 0;
-                                     const auto id    = bench.watch("game", visiting(game), [&](Game&, std::string_view, std::string_view) {
-                                         ++calls;
-                                     });
-                                     const auto page  = bench.open(id);
-                                     for (const std::string_view text : {"", "-", "1e", "101", "99999999999999999999999999"})
-                                         checkEqual(codeOf([&] {
-                                                        return bench.write(id, revisionOf(page), "/.0", "0", text);
-                                                    }),
-                                                    std::string{code::parse});
-                                     requireEqual(calls, 0);
-                                     requireEqual(std::get<1>(bench.write(id, revisionOf(page), "/.0", "0", "42")), std::string{});
-                                     requireEqual(calls, 1);
-                                 });
-                                 then("a message of 1 MiB is cut to 256 bytes on a character, and the answer fits the smallest budget", [&] {
-                                     // 254 bytes then characters of 3 bytes: the first of them straddles the bound.
-                                     std::string message(254, 'm');
-                                     while (message.size() < 1024 * 1024)
-                                         message += "\xE2\x82\xAC";
-                                     const auto id     = bench.watch("values", visiting(values), [&](std::vector<int>&, std::string_view, std::string_view) {
-                                         throw std::runtime_error(message);
-                                     });
-                                     const auto page   = bench.open(id);
-                                     const auto answer = bench.write(id, revisionOf(page), "/#1", "2", "5");
-                                     requireEqual(std::get<1>(answer), std::string{code::refused});
-                                     const auto& text = std::get<2>(answer);
-                                     require(text.size() <= inspect::maxTextBytes);
-                                     requireEqual(text, std::string(253, 'm') + "\xE2\x80\xA6");  // back to a whole character, then the ellipsis
-                                     require(std::get<0>(answer) != revisionOf(page));
-                                     requireEqual(values[1], 2);
-                                     const auto bytes = 8 + 2 + 9 + inspect::detail::stringBytes(std::get<1>(answer).size())
-                                                        + inspect::detail::stringBytes(text.size());
-                                     require(bytes <= inspect::minPageBytes);
-                                     // The revision was received: the next call is not a resynchronization.
-                                     require(!resyncOf(bench.changes(id, std::get<0>(answer))));
-                                 });
-                             }};
+const Scenario watchMutators{
+    "The application's mutator applies a write its own way, or refuses it (ADR-027, section 6)",
+    {"inspector"},
+    [] {
+        Bench            bench;
+        std::vector<int> values{1, 2, 3};
+        then("it receives the object, the path and the text, in place of the assignment", [&] {
+            std::string seenPath, seenText;
+            const auto  id     = bench.watch("values", visiting(values), [&](std::vector<int>& object, std::string_view path, std::string_view text) {
+                seenPath = path;
+                seenText = text;
+                object.assign(3, 7);  // its own way: keeps an invariant of the application
+            });
+            const auto  page   = bench.open(id);
+            const auto  answer = bench.write(id, revisionOf(page), "/#1", "2", "5");
+            requireEqual(std::get<1>(answer), std::string{});
+            requireEqual(seenPath, std::string{"/#1"});
+            requireEqual(seenText, std::string{"5"});
+            requireEqual(values, std::vector<int>({7, 7, 7}));
+            // The memory holds what the target shows now; the other nodes are found by the next pass.
+            requireEqual(pathsOf(bench.changes(id, std::get<0>(answer))), std::vector<std::string>({"/#0", "/#2"}));
+            // The text was parsed for the node first: the mutator is not called for a text that is not a number.
+            seenText.clear();
+            checkEqual(codeOf([&] {
+                           return bench.write(id, std::get<0>(answer), "/#1", "7", "seven");
+                       }),
+                       std::string{code::stale});  // the revision moved with the pass: refused before anything
+            require(seenText.empty());
+        });
+        then("a mutator may replace the container that held the node: nothing read before it is used again", [&] {
+            const auto id     = bench.watch("values", visiting(values), [](std::vector<int>& object, std::string_view, std::string_view text) {
+                object = std::vector<int>(1000, std::stoi(std::string(text)));  // the former elements are freed
+            });
+            const auto page   = bench.open(id);
+            const auto answer = bench.write(id, revisionOf(page), "/#1", "2", "5");
+            requireEqual(std::get<1>(answer), std::string{});
+            requireEqual(values.size(), std::size_t{1000});
+            // The target was read again in the new container; the pass tells what else changed.
+            const auto pass = bench.changes(id, std::get<0>(answer));
+            requireEqual(pathsOf(pass), std::vector<std::string>{""});
+            requireEqual(flagsOf(nodesOf(pass).front()), flag::childrenChanged);
+        });
+        then("a mutator may remove the node it was asked to write", [&] {
+            const auto id     = bench.watch("values", visiting(values), [](std::vector<int>& object, std::string_view, std::string_view) {
+                object.clear();
+            });
+            const auto page   = bench.open(id);
+            const auto answer = bench.write(id, revisionOf(page), "/#1", "2", "5");
+            requireEqual(std::get<1>(answer), std::string{});
+            require(values.empty());
+            require(!resyncOf(bench.changes(id, std::get<0>(answer))));
+        });
+        then("a text that is not a value of a described field is refused before the mutator is called", [&] {
+            Game       game;
+            int        calls = 0;
+            const auto id    = bench.watch("game", visiting(game), [&](Game&, std::string_view, std::string_view) {
+                ++calls;
+            });
+            const auto page  = bench.open(id);
+            for (const std::string_view text : {"", "-", "1e", "101", "99999999999999999999999999"})
+                checkEqual(codeOf([&] {
+                               return bench.write(id, revisionOf(page), "/.0", "0", text);
+                           }),
+                           std::string{code::parse});
+            requireEqual(calls, 0);
+            requireEqual(std::get<1>(bench.write(id, revisionOf(page), "/.0", "0", "42")), std::string{});
+            requireEqual(calls, 1);
+        });
+        then("a message of 1 MiB is cut to 256 bytes on a character, and the answer fits the smallest budget", [&] {
+            // 254 bytes then characters of 3 bytes: the first of them straddles the bound.
+            std::string message(254, 'm');
+            while (message.size() < 1024 * 1024)
+                message += "\xE2\x82\xAC";
+            const auto id     = bench.watch("values", visiting(values), [&](std::vector<int>&, std::string_view, std::string_view) {
+                throw std::runtime_error(message);
+            });
+            const auto page   = bench.open(id);
+            const auto answer = bench.write(id, revisionOf(page), "/#1", "2", "5");
+            requireEqual(std::get<1>(answer), std::string{code::refused});
+            const auto& text = std::get<2>(answer);
+            require(text.size() <= inspect::maxTextBytes);
+            requireEqual(text, std::string(253, 'm') + "\xE2\x80\xA6");  // back to a whole character, then the ellipsis
+            require(std::get<0>(answer) != revisionOf(page));
+            requireEqual(values[1], 2);
+            const auto bytes = 8 + 2 + 9 + inspect::detail::stringBytes(std::get<1>(answer).size()) + inspect::detail::stringBytes(text.size());
+            require(bytes <= inspect::minPageBytes);
+            // The revision was received: the next call is not a resynchronization.
+            require(!resyncOf(bench.changes(id, std::get<0>(answer))));
+        });
+    }};
 
 const Scenario watchWriteRequestBudget{
     "A write request fits the message size, its text bounded on both sides (ADR-027, section 3, \"Budget d'une requête\")",
