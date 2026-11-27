@@ -153,8 +153,12 @@ without a run: these tools answer at once, from native code, even while an opera
 They are **reads only**: nothing here writes a watched value, whatever the application made writable for its own panel.
 
 ```cpp
+app.bootstrap("developer");   // first: the state grant reads the inspectors of the developer environment
 auto automation = webfront::automation::enableAutomation(app, {.grants = {"check", "preview", "state"}});
 ```
+
+Without the developer environment there are no inspectors to read, and `enableAutomation` refuses the `state` grant
+with `std::invalid_argument`.
 
 | Tool | Arguments besides `session` | What it reads |
 | --- | --- | --- |
