@@ -436,6 +436,8 @@ const Scenario watchSourcesRead{"A watch reads through the source the applicatio
                                         checkEqual(std::get<4>(std::get<0>(bench.registry->page(0, 0, 10, 4096)).back()), false);
                                     });
                                     then("a paged source that tells more elements than 2^53 is shown as such, and never converted out of range", [&] {
+                                        if constexpr (std::numeric_limits<std::size_t>::digits <= 53)
+                                            return;  // a 32-bit size_t cannot tell more than 2^53 elements
                                         Endless    endless;
                                         const auto id   = bench.watch("endless", visiting(endless));
                                         const auto page = bench.open(id);
