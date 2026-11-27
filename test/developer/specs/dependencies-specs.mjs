@@ -1,5 +1,5 @@
 // Specs of the dependency graph read from the lock (dependencies.mjs): wf list --tree, wf why and wf info.
-import {dependencyTree, why, info, selectPackages, chainLimit} from '../../../js/developer/environment/dependencies.mjs';
+import {dependencyTree, dependencyGraph, whyChains, packageDetails, why, info, selectPackages, chainLimit} from '../../../js/developer/environment/dependencies.mjs';
 import {throws} from '../support.mjs';
 
 describe('The graph of the installed packages', () => {
@@ -44,6 +44,60 @@ describe('The graph of the installed packages', () => {
             expect(dependencyTree({roots: {}, packages: {}})).toBe('No installed packages.');
             const cycle = {roots: {a: {requested: '1', id: 'a@1'}}, packages: {'a@1': node('a', '1', {b: 'b@1'}), 'b@1': node('b', '1', {a: 'a@1'})}};
             expect(dependencyTree(cycle)).toBe('a@1  (1)\n└── b@1\n    └── a@1  deduped\n\n1 root, 2 packages');
+        });
+    });
+
+    describe('as a graph, for the Packages panel', () => {
+        const flat = (entries, depth = 0) => entries.flatMap(entry => [
+            [depth, entry.label, entry.kind, entry.range, entry.deduped, entry.versions], ...flat(entry.children, depth + 1)]);
+
+        it('gives the roots with their ranges, the peers, the packages already opened and the versions of a name', () => {
+            const graph = dependencyGraph(lock);
+            expect(graph.packages).toBe(5);
+            expect(flat(graph.roots)).toEqual([
+                [0, '@app/kit@1.0.0', 'root', 'latest', false, 1],
+                [1, 'react-dom@19.3.1', 'dependency', '19.x', false, 1],
+                [2, 'react@19.3.1', 'peer', '^19.3.1', false, 1],
+                [2, 'scheduler@0.28.0', 'dependency', '^0.28.0', false, 2],
+                [1, 'scheduler@0.20.0', 'dependency', '~0.20.0', false, 2],
+                [0, 'react@19.3.1', 'root', '^19.3.1', false, 1],
+                [0, 'react-dom@19.3.1', 'root', '^19.3.1', true, 1],
+            ]);
+            // A package that comes again is not opened again: its dependencies stay where it came first.
+            expect(graph.roots[2].children).toEqual([]);
+            expect(graph.roots[0].children[0].id).toBe('react-dom@19.3.1');
+            expect(graph.roots[0].children[0].requested).toBe('19.x');
+            expect(graph.roots[0].children[0].children[0].requested).toBe('peer ^19.3.1');
+        });
+
+        it('marks an optional dependency, is empty without a lock, and shows the control characters of a range', () => {
+            expect(dependencyGraph(null)).toEqual({roots: [], packages: 0});
+            const optional = {roots: {a: {requested: '1\x1b[2J', id: 'a@1'}},
+                packages: {'a@1': node('a', '1', {b: 'b@1', c: 'c@1'}, {optionalDependencies: {b: '^1'}}), 'b@1': node('b', '1'), 'c@1': node('c', '1')}};
+            const [root] = dependencyGraph(optional).roots;
+            expect(root.range).toBe('1^[[2J');
+            expect(root.children.map(child => [child.label, child.kind, child.range, child.requested]))
+                .toEqual([['b@1', 'optional', '^1', 'optional ^1'], ['c@1', 'dependency', '', '']]);
+        });
+
+        it('gives the chains of wf why as links to the packages, and what wf info says as values', () => {
+            const {chains, limited} = whyChains(lock, 'scheduler@0.28.0');
+            expect(limited).toBeFalse();
+            expect(chains).toEqual([
+                [{id: 'react-dom@19.3.1', label: 'react-dom@19.3.1', note: 'root, ^19.3.1'}, {id: 'scheduler@0.28.0', label: 'scheduler@0.28.0', note: '^0.28.0'}],
+                [{id: '@app+kit@1.0.0', label: '@app/kit@1.0.0', note: 'root, latest'}, {id: 'react-dom@19.3.1', label: 'react-dom@19.3.1', note: '19.x'},
+                    {id: 'scheduler@0.28.0', label: 'scheduler@0.28.0', note: '^0.28.0'}],
+            ]);
+            expect(packageDetails(lock, 'react-dom@19.3.1')).toEqual({
+                id: 'react-dom@19.3.1', name: 'react-dom', version: '19.3.1', label: 'react-dom@19.3.1', roots: ['^19.3.1'], description: '',
+                license: 'MIT', integrity: 'sha512-react-dom', files: ['package.json', 'index.js'],
+                directory: '.webfront/developer/packages/react-dom@19.3.1-key/',
+                dependencies: [{id: 'react@19.3.1', label: 'react@19.3.1', request: 'peer ^19.3.1'}, {id: 'scheduler@0.28.0', label: 'scheduler@0.28.0', request: '^0.28.0'}],
+                dependents: [{id: '@app+kit@1.0.0', label: '@app/kit@1.0.0'}],
+                executables: [],
+            });
+            expect(packageDetails(lock, '@app+kit@1.0.0').executables)
+                .toEqual([{name: 'make', command: 'wf exec @app/kit:make'}, {name: 'check', command: 'wf exec @app/kit:check'}]);
         });
     });
 
