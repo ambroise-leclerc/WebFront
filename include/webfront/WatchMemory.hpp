@@ -83,19 +83,22 @@ struct Rendered {
 /**
  * Reads a node. Nothing here fails: an exception of a formatter or of a paged source becomes the node's value, with the
  * kind `opaque`. A node is writable when the watch is, its type has an editor, and what is shown of it is whole and
- * tells it exactly: neither its label nor its value cut, and not a keyed element told by its position.
+ * tells it exactly: neither its label nor its value cut, its value shown as it is (a control character is shown as its
+ * picture, which an edition would write back in its place), and not a keyed element told by its position.
  */
 [[nodiscard]] inline Rendered render(const ChildView& view, std::string path, bool positional, bool writable) {
     const auto& ops = *view.node.ops;
     std::string kind, value;
-    std::size_t count  = 0;
-    bool        cut    = false;
-    bool        failed = false;
+    std::size_t count   = 0;
+    bool        cut     = false;
+    bool        altered = false;
+    bool        failed  = false;
     try {
         kind = ops.kind(view.node);
         TextSink sink{maxTextBytes + 1};  // one byte more than what is shown tells that it is cut
         ops.value(view.node, sink);
         std::tie(value, cut) = visibleText(sink.text(), maxTextBytes, true);
+        altered              = !cut && value != sink.text();
         count                = ops.container ? ops.size(view.node) : 0;
     } catch (const std::exception& error) {
         failed = true;
@@ -111,7 +114,7 @@ struct Rendered {
     }
     unsigned flags = cut ? flag::truncated : 0u;
     Editor   editor;
-    if (writable && !failed && !cut && !view.labelCut && !positional && ops.editor != nullptr) {
+    if (writable && !failed && !cut && !altered && !view.labelCut && !positional && ops.editor != nullptr) {
         try {
             editor = ops.editor(view.node);
         } catch (...) {

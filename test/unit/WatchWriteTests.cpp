@@ -151,6 +151,12 @@ const Scenario watchWrites{"A value is written only where the application allows
                                then("each writable kind parses its own text", [&] {
                                    checkEqual(std::get<1>(write("/#1", "name", "other\nname")), std::string{});
                                    checkEqual(std::get<1>(board), std::string{"other\nname"});
+                                   // The value now shows a control character as its picture: writing what is shown would replace it, so the node
+                                   // is no longer writable.
+                                   checkEqual(codeOf([&] {
+                                                  return bench.write(id, revisionOf(page), "/#1", "other\xE2\x90\x8Aname", "x");
+                                              }),
+                                              std::string{code::readOnly});
                                    checkEqual(std::get<1>(write("/#2", "false", "true")), std::string{});
                                    check(std::get<2>(board));
                                    checkEqual(std::get<1>(write("/#3", "0001", "1010")), std::string{});
@@ -393,29 +399,33 @@ const Scenario watchRegistrations{
             bench.registry->remove(first);
             const auto second = bench.watch("value", visiting(value));
             require(second != first);
-            for (const auto& call : std::vector<std::function<void()>>{[&] {
-                                                                           static_cast<void>(bench.children(first, "", revisionOf(page)));
-                                                                       },
-                                                                       [&] {
-                                                                           static_cast<void>(bench.changes(first, revisionOf(page)));
-                                                                       },
-                                                                       [&] {
-                                                                           static_cast<void>(bench.fold(first, "", revisionOf(page)));
-                                                                       },
-                                                                       [&] {
-                                                                           static_cast<void>(bench.reset(first));
-                                                                       },
-                                                                       [&] {
-                                                                           static_cast<void>(bench.value(first, ""));
-                                                                       },
-                                                                       [&] {
-                                                                           static_cast<void>(bench.write(first, revisionOf(page), "", "1", "2"));
-                                                                       }})
+            // Each call of the inspectors, on the watch that is gone.
+            const auto refused = [&](auto&& call) {
                 checkEqual(codeOf([&] {
                                call();
                                return 0;
                            }),
                            std::string{code::unknown});
+            };
+            const auto old = revisionOf(page);
+            refused([&] {
+                static_cast<void>(bench.children(first, "", old));
+            });
+            refused([&] {
+                static_cast<void>(bench.changes(first, old));
+            });
+            refused([&] {
+                static_cast<void>(bench.fold(first, "", old));
+            });
+            refused([&] {
+                static_cast<void>(bench.reset(first));
+            });
+            refused([&] {
+                static_cast<void>(bench.value(first, ""));
+            });
+            refused([&] {
+                static_cast<void>(bench.write(first, old, "", "1", "2"));
+            });
             requireEqual(value, 1);
             requireEqual(nodesOf(bench.open(second)).size(), std::size_t{1});
         });
@@ -642,16 +652,23 @@ const Scenario watchExecutors{"With an executor, a watch's operations run on the
                                   });
                                   then("calls sent together are run one by one, in order: the second, with the same revision, is stale", [&] {
                                       const auto revision = bench.reset(id);  // nothing runs yet: the loop has not started
-                                      auto       both     = std::async(std::launch::async, [&] {
-                                          return networking::ex::sync_wait(networking::ex::when_all(children(revision), children(revision)));
-                                      });
-                                      std::this_thread::sleep_for(20ms);
+                                      // Two calls with the same revision, asked one after the other while the executor's loop has not started.
+                                      const auto ask = [&] {
+                                          return std::async(std::launch::async, [&] {
+                                              return await(children(revision));
+                                          });
+                                      };
+                                      auto earlier = ask();
+                                      std::this_thread::sleep_for(50ms);
+                                      auto later = ask();
+                                      std::this_thread::sleep_for(50ms);
                                       requireEqual(reads.load(), 0);  // queued on the executor, not run where they were asked
                                       owner.start();
-                                      const auto [first, second] = *both.get();
-                                      require(!resyncOf(first));
-                                      requireEqual(nodesOf(first).size(), std::size_t{4});
-                                      require(resyncOf(second));
+                                      const auto answered = earlier.get();
+                                      const auto stale    = later.get();
+                                      require(!resyncOf(answered));
+                                      requireEqual(nodesOf(answered).size(), std::size_t{4});
+                                      require(resyncOf(stale));
                                   });
                                   then("an operation queued when the watch is removed is refused without calling the source", [&] {
                                       const auto revision = bench.reset(id);

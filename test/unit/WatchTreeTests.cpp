@@ -222,10 +222,12 @@ const Scenario watchValueKinds{"Each kind of value is rendered as a node (ADR-02
                                        expect("/#0", "bool", "true");
                                        expect("/#1", "integer", "-3");
                                        expect("/#2", "real", "0.5");
-                                       expect("/#3",
-                                              "string",
-                                              "a\xE2\x90\x8A"
-                                              "b");  // the control character is made visible
+                                       // A control character is made visible; the text shown is then not the object's, and is not offered to edition.
+                                       checkEqual(valueOf(nodeAt(page, "/#3")),
+                                                  std::string{"a\xE2\x90\x8A"
+                                                              "b"});
+                                       checkEqual(kindOf(nodeAt(page, "/#3")), std::string{"string"});
+                                       checkEqual(flagsOf(nodeAt(page, "/#3")), 0u);
                                        expect("/#4", "bitset", "0101");
                                        checkEqual(labelOf(nodeAt(page, "/#1")), std::string{"1"});
                                    });
@@ -379,9 +381,9 @@ const Scenario watchSourcesRead{"A watch reads through the source the applicatio
                                         checkEqual(kindOf(nodesOf(page).front()), std::string{"sequence"});
                                         checkEqual(flagsOf(nodesOf(page)[1]), 0u);  // a copy is not the object
                                         requireEqual(nextOf(page), 3.0);
-                                        const auto far = bench.children(id, "", revisionOf(page), 999, 10);
-                                        requireEqual(valuesOf(far), std::vector<std::string>{"", "998001"});
-                                        requireEqual(nextOf(far), 0.0);
+                                        const auto last = bench.children(id, "", revisionOf(page), 999, 10);
+                                        requireEqual(valuesOf(last), std::vector<std::string>{"", "998001"});
+                                        requireEqual(nextOf(last), 0.0);
                                     });
                                 }};
 
