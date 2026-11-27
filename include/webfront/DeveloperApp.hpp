@@ -186,10 +186,10 @@ private:
     /// function but containers() answers only an admitted page (UI::isLocalClient, section 2).
     void registerInspectors() {
         using Policy = http::DefaultBuffersPolicy;
-        static_assert(inspect::responseBudget<Policy> >= inspect::minPageBytes,
-                      "The buffers policy is too small for the inspectors: an answer must hold a page of one node (ADR-027)");
-        using Caller        = typename Base::UI;
-        const auto registry = this->enableInspectors();
+        // A policy too small for a page of one node, or for a write of 1 KiB, does not compile (ADR-027, section 3).
+        static constexpr inspect::Limits limits = inspect::limitsOf<Policy>();
+        using Caller                            = typename Base::UI;
+        const auto registry                     = this->enableInspectors();
         // The menu of the environment's tab asks it first: an environment that does not find it says the library is too old.
         this->template reservedCppFunction<std::tuple<bool, bool, bool>, Caller>(
             "webfront.inspector.containers",
@@ -224,6 +224,58 @@ private:
             [registry](Caller ui, double revision, double after, double count) {
                 admit(ui);
                 return registry->page(revision, after, count, inspect::responseBudget<Policy>);
+            });
+        // The watches' trees (sections 3, 5 and 6). Each operation runs whole where the watch's object lives: on its executor
+        // when it has one, else here, on the server thread. The session is taken while the caller is known to be connected.
+        this->template reservedCppFunction<inspect::LimitsAnswer, Caller>("webfront.inspector.limits", [](Caller ui) {
+            admit(ui);
+            return inspect::WatchRegistry::limits(limits);
+        });
+        this->template reservedCppFunction<ResultTask<inspect::Page>, Caller, double, std::string, double, double, double>(
+            "webfront.inspector.children",
+            [this, registry](Caller ui, double watch, std::string path, double revision, double start, double count) {
+                admit(ui);
+                return inspect::onWatch<inspect::Page>(registry, watch, [=, session = this->inspectorSession(ui)] {
+                    return registry->children(session, watch, path, revision, start, count, limits);
+                });
+            });
+        this->template reservedCppFunction<ResultTask<inspect::Page>, Caller, double, double, double, double>(
+            "webfront.inspector.changes",
+            [this, registry](Caller ui, double watch, double revision, double cursor, double count) {
+                admit(ui);
+                return inspect::onWatch<inspect::Page>(registry, watch, [=, session = this->inspectorSession(ui)] {
+                    return registry->changes(session, watch, revision, cursor, count, limits);
+                });
+            });
+        this->template reservedCppFunction<ResultTask<inspect::ValueAnswer>, Caller, double, std::string, double, double>(
+            "webfront.inspector.value",
+            [this, registry](Caller ui, double watch, std::string path, double snapshot, double offset) {
+                admit(ui);
+                return inspect::onWatch<inspect::ValueAnswer>(registry, watch, [=, session = this->inspectorSession(ui)] {
+                    return registry->value(session, watch, path, snapshot, offset, limits);
+                });
+            });
+        this->template reservedCppFunction<ResultTask<inspect::Page>, Caller, double, std::string, double>(
+            "webfront.inspector.fold",
+            [this, registry](Caller ui, double watch, std::string path, double revision) {
+                admit(ui);
+                return inspect::onWatch<inspect::Page>(registry, watch, [=, session = this->inspectorSession(ui)] {
+                    return registry->fold(session, watch, path, revision);
+                });
+            });
+        this->template reservedCppFunction<ResultTask<double>, Caller, double>("webfront.inspector.reset", [this, registry](Caller ui, double watch) {
+            admit(ui);
+            return inspect::onWatch<double>(registry, watch, [=, session = this->inspectorSession(ui)] {
+                return registry->reset(session, watch);
+            });
+        });
+        this->template reservedCppFunction<ResultTask<inspect::WriteAnswer>, Caller, double, double, std::string, std::string, std::string>(
+            "webfront.inspector.write",
+            [this, registry](Caller ui, double watch, double revision, std::string path, std::string expected, std::string text) {
+                admit(ui);
+                return inspect::onWatch<inspect::WriteAnswer>(registry, watch, [=, session = this->inspectorSession(ui)] {
+                    return registry->write(session, watch, revision, path, expected, text, limits);
+                });
             });
         // What the application registered and runs (section 7): pages of rows, each within the answer's budget.
         this->template reservedCppFunction<inspect::FunctionPage, Caller, double, double>(

@@ -1309,12 +1309,27 @@ public:
 
     /**
      * @brief Declares a watch: an object or a container of the application that the inspectors of the developer environment
-     * show (ADR-027, section 5). The watch exists while the returned handle lives.
+     * show as a tree and refresh (ADR-027, section 5; docs/WATCHES.md). The watch exists while the returned handle lives.
      *
-     * `source` reaches the object. A visitor, `[&](webfront::inspect::Visit<const T> visit) { std::scoped_lock lock{m}; visit(object); }`,
-     * is called by WebFront and calls the visit once with the object under its own lock: it is the form of an object shared
-     * between threads, and `Visit<T>` makes the watch writable. An accessor, `[&] -> const T& { return object; }`, returns a
-     * reference, read on the server thread only (correct only for an object that thread alone touches), or a copy.
+     * `source` reaches the object, and every operation of the inspectors (a page, a pass of differences, a value, a write)
+     * runs whole inside the access it defines:
+     * - a visitor, `[&](webfront::inspect::Visit<const T> visit) { std::scoped_lock lock{m}; visit(object); }`, is called by
+     *   WebFront and calls the visit once with the object under its own lock: it is the form of an object shared between
+     *   threads, and `Visit<T>` makes the watch writable;
+     * - an accessor, `[&] -> const T& { return object; }`, returns a reference, read on the thread that runs the operation
+     *   (correct only for an object that thread alone touches), or a copy. A lock taken inside an accessor protects nothing.
+     *
+     * `executor` (`app.uiExecutor()`, a host's loop: anything whose `schedule()` gives a sender) is the thread that owns the
+     * object: the source and the whole operation run there, in the order the calls were received. Without one they run on
+     * the server thread, the one of the `cppFunction` callbacks. An accessor that returns a non-constant reference is
+     * writable with an executor only.
+     *
+     * `mutator`, `[](T& object, std::string_view path, std::string_view text) { ... }`, applies a write its own way and
+     * throws to refuse it; without one a value is assigned. Values are writable only when the source is.
+     *
+     * Destroying the handle waits for an operation that another thread started: destroy it outside every lock the source
+     * takes and outside the executor. Destroying it from the operation itself terminates the process, after a diagnostic.
+     * The overloads that take a `std::shared_ptr<State>` never wait and allow both: see below.
      *
      * Outside the developer environment (`bootstrap("developer")`), and in a distribution build, nothing is registered and
      * the handle is empty: declare the watches after bootstrap(). Inside, a watch costs an entry in a table until an
@@ -1324,22 +1339,141 @@ public:
      */
     template <inspect::WatchSource Source>
     [[nodiscard]] inspect::Watch watch(std::string name, Source&& source, std::source_location location = std::source_location::current()) {
-        using Stored = std::decay_t<Source>;  // a function given by name is kept as a pointer
-        using Shape  = inspect::SourceShape<Stored>;
-        inspect::WatchRegistry::checkName(name);
-        const auto registry = inspectorRegistry();
-        if (!registry)
-            return {};
-        auto       owned = std::make_shared<Stored>(std::forward<Source>(source));
-        const auto id    = registry->add(std::move(name),
-                                         inspect::kindOf<typename Shape::Object>(),
-                                         inspect::locationText(location),
-                                         Shape::writable,
-                                         std::static_pointer_cast<void>(std::move(owned)));
-        return inspect::Watch{registry, id};
+        using Shape = inspect::SourceShape<std::decay_t<Source>>;
+        return declareWatch<Shape>(std::move(name),
+                                   location,
+                                   std::forward<Source>(source),
+                                   std::shared_ptr<inspect::NoState>{},
+                                   inspect::NoExecutor{},
+                                   inspect::NoMutator{});
+    }
+    template <inspect::WatchSource Source, inspect::WatchExecutor Executor>
+    [[nodiscard]] inspect::Watch watch(std::string name, Source&& source, Executor executor, std::source_location location = std::source_location::current()) {
+        using Shape = inspect::SourceShape<std::decay_t<Source>>;
+        return declareWatch<Shape>(std::move(name),
+                                   location,
+                                   std::forward<Source>(source),
+                                   std::shared_ptr<inspect::NoState>{},
+                                   std::move(executor),
+                                   inspect::NoMutator{});
+    }
+    template <inspect::WatchSource Source, inspect::WatchMutator<typename inspect::SourceShape<std::decay_t<Source>>::Object> Mutator>
+    [[nodiscard]] inspect::Watch watch(std::string name, Source&& source, Mutator mutator, std::source_location location = std::source_location::current()) {
+        using Shape = inspect::SourceShape<std::decay_t<Source>>;
+        return declareWatch<Shape>(std::move(name),
+                                   location,
+                                   std::forward<Source>(source),
+                                   std::shared_ptr<inspect::NoState>{},
+                                   inspect::NoExecutor{},
+                                   std::move(mutator));
+    }
+    template <inspect::WatchSource                                                               Source,
+              inspect::WatchExecutor                                                             Executor,
+              inspect::WatchMutator<typename inspect::SourceShape<std::decay_t<Source>>::Object> Mutator>
+    [[nodiscard]] inspect::Watch
+    watch(std::string name, Source&& source, Executor executor, Mutator mutator, std::source_location location = std::source_location::current()) {
+        using Shape = inspect::SourceShape<std::decay_t<Source>>;
+        return declareWatch<Shape>(std::move(name),
+                                   location,
+                                   std::forward<Source>(source),
+                                   std::shared_ptr<inspect::NoState>{},
+                                   std::move(executor),
+                                   std::move(mutator));
+    }
+
+    /**
+     * @brief Declares a watch whose source owns its state: each operation keeps `owner` alive while it runs, and the source
+     * captures nothing else by reference. It receives the state, `[](State& state, inspect::Visit<T> visit) {
+     * std::scoped_lock lock{state.mutex}; visit(state.value); }` (or `[](State& state) -> T& { ... }`).
+     *
+     * Destroying the handle then never waits: it may be destroyed under the lock the source takes, and from the operation
+     * itself (source, visitor or mutator). An operation in progress ends on a state that still lives, and its answer is
+     * replaced by the refusal `webfront.inspector.unknown`. It is the form to choose when the order of destruction cannot
+     * be guaranteed. The other parameters are those of the overloads above.
+     */
+    template <typename State, inspect::OwnedWatchSource<State> Source>
+    [[nodiscard]] inspect::Watch
+    watch(std::string name, std::shared_ptr<State> owner, Source&& source, std::source_location location = std::source_location::current()) {
+        using Shape = inspect::OwnedSourceShape<std::decay_t<Source>, State>;
+        return declareWatch<Shape>(std::move(name),
+                                   location,
+                                   std::forward<Source>(source),
+                                   requireOwner(std::move(owner)),
+                                   inspect::NoExecutor{},
+                                   inspect::NoMutator{});
+    }
+    template <typename State, inspect::OwnedWatchSource<State> Source, inspect::WatchExecutor Executor>
+    [[nodiscard]] inspect::Watch
+    watch(std::string name, std::shared_ptr<State> owner, Source&& source, Executor executor, std::source_location location = std::source_location::current()) {
+        using Shape = inspect::OwnedSourceShape<std::decay_t<Source>, State>;
+        return declareWatch<Shape>(std::move(name),
+                                   location,
+                                   std::forward<Source>(source),
+                                   requireOwner(std::move(owner)),
+                                   std::move(executor),
+                                   inspect::NoMutator{});
+    }
+    template <typename State,
+              inspect::OwnedWatchSource<State>                                                               Source,
+              inspect::WatchMutator<typename inspect::OwnedSourceShape<std::decay_t<Source>, State>::Object> Mutator>
+    [[nodiscard]] inspect::Watch
+    watch(std::string name, std::shared_ptr<State> owner, Source&& source, Mutator mutator, std::source_location location = std::source_location::current()) {
+        using Shape = inspect::OwnedSourceShape<std::decay_t<Source>, State>;
+        return declareWatch<Shape>(std::move(name),
+                                   location,
+                                   std::forward<Source>(source),
+                                   requireOwner(std::move(owner)),
+                                   inspect::NoExecutor{},
+                                   std::move(mutator));
+    }
+    template <typename State,
+              inspect::OwnedWatchSource<State>                                                               Source,
+              inspect::WatchExecutor                                                                         Executor,
+              inspect::WatchMutator<typename inspect::OwnedSourceShape<std::decay_t<Source>, State>::Object> Mutator>
+    [[nodiscard]] inspect::Watch watch(std::string            name,
+                                       std::shared_ptr<State> owner,
+                                       Source&&               source,
+                                       Executor               executor,
+                                       Mutator                mutator,
+                                       std::source_location   location = std::source_location::current()) {
+        using Shape = inspect::OwnedSourceShape<std::decay_t<Source>, State>;
+        return declareWatch<Shape>(std::move(name),
+                                   location,
+                                   std::forward<Source>(source),
+                                   requireOwner(std::move(owner)),
+                                   std::move(executor),
+                                   std::move(mutator));
     }
 
 private:
+    template <typename State>
+    static std::shared_ptr<State> requireOwner(std::shared_ptr<State> owner) {
+        if (!owner)
+            throw std::invalid_argument("webfront::BasicWF::watch(): an owning watch needs the state it owns");
+        return owner;
+    }
+
+    template <typename Shape, typename Source, typename State, typename Executor, typename Mutator>
+    [[nodiscard]] inspect::Watch
+    declareWatch(std::string name, const std::source_location& location, Source&& source, std::shared_ptr<State> owner, Executor executor, Mutator mutator) {
+        inspect::WatchRegistry::checkName(name);
+        if constexpr (inspect::introspection) {
+            const auto registry = inspectorRegistry();
+            if (!registry)
+                return {};
+            const auto id = registry->add(inspect::makeWatch<Shape>(std::move(name),
+                                                                    inspect::locationText(location),
+                                                                    std::forward<Source>(source),
+                                                                    std::move(owner),
+                                                                    std::move(executor),
+                                                                    std::move(mutator)));
+            return inspect::Watch{registry, id};
+        } else {
+            static_cast<void>(location), static_cast<void>(source), static_cast<void>(owner), static_cast<void>(executor), static_cast<void>(mutator);
+            return {};
+        }
+    }
+
     /// The names of the inspectors belong to WebFront: an application can neither hide one nor pose as one (ADR-027, section 1).
     static void refuseReservedName(std::string_view functionName) {
         if (inspect::isReservedName(functionName))
@@ -1766,11 +1900,31 @@ private:
     /// table without the bootstrap or in a distribution build, where the handle must stay empty (section 1).
     std::shared_ptr<inspect::WatchRegistry> enableInspectors() {
         std::scoped_lock lock{watchRegistryMutex};
-        if (!watchRegistry)
-            watchRegistry = std::make_shared<inspect::WatchRegistry>();
+        if (!watchRegistry) {
+            watchRegistry             = std::make_shared<inspect::WatchRegistry>();
+            watchRegistry->diagnostic = [](std::string_view message) {
+                log::warn("{}", message);
+            };
+        }
         if (jsCalls)
             jsCalls->enable();
         return watchRegistry;
+    }
+
+    /// What the inspectors keep for the connection of `caller` (its memory of each watch), freed when it closes. Throws
+    /// when the connection is gone.
+    [[nodiscard]] std::shared_ptr<inspect::WatchSession> inspectorSession(const UI& caller) const {
+        const auto registry   = inspectorRegistry();
+        const auto generation = deferredCallsOf(caller).second;
+        if (!registry || generation == 0)
+            throw detail::makeBridgeError(bridge_code::disconnected, "The connection is closed");
+        return registry->session(generation);
+    }
+
+    /// Frees what the inspectors keep for a connection that closed.
+    void forgetInspectorSession(WebLinkGeneration generation) const noexcept {
+        if (const auto registry = inspectorRegistry())
+            registry->forget(generation);
     }
 
     /// For the inspectors' functions (DeveloperAppWithNetwork): what cppFunction registered, and the calls made to JavaScript.
@@ -1924,6 +2078,7 @@ private:
             }
             stoppedCalls->close();
             readBinding->close(generation);
+            forgetInspectorSession(generation);
             if (auto found = domDocuments.find(id); found != domDocuments.end()) {
                 found->second->close();
                 domDocuments.erase(found);
@@ -1958,8 +2113,13 @@ private:
             document->close();
         domDocuments.clear();
         std::map<WebLinkId, Connection> released;
-        std::scoped_lock                lock{linksMutex};
-        released.swap(webLinks);
+        {
+            std::scoped_lock lock{linksMutex};
+            released.swap(webLinks);
+        }
+        // Their closure is not reported during shutdown: what the inspectors kept for them is freed here.
+        for (const auto& [id, connection] : released)
+            forgetInspectorSession(connection.generation);
     }
 
     /// The type-erased handler of a C++ function, as cppFunction<R, Args...> registers it.
@@ -2357,6 +2517,8 @@ private:
                 // Outside linksMutex: dropping the grants destroys their contexts, whose destructors may use the application.
                 if (closedGeneration)
                     readBinding->close(*closedGeneration);  // its read URLs stop working at once
+                if (closedGeneration)
+                    forgetInspectorSession(*closedGeneration);
                 if (auto found = domDocuments.find(event.webLinkId); found != domDocuments.end()) {
                     found->second->close();
                     domDocuments.erase(found);

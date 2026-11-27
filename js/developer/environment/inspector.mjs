@@ -1,12 +1,14 @@
 // The page of the inspectors (#680, ADR-027 section 8): inspector.html?panel=<id> shows one panel and talks to C++ through the
 // bridge. In a window or a tab of its own it opens its own connection; in the floating window of a page (?frame=1) it opens
 // none and borrows that page's bridge, since the adapters give the proof of the view to the main frame only. The panel of the
-// watches lists them by webfront.inspector.watches and follows the registrations and removals (section 3, "Découverte"). The
-// panels of the functions and of the browsers are in inspector-registry.mjs (#681, section 7), the one of the packages in
-// inspector-packages.mjs (#683), the one of the bridge in the page in inspector-bridge.mjs (#684).
+// watches lists them by webfront.inspector.watches and follows the registrations and removals (section 3, "Découverte"); the
+// tree of each is in inspector-watches.mjs (#682). The panels of the functions and of the browsers are in
+// inspector-registry.mjs (#681, section 7), the one of the packages in inspector-packages.mjs (#683), the one of the bridge
+// in the page in inspector-bridge.mjs (#684).
 import {inspectorPanels as panels, panelTitle, inspectorChannel as channelName} from './menu.mjs';
-import {showFunctionsPanel, showBrowsersPanel, registryStyles} from './inspector-registry.mjs';
+import {showFunctionsPanel, showBrowsersPanel, registryStyles, periods, formatPeriod, keptPeriod, keepPeriod, createPoller} from './inspector-registry.mjs';
 import {showPackagesPanel, packagesStyles} from './inspector-packages.mjs';
+import {createWatchTree, createTreeView, watchTreeStyles} from './inspector-watches.mjs';
 import {showBridgePanel, bridgeSource, bridgeStyles} from './inspector-bridge.mjs';
 
 // What a page of the application's origin reads a published state with, as a detached Bridge panel does.
@@ -203,8 +205,11 @@ ul.watches .kind{color:#d7fa85;font-family:ui-monospace,monospace;font-size:12px
 ul.watches .location{grid-column:1/3;color:#a9b3c4;font-size:12px;overflow-wrap:anywhere}
 ul.watches .writable{color:#8fd0ff;font-size:12px}`;
 
-/** Renders the list of the watches in `list`, one item per watch, kept by id so that a removal removes its item. */
-export function renderWatches(list, watches) {
+/**
+ * Renders the list of the watches in `list`, one item per watch, kept by id so that a removal removes its item. With
+ * `onToggle(watch, item)`, each item has a button that unfolds the tree of its watch.
+ */
+export function renderWatches(list, watches, {onToggle = null} = {}) {
     const page = list.ownerDocument;
     const items = new Map([...list.children].map(item => [Number(item.dataset.watch), item]));
     const ids = new Set(watches.map(watch => watch.id));
@@ -219,8 +224,21 @@ export function renderWatches(list, watches) {
             element.textContent = text;
             return element;
         };
-        item.append(cell('name', watch.name), cell('kind', watch.kind), cell('location', watch.location));
-        if (watch.writable) item.append(cell('writable', 'writable'));
+        const head = page.createElement('div');
+        head.className = 'head';
+        if (onToggle) {
+            const toggle = page.createElement('button');
+            toggle.type = 'button';
+            toggle.className = 'toggle';
+            toggle.textContent = '▸';
+            toggle.setAttribute('aria-expanded', 'false');
+            toggle.setAttribute('aria-label', `Show the content of ${watch.name}`);
+            toggle.addEventListener('click', () => onToggle(watch, item));
+            head.append(toggle);
+        }
+        head.append(cell('name', watch.name), cell('kind', watch.kind), cell('location', watch.location));
+        if (watch.writable) head.append(cell('writable', 'writable'));
+        item.append(head);
         list.append(item);
     }
 }
@@ -255,7 +273,7 @@ export async function main(view = window) {
     page.title = `WebFront inspector: ${panelTitle(id)}`;
     reloadWhenRestored(view);
     const style = page.createElement('style');
-    style.textContent = styles + registryStyles + packagesStyles + bridgeStyles;
+    style.textContent = styles + registryStyles + packagesStyles + watchTreeStyles + bridgeStyles;
     page.head.append(style);
     const header = page.createElement('header');
     const heading = page.createElement('h1');
@@ -316,30 +334,107 @@ export async function main(view = window) {
     pause.className = 'pause';
     pause.textContent = 'Pause';
     header.insertBefore(pause, header.children[1] ?? null);
+    const periodLabel = page.createElement('label');
+    periodLabel.textContent = 'Refresh every ';
+    const period = page.createElement('select');
+    period.className = 'period';
+    const chosen = keptPeriod(view);
+    for (const value of periods) {
+        const option = page.createElement('option');
+        option.value = String(value);
+        option.textContent = formatPeriod(value);
+        option.selected = value === chosen;
+        period.append(option);
+    }
+    periodLabel.append(period);
+    header.insertBefore(periodLabel, pause);
     const describe = watches => {
         status.classList.remove('error');
         status.textContent = watches.length ? '' : 'The application declares no watch (app.watch).';
     };
+    const denied = error => error?.code === 'webfront.inspector.denied'
+        ? 'The inspectors answer only a view of the application: this page is not admitted.' : null;
+
+    // The trees that are unfolded, by the identifier of their watch. Each is read again at the period, unless paused.
+    const trees = new Map();
+    const close = id => {
+        const shown = trees.get(id);
+        if (!shown) return;
+        shown.tree.stop();
+        shown.view.stop();
+        shown.element.remove();
+        trees.delete(id);
+    };
+    const toggle = async (watch, item) => {
+        const button = item.querySelector('button.toggle');
+        if (trees.has(watch.id)) {
+            close(watch.id);
+            button.textContent = '▸';
+            button.setAttribute('aria-expanded', 'false');
+            return;
+        }
+        const element = page.createElement('ul');
+        item.append(element);
+        let shown = null;
+        const tree = createWatchTree({
+            bridge,
+            watch: watch.id,
+            maxMessageBytes: bridge.maxMessageBytes ?? Infinity,
+            onUpdate: () => shown?.render(),
+            // A watch that C++ no longer knows leaves the list at once, without waiting for the next discovery.
+            onGone: () => { close(watch.id); discovery.forget(watch.id); },
+        });
+        shown = createTreeView({tree, list: element, view});
+        trees.set(watch.id, {tree, view: shown, element});
+        button.textContent = '▾';
+        button.setAttribute('aria-expanded', 'true');
+        try { await tree.open(); }
+        catch (error) {
+            if (trees.has(watch.id)) {
+                status.classList.add('error');
+                status.textContent = denied(error) ?? `The watch cannot be read: ${error?.message ?? error}`;
+            }
+        }
+    };
     const discovery = createWatchDiscovery({
         bridge,
-        onChange: ({watches}) => renderWatches(list, watches),
+        onChange: ({watches, removed}) => {
+            for (const id of removed) close(id);
+            renderWatches(list, watches, {onToggle: toggle});
+        },
         // Every read that succeeds says so, also after an error and when nothing changed.
         onRead: describe,
         onError: error => {
             status.classList.add('error');
-            status.textContent = error?.code === 'webfront.inspector.denied'
-                ? 'The inspectors answer only a view of the application: this page is not admitted.'
-                : `The watches cannot be read: ${error?.message ?? error}`;
+            status.textContent = denied(error) ?? `The watches cannot be read: ${error?.message ?? error}`;
         },
         timers: view,
     });
+    // One pass of differences per tree and per period; a tree that is busy (the user unfolds, writes) is skipped this time.
+    const refresher = createPoller({
+        read: async () => { await Promise.all([...trees.values()].map(({tree}) => tree.refresh().catch(() => false))); return true; },
+        onData: () => {},
+        period: chosen,
+        timers: view,
+    });
+    period.addEventListener('change', () => {
+        const value = Number(period.value);
+        keepPeriod(view, value);
+        refresher.setPeriod(value);
+    });
     pause.addEventListener('click', () => {
-        if (discovery.paused) discovery.resume(); else discovery.pause();
+        if (discovery.paused) { discovery.resume(); refresher.resume(); }
+        else { discovery.pause(); refresher.pause(); }
         pause.textContent = discovery.paused ? 'Resume' : 'Pause';
     });
-    view.addEventListener('pagehide', () => discovery.stop());
+    view.addEventListener('pagehide', () => {
+        discovery.stop();
+        refresher.stop();
+        for (const id of [...trees.keys()]) close(id);
+    });
     await discovery.start();
-    return {bridge, discovery, list};
+    refresher.start();
+    return {bridge, discovery, list, trees, refresher, toggle};
 }
 
 /**

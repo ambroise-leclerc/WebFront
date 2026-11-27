@@ -64,8 +64,13 @@ _require("${readme}" "target_link_libraries(MyApp PRIVATE WebFront::WebFront)" "
 _require("${readme}" "mkdir build\ncd build\ncmake ..\ncmake --build .\n" "Life standard build")
 foreach(line "app.cppFunction(\"life.step\", &webfront::demo::nextLife);" "app.bootstrap(\"developer\");" "app.show();")
     _require("${readme}" "${line}" "Life bootstrap snippet")
+endforeach()
+# The compiled developer stage registers the same simulation through what it keeps for the inspectors (LifeWatches.hpp).
+foreach(line "app.cppFunction(\"life.step\", " "webfront::demo::nextLife" "app.bootstrap(\"developer\");" "app.show();")
     _require("${life}" "${line}" "compiled Life bootstrap")
 endforeach()
+_read(life_watches examples/life/LifeWatches.hpp)
+_require("${life_watches}" "const auto       next = nextLife(cells);" "the developer stage steps with the shared simulation")
 foreach(line "#include <bitset>" "Grid nextLife(const Grid& cells)" "app.cppFunction(\"life.step\", &nextLife);")
     _require("${readme}" "${line}" "self-contained introductory Life application")
 endforeach()

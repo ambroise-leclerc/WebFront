@@ -469,7 +469,10 @@ environment's `mount`, not to the embedded bootstrap page):
   The **Watches** panel lists the application's watches (`app.watch(name, source)`, declared after `bootstrap()`): their
   name, the kind of their root and where they were declared. It asks C++ for the revision of their table every 250 ms
   (Pause stops it), reads the list again when it changed, and adds or removes the watches that appeared or disappeared.
-  Their contents come with the next versions of the environment.
+  The arrow beside a watch unfolds its content as a tree: scalars, strings, containers, described and formattable types,
+  read by pages of 200 children and refreshed at the chosen period, the values that changed highlighted. A value the
+  application made writable is edited in place (Enter writes, Escape cancels); a value that is cut offers its full text.
+  [Watches](WATCHES.md) tells how to declare them, under which lock or on which thread they are read, and their bounds.
 
   The **Functions** panel lists what the application registered with `cppFunction`, the functions of its spaces included
   (with the path of their space): the name, the signature as TypeScript declares it (`(a: number, b: string) =>

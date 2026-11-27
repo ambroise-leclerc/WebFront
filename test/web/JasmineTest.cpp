@@ -168,6 +168,7 @@ public:
         });
         registerBitsetCallbacks();
         registerListCallbacks();
+        registerWatchCallbacks();
         lifeReactSubscription = demo::installLifeReact(app);
         registerHostLoop(app);
         registerMediaRoute(app);
@@ -253,6 +254,12 @@ private:
     std::array<std::uint32_t, 6>         domEventCounts{};
     std::map<WebLinkId, dom::Node>       documentTexts, documentInputs;
     std::map<WebLinkId, TaskHandle>      documentReads;
+    // What inspector-specs.mjs watches (#682). The handles are declared last: destroyed before what their sources read.
+    struct WatchedFixture {
+        vector<string> rows;
+        string         text;
+        inspect::Watch rowsWatch, textWatch;
+    } watched;
     // The forms of #383 built for each browser, with the object their events write.
     struct FormsFixture {
         std::shared_ptr<forms_fixture::Settings>  object;
@@ -460,6 +467,37 @@ private:
         if (!reason.empty())  // always: a value-returning coroutine needs a co_return and no unreachable code (MSVC)
             throw BridgeError("late:failure", reason);
         co_return reason;
+    }
+
+    /// The watches that inspector-specs.mjs reads (#682). They are declared by a call of the specs, once bootstrap has
+    /// enabled the inspectors; their objects are touched by the server thread only, as the callbacks are.
+    void registerWatchCallbacks() {
+        webFront->cppFunction("watchFixture.declare", [this] {
+            watched.rows.clear();
+            for (int index = 0; index < 500; ++index)
+                watched.rows.push_back("row " + to_string(index));
+            watched.text.clear();
+            while (watched.text.size() < 100'000)
+                watched.text += "h\xC3\xA9llo \xE2\x82\xAC ";  // characters of 1, 2 and 3 bytes
+            watched.rowsWatch = webFront->watch("suite.rows", [this](inspect::Visit<vector<string>> visit) {
+                visit(watched.rows);
+            });
+            watched.textWatch = webFront->watch("suite.text", [this](inspect::Visit<const string> visit) {
+                visit(watched.text);
+            });
+            return tuple{static_cast<double>(watched.rowsWatch.id()), static_cast<double>(watched.textWatch.id())};
+        });
+        webFront->cppFunction("watchFixture.changeAll", [this](const string& prefix) {
+            for (size_t index = 0; index < watched.rows.size(); ++index)
+                watched.rows[index] = prefix + ' ' + to_string(index);
+        });
+        webFront->cppFunction("watchFixture.row", [this](double index) {
+            return watched.rows.at(static_cast<size_t>(index));
+        });
+        webFront->cppFunction("watchFixture.remove", [this] {
+            watched.rowsWatch.reset();
+            watched.textWatch.reset();
+        });
     }
 
     void registerListCallbacks() {

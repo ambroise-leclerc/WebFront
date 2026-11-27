@@ -11,6 +11,7 @@
 #include "Life.hpp"
 #include "LifeDeveloperOptions.hpp"
 #include "LifeFrontend.hpp"
+#include "LifeWatches.hpp"
 #include <webfront/WebFront.hpp>
 
 #include <iostream>
@@ -27,12 +28,20 @@ int main(int argc, char** argv) {
     }
     try {
         webfront::demo::prepareLifeProject(options->project);
-        webfront::demo::LifeApp app{options->project};
-        app.cppFunction("life.step", &webfront::demo::nextLife);
+        // What the inspectors show of the simulation (State C++ > Watches in the menu of the WebFront tab): declared before
+        // the application, whose callback refers to it.
+        webfront::demo::LifeObserved observed;
+        webfront::demo::LifeApp      app{options->project};
+        // The simulation is webfront::demo::nextLife, as in the console and embedded stages; this stage keeps its last result.
+        app.cppFunction("life.step", [&observed](const webfront::demo::LifeGrid& cells) {
+            return observed.step(cells);
+        });
         if (!options->environment)
             app.bootstrap("developer");
         else
             app.bootstrap("developer", {.environment = *options->environment, .integrity = *options->integrity});
+        // After bootstrap, which enables the inspectors, and after `observed`: the handles are destroyed before its mutex.
+        const auto watches = webfront::demo::watchLife(app, observed);
         app.show();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
