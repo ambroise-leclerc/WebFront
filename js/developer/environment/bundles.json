@@ -26,7 +26,7 @@
   "js/developer/environment/menu.mjs": "b4fe4c38e6b8cc6c1101df842e282ab85e6c6e029b2225738b9d27bc5efbc88d",
   "js/developer/environment/inspector-host.mjs": "bffcef61b8a5778f53adfea5096c5d5fa277868bbaa39e60142a3493210076fb",
   "js/developer/environment/inspector.mjs": "e22d5731e7e92b821ccdb15badc2fa4aebba653763239ea813ea904719aca33a",
-  "js/developer/environment/inspector-packages.mjs": "1c90f9d9c84592cd9372116bcf753ee0914166f218b2f181ffb24e51710f62a0",
+  "js/developer/environment/inspector-packages.mjs": "f7bcfc5bee182b0260ca0892962120743a74b7bb70515ec1739d115b569e497a",
   "js/developer/environment/inspector-registry.mjs": "431153f7d7eb562262361f2f8eb60d8690f42cdfbf5ed9586270270d9e2b6038",
   "js/developer/environment/inspector.html": "66bfb80d6bd29bc9aabf71e0dd9b163dfcd1f1c77d1a41818645af1a4f9b8616",
   "js/developer/environment/tarball.mjs": "1c1e1aea067910e1fec74e85b4bf9fbefed9b38187a04d8d2764f0b9a96fca39",

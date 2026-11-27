@@ -156,8 +156,13 @@ describe('The Packages panel of the inspectors', () => {
         expect(item(panel.tree, 'scheduler@0.28.0').getAttribute('aria-selected')).toBe('true');
 
         // A package of a chain: its detail, with its executables, its dependencies and the ranges that ask for them.
-        [...panel.detail.querySelectorAll('ol.chains button')].find(button => button.textContent === '@app/kit@1.0.0').click();
+        const followed = [...panel.detail.querySelectorAll('ol.chains button')].find(button => button.textContent === '@app/kit@1.0.0');
+        followed.focus();
+        followed.click();
         expect(panel.selected).toBe('@app+kit@1.0.0');
+        // The link was replaced with the detail: the focus is on the title of the package it led to, not lost to the page.
+        expect(document.activeElement).toBe(panel.detail.querySelector('h2'));
+        expect(document.activeElement.textContent).toBe('@app/kit@1.0.0');
         const kit = rowsOf(panel.detail);
         expect(kit.Root).toBe('yes, requested latest');
         expect(kit.License).toBe('not declared');

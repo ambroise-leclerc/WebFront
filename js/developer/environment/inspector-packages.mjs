@@ -69,6 +69,7 @@ ul.matches button,.package-detail button.package-link{min-height:28px;padding:0 
 ul.matches li{display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px}
 ul.matches button:focus-visible,.package-detail button:focus-visible{outline:2px solid #d7fa85;outline-offset:-2px}
 .package-detail{min-width:0;padding:8px 12px;border:1px solid #2f3a50;border-radius:4px;align-self:start}
+.package-detail h2:focus{outline:none}
 .package-detail h2{margin:0 0 4px;font:600 14px ui-monospace,monospace;overflow-wrap:anywhere}
 .package-detail h3{margin:12px 0 4px;font-size:12px;font-weight:600;color:#a9b3c4}
 .package-detail p{margin:0 0 8px}
@@ -151,7 +152,12 @@ export async function showPackagesPanel({page, view, body, status, bridge, load 
         const button = element('button', 'package-link', label);
         button.type = 'button';
         button.dataset.package = id;
-        button.addEventListener('click', () => select(id));
+        button.addEventListener('click', () => {
+            // A link of the detail is replaced with it: the focus goes to the title of the package it leads to, not to the page.
+            const replaced = detail.contains(button);
+            select(id);
+            if (replaced) detail.querySelector('h2')?.focus();
+        });
         return button;
     };
 
@@ -195,7 +201,9 @@ export async function showPackagesPanel({page, view, body, status, bridge, load 
         const fileList = element('ul', 'files');
         for (const path of details.files) fileList.append(element('li', '', path));
         files.append(fileList);
-        detail.replaceChildren(element('h2', '', details.label), ...(details.description ? [element('p', 'description', details.description)] : []), rows,
+        const title = element('h2', '', details.label);
+        title.tabIndex = -1;
+        detail.replaceChildren(title, ...(details.description ? [element('p', 'description', details.description)] : []), rows,
             element('h3', '', 'Why it is installed (wf why)'), why,
             ...(chains.length ? [] : [element('p', 'note', 'Nothing requires it: wf install --update resolves the manifest again.')]),
             ...(limited ? [element('p', 'note', `Only the first ${chainLimit} chains are shown.`)] : []),
