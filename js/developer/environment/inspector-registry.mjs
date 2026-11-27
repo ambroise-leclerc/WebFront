@@ -121,7 +121,7 @@ export function filterRows(rows, search, fields) {
 }
 
 /** Whether a function is one of WebFront's own (the environment's callbacks, the terminal's commands, the DOM bridge). */
-export const ownFunction = name => name.startsWith('webfront.') || name.startsWith('wfDom.') || name.startsWith('wfBind.');
+export const ownFunction = name => name.startsWith('webfront.') || name.startsWith('wfDom.') || name.startsWith('wfBind.') || name.startsWith('wfInspect.');
 
 /** A duration in milliseconds as a short text: microseconds under a millisecond, seconds from a second; "–" when unknown. */
 export function formatDuration(milliseconds) {

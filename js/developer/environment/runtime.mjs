@@ -19,6 +19,7 @@ import {typescriptPackage, parseCheckOptions, checkHost} from './typecheck.mjs';
 import {pinnedStarters} from './bootstrap.mjs';
 import {createWorkspace, isManaged, layoutState, State} from './workspace.mjs';
 import {prepareInspectors} from './inspector-host.mjs';
+import {interfaceTarget} from './inspector-bridge.mjs';
 import {connectAutomation as connectAgent, clipText, automationHelp, onAutomationNotice} from './automation.mjs';
 import {ls, cat, tree, mounts, fileCommandHelp, withheld, withheldReason} from './files.mjs';
 import {dependencyTree, why as whyInstalled, info as packageInfo} from './dependencies.mjs';
@@ -676,6 +677,7 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
     });
     const workspace = layout && preview && !isManaged(preview) ? await createWorkspace({bridge, element, frame: preview, openInspector}) : null;
     if (workspace) inspectors = prepareInspectors({bridge, page: element.ownerDocument, access: workspace.inspectorAccess,
+        inspected: () => interfaceTarget(preview),
         inspectorUrl: new URL('./inspector.html', import.meta.url).href});
     terminal.open(element);
     fit.fit();
