@@ -118,8 +118,9 @@ public:
     /**
      * Runs a `webfront.state.*` tool: the session and the `state` grant are checked first, then the read answers at once,
      * outside the session's lock (a read of a watch waits for the application). The reads do not need the developer window
-     * and take no run: they answer while an operation runs. A refusal is audited; a read is not, a client that polls would
-     * otherwise evict the decisions the audit keeps.
+     * and take no run: they answer while an operation runs. The audit keeps authorization decisions, as for start(): a
+     * refusal of the session or of the grant is audited. A read is not, nor what the read itself answers (invalid arguments,
+     * a refusal of the inspectors, a closed session): a client that polls would otherwise evict the decisions the audit keeps.
      */
     std::string read(std::string_view tool, const Object& request) {
         {

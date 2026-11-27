@@ -396,6 +396,13 @@ def consumer(args):
                 for operation in ("test", "init", "install", "embed"):
                     client.tool("start", {"session": client.session, "operation": operation}, error=True)
                 client.tool("start", {"session": second.mcp.session, "operation": "check"}, error=True)
+                # Without the state grant, a read of the application's state is an unknown tool, and its refusal is audited.
+                client.counter += 1
+                status, _, body = client.post(json.dumps({"jsonrpc": "2.0", "id": client.counter, "method": "tools/call", "params": {
+                    "name": "webfront.state.watches", "arguments": {"session": client.session}}}).encode())
+                assert status == 200 and json.loads(body)["error"]["message"] == "Unknown tool", (status, body)
+                assert any(entry["operation"] == "webfront.state.watches" and entry["decision"] == "denied"
+                           for entry in client.tool("session")["audit"]), client.tool("session")
                 # Only the allow-listed callback can be called, and the page can never reach webfront.* ones.
                 for callback in ("consumer.secret", "webfront.developer.read", "consumer.render.extra"):
                     client.tool("start", {"session": client.session, "operation": "call", "arguments": {"callback": callback}}, error=True)

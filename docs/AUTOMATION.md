@@ -258,7 +258,9 @@ does not name them and calling one is an unknown tool.
 
 A refusal is a tool error whose `code` is the inspectors': `webfront.inspector.unknown`, `webfront.inspector.stale`,
 `webfront.inspector.limit` or `webfront.inspector.unavailable`; an argument of the wrong type or out of its bounds is
-`invalid_arguments`. A refused call is audited, a read is not: polling would evict the decisions the audit keeps.
+`invalid_arguments`. The audit keeps authorization decisions, as for `webfront.start`: a call refused for its session or
+its grant is audited; a read is not, nor a refusal of the read itself (its arguments, the inspectors, a closed session),
+since polling would evict the decisions the audit keeps.
 [Developing with an agent](DEVELOPING_WITH_AGENTS.md#reading-the-running-application-webfrontstate) has the arguments of
 each tool and the sequence that reads a watch.
 

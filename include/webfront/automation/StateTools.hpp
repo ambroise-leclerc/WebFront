@@ -19,6 +19,7 @@
 #include <format>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -163,31 +164,64 @@ namespace detail {
     return value ? "true" : "false";
 }
 
+/// The exact value of a JSON number token when it is a whole number of at most 18 digits, read from its decimal digits
+/// (never through a double, which rounds `1.00000000000000001` to 1 and 2^53 + 1 to 2^53); empty otherwise: a fraction, a
+/// larger number, or a token that is no JSON number. `1`, `1.0`, `10E-1` and `9007199254740992.0` are whole.
+[[nodiscard]] inline std::optional<std::int64_t> wholeNumber(std::string_view token) {
+    if (!json::detail::isNumber(token))
+        return std::nullopt;
+    const bool negative = token.starts_with('-');
+    if (negative)
+        token.remove_prefix(1);
+    const auto  mark     = token.find_first_of("eE");
+    const auto  mantissa = token.substr(0, mark);
+    std::string digits;  // the significant digits, the point removed
+    long long   exponent = 0;
+    if (const auto point = mantissa.find('.'); point != std::string_view::npos) {
+        digits   = std::string(mantissa.substr(0, point)) + std::string(mantissa.substr(point + 1));
+        exponent = -static_cast<long long>(mantissa.size() - point - 1);
+    } else
+        digits = std::string(mantissa);
+    if (mark != std::string_view::npos) {
+        auto written = token.substr(mark + 1);
+        if (written.starts_with('+'))
+            written.remove_prefix(1);
+        long long value         = 0;
+        const auto [end, error] = std::from_chars(written.data(), written.data() + written.size(), value);
+        if (error != std::errc{} || end != written.data() + written.size() || value > 1000 || value < -1000)
+            return std::nullopt;
+        exponent += value;
+    }
+    const auto first = digits.find_first_not_of('0');
+    if (first == std::string::npos)
+        return 0;
+    digits.erase(0, first);
+    // A negative exponent removes digits, which must all be 0; a positive one appends zeros.
+    for (; exponent < 0; ++exponent) {
+        if (digits.empty() || digits.back() != '0')
+            return std::nullopt;
+        digits.pop_back();
+    }
+    if (static_cast<long long>(digits.size()) + exponent > 18)
+        return std::nullopt;
+    digits.append(static_cast<std::size_t>(exponent), '0');
+    std::int64_t value = 0;
+    std::from_chars(digits.data(), digits.data() + digits.size(), value);
+    return negative ? -value : value;
+}
+
 /// The whole number `key` of the arguments, `fallback` when it is absent, refused (std::invalid_argument) out of
 /// [minimum, maximum]: the bounds the schema of tools/list announces. Every JSON spelling of a whole number is accepted
-/// (`1`, `1.0`, `1e0`, as JSON Schema's `integer`). A number from 2^53 on is no longer exact as a double, so that one is
-/// read from its digits: 2^53 + 1 would otherwise round into the bounds.
+/// (`1`, `1.0`, `1e0`, as JSON Schema's `integer`), and its exact decimal value is compared to the bounds.
 [[nodiscard]] inline double
 numberOf(const Object& arguments, std::string_view key, double fallback = 0, double minimum = 0, double maximum = inspect::maxExactNumber) {
     if (!arguments.has(key))
         return fallback;
-    const auto raw     = arguments.raw(key);
-    const auto refused = [&] {
-        return std::invalid_argument("Argument " + std::string(key) + " must be a whole number from " + number(minimum) + " to " + number(maximum));
-    };
-    double value{};
-    if (!json::detail::isNumber(raw))
-        throw refused();
-    const auto [end, error] = std::from_chars(raw.data(), raw.data() + raw.size(), value);
-    if (error != std::errc{} || end != raw.data() + raw.size() || !std::isfinite(value) || value != std::floor(value) || value < minimum || value > maximum)
-        throw refused();
-    if (std::abs(value) >= inspect::maxExactNumber) {
-        std::int64_t exact{};
-        const auto [last, failure] = std::from_chars(raw.data(), raw.data() + raw.size(), exact);
-        if (failure != std::errc{} || last != raw.data() + raw.size() || static_cast<double>(exact) != value || exact != static_cast<std::int64_t>(value))
-            throw refused();
-    }
-    return value;
+    const auto value = wholeNumber(arguments.raw(key));
+    // The bounds are whole numbers up to 2^53, exact as doubles and as 64-bit integers.
+    if (!value || *value < static_cast<std::int64_t>(minimum) || *value > static_cast<std::int64_t>(maximum))
+        throw std::invalid_argument("Argument " + std::string(key) + " must be a whole number from " + number(minimum) + " to " + number(maximum));
+    return static_cast<double>(*value);
 }
 
 /// The identifier of a watch, which the registry never gives as 0.
