@@ -423,25 +423,26 @@ const reasons = {
 /** Why a write was not applied, for the user. */
 export const writeFailure = ({code, message}) => message || reasons[code] || code;
 
-/** The kind of the elements that a block shows, one line each. */
-const blockKind = 'string';
+/** The kind of the containers that a block shows, and of their elements, one line each. */
+const blockContainer = 'sequence', blockKind = 'string';
 
 /** The width of a text in the columns of a block: its characters (code points). */
 const columns = text => [...text].length;
 
 /**
  * The width, in characters, of the block that the loaded children of `path` can be shown as; 0 when they cannot. A block shows
- * two or more strings of the same length, none of them empty: the rows of a grid of text. It reads only what is loaded, so the
- * pages and the passes are the same in both layouts (ADR-027, section 3).
+ * the elements of a sequence, labelled by their index, that are two or more strings of the same length, none of them empty:
+ * the rows of a grid of text. The fields of an object and the entries of a map keep their names in the tree. It reads only what
+ * is loaded, so the pages and the passes are the same in both layouts (ADR-027, section 3).
  */
 export function blockWidth(tree, path) {
     const entry = tree.nodes.get(path);
-    if (!entry || entry.node.children < 2) return 0;
+    if (!entry || entry.node.kind !== blockContainer || entry.node.children < 2) return 0;
     let width = 0, count = 0;
-    for (const child of entry.positions.values()) {
+    for (const [position, child] of entry.positions) {
         const node = tree.nodes.get(child)?.node;
         if (!node) continue;
-        if (node.kind !== blockKind || node.children !== 0) return 0;
+        if (node.kind !== blockKind || node.children !== 0 || node.label !== `[${position}]`) return 0;
         const length = columns(node.value);
         if (!length || (count && length !== width)) return 0;
         width = length;

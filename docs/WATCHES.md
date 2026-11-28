@@ -229,14 +229,16 @@ ADR; it uses the bridge's existing types only.
 Elements that are all leaves of one kind show that kind once, on their container (`sequence [32] of string`), with their
 indices in a narrow column and their values aligned, so that more of them fit in the window.
 
-A container of two or more strings of the same length, such as `grid` above, shows as a **block**: one line per element,
-without index or kind, in a monospace font whose letter spacing widens the advance of a character to the line height, so
-that each character is a square cell and a grid of 32 by 32 characters is square; the grid of Life fits in the default inspector window. The
-block keeps what the tree offers: the lines that the last pass changed are highlighted, a line that is cut offers its full
-value, and a line of a writable watch is edited in place (click it, or Enter or F2). Its **Tree** button shows the
-elements one by one again, and **Block** returns to the block; the choice is kept per watch and container in this
-browser, as the period is. A line that no longer has the length of the others turns the block back into a tree until they
-agree. The layout changes only what is shown: the pages of 200 elements and the passes are the same (ADR-027, section 3).
+A sequence (a vector, an array) of two or more strings of the same length, labelled by their index, such as `grid`
+above, shows as a **block**: one line per element, without index or kind, in a monospace font whose letter spacing
+widens the advance of a character to the line height, so that each character is a square cell and a grid of 32 by 32
+characters is square; the grid of Life fits in the default inspector window. The block keeps what the tree offers: the
+lines that the last pass changed are highlighted, a line that is cut offers its full value, and a line of a writable
+watch is edited in place (click it, or Enter or F2). Its **Tree** button shows the elements one by one again, and
+**Block** returns to the block; the choice is kept per watch and container in this browser, as the period is. A line
+that no longer has the length of the others turns the block back into a tree until they agree. The fields of an object
+and the entries of a map keep their names in the tree. The layout changes only what is shown: the pages of 200 elements
+and the passes are the same (ADR-027, section 3).
 
 ## Reading a watch from an agent
 

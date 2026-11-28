@@ -490,7 +490,7 @@ environment's `mount`, not to the embedded bootstrap page):
   read by pages of 200 children and refreshed at the chosen period, the values that changed highlighted. A value the
   application made writable is edited in place (Enter writes, Escape cancels); a value that is cut offers its full text.
   Elements that are all leaves of one kind show that kind once, on their container (`sequence [3] of string`), with their
-  indices in a narrow column and their values aligned. A container of strings of the same length, such as the grid of
+  indices in a narrow column and their values aligned. A sequence of strings of the same length, such as the grid of
   Life, shows as a **block**: one line per element, without index or kind, in square character cells, so that a grid of
   32 by 32 characters is square. The lines keep the highlighting of what changed, the full value and the edition in place.
   Its **Tree** button shows the elements one by one again and **Block** returns to the block; the choice is kept per watch

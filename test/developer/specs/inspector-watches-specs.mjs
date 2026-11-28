@@ -735,6 +735,28 @@ describe('The view of a tree', () => {
         } finally { style.remove(); }
     });
 
+    it('keeps the names of the fields of an object, or the keys of a map, whose values have the same length', async () => {
+        const bridge = fakeWatch(['abc', 'def']);
+        const children = bridge.answers[functions.children];
+        const named = (kind, label) => (...args) => {
+            const page = children(...args);
+            page[0] = page[0].map(([path, nodeKind, nodeLabel, ...rest]) => path === '' ? [path, kind, nodeLabel, ...rest] : [path, nodeKind, label(path), ...rest]);
+            return page;
+        };
+        for (const [kind, label] of [['map', path => `key${path.slice(2)}`], ['described', path => `field${path.slice(2)}`], ['sequence', path => `#${path.slice(2)}`]]) {
+            bridge.answers[functions.children] = named(kind, label);
+            const list = document.createElement('ul');
+            document.body.append(list);
+            let view = null;
+            const tree = createWatchTree({bridge, watch: 1, onUpdate: () => view?.render()});
+            view = createTreeView({tree, list, view: {}});
+            await tree.open();
+            expect(blockWidth(tree, '')).withContext(kind).toBe(0);
+            expect(list.querySelector('ul.block')).withContext(kind).toBeNull();
+            expect(rows(list).slice(1).map(item => item.querySelector('.label').textContent)).toEqual([label('/#0'), label('/#1')]);
+        }
+    });
+
     it('highlights the lines of a block that the last pass changed', async () => {
         const grid = ['....', '....', '....'];
         const {list, tree} = await shown(grid);
