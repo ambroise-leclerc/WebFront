@@ -1,5 +1,5 @@
 // Specs of wf test's host side, which supplement the real-browser regression in test/web/developer-specs.mjs.
-import {parseTestOptions, specFiles, jasmineCore, buildReport, formatReport, reportResult, runnerFiles, fitResult, abortable} from '../../../js/developer/environment/testing.mjs';
+import {parseTestOptions, specFiles, jasmineCore, buildReport, formatReport, reportResult, runnerFiles, fitResult, abortable, frameStage, describeStage, stoppedRun} from '../../../js/developer/environment/testing.mjs';
 import {execute} from '../../../js/developer/environment/runtime.mjs';
 import {bundleTests} from '../../../js/developer/environment/bundler.mjs';
 import {rejects, throws, esbuild, reportSpecStarted, reportSpecDone} from '../support.mjs';
@@ -328,4 +328,55 @@ describe('wf test', () => {
         expect(sandbox.order).withContext('the specs run in the manifest order').toEqual(['a1', 'b2']);
         await rejects(bundleTests(await esbuild(), {specs: ['absent.spec.js'], lock, readProject}), /absent\.spec\.js/);
     }, 60000);
+});
+
+// A run stopped at its time limit names how far the runner frame got (#690): the last stage the runner posted, the spec
+// it was running, and the runner's files whose response never completed.
+describe('the stage of a stopped wf test run', () => {
+    const at = (file, end = 3) => ({name: `http://127.0.0.1:9002/webfront/developer/test/run/${file}`, responseEnd: end});
+    const frame = ({page = true, resources = [], styled = false}) => ({
+        performance: {
+            getEntriesByType: type => type === 'navigation'
+                ? (page ? [at('index.html?pattern=&run=1', 5)] : [])
+                : resources.map(file => file === 'WebFront.js' ? {name: 'http://127.0.0.1:9002/WebFront.js', responseEnd: 4} : at(file)),
+        },
+        document: {querySelector: selector => styled && selector === 'link[href="./specs.css"]' ? {} : null},
+    });
+
+    it('lists the runner files the frame did not receive, specs.css only when the page links it', () => {
+        expect(frameStage(frame({resources: ['specs.css', 'WebFront.js', 'jasmine.js'], styled: true}), {reached: 'bridge settled'})).toEqual({
+            reached: 'bridge settled', specs: 0, current: '', suite: '',
+            loaded: ['index.html', 'specs.css', 'WebFront.js', 'jasmine.js'], missing: ['runner.js', 'specs.js']});
+        expect(frameStage(frame({resources: ['WebFront.js', 'jasmine.js', 'runner.js', 'specs.js']})).missing).toEqual([]);
+        // Nothing posted and no page: the runner never started.
+        expect(frameStage(frame({page: false}))).toEqual({reached: 'page requested', specs: 0, current: '', suite: '', loaded: [],
+            missing: ['index.html', 'WebFront.js', 'jasmine.js', 'runner.js', 'specs.js']});
+    });
+
+    it('counts a resource only once its response ended', () => {
+        const stalled = frame({resources: ['WebFront.js']});
+        const entries = stalled.performance.getEntriesByType;
+        stalled.performance.getEntriesByType = type => type === 'resource' ? [...entries(type), at('jasmine.js', 0)] : entries(type);
+        expect(frameStage(stalled).missing).toEqual(['jasmine.js', 'runner.js', 'specs.js']);
+    });
+
+    it('keeps the stage of a frame it cannot read', () => {
+        expect(frameStage(null, {reached: 'specs loaded', specs: 2})).toEqual({reached: 'specs loaded', specs: 2, current: '', suite: '', loaded: [], missing: []});
+    });
+
+    it('says the stage in the message and keeps it in the report', () => {
+        const stage = {reached: 'specs running', specs: 3, current: 'suite never ends', suite: 'suite', loaded: [], missing: []};
+        const stopped = stoppedRun('timeout', 'suite', stage);
+        expect([stopped.exitCode, stopped.message]).toEqual([124, 'Tests stopped at their time limit (stage: specs running, 3 specs done, in suite never ends)']);
+        expect([stopped.report.status, stopped.report.stage, stopped.report.error]).toEqual(['timeout', stage, stopped.message]);
+        expect(describeStage({reached: 'page requested', specs: 0, current: '', loaded: ['index.html'], missing: ['runner.js', 'specs.js']}))
+            .toBe('stage: page requested; not loaded: runner.js, specs.js');
+        // A run stopped in a suite's hook or between specs names no spec as running, but the suite whose hooks run.
+        expect(describeStage({reached: 'between specs', specs: 2, current: '', suite: '', loaded: [], missing: []})).toBe('stage: between specs, 2 specs done');
+        expect(describeStage({reached: 'between specs', specs: 0, current: '', suite: 'slow setup', loaded: [], missing: []}))
+            .toBe('stage: between specs, in suite slow setup');
+        // Stopped before the frame existed: no stage, and the message stays the plain one.
+        const early = stoppedRun('interrupted', '');
+        expect([early.exitCode, early.message, 'stage' in early.report]).toEqual([130, 'Tests stopped by Ctrl+C', false]);
+    });
 });

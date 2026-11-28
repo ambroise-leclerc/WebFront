@@ -60,17 +60,32 @@ function boot() {
     for (const name in members) globalThis[name] = members[name];
 }
 try {
+    post({type: 'stage', stage: 'runner started'});
     try { await webFront.ready; } catch { /* the specs that need the bridge fail on their own */ }
+    post({type: 'stage', stage: 'bridge settled'});
     boot();
     const env = jasmine.getEnv();
     env.configure({random: false, specFilter: spec => spec.getFullName().includes(pattern)});
+    // The suites entered, innermost last: outside a spec, the run is in the hooks of the innermost one (beforeAll, afterAll).
+    const open = [];
+    const between = () => post({type: 'stage', stage: 'between specs', suite: open.at(-1) ?? ''});
     env.addReporter({
+        suiteStarted(result) {
+            open.push(clip(result.fullName, 256));
+            between();
+        },
+        specStarted(result) {
+            post({type: 'stage', stage: 'specs running', spec: clip(result.fullName, 256), suite: open.at(-1) ?? ''});
+        },
         specDone(result) {
             specs.push({name: clip(result.fullName, 1024), status: result.status, reason: clip(result.pendingReason, 1024),
                 failures: problems(result.failedExpectations)});
             post({type: 'spec', status: result.status});
+            between();
         },
         suiteDone(result) {
+            open.pop();
+            between();
             // An afterAll that throws is reported here, not by any spec.
             if (result.failedExpectations?.length) suites.push({name: clip(result.fullName, 1024), failures: problems(result.failedExpectations)});
         },
@@ -80,6 +95,7 @@ try {
         },
     });
     await import('./specs.js');
+    post({type: 'stage', stage: 'specs loaded'});
     await env.execute();
 } catch (error) {
     // WebKit's stack lacks the message, so it is always put first.
@@ -158,10 +174,57 @@ export function abortable(promise, signal) {
     });
 }
 
-export const stoppedRun = (reason, pattern) => {
-    const [message, exitCode] = reason === 'timeout' ? ['Tests stopped at their time limit', 124] : ['Tests stopped by Ctrl+C', 130];
-    return Object.assign(new ScriptExit(message, exitCode), {report: emptyReport(reason, exitCode, {pattern, error: message})});
+/**
+ * A run stopped before its report: 'timeout' (124) or 'interrupted' (130). `stage`, when the runner frame was started,
+ * says how far it got (frameStage) and is added to the message and to the report.
+ */
+export const stoppedRun = (reason, pattern, stage) => {
+    const [stopped, exitCode] = reason === 'timeout' ? ['Tests stopped at their time limit', 124] : ['Tests stopped by Ctrl+C', 130];
+    const message = stage ? `${stopped} (${describeStage(stage)})` : stopped;
+    return Object.assign(new ScriptExit(message, exitCode), {report: emptyReport(reason, exitCode, {pattern, error: message, ...(stage ? {stage} : {})})});
 };
+
+/** The files of the runner, in the order the page loads them; specs.css only when the specs built one. */
+export const runnerResources = ['index.html', 'specs.css', 'WebFront.js', 'jasmine.js', 'runner.js', 'specs.js'];
+
+/**
+ * How far the runner frame got, for a run stopped before its report (#690): `reached` is the last stage the runner
+ * posted ('page requested' when it posted none: it did not start; 'between specs' after a spec finished, in a suite's
+ * hook or before the next spec), `specs` the specs it finished, `current` the spec in progress (the one that hangs when
+ * the stage is 'specs running'), `suite` the innermost suite entered (whose beforeAll or afterAll hangs when the stage is
+ * 'between specs'), `loaded` the runner's
+ * files whose response the frame received completely, and `missing` those it did not (never requested, or a response
+ * still incomplete). A frame that cannot be read leaves both lists empty.
+ */
+export function frameStage(frameWindow, {reached = 'page requested', specs = 0, current = '', suite = '', resources = runnerResources} = {}) {
+    let loaded = [];
+    let missing = [];
+    try {
+        const names = new Set();
+        const entries = [...frameWindow.performance.getEntriesByType('navigation'), ...frameWindow.performance.getEntriesByType('resource')];
+        for (const entry of entries) {
+            if (!(entry.responseEnd > 0)) continue;
+            const file = new URL(entry.name).pathname.split('/').at(-1);
+            names.add(file === '' ? 'index.html' : file);
+        }
+        // The page links specs.css only when the specs built one: unknown while the page itself did not load.
+        const styled = names.has('specs.css') || Boolean(frameWindow.document.querySelector('link[href="./specs.css"]'));
+        const expected = resources.filter(file => file !== 'specs.css' || styled);
+        loaded = expected.filter(file => names.has(file));
+        missing = expected.filter(file => !names.has(file));
+    } catch { /* a frame that navigated away or was never attached: only the stage is known */ }
+    return {reached, specs, current, suite, loaded, missing};
+}
+
+/** The stage of a stopped run in words: "stage: specs running, 3 specs done, in suite spec" or "stage: page requested; not loaded: runner.js, specs.js". */
+export function describeStage({reached, specs, current, suite, missing}) {
+    const parts = [`stage: ${reached}`];
+    if (specs) parts[0] += `, ${plural(specs, 'spec')} done`;
+    if (current && reached === 'specs running') parts[0] += `, in ${current}`;
+    else if (suite && reached === 'between specs') parts[0] += `, in suite ${suite}`;
+    if (missing.length) parts.push(`not loaded: ${missing.join(', ')}`);
+    return parts.join('; ');
+}
 
 // Out of sight but laid out like a page: specs that measure the DOM need a real viewport.
 function defaultFrame() {
@@ -181,6 +244,12 @@ export function runInFrame({pattern, timeout, runId, signal, write = () => {}, c
     return new Promise((resolve, reject) => {
         const frame = createFrame();
         let timer;
+        let reached;
+        let specs = 0;
+        let current = '';
+        let suite = '';
+        // Known once the frame is in the page; a run stopped before that has no stage to give.
+        const stage = () => frame.isConnected ? frameStage(frame.contentWindow, {reached, specs, current, suite}) : undefined;
         const finish = (error, report) => {
             clearTimeout(timer);
             removeEventListener('message', receive);
@@ -191,13 +260,21 @@ export function runInFrame({pattern, timeout, runId, signal, write = () => {}, c
         const receive = ({source, origin, data}) => {
             if (source !== frame.contentWindow || origin !== location.origin) return;
             const message = data?.webfrontTest;
-            if (message?.type === 'spec') write(progress[message.status] ?? '');
+            if (message?.type === 'stage' && typeof message.stage === 'string') {
+                // A stage replaces the spec and the suite of the previous one: between specs, no spec is running.
+                reached = message.stage.slice(0, 64);
+                current = typeof message.spec === 'string' ? message.spec.slice(0, 256) : '';
+                suite = typeof message.suite === 'string' ? message.suite.slice(0, 256) : '';
+            } else if (message?.type === 'spec') {
+                if (message.status !== 'excluded') specs += 1;  // like the report's total: a spec filtered out did not run
+                write(progress[message.status] ?? '');
+            }
             else if (message?.type === 'done' || message?.type === 'error') finish(null, buildReport(message, {pattern}));
         };
-        const interrupt = () => finish(stoppedRun('interrupted', pattern));
+        const interrupt = () => finish(stoppedRun('interrupted', pattern, stage()));
         addEventListener('message', receive);
         signal?.addEventListener('abort', interrupt, {once: true});
-        timer = setTimeout(() => finish(stoppedRun('timeout', pattern)), timeout * 1000);
+        timer = setTimeout(() => finish(stoppedRun('timeout', pattern, stage())), timeout * 1000);
         if (signal?.aborted) return interrupt();
         frame.src = `/webfront/developer/test/${runId}/index.html?pattern=${encodeURIComponent(pattern)}&run=${Date.now()}`;
         document.body.append(frame);
