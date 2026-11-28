@@ -6,7 +6,7 @@ import {detachedContainer, containerFor, hostReasons, parsePreferences, formatPr
     preferencesStore, applyPreferenceChanges} from '../../../js/developer/environment/inspector-host.mjs';
 import {readDescriptor, readPage, listWatches, listingAttempts, reconcile, watchOpener, createWatchDiscovery, renderWatches, pageBridge, attachAgain,
     watchesFunction, reloadWhenRestored} from '../../../js/developer/environment/inspector.mjs';
-import {inspectorChannel, inspectorPanels} from '../../../js/developer/environment/menu.mjs';
+import {inspectorChannel, inspectorPanels, inspectorMoves, makeMoveButton} from '../../../js/developer/environment/menu.mjs';
 import {LineEditor} from '../../../js/developer/environment/terminal.mjs';
 import {memoryBridge} from '../memory-bridge.mjs';
 
@@ -281,11 +281,39 @@ describe('The inspectors', () => {
             expect(host.frame.hasAttribute('src')).toBeFalse();
         });
 
+        it('draws Detach and Attach as icons named by their action (#722)', () => {
+            for (const move of ['detach', 'attach']) {
+                const button = makeMoveButton(document, document.createElement('button'), move);
+                expect(button.textContent).toBe('');
+                expect(button.getAttribute('aria-label')).toBe(inspectorMoves[move]);
+                expect(button.title).toBe(inspectorMoves[move]);
+                const svg = button.firstElementChild;
+                expect(button.children.length).toBe(1);
+                expect(svg.namespaceURI).toBe('http://www.w3.org/2000/svg');
+                expect(svg.getAttribute('stroke')).toBe('currentColor');
+                expect(svg.getAttribute('aria-hidden')).toBe('true');
+                expect(svg.querySelectorAll('path').length).toBeGreaterThan(1);
+            }
+            expect(inspectorMoves.detach).toBe('Detach this panel to a window of its own');
+            expect(inspectorMoves.attach).toBe('Show this panel in the floating window of the main page');
+        });
+
+        it('names the Detach icon by its action, and its tooltip too when it can detach', async () => {
+            const {host} = await testHost({containers: admitted(true)});
+            await host.open('cpp.watches');
+            expect(host.detachButton.textContent).toBe('');
+            expect(host.detachButton.querySelector('svg')).not.toBeNull();
+            expect(host.detachButton.getAttribute('aria-label')).toBe(inspectorMoves.detach);
+            expect(host.detachButton.title).toBe(inspectorMoves.detach);
+            expect(host.closeButton.getAttribute('aria-label')).toBe('Close the inspector');
+        });
+
         it('greys Detach with the reason when no detached container would reach the inspectors', async () => {
             const {host, calls, opened} = await testHost({containers: admitted(false, true), embedded: true});
             await host.open('cpp.watches');
             expect(host.detachButton.getAttribute('aria-disabled')).toBe('true');
             expect(host.detachButton.title).toBe(hostReasons.noDetached);
+            expect(host.detachButton.getAttribute('aria-label')).toBe(inspectorMoves.detach);
             host.detachButton.click();
             await host.saved();
             expect(calls.some(([name]) => name === 'webfront.inspector.openWindow')).toBeFalse();

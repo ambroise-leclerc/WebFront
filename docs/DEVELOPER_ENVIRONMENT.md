@@ -448,14 +448,17 @@ environment's `mount`, not to the embedded bootstrap page):
   to C++ through the bridge. An entry of the menu opens its panel where the project keeps it: at first, and whenever its
   detached container is unavailable, in a **floating window** of the page (moved and resized like the terminal's window,
   with the mouse or with the arrow keys on its title bar), whose frame opens no connection of its own and borrows the page's
-  bridge, since the adapters give the proof of the view to the main frame only. **Detach** moves the panel to a window of its
-  own, and the next opening of that panel goes there again; **Attach**, in that window, brings it back to the floating
-  window, where it then opens. The containers follow the access each frontend actually gives, never its name alone:
+  bridge, since the adapters give the proof of the view to the main frame only. The **detach** icon of its title bar, a frame
+  with an arrow leaving to the top right (↗, tooltip "Detach this panel to a window of its own"), moves the panel to a
+  window of its own, and the next opening of that panel goes there again; the **attach** icon of that window's header, an
+  arrow entering a frame (↙, tooltip "Show this panel in the floating window of the main page"), brings it back to the
+  floating window, where it then opens. Both icons take the color of the text and carry their action as their accessible
+  name. The containers follow the access each frontend actually gives, never its name alone:
 
   | Frontend of the page | Inspectors | Panel opens in | Detached container |
   | --- | --- | --- | --- |
   | WebKitGTK, WKWebView, WebView2 | admitted: the view proves itself | the floating window | a native secondary window (`webfront.inspector.openWindow`, `openSecondaryWindow`), which carries the proof of the view; opening the panel again brings it to the front, and closing the main window closes it |
-  | CEF | admitted: the view proves itself | the floating window | none: CEF opens no secondary window, and `window.open` there would open a frame without the proof; Detach is greyed, with the reason in its tooltip |
+  | CEF | admitted: the view proves itself | the floating window | none: CEF opens no secondary window, and `window.open` there would open a frame without the proof; the detach icon is greyed, with the reason in its tooltip |
   | System browser (default of `webfront::WebFront`) | **refused by default**: the entries are greyed and say how to enable them | none | none |
   | System browser with `trustLoopbackClients` | admitted: any loopback page | the floating window | a tab of the system browser (`window.open`), with its own loopback connection; when the pop-up blocker refuses it, the panel stays in the floating window and a message offers to try again; the tab closes when the page that opened it is gone |
 
@@ -475,10 +478,10 @@ environment's `mount`, not to the embedded bootstrap page):
   Every loopback connection is then a local client: it reads the inspectors, and it also passes the `ui.isLocalClient()`
   check of the application's own callbacks (below). The option is the application's choice; the environment never sets it.
 
-  Attach brings the panel back to the page that detached it only, even when other pages of the application are open on
+  The attach icon brings the panel back to the page that detached it only, even when other pages of the application are open on
   the same origin. A page keeps its identifier across a reload through Web Locks; in a browser without them, a reloaded
   page has a new one, and a tab detached before the reload asks the old page in vain: it says that the main page did not
-  answer. Close that tab, open the panel from the menu of the reloaded page, then use Attach in the window it opens. The project keeps the detached panels and the floating window's place in
+  answer. Close that tab, open the panel from the menu of the reloaded page, then use the attach icon in the window it opens. The project keeps the detached panels and the floating window's place in
   `.webfront/developer/inspector-window.json`. A save that reaches C++ completes or releases its transaction there,
   even when its page closes. A page closed before the save reaches C++ may lose its latest choice.
   With a frontend that proves its view, developer file writes and starting or cancelling native terminal commands

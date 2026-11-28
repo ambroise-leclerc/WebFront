@@ -42,6 +42,7 @@ these entries stays in the GitHub releases and the Git history.
 - The test helpers, `webfront_add_jasmine_test` included, export the real `XDG_DATA_HOME` and `XDG_CACHE_HOME` as `WEBFRONT_TEST_REAL_XDG_DATA_HOME` and `WEBFRONT_TEST_REAL_XDG_CACHE_HOME`, so an application under test can keep the throwaway WebKitGTK profile away from the programs it starts ([#664](https://github.com/ambroise-leclerc/WebFront/issues/664), `docs/CONSUMER_TESTING.md`).
 
 ### Changed
+- Detach and attach an inspector panel with small icons, a frame with an arrow leaving it or entering it, instead of the **Detach** and **Attach** words; their tooltip and accessible name say the action, and a greyed detach icon still says why (#722, `docs/DEVELOPER_ENVIRONMENT.md`).
 - `wf test` stopped at its time limit or by Ctrl+C says how far its runner got, in its message and in the report's new `stage`: the last step reached, the spec in progress, and the runner files that never finished loading (#690, `docs/DEVELOPER_ENVIRONMENT.md`).
 - Destroying the handle of a watch (`inspect::Watch`) waits for an operation of the inspectors in progress on another thread: destroy it outside every lock its source takes, or declare the watch with the state it owns (#682, ADR-027, `docs/WATCHES.md`).
 - `cppFunction` and `Space::cppFunction` take a last, defaulted `std::source_location`, which the inspectors show; existing calls compile unchanged, the explicit `cppFunction<R, Args...>` form included (#681, ADR-027).

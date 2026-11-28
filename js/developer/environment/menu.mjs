@@ -31,6 +31,39 @@ export const panelTitle = id => inspectorPanels.has(id) ? `${inspectorPanels.get
  */
 export const inspectorChannel = 'webfront-inspector';
 
+/** What the icon buttons that move a panel say, as their accessible name and their tooltip (#722). */
+export const inspectorMoves = {
+    detach: 'Detach this panel to a window of its own',
+    attach: 'Show this panel in the floating window of the main page',
+};
+
+// A frame open at its top right, and an arrow that leaves it (detach, ↗) or enters it (attach, ↙), drawn in currentColor.
+const iconPaths = {
+    detach: ['M7 3H3v10h10V9', 'M9 3h4v4', 'M13 3 7 9'],
+    attach: ['M7 3H3v10h10V9', 'M13 3 7 9', 'M7 5v4h4'],
+};
+const svgSpace = 'http://www.w3.org/2000/svg';
+
+/**
+ * Makes `button` (of `page`) the icon button `move` ('detach' or 'attach'): a 16 px inline SVG in the color of the text,
+ * hidden from assistive technologies, the button being named by its aria-label and its tooltip (inspectorMoves).
+ */
+export function makeMoveButton(page, button, move) {
+    const svg = page.createElementNS(svgSpace, 'svg');
+    const attributes = {viewBox: '0 0 16 16', width: '16', height: '16', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5',
+        'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false'};
+    for (const [name, value] of Object.entries(attributes)) svg.setAttribute(name, value);
+    for (const d of iconPaths[move]) {
+        const path = page.createElementNS(svgSpace, 'path');
+        path.setAttribute('d', d);
+        svg.append(path);
+    }
+    button.replaceChildren(svg);
+    button.setAttribute('aria-label', inspectorMoves[move]);
+    button.title = inspectorMoves[move];
+    return button;
+}
+
 // --- Access to the inspectors ----------------------------------------------------------------------------------
 
 /** The reserved function that says which containers would reach the inspectors; the only one that checks no access. */

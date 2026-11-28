@@ -5,7 +5,7 @@
 // tree of each is in inspector-watches.mjs (#682). The panels of the functions and of the browsers are in
 // inspector-registry.mjs (#681, section 7), the one of the packages in inspector-packages.mjs (#683), the one of the bridge
 // in the page in inspector-bridge.mjs (#684).
-import {inspectorPanels as panels, panelTitle, inspectorChannel as channelName} from './menu.mjs';
+import {inspectorPanels as panels, panelTitle, inspectorChannel as channelName, makeMoveButton} from './menu.mjs';
 import {showFunctionsPanel, showBrowsersPanel, registryStyles, periods, formatPeriod, keptPeriod, keepPeriod, createPoller} from './inspector-registry.mjs';
 import {showPackagesPanel, packagesStyles} from './inspector-packages.mjs';
 import {createWatchTree, createTreeView, watchTreeStyles} from './inspector-watches.mjs';
@@ -196,6 +196,8 @@ header label{display:flex;align-items:center;gap:4px;color:#a9b3c4;font-size:12p
 header button,header select{min-height:26px;padding:0 8px;border:1px solid #46536a;border-radius:4px;background:#2f3a50;color:inherit;font:inherit;cursor:pointer}
 header select{padding:0 4px}
 header button:focus-visible,header select:focus-visible{outline:2px solid #d7fa85;outline-offset:1px}
+header button.attach{min-width:26px;padding:0 4px}
+header button.attach>svg{display:block;margin:auto;pointer-events:none}
 main{padding:4px 8px}
 .status{color:#a9b3c4;font-size:12px;margin:2px 0 4px}
 .status:empty{display:none}
@@ -318,8 +320,7 @@ export async function main(view = window) {
         const attach = page.createElement('button');
         attach.type = 'button';
         attach.className = 'attach';
-        attach.textContent = 'Attach';
-        attach.title = 'Show this panel in the floating window of the main page';
+        makeMoveButton(page, attach, 'attach');
         header.append(attach);
         // Its own status: the reads of the watches, which clear theirs, never clear why the panel could not be attached.
         const attachStatus = page.createElement('p');

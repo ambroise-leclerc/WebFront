@@ -177,6 +177,12 @@ try {
             await eventually(() => /No installed packages/.test(panel()?.querySelector('.status:not(.attach-status)')?.textContent ?? ''),
                 () => `The Packages panel must say that a project without a lock has no package: ${shown()}`, slowly);
             assert(tree().length === 0, `A project without a lock has no tree: ${shown()}`);
+            // Detached, the panel offers to go back to the floating window with an icon named by its action (#722).
+            const attach = panel().querySelector('header button.attach');
+            assert(attach && attach.textContent === '' && attach.querySelector('svg[aria-hidden="true"]'),
+                `A detached panel must offer Attach as an icon: ${attach?.outerHTML}`);
+            assert(attach.getAttribute('aria-label') === 'Show this panel in the floating window of the main page' && attach.title === attach.getAttribute('aria-label'),
+                `The Attach icon must be named by its action: ${attach.getAttribute('aria-label')} / ${attach.title}`);
 
             await execute(['install', 'react@19.3.1', 'react-dom@19.3.1'], context);
             lock = await runtime.readLock(webFront);
@@ -1063,10 +1069,15 @@ try {
                     await webFront.cppFunction('test.unwatchLife')();
                     await until(() => !listed().includes('grid'), `The watches of Life must disappear once removed: ${listed()}`);
                     const detach = floating().querySelector('.webfront-inspector-detach');
+                    // An icon named by its action, whether it can detach or not (#722).
+                    assert(detach.textContent === '' && detach.querySelector('svg[aria-hidden="true"]')
+                        && detach.getAttribute('aria-label') === 'Detach this panel to a window of its own',
+                        `Detach must be an icon named by its action: ${detach.outerHTML}`);
                     if (secondaryWindow) {
                         // A frontend that opens windows: Detach moves the panel to a native window with its own proven connection.
                         const views = await webFront.cppFunction('test.views')();
-                        assert(detach.getAttribute('aria-disabled') === 'false', 'A frontend that opens windows must offer to detach the panel');
+                        assert(detach.getAttribute('aria-disabled') === 'false' && detach.title === detach.getAttribute('aria-label'),
+                            `A frontend that opens windows must offer to detach the panel: ${detach.title}`);
                         detach.click();
                         await until(() => floating().hidden, 'A detached panel must leave the floating window');
                         await until(async () => await webFront.cppFunction('test.views')() === views + 1,
