@@ -136,10 +136,12 @@ export function createBridgeMonitor({target, clock = () => performance.now(), no
                     if (ownTraffic(name)) return;
                     // A long name is kept by its bounded label and a digest of the whole name: what the monitor keeps of a
                     // name never exceeds the bound, and two names that share their label stay two functions.
-                    const key = typeof name === 'string' && name.length <= limits.text / 4 ? name : `${boundedText(name)}#${digest(String(name))}`;
+                    // The label keeps room for the digest, so that two such names are also shown apart.
+                    const key = typeof name === 'string' && name.length <= limits.text / 4 ? name
+                        : `${boundedText(name, limits.text - 17)}#${digest(String(name))}`;
                     const known = state.js.get(key);
                     if (known) ++known.calls;
-                    else if (state.js.size < limits.jsNames) state.js.set(key, {id: ++sequence, name: boundedText(key), calls: 1});
+                    else if (state.js.size < limits.jsNames) state.js.set(key, {id: ++sequence, name: key, calls: 1});
                     else ++state.jsOthers;
                 } catch { /* never the application's problem */ }
             },

@@ -198,8 +198,9 @@ public:
             result.page   = BridgePage{std::vector<BridgeRow>{}, 0.0, 0.0, 0.0, 0.0};
             return result;
         }
-        auto& source       = found->second;
-        source.wantedUntil = now + bridgeLease;
+        auto& source = found->second;
+        // The latest lease wins: a read whose time was taken earlier but that takes the lock last never shortens it.
+        source.wantedUntil = (std::max)(source.wantedUntil, now + bridgeLease);
         const bool fresh   = source.publication != 0 && now - source.publishedAt < bridgeAskAgain;
         if (!fresh && (source.askedAt == Clock::time_point{} || now - source.askedAt >= bridgeAskAgain)) {
             source.askedAt = now;

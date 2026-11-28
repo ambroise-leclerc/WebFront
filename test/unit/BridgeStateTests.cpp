@@ -205,6 +205,17 @@ const Scenario bridgeStateLease{
                 require(std::get<0>(states.read("host-5", 0, 200, 32768, start).page) == someRows(2));
             });
         });
+        given("two reads that take the lock in the reverse order of their time", [&] {
+            States                          states;
+            Page                            page;
+            const States::Clock::time_point start{1000s};
+            page.announce(states, "host-8", start);
+            static_cast<void>(states.read("host-8", 0, 0, 32768, start + 10s));
+            static_cast<void>(states.read("host-8", 0, 0, 32768, start));
+            then("the later lease is kept: a publication within it is told to go on", [&] {
+                require(states.publish("host-8", &page, someRows(1), start + inspect::bridgeLease + 5s));
+            });
+        });
         given("a read whose time was taken just before a publication", [&] {
             States                          states;
             Page                            page;
