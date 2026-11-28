@@ -234,9 +234,10 @@ above, shows as a **block**: one line per element, without index or kind, in a m
 widens the advance of a character to the line height, so that each character is a square cell and a grid of 32 by 32
 characters is square; the grid of Life fits in the default inspector window. The block keeps what the tree offers: the
 lines that the last pass changed are highlighted, a line that is cut offers its full value (with a 24 px button, which
-makes that line as high), and a line of a writable watch is edited in place (click it, or Enter or F2). Its **Tree**
-button shows the elements one by one again, and **Block** returns to the block; the choice is kept per watch and
-container in this browser, as the period is. A line that no longer has the length of the others turns the block back
+makes that line as high), and a line of a writable watch is edited in place (click it, or Enter or F2; with a mouse it
+is as high as its line of text, and **Tree** gives rows of 24 px, 44 px under a coarse pointer as in the block). Its
+**Tree** button shows the elements one by one again, and **Block** returns to the block; the choice is kept per watch
+and container in this browser, as the period is. A line that no longer has the length of the others turns the block back
 into a tree until they agree. The fields of an object, the entries of a map and strings that break their line keep the
 tree. The layout changes only what is shown: the pages of 200 elements and the passes are the same (ADR-027, section 3).
 

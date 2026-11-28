@@ -608,7 +608,10 @@ export function createTreeView({tree, list, view = globalThis, name = null}) {
 
     /**
      * A node as one line of a block: its value only, its kind being the block's. Its index is not shown, but it names the line
-     * for assistive technologies. A line with a control is a target of 44 px under a coarse pointer.
+     * for assistive technologies. A line with a control is a target of 44 px under a coarse pointer. With a mouse, a writable
+     * line is a target as high as the line of text, as a link in a paragraph is (WCAG 2.2, 2.5.8, inline exception): a taller
+     * line would no longer give square cells. It is also edited from the keyboard (Enter, F2), and the Tree button gives
+     * rows of 24 px; a Full value button keeps its 24 px.
      */
     function blockLine(path) {
         const {node, changed} = tree.nodes.get(path);
