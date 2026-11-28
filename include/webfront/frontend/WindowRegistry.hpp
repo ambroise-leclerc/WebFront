@@ -83,9 +83,9 @@ public:
         if (const auto found = secondary.find(page); found != secondary.end() && found->second.get() == which) {
             session = std::move(found->second);
             secondary.erase(found);
-        } else if (const auto found = std::ranges::find(closing, which, &std::shared_ptr<Session>::get); found != closing.end()) {
-            session = std::move(*found);
-            closing.erase(found);
+        } else if (const auto ending = std::ranges::find(closing, which, &std::shared_ptr<Session>::get); ending != closing.end()) {
+            session = std::move(*ending);
+            closing.erase(ending);
         } else
             return;
         // open() returned long ago, so nothing else can report a page that failed (navigation, runtime, process lost):
