@@ -168,6 +168,21 @@ def raw_request(port, text):
     return int(answer.split(b" ", 2)[1])
 
 
+def host_environment(base, profile, temporary):
+    """The environment of one launch: every browser profile private to it.
+
+    WebView2 shares one browser process between the applications that use the same user data folder, and without
+    WEBFRONT_TEST_WEBVIEW2_PROFILE every automation_host takes the same default folder (derived from its executable).
+    A launch then joined the browser process of a host that another scenario, or the previous launch, was closing, and
+    lost its window with that process: the session closed and its MCP listener with it (#720)."""
+    profile = pathlib.Path(profile)
+    environment = dict(base, XDG_DATA_HOME=str(profile / "data"), XDG_CACHE_HOME=str(profile / "cache"),
+                       WEBFRONT_TEST_CEF_PROFILE=str(profile / "cef"), WEBFRONT_TEST_WEBVIEW2_PROFILE=str(profile / "webview2"))
+    # Chromium puts its singleton Unix socket in TMPDIR: a short private directory keeps it below sockaddr_un's limit.
+    environment.update(TMPDIR=str(temporary), TEMP=str(temporary), TMP=str(temporary))
+    return environment
+
+
 class Host:
     """automation_host: an application that enabled automation, launched with its own browser profile."""
 
@@ -182,10 +197,10 @@ class Host:
         self.base = ["--project", str(project), "--environment", environment or args.environment,
                      "--integrity", integrity or json.loads(pathlib.Path(args.provision).read_text())["integrity"],
                      "--registry-dir", args.registry]
-        env = dict(os.environ, XDG_DATA_HOME=str(profile / "data"), XDG_CACHE_HOME=str(profile / "cache"),
-                   WEBFRONT_TEST_CEF_PROFILE=str(profile / "cef"))
-        # Chromium puts its singleton Unix socket in TMPDIR: a short private directory keeps it below sockaddr_un's limit.
-        env.update(TMPDIR=temporary, TEMP=temporary, TMP=temporary)
+        env = host_environment(os.environ, profile, temporary)
+        # Each launch is announced in the log that the hosts of a scenario share, so that a failure names its own lines.
+        log.write(f"--- {name} ---\n")
+        log.flush()
         # Closing its standard input closes the application's window (stop()).
         self.process = subprocess.Popen([args.host, *self.base, "--sessions", str(self.sessions), *extra],
                                         stdin=subprocess.PIPE, stdout=log, stderr=log, text=True, env=env)
@@ -635,6 +650,13 @@ def port_conflict_after_failure(process, timeout=1):
         return False
 
 
+def launch_failure(name, run, port, failure, status, log):
+    """The report of a failed launch of the stable scenario: which launch, on which port, why, how the host ended and
+    the hosts' log."""
+    return (f"{name}: launch {run + 1} of 2 on the fixed MCP port {port} failed: {type(failure).__name__}: {failure}\n"
+            f"host exit status: {status}\n--- stable.log ---\n{log}")
+
+
 def stable(args):
     pathlib.Path(args.work).mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=args.work, prefix="stable-") as temporary:
@@ -683,6 +705,16 @@ def stable(args):
                         client.close()
                         host.stop()
                         assert host.wait() == 0, host.logs()
+                    except Exception as failure:
+                        # Say which launch failed, with the whole log of the hosts (the failing one last), once the host
+                        # has written its last lines: a host whose session closed exits by itself.
+                        try:
+                            status = host.process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            status = "still running, killed"
+                            host.process.kill()
+                            host.process.wait()
+                        raise AssertionError(launch_failure(host.name, run, port, failure, status, host.full_log())) from failure
                     finally:
                         host.close()
                 else:

@@ -50,6 +50,7 @@ these entries stays in the GitHub releases and the Git history.
 - A `+` in the path of a file request is a literal `+`, as for the routes, the spaces and `ui.path()`: `/a+b.html` serves `a+b.html`, no longer `a b.html`, which `/a%20b.html` names (#672).
 
 ### Fixed
+- A client connected to the MCP listener when it closes, because the session closed or the application stopped, reads its answer (a closed session says so) instead of a connection reset; a request that arrived just before its peer's two-second deadline is served rather than reset (#720, `docs/AUTOMATION.md`).
 - A closed WKWebView secondary window, or one that another window covered, no longer leaves its page suspended and connected to the application: on macOS 14+ a secondary window is never suspended while inactive (#681, `docs/WKWEBVIEW.md`).
 - A closed WKWebView secondary window disconnects as soon as it is released, even while the system still holds its view: its page is closed explicitly instead of when the view's last reference goes, which kept the detached inspector window connected for more than thirty seconds (#702, `docs/WKWEBVIEW.md`).
 - A closed WebView2 secondary window disconnects at once: its page navigates to `about:blank` before its controller closes, instead of ending whenever the renderer of the shared environment got to it, which once kept the detached inspector window connected for more than thirty seconds (#708, `docs/WEBVIEW2.md`).
