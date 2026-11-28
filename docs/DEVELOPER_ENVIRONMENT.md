@@ -489,6 +489,12 @@ environment's `mount`, not to the embedded bootstrap page):
   The arrow beside a watch unfolds its content as a tree: scalars, strings, containers, described and formattable types,
   read by pages of 200 children and refreshed at the chosen period, the values that changed highlighted. A value the
   application made writable is edited in place (Enter writes, Escape cancels); a value that is cut offers its full text.
+  Elements that are all leaves of one kind show that kind once, on their container (`sequence [3] of string`), with their
+  indices in a narrow column and their values aligned. A container of strings of the same length, such as the grid of
+  Life, shows as a **block**: one line per element, without index or kind, in square character cells, so that a grid of
+  32 by 32 characters is square. The lines keep the highlighting of what changed, the full value and the edition in place.
+  Its **Tree** button shows the elements one by one again and **Block** returns to the block; the choice is kept per watch
+  in this browser, as the period is. The layout changes only what is shown: the pages read are the same.
   [Watches](WATCHES.md) tells how to declare them, under which lock or on which thread they are read, and their bounds.
 
   The **Functions** panel lists what the application registered with `cppFunction`, the functions of its spaces included
@@ -544,8 +550,10 @@ environment's `mount`, not to the embedded bootstrap page):
   announcement is refused with `webfront.inspector.unavailable`, and its detached panel says that the page is not
   connected.
 
-The tab is a button (`aria-expanded`, `aria-haspopup="menu"`, 44 px target), its menu a `menu` of `menuitem`s of 44 px,
-and the window a non-modal dialog. The interface stays in the preview
+The tab is a button (`aria-expanded`, `aria-haspopup="menu"`, 44 px target), its menu a `menu` of compact `menuitem`s
+(28 px, 24 px at least, and 44 px under a coarse pointer such as a touch screen), and the window a non-modal dialog. The
+inspector panels are dense in the same way: their controls keep 24 px at least, 44 px under a coarse pointer, and a
+visible focus. The interface stays in the preview
 frame, as before: the layout adds nothing to the application's documents except the shortcut's listener and the preview page's announcement, installed in the interface
 and in the same-origin frames it embeds (not in a frame of another origin, nor one inside a shadow tree: click the interface
 or the tab first). This is a layout, not a

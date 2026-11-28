@@ -3,7 +3,7 @@
 // and the view that shows a tree. A fake of the C++ side answers here; the real one is read in a browser by
 // test/web/suite/specs/inspector-specs.mjs.
 import {flags, functions, codes, readNode, readNodePage, readLimits, writeBound, utf8Bytes, parentOf, createWatchTree, createTreeView,
-    writeFailure} from '../../../js/developer/environment/inspector-watches.mjs';
+    writeFailure, blockWidth, layouts, keptLayout, keepLayout, keptLayoutCount, watchTreeStyles} from '../../../js/developer/environment/inspector-watches.mjs';
 
 const node = (path, kind, label, value, children = 0, bits = 0) => [path, kind, label, value, children, bits];
 const refusal = (code, message = code) => Object.assign(new Error(message), {code});
@@ -485,13 +485,13 @@ describe('The tree of a watch', () => {
 });
 
 describe('The view of a tree', () => {
-    async function shown(values, options) {
+    async function shown(values, options = {}) {
         const bridge = fakeWatch(values, options);
         const list = document.createElement('ul');
         document.body.append(list);
         let view = null;
         const tree = createWatchTree({bridge, watch: 1, onUpdate: () => view?.render()});
-        view = createTreeView({tree, list, view: {}});
+        view = createTreeView({tree, list, view: options.view ?? {}, name: options.name ?? null});
         await tree.open();
         return {bridge, tree, view, list};
     }
@@ -677,5 +677,113 @@ describe('The view of a tree', () => {
         await tree.settled();
         expect(rows(list).length).toBe(7);
         expect(list.querySelector('button.more').textContent).toBe('[6] not loaded');
+    });
+    it('shows the kind of elements of one kind once, on their container, and their labels in a narrow column', async () => {
+        const {list} = await shown(['a', 'bb', 'ccc']);
+        const group = list.querySelector('ul.tree ul.tree');
+        expect(group.classList.contains('homogeneous')).toBeTrue();
+        expect(group.style.getPropertyValue('--label-width')).toBe('3ch');
+        expect(rows(list)[0].querySelector(':scope > .row > .of').textContent).toBe('of string');
+        expect(rows(list).slice(1).map(item => item.querySelector('.kind'))).toEqual([null, null, null]);
+        expect(rows(list).slice(1).map(item => item.querySelector('.label').textContent)).toEqual(['[0]', '[1]', '[2]']);
+        // Strings of different lengths are no grid: no block is offered.
+        expect(list.querySelector('ul.block')).toBeNull();
+        expect(list.querySelector('button.layout')).toBeNull();
+    });
+
+    it('shows a container of strings of the same length as a block, and goes back to the tree with its button', async () => {
+        const storage = new Map();
+        const localStorage = {getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value)};
+        const grid = ['#..', '.#.', '..#'];
+        const {list, tree} = await shown(grid, {view: {localStorage}, name: 'grid'});
+        expect(blockWidth(tree, '')).toBe(3);
+        let block = list.querySelector('ul.tree.block');
+        expect(block).not.toBeNull();
+        // One line per element, its value only: no label, no kind.
+        expect([...block.children].map(line => line.textContent)).toEqual(grid);
+        expect(block.querySelector('.label, .kind')).toBeNull();
+        expect([...block.children].map(line => line.dataset.path)).toEqual(['/#0', '/#1', '/#2']);
+        const layout = list.querySelector('button.layout');
+        expect(layout.textContent).toBe('Tree');
+        layout.focus();
+        layout.click();
+        expect(list.querySelector('ul.block')).toBeNull();
+        expect(rows(list).slice(1).map(item => item.querySelector('.label').textContent)).toEqual(['[0]', '[1]', '[2]']);
+        expect(document.activeElement).withContext('the focus stays on the button').toBe(list.querySelector('button.layout'));
+        expect(keptLayout({localStorage}, 'grid', '')).toBe(layouts.tree);
+        // The choice is kept for this watch: another view of it opens on the tree, another watch on the block.
+        const again = await shown(grid, {view: {localStorage}, name: 'grid'});
+        expect(again.list.querySelector('ul.block')).toBeNull();
+        const other = await shown(grid, {view: {localStorage}, name: 'other'});
+        expect(other.list.querySelector('ul.block')).not.toBeNull();
+        list.querySelector('button.layout').click();
+        block = list.querySelector('ul.tree.block');
+        expect(block).not.toBeNull();
+        expect(keptLayout({localStorage}, 'grid', '')).toBe(layouts.block);
+    });
+
+    it('shows a grid of 32 by 32 characters as a square block, its rows as compact as its columns', async () => {
+        const style = document.createElement('style');
+        style.textContent = watchTreeStyles;
+        document.head.append(style);
+        try {
+            const {list} = await shown(Array.from({length: 32}, (unused, row) => '.#'.repeat(16).slice(row % 2, row % 2 + 32).padEnd(32, '.')));
+            const box = list.querySelector('ul.block').getBoundingClientRect();
+            expect(Math.abs(box.width / box.height - 1)).withContext(`${box.width} x ${box.height}`).toBeLessThan(0.05);
+            // Smaller than the rows of the tree, which a grid of 32 rows would make more than three times higher than wide.
+            expect(box.height).toBeLessThan(32 * 16);
+        } finally { style.remove(); }
+    });
+
+    it('highlights the lines of a block that the last pass changed', async () => {
+        const grid = ['....', '....', '....'];
+        const {list, tree} = await shown(grid);
+        grid[1] = '.##.';
+        await tree.refresh();
+        const lines = () => [...list.querySelectorAll('ul.block > li')];
+        expect(lines().map(line => line.classList.contains('changed'))).toEqual([false, true, false]);
+        expect(lines()[1].textContent).toBe('.##.');
+        await tree.refresh();
+        expect(lines().some(line => line.classList.contains('changed'))).toBeFalse();
+        // A line that no longer has the length of the others makes the block a tree again, until they agree.
+        grid[2] = '..';
+        await tree.refresh();
+        expect(list.querySelector('ul.block')).toBeNull();
+    });
+
+    it('edits a writable line of a block in place, and reads the full value of one that is cut', async () => {
+        const grid = ['ab', 'cd'];
+        const {list, tree, bridge} = await shown(grid);
+        list.querySelectorAll('ul.block .value')[1].click();
+        const input = list.querySelector('ul.block input.edit');
+        expect(input.value).toBe('cd');
+        input.value = 'CD';
+        input.dispatchEvent(new Event('input'));
+        input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter'}));
+        await tree.settled();
+        await new Promise(resolve => setTimeout(resolve));
+        expect(grid[1]).toBe('CD');
+        expect(list.querySelectorAll('ul.block > li')[1].textContent).toBe('CD');
+        // A line that C++ cut offers its full value.
+        const children = bridge.answers[functions.children];
+        bridge.answers[functions.children] = (...args) => {
+            const page = children(...args);
+            page[0] = page[0].map(([path, kind, label, value, count, bits]) => [path, kind, label, value, count, path === '/#0' ? bits | flags.truncated : bits]);
+            return page;
+        };
+        await tree.load('', 0);
+        list.querySelector('ul.block button.full').click();
+        await new Promise(resolve => setTimeout(resolve));
+        expect(list.querySelector('ul.block pre.full').textContent).toBe('ababab');
+    });
+
+    it('keeps a bounded number of layouts, the last chosen ones', () => {
+        const storage = new Map();
+        const view = {localStorage: {getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value)}};
+        for (let index = 0; index <= keptLayoutCount; ++index) keepLayout(view, `watch${index}`, '', layouts.tree);
+        expect(keptLayout(view, 'watch0', '')).toBeNull();
+        expect(keptLayout(view, `watch${keptLayoutCount}`, '')).toBe(layouts.tree);
+        expect(keptLayout({localStorage: {getItem: () => { throw new Error('blocked'); }}}, 'grid', '')).toBeNull();
+        expect(keptLayout({localStorage: {getItem: () => '{"x":'}}, 'grid', '')).toBeNull();
     });
 });

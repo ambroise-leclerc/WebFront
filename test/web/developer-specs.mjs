@@ -1037,6 +1037,30 @@ try {
                     await until(() => !inShownList(), `A removed watch must disappear from the inspector: ${listed()}`);
                     assert(shownList.isConnected && frame.isConnected && frame.contentDocument === shownDocument,
                         'The watch must have disappeared from the list that showed it, still in the inspector');
+                    // The watches of Life (#723): its grid, 32 strings of 32 characters, shows as a block of square character
+                    // cells, one line per row, without label or kind, inside the default window; its Tree button shows the rows
+                    // one by one, and Block brings the block back.
+                    await webFront.cppFunction('test.watchLife')();
+                    await until(() => listed().includes('grid'), `The watches of Life must appear in the inspector: ${listed()}`);
+                    const gridItem = () => [...shownList.querySelectorAll(':scope > li')].find(item => item.querySelector('.name')?.textContent === 'grid');
+                    gridItem().querySelector('button.toggle').click();
+                    const gridBlock = () => gridItem()?.querySelector('ul.tree.block');
+                    await until(() => gridBlock()?.querySelectorAll(':scope > li').length === 32, 'The grid of Life must show as a block of 32 lines');
+                    const lines = [...gridBlock().querySelectorAll(':scope > li')];
+                    assert(lines.every(line => line.textContent.length === 32) && lines[0].textContent.startsWith('.#.')
+                        && !gridBlock().querySelector('.label, .kind'), `The block must show the rows alone: ${lines[0]?.textContent}`);
+                    const gridBox = gridBlock().getBoundingClientRect();
+                    assert(Math.abs(gridBox.width / gridBox.height - 1) < 0.08,
+                        `A grid of 32 by 32 characters must be square: ${gridBox.width} x ${gridBox.height}`);
+                    assert(gridBox.left >= 0 && gridBox.right <= frame.contentWindow.innerWidth && gridBox.height <= frame.contentWindow.innerHeight,
+                        `The grid of Life must fit in the default window: ${JSON.stringify(gridBox)} in ${frame.contentWindow.innerWidth} x ${frame.contentWindow.innerHeight}`);
+                    gridItem().querySelector('button.layout').click();
+                    await until(() => !gridBlock() && gridItem().querySelectorAll('ul.tree ul.tree > li .label').length === 32,
+                        'The Tree button must show the rows of the grid one by one');
+                    gridItem().querySelector('button.layout').click();
+                    await until(() => gridBlock()?.querySelectorAll(':scope > li').length === 32, 'The Block button must show the grid as a block again');
+                    await webFront.cppFunction('test.unwatchLife')();
+                    await until(() => !listed().includes('grid'), `The watches of Life must disappear once removed: ${listed()}`);
                     const detach = floating().querySelector('.webfront-inspector-detach');
                     if (secondaryWindow) {
                         // A frontend that opens windows: Detach moves the panel to a native window with its own proven connection.
@@ -1192,8 +1216,17 @@ try {
         assert(again.menus().length === 1 && again.menus()[0].querySelector('[role=menu]'), 'A right click on the tab must open its menu');
         assert(again.entries(0).map(entry => entry.firstChild.textContent).join() === 'Terminal,C++ state,TypeScript state',
             `The menu must offer the terminal and the inspectors: ${again.entries(0).map(entry => entry.textContent)}`);
-        assert(again.inside('.webfront-menu') && again.entries(0).every(entry => entry.getBoundingClientRect().height >= 44),
-            'The menu must stay inside the window, with targets of 44 px');
+        // Compact for a mouse (#723): entries of 24 to 32 px, never less than 24 px (WCAG 2.2, 2.5.8), and 44 px again under a
+        // coarse pointer; each is the element a pointer finds at its centre.
+        const coarse = page.defaultView.matchMedia('(pointer: coarse)').matches;
+        const entryBoxes = () => again.entries(0).map(entry => entry.getBoundingClientRect());
+        assert(again.inside('.webfront-menu') && entryBoxes().every(box => box.width >= 24
+            && (coarse ? box.height >= 44 : box.height >= 24 && box.height <= 32)),
+        `The menu must stay inside the window, with compact targets of 24 px at least: ${JSON.stringify(entryBoxes().map(box => box.height))}`);
+        assert(again.entries(0).every((entry, index) => {
+            const box = entryBoxes()[index];
+            return page.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)?.closest('[role=menuitem]') === entry;
+        }), 'Each entry of the menu must be reachable by the pointer');
         assert(page.activeElement === again.entries(0)[0] && again.state() === 'interface', 'The menu must take the focus, and leave the terminal collapsed');
         // The arrows move in the menu and open a submenu. This page is a frame of the test page: its connection is not
         // the proven view, so no container is admitted and the entries say how to admit one.
@@ -1220,6 +1253,13 @@ try {
         again.press(page.activeElement, {key: 'Escape'});
         again.press(button, {key: 'F10', shiftKey: true});
         assert(again.menus().length === 1, 'Shift+F10 must open the menu on the tab');
+        // With the mouse: a click on an entry with a submenu opens it, a press elsewhere closes the menu.
+        again.entries(0)[1].dispatchEvent(new page.defaultView.MouseEvent('click', {bubbles: true, cancelable: true, button: 0}));
+        assert(again.menus().length === 2 && again.entries(1).length === 3, 'A click on C++ state must open its submenu');
+        page.body.dispatchEvent(new page.defaultView.PointerEvent('pointerdown', {bubbles: true, cancelable: true, pointerType: 'mouse'}));
+        assert(again.menus().length === 0, 'A press outside the menu must close it');
+        again.press(button, {key: 'F10', shiftKey: true});
+        assert(again.menus().length === 1, 'Shift+F10 must open the menu again');
         again.press(again.entries(0)[0], {key: 'Enter'});
         assert(again.menus().length === 0 && again.state() === 'floating' && again.panel().contains(page.activeElement),
             'The Terminal entry must open the terminal and give it the keys');

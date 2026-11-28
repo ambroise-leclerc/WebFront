@@ -375,23 +375,41 @@ export function createWatchTree({bridge, watch, count = pageCount, onUpdate = ()
 
 export const watchTreeStyles = `
 ul.watches li{display:block}
-ul.watches .head{display:grid;grid-template-columns:auto 1fr auto;gap:2px 12px;align-items:baseline}
-ul.watches .head .location{grid-column:2/4}
-ul.watches button.toggle,ul.tree button.toggle{width:24px;min-height:24px;padding:0;border:0;background:none;color:#a9b3c4;font:inherit;cursor:pointer}
-ul.watches button.toggle:focus-visible,ul.tree button:focus-visible,ul.tree input:focus-visible{outline:2px solid #d7fa85;outline-offset:1px}
-ul.tree{list-style:none;margin:4px 0 0;padding:0 0 0 16px;font:12px ui-monospace,monospace}
-ul.tree li{padding:1px 0;border:0}
-ul.tree .row{display:flex;gap:6px;align-items:baseline;min-height:24px}
-ul.tree .spacer{display:inline-block;width:24px}
+ul.watches .head{display:flex;align-items:center;gap:0 8px;min-width:0}
+ul.watches .head .location{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:right}
+ul.watches button.toggle,ul.tree button.toggle{flex:none;width:24px;height:24px;padding:0;border:0;border-radius:3px;background:none;color:#a9b3c4;font:inherit;line-height:1;cursor:pointer}
+ul.watches button.toggle:hover,ul.tree button.toggle:hover{background:#2f3a50}
+ul.watches button.toggle:focus-visible,ul.tree button:focus-visible,ul.tree input:focus-visible,ul.tree [role=button]:focus-visible{outline:2px solid #d7fa85;outline-offset:1px}
+ul.tree{list-style:none;margin:2px 0 0;padding:0 0 0 12px;font:12px/16px ui-monospace,monospace}
+ul.tree li{padding:0;border:0}
+ul.tree .row{display:flex;gap:6px;align-items:center;min-height:18px}
+ul.tree .row.target{min-height:24px}
+ul.tree .spacer{flex:none;display:inline-block;width:24px}
+ul.tree.leaves>li>.row>.spacer{display:none}
 ul.tree .label{color:#8fd0ff}
-ul.tree .kind{color:#a9b3c4;justify-self:auto}
-ul.tree .value{overflow-wrap:anywhere;white-space:pre-wrap}
+ul.tree.homogeneous>li>.row>.label{min-width:var(--label-width);text-align:end;color:#7b8aa3}
+ul.tree .kind,ul.tree .of{flex:none;color:#a9b3c4;justify-self:auto}
+ul.tree .value{min-width:0;overflow-wrap:anywhere;white-space:pre-wrap}
 ul.tree .value.writable{cursor:text;border-bottom:1px dotted #46536a}
 ul.tree .changed>.row .value,ul.tree .changed>.row .kind{background:#4a3d12}
 ul.tree .note{color:#ffbd2e}
 ul.tree input{min-width:12ch;border:1px solid #46536a;border-radius:3px;background:#141821;color:inherit;font:inherit}
-ul.tree button.more,ul.tree button.full{min-height:24px;padding:0 6px;border:1px solid #46536a;border-radius:3px;background:#2f3a50;color:inherit;font:inherit;cursor:pointer}
-ul.tree pre.full{max-height:240px;overflow:auto;margin:2px 0;padding:4px;background:#0f131b;white-space:pre-wrap;overflow-wrap:anywhere}`;
+ul.tree button.more,ul.tree button.full,ul.tree button.layout{flex:none;min-height:24px;padding:0 6px;border:1px solid #46536a;border-radius:3px;background:#2f3a50;color:inherit;font:11px system-ui;cursor:pointer}
+ul.tree pre.full{max-height:240px;overflow:auto;margin:2px 0;padding:4px;background:#0f131b;white-space:pre-wrap;overflow-wrap:anywhere}
+ul.tree.block{width:max-content;max-width:calc(100% - 12px);margin:2px 0 2px 12px;padding:0;overflow-x:auto;font-size:11px;line-height:1em}
+ul.tree.block>li{margin:0;padding:0}
+ul.tree.block>li>.row{display:block;min-height:0;line-height:1em;white-space:pre}
+ul.tree.block .value{display:inline-block;vertical-align:top;letter-spacing:calc(1em - 1ch);white-space:pre;overflow-wrap:normal}
+ul.tree.block .value.writable{border-bottom:0;text-decoration:underline dotted #46536a}
+ul.tree.block .changed>.row .value{background:#4a3d12}
+ul.tree.block .row button.full{min-height:0;height:1em;padding:0 4px;font-size:inherit;line-height:1}
+ul.tree.block .row .note{white-space:normal;letter-spacing:normal}
+@media (pointer:coarse){
+ul.watches button.toggle,ul.tree button.toggle{width:44px;height:44px}
+ul.tree .row.target{min-height:44px}
+ul.tree .spacer{width:44px}
+ul.tree button.more,ul.tree button.full,ul.tree button.layout{min-height:44px;padding:0 10px}
+}`;
 
 /** The most characters of a full value that the page shows; the rest is told by its size. */
 export const shownValueCharacters = 64 * 1024;
@@ -405,13 +423,75 @@ const reasons = {
 /** Why a write was not applied, for the user. */
 export const writeFailure = ({code, message}) => message || reasons[code] || code;
 
+/** The kind of the elements that a block shows, one line each. */
+const blockKind = 'string';
+
+/** The width of a text in the columns of a block: its characters (code points). */
+const columns = text => [...text].length;
+
+/**
+ * The width, in characters, of the block that the loaded children of `path` can be shown as; 0 when they cannot. A block shows
+ * two or more strings of the same length, none of them empty: the rows of a grid of text. It reads only what is loaded, so the
+ * pages and the passes are the same in both layouts (ADR-027, section 3).
+ */
+export function blockWidth(tree, path) {
+    const entry = tree.nodes.get(path);
+    if (!entry || entry.node.children < 2) return 0;
+    let width = 0, count = 0;
+    for (const child of entry.positions.values()) {
+        const node = tree.nodes.get(child)?.node;
+        if (!node) continue;
+        if (node.kind !== blockKind || node.children !== 0) return 0;
+        const length = columns(node.value);
+        if (!length || (count && length !== width)) return 0;
+        width = length;
+        ++count;
+    }
+    return count >= 2 ? width : 0;
+}
+
+/** How the elements of a container are shown: one row each in the tree, or one line each in a block. */
+export const layouts = Object.freeze({tree: 'tree', block: 'block'});
+
+const layoutsKey = 'webfront.inspector.layouts';
+/** The most layouts this viewer's choices keep; the oldest are forgotten first. */
+export const keptLayoutCount = 200;
+
+/** The layout this viewer chose for the container `path` of the watch `name`, or null when none is kept or the storage is unavailable. */
+export function keptLayout(view, name, path) {
+    try {
+        const kept = JSON.parse(view.localStorage?.getItem(layoutsKey) ?? '{}')?.[JSON.stringify([name, path])];
+        return Object.values(layouts).includes(kept) ? kept : null;
+    } catch { return null; }
+}
+
+/** Keeps the layout chosen for the container `path` of the watch `name`, as the period is kept: a convenience of this viewer. */
+export function keepLayout(view, name, path, layout) {
+    try {
+        let kept = JSON.parse(view.localStorage?.getItem(layoutsKey) ?? '{}');
+        if (!kept || typeof kept !== 'object' || Array.isArray(kept)) kept = {};
+        const key = JSON.stringify([name, path]);
+        delete kept[key];
+        kept[key] = layout;
+        const keys = Object.keys(kept);
+        for (const old of keys.slice(0, Math.max(0, keys.length - keptLayoutCount))) delete kept[old];
+        view.localStorage?.setItem(layoutsKey, JSON.stringify(kept));
+    } catch { /* a convenience only: the choice lasts as long as the page */ }
+}
+
 /**
  * Shows a tree in `list` (a `ul`), and wires its controls: unfolding and folding, the next page of a list, a position in a
  * large container, the edition in place of a writable value (Enter writes, Escape cancels), and the full value of one that
  * is cut. `render()` draws the model again; it keeps the focus and an edition in progress.
+ *
+ * The elements of a container that are all leaves of one kind show their kind once, on the container, and their labels in
+ * a narrow column. A container of strings of the same length (blockWidth) is shown as a block by default: one line per
+ * element, without label or kind, in square character cells, so that a grid of text keeps its proportions. Its Tree button
+ * shows the elements one by one again, and Block returns to the block; the choice is kept per watch (`name`) and container.
  */
-export function createTreeView({tree, list, view = globalThis}) {
+export function createTreeView({tree, list, view = globalThis, name = null}) {
     const page = list.ownerDocument;
+    const chosen = new Map();  // path, the layout of its elements in this view
     const notes = new Map();  // path, why the last write was not applied
     const full = new Map();   // path, the full value read
     let editing = null;       // {path, text}: kept across the renderings that a refresh causes
@@ -469,22 +549,19 @@ export function createTreeView({tree, list, view = globalThis}) {
         render();
     }
 
-    function row(path, depth) {
-        const entry = tree.nodes.get(path);
-        const {node} = entry;
-        const item = element('li');
-        item.setAttribute('role', 'treeitem');
-        item.dataset.path = path;
-        if (entry.changed && entry.changed === tree.pass) item.classList.add('changed');
-        const line = element('div', 'row');
-        const unfolds = node.children > 0 && !(node.flags & flags.depthReached);
-        const open = unfolds && tree.expanded.has(path);
-        if (unfolds) {
-            item.setAttribute('aria-expanded', String(open));
-            line.append(button('toggle', open ? '▾' : '▸', `${open ? 'Fold' : 'Unfold'} ${node.label}`,
-                () => report(open ? tree.collapse(path) : tree.expand(path))));
-        } else line.append(element('span', 'spacer'));
-        line.append(element('span', 'label', node.label), element('span', 'kind', node.children > 0 ? `${node.kind} [${node.children}]` : node.kind));
+    /** The layout of the elements of `path`: the one this viewer chose, else a block. */
+    const layoutOf = path => {
+        if (!chosen.has(path)) chosen.set(path, (name === null ? null : keptLayout(view, name, path)) ?? layouts.block);
+        return chosen.get(path);
+    };
+    const choose = (path, layout) => {
+        chosen.set(path, layout);
+        if (name !== null) keepLayout(view, name, path, layout);
+        render();
+    };
+
+    /** The value of a node, or the field that edits it; its full value and notes after it. */
+    function valueOf(path, node, line, item) {
         if (editing?.path === path) {
             const input = element('input', 'edit');
             input.value = editing.text;
@@ -522,9 +599,66 @@ export function createTreeView({tree, list, view = globalThis}) {
             item.append(element('pre', 'full', shown),
                 element('span', 'note', `${total} bytes${capped ? ', cut at the inspector\'s limit' : ''}`));
         }
+    }
+
+    /** A node as one line of a block: its value only, its label and kind being those of the block. */
+    function blockLine(path) {
+        const {node, changed} = tree.nodes.get(path);
+        const item = element('li');
+        item.setAttribute('role', 'treeitem');
+        item.dataset.path = path;
+        if (changed && changed === tree.pass) item.classList.add('changed');
+        valueOf(path, node, element('div', 'row'), item);
+        return item;
+    }
+
+    /** A node as a row of the tree; `uniform` when its siblings are leaves of its kind, which their container shows once. */
+    function row(path, depth, uniform = false) {
+        const entry = tree.nodes.get(path);
+        const {node} = entry;
+        const item = element('li');
+        item.setAttribute('role', 'treeitem');
+        item.dataset.path = path;
+        if (entry.changed && entry.changed === tree.pass) item.classList.add('changed');
+        const line = element('div', 'row');
+        const unfolds = node.children > 0 && !(node.flags & flags.depthReached);
+        const open = unfolds && tree.expanded.has(path);
+        const children = open
+            ? [...entry.positions].sort((a, b) => a[0] - b[0]).filter(([, child]) => tree.nodes.has(child)) : [];
+        const shown = children.map(([, child]) => tree.nodes.get(child).node);
+        const leaves = shown.length > 0 && shown.every(child => child.children === 0 || (child.flags & flags.depthReached));
+        const sameKind = leaves && shown.length > 1 && shown.every(child => child.kind === shown[0].kind);
+        const width = open ? blockWidth(tree, path) : 0;
+        const block = width > 0 && layoutOf(path) === layouts.block;
+        if (unfolds) {
+            item.setAttribute('aria-expanded', String(open));
+            line.append(button('toggle', open ? '▾' : '▸', `${open ? 'Fold' : 'Unfold'} ${node.label}`,
+                () => report(open ? tree.collapse(path) : tree.expand(path))));
+        } else line.append(element('span', 'spacer'));
+        line.append(element('span', 'label', node.label));
+        if (!uniform) line.append(element('span', 'kind', node.children > 0 ? `${node.kind} [${node.children}]` : node.kind));
+        if (sameKind) line.append(element('span', 'of', `of ${shown[0].kind}`));
+        if (width > 0) {
+            const layout = button('layout', block ? 'Tree' : 'Block',
+                block ? `Show the elements of ${node.label} one by one` : `Show the elements of ${node.label} as a block of text`,
+                () => choose(path, block ? layouts.tree : layouts.block));
+            layout.title = block ? 'Show the elements one by one, with their index' : 'Show the elements as a block of text, one line each';
+            line.append(layout);
+        }
+        valueOf(path, node, line, item);
+        if (line.querySelector('button, input, [role=button]')) line.classList.add('target');
         if (open) {
-            const group = element('ul', 'tree');
+            const group = element('ul', block ? 'tree block' : 'tree');
             group.setAttribute('role', 'group');
+            if (block) {
+                group.setAttribute('aria-label', `${node.label}, ${width} characters per line`);
+            } else if (leaves) {
+                group.classList.add('leaves');
+                if (sameKind) {
+                    group.classList.add('homogeneous');
+                    group.style.setProperty('--label-width', `${Math.max(...shown.map(child => columns(child.label)))}ch`);
+                }
+            }
             let expected = 0;
             const gap = (from, to) => {
                 const more = element('li');
@@ -537,9 +671,9 @@ export function createTreeView({tree, list, view = globalThis}) {
                 more.dataset.from = String(from);
                 return more;
             };
-            for (const [position, child] of [...entry.positions].sort((a, b) => a[0] - b[0])) {
+            for (const [position, child] of children) {
                 if (position > expected) group.append(gap(expected, position));
-                if (tree.nodes.has(child)) group.append(row(child, depth + 1));
+                group.append(block ? blockLine(child) : row(child, depth + 1, sameKind));
                 expected = position + 1;
             }
             if (expected < node.children) {

@@ -419,7 +419,7 @@ const readyTexts = {
 export const describeReady = ready => ready.state === 'rejected' && ready.reason ? `rejected: ${ready.reason}` : readyTexts[ready.state] ?? ready.state;
 
 export const bridgeStyles = `
-dl.bridge{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0 0 12px}
+dl.bridge{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;margin:0 0 8px}
 dl.bridge dt{color:#a9b3c4}
 dl.bridge dd{margin:0;overflow-wrap:anywhere}
 dl.bridge dd.rejected{color:#ffbd2e}`;
