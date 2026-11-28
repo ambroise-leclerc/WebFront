@@ -139,7 +139,9 @@ operation of `webfront.start`, not one MCP tool per callback, so the tool list s
 - **Token.** By default every request carries `Authorization: Bearer <token>`, a 256-bit value from the OS. Before parsing the
   body, the listener compares equal-length tokens in constant time and rejects a length mismatch immediately; a failed check gets
   401 with `WWW-Authenticate: Bearer` (no OAuth server is announced). The token lives as
-  long as the session by default: closing it, a deadline or a lost window closes the listener and removes the file. A supplied
+  long as the session by default: closing it, a deadline or a lost window closes the listener and removes the file; a client
+  already connected has up to a second to complete its request, within the admission bounds, and is then answered as the
+  closed session answers rather than reset. A supplied
   `mcpToken` remains valid across launches until the application changes it; authentication can be explicitly disabled.
 - **Client configuration.** `mcp.json` (mode 0600 in a 0700 directory on POSIX, owner-only ACL on Windows) holds the URL and
   the header, ready for a client that takes a configuration file (`claude --mcp-config PATH/mcp.json`). The token appears in
@@ -369,7 +371,7 @@ control need their own reviewed authorization/isolation design.
 
 `AutomationMcpHttpTests.cpp` covers the listener: screening of Host, Origin, Sec-Fetch, path, method, token, media types and
 lengths; MCP sessions, revisions, batches, notifications and eviction; real sockets with refusals read before a reset,
-`Expect: 100-continue`, silent peers, a taken port and revocation; two activations side by side and the cleanup of a vanished
+`Expect: 100-continue`, silent peers, a taken port, revocation and a client answered while the listener closes; two activations side by side and the cleanup of a vanished
 instance. The other unit tests cover native grants, cross-session rejection, path/option refusal, cancellation races,
 deadline revocation, the MCP lifecycle and identifiers, and hostile JSON. `AutomationAbsentFromDistribution` checks that
 `Enable.hpp` does not compile with `WEBFRONT_DISTRIBUTION`. Browser Jasmine specs cover shared dispatch arbitration and the

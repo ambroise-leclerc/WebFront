@@ -15,7 +15,9 @@
 // session Bearer token compared in constant time, then the media types and the announced length. The token is written
 // with the URL in `mcp.json`, a private client configuration in the instance's private directory, never in the project.
 // Admission bounds the peers that have not authenticated: a bounded queue of unauthenticated peers with a two-second deadline,
-// and separate workers for the authenticated requests.
+// and separate workers for the authenticated requests. When the listener closes (the session closed, or `stop()`), the
+// clients it had accepted, or that wait in its backlog, have up to a second to complete their requests, which are then
+// answered instead of reset.
 
 #pragma once
 #if defined(WEBFRONT_DISTRIBUTION) && WEBFRONT_DISTRIBUTION
@@ -27,6 +29,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <list>
 #include <map>
 #include <memory>
@@ -407,7 +410,7 @@ public:
 };
 
 /// The loopback listener. It writes `mcp.json` into `directory` (an existing private directory outside the project) and
-/// removes it when it stops. Closing the session stops it; so does `stop()`.
+/// removes it when it stops. Closing the session stops it; so does `stop()`. Either answers the connected clients first.
 template <typename Backend = Session>
 class Server {
 public:
@@ -454,7 +457,8 @@ public:
     const std::filesystem::path& configuration() const {
         return file;
     }
-    /// Closes the listener, waits for the requests in progress and removes `mcp.json`. Idempotent.
+    /// Closes the listener, removes `mcp.json`, serves the requests that the clients already connected complete within a
+    /// second, and waits for the requests in progress. Idempotent.
     void stop() {
         worker.request_stop();
         if (worker.joinable())
@@ -476,6 +480,10 @@ private:
     std::jthread                      worker;
 
     static constexpr std::size_t maxConnections = 32, maxPending = 64;
+    // How long a closing listener still serves the requests of the clients it had accepted.
+    static constexpr std::chrono::milliseconds closingGrace{1000};
+    // Enough reads of 4 KiB for the largest acceptable request: its headers and a body of `messageLimit` bytes.
+    static constexpr std::size_t wholeRequestReads = (headerLimit + messageLimit) / 4096 + 2;
     struct Connection {
         std::atomic<bool> finished{false};
         std::jthread      thread;
@@ -583,59 +591,103 @@ private:
                 owner.withdraw();
             }
         } revoke{*this};
-        while (!stop.stop_requested() && !backend->isClosed()) {
-            std::erase_if(connections, [](const Connection& connection) {
-                return connection.finished.load();
-            });
-#ifdef _WIN32
-            std::vector<WSAPOLLFD> items;
-#else
-            std::vector<pollfd> items;
-#endif
-            items.push_back({listener.value, POLLIN, 0});
-            for (const auto& peer : pending)
-                items.push_back({peer.socket.value, POLLIN, 0});
-#ifdef _WIN32
-            if (::WSAPoll(items.data(), static_cast<ULONG>(items.size()), 20) < 0)
-                continue;
-#else
-            if (::poll(items.data(), static_cast<nfds_t>(items.size()), 20) < 0)
-                continue;
-#endif
-            std::size_t index = 1;
-            for (auto peer = pending.begin(); peer != pending.end(); ++index) {
-                bool keep = std::chrono::steady_clock::now() < peer->deadline;
-                if (keep && items[index].revents) {
-                    char       bytes[4096];
-                    const auto count = channel::SocketRead{}(peer->socket.value, bytes, sizeof bytes);
-                    if (count > 0 && !peer->refused) {
-                        if (feed(*peer, std::string_view(bytes, static_cast<std::size_t>(count)))) {
-                            if (connections.size() >= maxConnections)
-                                refuse(*peer, refusal(503, "The MCP listener is busy"));
-                            else {
-                                dispatch(connections, *peer);
-                                keep = false;
-                            }
-                        }
-                    } else if (count == 0 || (count < 0 && !channel::retryableSocketError(channel::socketError())))
-                        keep = false;
-                }
-                if (keep)
-                    ++peer;
-                else
-                    peer = pending.erase(peer);
-            }
-            // Drain a bounded batch, then serve the readable peers before accepting another batch.
-            if (items.front().revents)
-                for (std::size_t accepted = 0; accepted < maxPending; ++accepted) {
-                    const auto handle = channel::acceptSocket(listener.value);
-                    if (handle == channel::invalid)
-                        break;
-                    if (pending.size() >= maxPending)
-                        pending.pop_front();
-                    pending.emplace_back(handle);
-                }
+        while (!stop.stop_requested() && !backend->isClosed())
+            step(connections, pending, true, std::chrono::steady_clock::time_point::max());
+        // Closing (#720): a client connected before the listener closes is answered (a closed session says so) rather
+        // than reset. The backlog is taken first, then the listener closes; the requests already sent are served for
+        // a bounded time, whatever stopped the listener, since the session's closing also asks to stop it.
+        for (std::size_t accepted = 0; accepted < maxPending && pending.size() < maxPending; ++accepted) {
+            const auto handle = channel::acceptSocket(listener.value);
+            if (handle == channel::invalid)
+                break;
+            pending.emplace_back(handle);
         }
+        listener.reset();
+        withdraw();
+        const auto closing = std::chrono::steady_clock::now() + closingGrace;
+        while (!pending.empty() && std::chrono::steady_clock::now() < closing)
+            step(connections, pending, false, closing);
+        // A last pass without waiting: a request completed within the grace is served even if this thread ran late.
+        for (auto& peer : pending)
+            if (receive(connections, peer, wholeRequestReads))
+                discard(peer);
+    }
+    // One round: reads the readable peers, dispatches their complete requests and, while `accepting`, takes a batch of
+    // connections. A peer is closed at its deadline or at `limit`, after what it sent has been read: bytes left unread
+    // would make the system answer it with a reset instead of the end of the stream.
+    void step(std::list<Connection>& connections, std::list<Pending>& pending, bool accepting, std::chrono::steady_clock::time_point limit) {
+        std::erase_if(connections, [](const Connection& connection) {
+            return connection.finished.load();
+        });
+#ifdef _WIN32
+        std::vector<WSAPOLLFD> items;
+#else
+        std::vector<pollfd> items;
+#endif
+        if (accepting)
+            items.push_back({listener.value, POLLIN, 0});
+        for (const auto& peer : pending)
+            items.push_back({peer.socket.value, POLLIN, 0});
+#ifdef _WIN32
+        if (::WSAPoll(items.data(), static_cast<ULONG>(items.size()), 20) < 0)
+            return;
+#else
+        if (::poll(items.data(), static_cast<nfds_t>(items.size()), 20) < 0)
+            return;
+#endif
+        std::size_t index = accepting ? 1 : 0;
+        for (auto peer = pending.begin(); peer != pending.end(); ++index) {
+            // Read before the deadline applies: a request that arrived while this thread was not scheduled is served.
+            bool keep = !items[index].revents || receive(connections, *peer, 1);
+            // At its deadline, a peer is served if the rest of its request is already there; otherwise it is closed.
+            if (keep && std::chrono::steady_clock::now() >= std::min(peer->deadline, limit)) {
+                if (receive(connections, *peer, wholeRequestReads))
+                    discard(*peer);
+                keep = false;
+            }
+            if (keep)
+                ++peer;
+            else
+                peer = pending.erase(peer);
+        }
+        // Drain a bounded batch, then serve the readable peers before accepting another batch.
+        if (accepting && items.front().revents)
+            for (std::size_t accepted = 0; accepted < maxPending; ++accepted) {
+                const auto handle = channel::acceptSocket(listener.value);
+                if (handle == channel::invalid)
+                    break;
+                if (pending.size() >= maxPending)
+                    pending.pop_front();
+                pending.emplace_back(handle);
+            }
+    }
+    // Feeds a peer up to `reads` reads of what it already sent, without waiting. Returns whether it stays pending: false
+    // once its request is dispatched, or when its client closed or failed.
+    bool receive(std::list<Connection>& connections, Pending& peer, std::size_t reads) {
+        char bytes[4096];
+        for (std::size_t read = 0; read < reads; ++read) {
+            const auto count = channel::SocketRead{}(peer.socket.value, bytes, sizeof bytes);
+            if (count == 0 || (count < 0 && !channel::retryableSocketError(channel::socketError())))
+                return false;
+            if (count < 0)
+                return true;
+            if (!peer.refused && feed(peer, std::string_view(bytes, static_cast<std::size_t>(count)))) {
+                if (connections.size() >= maxConnections)
+                    refuse(peer, refusal(503, "The MCP listener is busy"));
+                else {
+                    dispatch(connections, peer);
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+    // Reads, without waiting, what a peer about to be closed has already sent.
+    static void discard(Pending& peer) noexcept {
+        char bytes[4096];
+        for (int reads = 0; reads < 16; ++reads)
+            if (channel::SocketRead{}(peer.socket.value, bytes, sizeof bytes) <= 0)
+                break;
     }
     void dispatch(std::list<Connection>& connections, Pending& peer) {
         auto&           connection = connections.emplace_back();

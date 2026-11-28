@@ -560,6 +560,39 @@ const Scenario mcpHttpListener{
         });
     }};
 
+// #720: the session closing closed the listener with the clients it had accepted, whose requests then met a reset.
+const Scenario mcpHttpClosingListener{"A closing MCP listener answers the clients it had accepted", [] {
+                                          using namespace mcphttptests;
+                                          webfront::test::TemporaryDirectory root;
+                                          std::filesystem::create_directory(root.path() / "project");
+                                          auto controller = std::make_shared<Session>(SessionOptions{root.path() / "project", {"build"}});
+                                          controller->poll();
+                                          channel::PrivateDirectory         directory{root.path() / "private"};
+                                          mcphttp::Server<Session>          server{controller, directory.path};
+                                          const auto                        port   = server.port();
+                                          const auto                        secret = bearer(directory.path);
+                                          [[maybe_unused]] channel::Runtime runtime;
+                                          given("a client whose request is not complete when the session closes", [&] {
+                                              const auto      text = post(port, initialize, {}, secret);
+                                              channel::Socket peer{channel::createSocket()};
+                                              connectTo(peer, port);
+                                              channel::send(peer.value, text.substr(0, 20));
+                                              when("the session closes, then the client sends the rest of its request", [&] {
+                                                  controller->close("Developer window disconnected");
+                                                  std::this_thread::sleep_for(std::chrono::milliseconds{150});
+                                                  channel::send(peer.value, text.substr(20));
+                                                  then("it reads an answer instead of a reset, and the listener is closed", [&] {
+                                                      const auto received = drain(peer.value);
+                                                      require(received.starts_with("HTTP/1.1 "));
+                                                      checkEqual(reply(received).status, 200);
+                                                      channel::Socket late{channel::createSocket()};
+                                                      const auto      address = channel::address(port);
+                                                      require(::connect(late.value, reinterpret_cast<const sockaddr*>(&address), sizeof address) != 0);
+                                                  });
+                                              });
+                                          });
+                                      }};
+
 const Scenario mcpHttpActivation{"An application that enables automation serves its own MCP URL", [] {
                                      using namespace mcphttptests;
                                      webfront::test::TemporaryDirectory root;

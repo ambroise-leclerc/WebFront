@@ -25,8 +25,11 @@ import urllib.parse
 class Client:
     """MCP over the Streamable HTTP listener of an application, from its private mcp.json."""
 
-    def __init__(self, configuration, timeout=30):
-        self.timeout = timeout  # seconds for the session to become ready and for one operation to finish
+    def __init__(self, configuration, timeout=30, startup=90):
+        self.timeout = timeout  # seconds for one operation to finish
+        # Seconds for the session to become ready. Each launch starts its own WebView2 browser process on a new profile
+        # (host_environment): on a loaded Windows runner its first page takes far longer than a warm one (#720).
+        self.startup = max(startup, timeout)
         server = json.loads(pathlib.Path(configuration).read_text())["mcpServers"]["webfront"]
         assert server["type"] == "http", server
         self.url = urllib.parse.urlsplit(server["url"])
@@ -87,7 +90,7 @@ class Client:
         assert "webfront.session" in result["instructions"], result
         self.send("notifications/initialized", notification=True)
         assert len(self.send("tools/list")["tools"]) == tools
-        end = time.monotonic() + self.timeout
+        end = time.monotonic() + self.startup
         while time.monotonic() < end:
             state = self.tool("session")
             if state["state"] == "ready":
@@ -168,6 +171,21 @@ def raw_request(port, text):
     return int(answer.split(b" ", 2)[1])
 
 
+def host_environment(base, profile, temporary):
+    """The environment of one launch: every browser profile private to it.
+
+    WebView2 shares one browser process between the applications that use the same user data folder, and without
+    WEBFRONT_TEST_WEBVIEW2_PROFILE every automation_host takes the same default folder (derived from its executable).
+    A launch then joined the browser process of a host that another scenario, or the previous launch, was closing, and
+    lost its window with that process: the session closed and its MCP listener with it (#720)."""
+    profile = pathlib.Path(profile)
+    environment = dict(base, XDG_DATA_HOME=str(profile / "data"), XDG_CACHE_HOME=str(profile / "cache"),
+                       WEBFRONT_TEST_CEF_PROFILE=str(profile / "cef"), WEBFRONT_TEST_WEBVIEW2_PROFILE=str(profile / "webview2"))
+    # Chromium puts its singleton Unix socket in TMPDIR: a short private directory keeps it below sockaddr_un's limit.
+    environment.update(TMPDIR=str(temporary), TEMP=str(temporary), TMP=str(temporary))
+    return environment
+
+
 class Host:
     """automation_host: an application that enabled automation, launched with its own browser profile."""
 
@@ -182,10 +200,10 @@ class Host:
         self.base = ["--project", str(project), "--environment", environment or args.environment,
                      "--integrity", integrity or json.loads(pathlib.Path(args.provision).read_text())["integrity"],
                      "--registry-dir", args.registry]
-        env = dict(os.environ, XDG_DATA_HOME=str(profile / "data"), XDG_CACHE_HOME=str(profile / "cache"),
-                   WEBFRONT_TEST_CEF_PROFILE=str(profile / "cef"))
-        # Chromium puts its singleton Unix socket in TMPDIR: a short private directory keeps it below sockaddr_un's limit.
-        env.update(TMPDIR=temporary, TEMP=temporary, TMP=temporary)
+        env = host_environment(os.environ, profile, temporary)
+        # Each launch is announced in the log that the hosts of a scenario share, so that a failure names its own lines.
+        log.write(f"--- {name} ---\n")
+        log.flush()
         # Closing its standard input closes the application's window (stop()).
         self.process = subprocess.Popen([args.host, *self.base, "--sessions", str(self.sessions), *extra],
                                         stdin=subprocess.PIPE, stdout=log, stderr=log, text=True, env=env)
@@ -306,7 +324,8 @@ def watchdog(args):
         project = root / "project"
         shutil.copytree(args.fixture, project)
         directory = root / "forced-window"
-        options = ["--directory", str(directory), "--grants", "build", "--timeout", "2", "--startup-timeout", "30"]
+        # The startup deadline leaves a cold browser profile time to load the page (#720); no case here expects it to expire.
+        options = ["--directory", str(directory), "--grants", "build", "--timeout", "2", "--startup-timeout", "90"]
         # An operation that never completes in a renderer that stays responsive: the deadline revokes the session, the
         # page runs the request to close, show() returns and the host reports the deadline with 71, before any grace (#709).
         environment, integrity = operation_archive(args, root, "waiting",
@@ -359,7 +378,7 @@ def watchdog(args):
         with (pathlib.Path(args.work) / "watchdog-failed.log").open("w", encoding="utf-8") as log:
             host = Host(args, project, root, "failed", log, options, str(failed_environment), failed_integrity)
             try:
-                assert host.wait(timeout=45) == 70, host.logs()
+                assert host.wait(timeout=120) == 70, host.logs()
             finally:
                 host.close()
             assert "Automation startup: B" + "é" * 511 + "\n" in host.logs(), host.logs()
@@ -570,7 +589,7 @@ def session(args):
         setup.mkdir()
         with (root / "setup.log").open("w") as log:
             host = Host(args, setup, root, "setup", log,
-                        ["--grants", "init,create,install,restore,embed,packages,state", "--timeout", "60", "--startup-timeout", "60"])
+                        ["--grants", "init,create,install,restore,embed,packages,state", "--timeout", "60", "--startup-timeout", "90"])
             try:
                 client = host.client(timeout=60)
                 client.initialize(tools=14)  # the four tools of the session and the ten reads of the state
@@ -635,6 +654,13 @@ def port_conflict_after_failure(process, timeout=1):
         return False
 
 
+def launch_failure(name, run, port, failure, status, log):
+    """The report of a failed launch of the stable scenario: which launch, on which port, why, how the host ended and
+    the hosts' log."""
+    return (f"{name}: launch {run + 1} of 2 on the fixed MCP port {port} failed: {type(failure).__name__}: {failure}\n"
+            f"host exit status: {status}\n--- stable.log ---\n{log}")
+
+
 def stable(args):
     pathlib.Path(args.work).mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=args.work, prefix="stable-") as temporary:
@@ -683,6 +709,16 @@ def stable(args):
                         client.close()
                         host.stop()
                         assert host.wait() == 0, host.logs()
+                    except Exception as failure:
+                        # Say which launch failed, with the whole log of the hosts (the failing one last), once the host
+                        # has written its last lines: a host whose session closed exits by itself.
+                        try:
+                            status = host.process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            status = "still running, killed"
+                            host.process.kill()
+                            host.process.wait()
+                        raise AssertionError(launch_failure(host.name, run, port, failure, status, host.full_log())) from failure
                     finally:
                         host.close()
                 else:
