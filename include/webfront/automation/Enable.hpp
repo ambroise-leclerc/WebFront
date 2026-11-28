@@ -151,8 +151,9 @@ public:
         // A renderer in a loop never runs that request: after the grace the window is declared unresponsive.
         supervisor = std::jthread([this](std::stop_token stop) {
             while (!stop.stop_requested()) {
-                if (session->expire(Clock::now()) || session->expireStartup(startupDeadline(launched, startup), Clock::now()))
-                    session->close("Native automation deadline exceeded");
+                // Each expiry closes the session with its own reason and names its deadline (`Session::revokedBy()`).
+                if (!session->expire(Clock::now()))
+                    session->expireStartup(startupDeadline(launched, startup), Clock::now());
                 if (session->isClosed()) {
                     // The grace starts when the window is asked to close, so a closeBrowser() that blocks does not extend it.
                     const auto deadline = deadlineAfter(Clock::now(), grace);

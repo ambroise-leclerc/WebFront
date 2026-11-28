@@ -382,6 +382,13 @@ const Scenario automationCancellation{"Automation cancellation and native deadli
                                               require(session.expire(std::chrono::steady_clock::now() + std::chrono::seconds{2}));
                                               require(session.isClosed());
                                               require(Object(session.result(query(session, id))).string("state") == "timeout");
+                                              // What automation_host reads to exit with 71 (#709): the deadline, not a copy of its reason.
+                                              requireEqual(session.revokedBy(), std::string{Session::operationDeadline});
+                                              requireEqual(Object(session.describe()).string("revocation"), std::string{Session::operationDeadline});
+                                              session.close("Native automation deadline exceeded");
+                                              requireEqual(session.revokedBy(), std::string{Session::operationDeadline});
+                                              requireEqual(Object(session.describe()).string("failure"),
+                                                           std::string{"Native operation deadline exceeded; session revoked"});
                                               requireThrows([&] {
                                                   session.complete(id, R"({"exitCode":0,"output":"","report":null})");
                                               });
@@ -402,10 +409,16 @@ const Scenario automationStartup{"Automation startup expiry respects readiness a
                                          session.poll();
                                          require(!session.expireStartup(deadline, deadline));
                                          require(!session.isClosed());
+                                         // Closed for another reason: no deadline revoked it, so the host does not report one.
+                                         session.close("Developer window disconnected");
+                                         require(session.revokedBy().empty());
+                                         require(Object(session.describe()).string("revocation").empty());
                                      });
                                      given("the renderer has not polled at the deadline", [&] {
                                          require(session.expireStartup(deadline, deadline));
                                          require(session.isClosed());
+                                         requireEqual(session.revokedBy(), std::string{Session::startupDeadline});
+                                         requireEqual(Object(session.describe()).string("revocation"), std::string{Session::startupDeadline});
                                          requireThrows([&] {
                                              session.start(command(session, "build"));
                                          });

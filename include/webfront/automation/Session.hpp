@@ -73,7 +73,7 @@ public:
                              : ready ? "ready"
                                      : "starting")
                + ",\"allow\":" + stringArray(options.allow) + ",\"callbacks\":" + stringArray(options.callbacks) + ",\"failure\":" + json::quote(failure)
-               + ",\"audit\":" + auditJson() + "}";
+               + ",\"revocation\":" + json::quote(revocation) + ",\"audit\":" + auditJson() + "}";
     }
 
     std::string start(const Object& request, Clock::time_point now = Clock::now()) {
@@ -240,7 +240,7 @@ public:
         auto& run = find(*active);
         run.state = "timeout";
         active.reset();
-        closeLocked("Native operation deadline exceeded; session revoked");
+        closeLocked("Native operation deadline exceeded; session revoked", operationDeadline);
         return true;
     }
 
@@ -249,7 +249,7 @@ public:
         std::scoped_lock lock{mutex};
         if (closed || ready || now < deadline)
             return false;
-        closeLocked("Native automation startup deadline exceeded");
+        closeLocked("Native automation startup deadline exceeded", startupDeadline);
         return true;
     }
 
@@ -257,6 +257,16 @@ public:
         std::scoped_lock lock{mutex};
         return closed;
     }
+    /// The deadlines that revoke a session, as `revokedBy()` and the `revocation` member of `describe()` name them.
+    static constexpr std::string_view operationDeadline = "operation-deadline", startupDeadline = "startup-deadline";
+
+    /// Which native deadline revoked the session: `operationDeadline`, `startupDeadline`, or empty when none did (the session
+    /// is open, or was closed for another reason). The first closing fixes it, like the failure reason.
+    std::string revokedBy() const {
+        std::scoped_lock lock{mutex};
+        return revocation;
+    }
+
     bool wasReady() const {
         std::scoped_lock lock{mutex};
         return ready;
@@ -264,7 +274,7 @@ public:
 
 private:
     SessionOptions             options;
-    std::string                identity, failure;
+    std::string                identity, failure, revocation;
     mutable std::mutex         mutex;
     std::deque<Run>            runs;
     std::deque<std::string>    auditEntries;
@@ -379,11 +389,12 @@ private:
         return "{\"runId\":" + json::quote(run.id) + ",\"operation\":" + json::quote(run.operation) + ",\"state\":" + json::quote(run.state)
                + ",\"cancelRequested\":" + (run.cancel ? "true" : "false") + ",\"output\":" + json::quote(run.output) + ",\"result\":" + run.result + "}";
     }
-    void closeLocked(std::string reason) {
+    void closeLocked(std::string reason, std::string_view deadline = {}) {
         if (closed)
             return;
-        closed  = true;
-        failure = std::move(reason);
+        closed     = true;
+        failure    = std::move(reason);
+        revocation = deadline;
         if (active) {
             find(*active).state = "disconnected";
             active.reset();
