@@ -481,6 +481,12 @@ public:
         }
     }
 
+    /// Names the milestones of WEBFRONT_STARTUP_TRACE after `label` (a secondary window's page): two windows opening
+    /// together are told apart (#716).
+    void traceAs(std::string label) {
+        trace.label = std::move(label);
+    }
+
     /// Whether the window is shown (the first window's choice, which a secondary window follows).
     [[nodiscard]] bool shown() const noexcept {
         return visibleWindow;
@@ -672,6 +678,7 @@ private:
             if (!created)
                 throw std::runtime_error("WebView2: no environment returned");
             environment = created;
+            trace("environment created");
             createController();
         } catch (...) {
             fail();
@@ -746,11 +753,13 @@ private:
             BOOL success = FALSE;
             check(args->get_IsSuccess(&success), "reading navigation result");
             if (!success) {
+                trace("navigation failed");
                 presentWindow();
                 handleInitialNavigationFailure(args);
                 return;
             }
             initialNavigationPending = false;
+            trace("document loaded");
         } catch (...) {
             fail();
         }
@@ -895,6 +904,7 @@ private:
                 return S_OK;
             }).Get());
         check(started, "starting controller creation");
+        trace("view requested");
     }
 
     void registerLifecycleHandlers() {
@@ -1144,8 +1154,9 @@ inline void openSecondary(std::string_view address, std::string_view port, std::
             if (!primary.environment)
                 throw WindowNotReady("WebView2Frontend: the first window is not ready (its browser is being created); call it later");
             // The first window's delay, which the application configured (WebView2FrontendWithOptions), not this call's default.
-            auto session                = std::make_shared<Session>(primary.startupTimeout());
-            session->secondary          = true;
+            auto session       = std::make_shared<Session>(primary.startupTimeout());
+            session->secondary = true;
+            session->traceAs(std::string(page));
             session->contentPolicy      = webfront::detail::BoundContentPolicy{frontend::detail::applicationUrl(address, port, "", options.launch.origin),
                                                                                options.contentPolicy};
             session->viewLaunch         = options.launch;

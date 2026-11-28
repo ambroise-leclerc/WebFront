@@ -26,6 +26,7 @@
 #include <mutex>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
@@ -36,8 +37,28 @@
 #endif
 
 namespace {
+// Counts the files the server was asked for and serves none of them: a window that did not connect tells whether its page
+// was requested at all (#716).
+class RequestLog {
+    static inline std::mutex                      mutex;
+    static inline std::map<std::string, unsigned> requests;
+
+public:
+    explicit RequestLog(const std::filesystem::path&) { }
+    std::optional<webfront::fs::File> open(const std::filesystem::path& file) {
+        std::lock_guard lock{mutex};
+        ++requests[file.filename().generic_string()];
+        return std::nullopt;
+    }
+    static unsigned count(const std::string& file) {
+        std::lock_guard lock{mutex};
+        const auto      found = requests.find(file);
+        return found == requests.end() ? 0 : found->second;
+    }
+};
+
 using Frontend = WEBFRONT_TEST_FRONTEND;
-using TestFS   = webfront::fs::Multi<webfront::fs::IndexFS, webfront::fs::NativeDebugFS>;
+using TestFS   = webfront::fs::Multi<RequestLog, webfront::fs::IndexFS, webfront::fs::NativeDebugFS>;
 using App      = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, webfront::testdriver::TestFrontend<Frontend>>;
 static_assert(Frontend::action == webfront::frontend::Action::closeServerAfterOpen);
 
@@ -757,6 +778,14 @@ public:
         std::lock_guard lock{mutex};
         return connections;
     }
+    /// The names of the windows whose page announced itself.
+    std::string readyNames() {
+        std::lock_guard lock{mutex};
+        std::string     names;
+        for (const auto& [name, ui] : windows)
+            names += (names.empty() ? "" : ", ") + name;
+        return names.empty() ? "none" : names;
+    }
     App::UI window(const std::string& name) {
         std::lock_guard lock{mutex};
         return windows.at(name);
@@ -808,7 +837,17 @@ public:
     }
 };
 
+// The milestones of each window's start (WEBFRONT_STARTUP_TRACE), on standard error: CTest keeps them with a failure.
+void traceStartup() {
+#if defined(_WIN32)
+    _putenv_s("WEBFRONT_STARTUP_TRACE", "1");  // also sets the process environment block, which WebView2's trace reads
+#else
+    setenv("WEBFRONT_STARTUP_TRACE", "1", 1);
+#endif
+}
+
 int checkSecondWindow() {
+    traceStartup();
     App app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
     lifecycleStage         = LifecycleStage::startingInstrumented;
     bool refusedBeforeShow = false;
@@ -823,8 +862,9 @@ int checkSecondWindow() {
         throw std::runtime_error("A close request of a window was accepted before show()");
     SecondWindows windows;
     windows.setup(app);
-    std::string failure;
-    std::thread host([&] {
+    std::string       failure;
+    std::atomic<bool> earlyOpened = false;
+    std::thread       host([&] {
         try {
             const auto check = [&](bool condition, const char* message) {
                 if (!condition)
@@ -837,6 +877,7 @@ int checkSecondWindow() {
                 for (int attempt = 0; attempt < 2000 && !executor.available(); ++attempt)
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));
                 app.openSecondaryWindow(earlyPage);
+                earlyOpened = true;
             }
             check(windows.ready("main"), "The first window did not connect");
             if constexpr (!App::supportsSecondaryWindow) {
@@ -848,7 +889,13 @@ int checkSecondWindow() {
                 }
                 check(refused, "A frontend without a second window did not refuse the call");
             } else {
-                check(windows.ready("early"), "The window opened as the first one started did not connect");
+                // What a failure tells apart (#716): a window never opened, a page never requested from the server, a page
+                // whose WebSocket never connected, a connection whose page never announced itself.
+                if (!windows.ready("early"))
+                    throw std::runtime_error(
+                        "The window opened as the first one started did not connect (window opened: " + std::string(earlyOpened ? "yes" : "no")
+                        + "; requests of second-window.html: " + std::to_string(RequestLog::count("second-window.html")) + " of 2; WebSocket connections: "
+                        + std::to_string(windows.connectionCount()) + " of 2; pages announced: " + windows.readyNames() + ")");
                 check(app.requestClose(earlyPage), "The close request of the early window was refused");
                 for (int attempt = 0; attempt < 200 && app.requestClose(earlyPage); ++attempt)
                     std::this_thread::sleep_for(std::chrono::milliseconds(25));

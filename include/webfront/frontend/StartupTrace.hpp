@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <string>
 #include <string_view>
 
 #if defined(_WIN32)
@@ -85,7 +86,9 @@ namespace webfront::frontend::detail {
 }
 
 /// WEBFRONT_STARTUP_TRACE=1 reports the milestones of a view's start on standard error: one object per session, whose
-/// creation is the origin of the session's own clock.
+/// creation is the origin of the session's own clock. A labelled trace (a secondary window, named by its page) writes its
+/// label in parentheses after "WebFront startup", so that the milestones of two windows opening together stay apart and
+/// the unlabelled lines remain those of the application's own window.
 class StartupTrace {
     std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
 
@@ -103,10 +106,15 @@ class StartupTrace {
     }
 
 public:
+    std::string label;  // empty: the application's own window
+
     void operator()(const char* milestone) const noexcept {
         if (enabled())
             std::fprintf(stderr,
-                         "WebFront startup: %s at %lld ms (session %lld ms)\n",
+                         "WebFront startup%s%s%s: %s at %lld ms (session %lld ms)\n",
+                         label.empty() ? "" : " (",
+                         label.c_str(),
+                         label.empty() ? "" : ")",
                          milestone,
                          millisecondsSinceProcessStart(),
                          static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - created).count()));
