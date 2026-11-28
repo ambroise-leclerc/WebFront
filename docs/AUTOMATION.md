@@ -140,7 +140,8 @@ operation of `webfront.start`, not one MCP tool per callback, so the tool list s
   body, the listener compares equal-length tokens in constant time and rejects a length mismatch immediately; a failed check gets
   401 with `WWW-Authenticate: Bearer` (no OAuth server is announced). The token lives as
   long as the session by default: closing it, a deadline or a lost window closes the listener and removes the file; a client
-  already connected then still reads its answer, which says the session is closed, within a second. A supplied
+  already connected has up to a second to complete its request, within the admission bounds, and is then answered as the
+  closed session answers rather than reset. A supplied
   `mcpToken` remains valid across launches until the application changes it; authentication can be explicitly disabled.
 - **Client configuration.** `mcp.json` (mode 0600 in a 0700 directory on POSIX, owner-only ACL on Windows) holds the URL and
   the header, ready for a client that takes a configuration file (`claude --mcp-config PATH/mcp.json`). The token appears in

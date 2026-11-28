@@ -50,10 +50,12 @@ namespace webfront::testdriver {
 struct DriverWebView2Options {
     static frontend::WebView2Options get() {
 #ifdef _MSC_VER
-        char*                                             raw    = nullptr;
-        std::size_t                                       length = 0;
-        const auto                                        status = _dupenv_s(&raw, &length, "WEBFRONT_TEST_WEBVIEW2_PROFILE");
-        const std::unique_ptr<char, decltype(&std::free)> profile(raw, std::free);
+        // Read in UTF-16: a profile under a temporary directory may hold characters that the ANSI code page cannot
+        // represent, which the narrow environment would turn into '?' (#720).
+        wchar_t*                                             raw    = nullptr;
+        std::size_t                                          length = 0;
+        const auto                                           status = _wdupenv_s(&raw, &length, L"WEBFRONT_TEST_WEBVIEW2_PROFILE");
+        const std::unique_ptr<wchar_t, decltype(&std::free)> profile(raw, std::free);
         if (status != 0)
             throw std::runtime_error("Cannot read the WebView2 test profile");
         return get(profile.get());
@@ -62,6 +64,15 @@ struct DriverWebView2Options {
 #endif
     }
     static frontend::WebView2Options get(const char* profile) {
+        return withProfile(profile);
+    }
+    static frontend::WebView2Options get(const wchar_t* profile) {
+        return withProfile(profile);
+    }
+
+private:
+    template <typename Character>
+    static frontend::WebView2Options withProfile(const Character* profile) {
         frontend::WebView2Options options;
         options.visible = visibleWindows;
         if (profile && *profile)

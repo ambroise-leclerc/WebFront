@@ -120,8 +120,24 @@ const Scenario driverWebView2{
         const auto second = testdriver::DriverWebView2Options::get("second-session");
         require(first.userDataFolder == std::filesystem::path("first-session"));
         require(second.userDataFolder != first.userDataFolder);
-        require(testdriver::DriverWebView2Options::get(nullptr).userDataFolder.empty());
+        require(testdriver::DriverWebView2Options::get(static_cast<const char*>(nullptr)).userDataFolder.empty());
         require(testdriver::DriverWebView2Options::get("").userDataFolder.empty());
+        // #720: the automation client's profiles live under a directory whose name holds characters outside the ANSI
+        // code page on Windows; the profile read from the environment keeps them.
+        const std::filesystem::path unicode{u8"wf-profile- &%!^ \u96ea /webview2"};
+#ifdef _WIN32
+        require(_wputenv_s(L"WEBFRONT_TEST_WEBVIEW2_PROFILE", unicode.c_str()) == 0);
+#else
+        require(::setenv("WEBFRONT_TEST_WEBVIEW2_PROFILE", unicode.c_str(), 1) == 0);
+#endif
+        const auto read = testdriver::DriverWebView2Options::get().userDataFolder;
+#ifdef _WIN32
+        (void)_wputenv_s(L"WEBFRONT_TEST_WEBVIEW2_PROFILE", L"");
+#else
+        (void)::unsetenv("WEBFRONT_TEST_WEBVIEW2_PROFILE");
+#endif
+        require(read == unicode);
+        require(testdriver::DriverWebView2Options::get(L"profile").userDataFolder == std::filesystem::path(L"profile"));
     }};
 
 const Scenario singleCommand{"A single-command watchdog has a separate budget after bootstrap", [] {

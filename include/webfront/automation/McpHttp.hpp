@@ -16,7 +16,8 @@
 // with the URL in `mcp.json`, a private client configuration in the instance's private directory, never in the project.
 // Admission bounds the peers that have not authenticated: a bounded queue of unauthenticated peers with a two-second deadline,
 // and separate workers for the authenticated requests. When the listener closes (the session closed, or `stop()`), the
-// clients it had accepted, or that wait in its backlog, still get their answer for up to a second instead of a reset.
+// clients it had accepted, or that wait in its backlog, have up to a second to complete their requests, which are then
+// answered instead of reset.
 
 #pragma once
 #if defined(WEBFRONT_DISTRIBUTION) && WEBFRONT_DISTRIBUTION
@@ -456,8 +457,8 @@ public:
     const std::filesystem::path& configuration() const {
         return file;
     }
-    /// Closes the listener, removes `mcp.json`, answers the clients already connected (for up to a second) and waits for
-    /// the requests in progress. Idempotent.
+    /// Closes the listener, removes `mcp.json`, serves the requests that the clients already connected complete within a
+    /// second, and waits for the requests in progress. Idempotent.
     void stop() {
         worker.request_stop();
         if (worker.joinable())
@@ -481,6 +482,8 @@ private:
     static constexpr std::size_t maxConnections = 32, maxPending = 64;
     // How long a closing listener still serves the requests of the clients it had accepted.
     static constexpr std::chrono::milliseconds closingGrace{1000};
+    // Enough reads of 4 KiB for the largest acceptable request: its headers and a body of `messageLimit` bytes.
+    static constexpr std::size_t wholeRequestReads = (headerLimit + messageLimit) / 4096 + 2;
     struct Connection {
         std::atomic<bool> finished{false};
         std::jthread      thread;
@@ -632,25 +635,12 @@ private:
 #endif
         std::size_t index = accepting ? 1 : 0;
         for (auto peer = pending.begin(); peer != pending.end(); ++index) {
-            bool keep = true;
             // Read before the deadline applies: a request that arrived while this thread was not scheduled is served.
-            if (items[index].revents) {
-                char       bytes[4096];
-                const auto count = channel::SocketRead{}(peer->socket.value, bytes, sizeof bytes);
-                if (count > 0 && !peer->refused) {
-                    if (feed(*peer, std::string_view(bytes, static_cast<std::size_t>(count)))) {
-                        if (connections.size() >= maxConnections)
-                            refuse(*peer, refusal(503, "The MCP listener is busy"));
-                        else {
-                            dispatch(connections, *peer);
-                            keep = false;
-                        }
-                    }
-                } else if (count == 0 || (count < 0 && !channel::retryableSocketError(channel::socketError())))
-                    keep = false;
-            }
+            bool keep = !items[index].revents || receive(connections, *peer, 1);
+            // At its deadline, a peer is served if the rest of its request is already there; otherwise it is closed.
             if (keep && std::chrono::steady_clock::now() >= std::min(peer->deadline, limit)) {
-                discard(*peer);
+                if (receive(connections, *peer, wholeRequestReads))
+                    discard(*peer);
                 keep = false;
             }
             if (keep)
@@ -668,6 +658,27 @@ private:
                     pending.pop_front();
                 pending.emplace_back(handle);
             }
+    }
+    // Feeds a peer up to `reads` reads of what it already sent, without waiting. Returns whether it stays pending: false
+    // once its request is dispatched, or when its client closed or failed.
+    bool receive(std::list<Connection>& connections, Pending& peer, std::size_t reads) {
+        char bytes[4096];
+        for (std::size_t read = 0; read < reads; ++read) {
+            const auto count = channel::SocketRead{}(peer.socket.value, bytes, sizeof bytes);
+            if (count == 0 || (count < 0 && !channel::retryableSocketError(channel::socketError())))
+                return false;
+            if (count < 0)
+                return true;
+            if (!peer.refused && feed(peer, std::string_view(bytes, static_cast<std::size_t>(count)))) {
+                if (connections.size() >= maxConnections)
+                    refuse(peer, refusal(503, "The MCP listener is busy"));
+                else {
+                    dispatch(connections, peer);
+                    return false;
+                }
+            }
+        }
+        return true;
     }
     // Reads, without waiting, what a peer about to be closed has already sent.
     static void discard(Pending& peer) noexcept {
