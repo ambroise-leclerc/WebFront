@@ -3,7 +3,7 @@
 // Created: 2026-10-24
 //
 // WebFront — tests/unit
-// Role: The options and usage errors of the non-interactive wf driver.
+// Role: The options, usage errors and time-limit diagnostics of the non-interactive wf driver.
 // Thread: worker-safe | Alloc: heap-init
 // LLM: pins test/driver/WfDriver.hpp parsing
 
@@ -177,3 +177,44 @@ const Scenario driverWatchdog{"The driver watchdog keeps a native command limit 
                                   cancelled.request_stop();
                                   require(!deadline.expired(cancelled.get_token()));
                               }};
+
+const Scenario driverStage{"The driver's time limit names the stage that wf test reached", [] {
+                               using webfront::testdriver::Outcome;
+                               const auto failureOf = [](const Outcome& outcome) {
+                                   std::string text;
+                                   outcome.inspect([&](bool, int, bool, const std::string&, const std::string& failure) {
+                                       text = failure;
+                                   });
+                                   return text;
+                               };
+                               given("a command that reported no stage", [&] {
+                                   Outcome outcome;
+                                   outcome.timedOut();
+                                   requireEqual(failureOf(outcome), std::string{"The time limit of the driver elapsed"});
+                               });
+                               given("a wf test run in a spec when the limit elapses", [&] {
+                                   Outcome outcome;
+                                   outcome.stage("stage: between specs, 2 specs done, in suite arithmetic");
+                                   outcome.stage("stage: specs running, 2 specs done, in arithmetic hangs");
+                                   outcome.timedOut();
+                                   then("the failure names the last stage", [&] {
+                                       requireEqual(failureOf(outcome),
+                                                    std::string{"The time limit of the driver elapsed (wf test stage: specs running, 2 specs "
+                                                                "done, in arithmetic hangs)"});
+                                   });
+                                   then("a stage arriving after the outcome changes nothing", [&] {
+                                       outcome.stage("stage: between specs, 3 specs done");
+                                       outcome.timedOut();
+                                       requireEqual(failureOf(outcome),
+                                                    std::string{"The time limit of the driver elapsed (wf test stage: specs running, 2 specs "
+                                                                "done, in arithmetic hangs)"});
+                                   });
+                               });
+                               given("a command that reported its result first", [&] {
+                                   Outcome outcome;
+                                   outcome.stage("stage: specs running, 0 specs done, in arithmetic adds");
+                                   outcome.result(0, "{}");
+                                   outcome.timedOut();
+                                   requireEqual(failureOf(outcome), std::string{});
+                               });
+                           }};

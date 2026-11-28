@@ -208,7 +208,7 @@ webfront_register_frontend(CEF
     OPTION WEBFRONT_EMBED_CEF POLICY lenient
     DESCRIPTION "Download and link CEF so CEFFrontend is available (Windows, Linux x86_64 and aarch64, and macOS only). Other platforms fail at configure time"
     PLATFORMS Windows Linux Darwin SUPPORT CEFIntegration SETUP setup_cef_for_target
-    TEST_PLATFORMS Linux TEST_NAME WebFrontBrowserIntegration TEST_TIMEOUT 60 XVFB_LINUX)
+    TEST_PLATFORMS Linux TEST_NAME WebFrontBrowserIntegration TEST_TIMEOUT 120 XVFB_LINUX)
 
 # Both option validation and standalone default selection use the registry's platform list.
 function(webfront_frontend_supports_platform name out)

@@ -449,6 +449,10 @@ if(_browser_tests_available)
         webfront_add_driver_test(WfDriverInstall 0 "install|jasmine-core" OUTPUT "Installed 1 packages" PROVIDES WfDriverInstalled)
         # A failing command: its status, its output and the structured report reach CTest.
         webfront_add_driver_test(WfDriverTestFails 1 "test|fails" OUTPUT "FAILED: 1 spec, 1 failure" REPORT "\"failed\":1" REQUIRES WfDriverInstalled)
+        # A run that the driver's limit ends, before wf test reports its own stage, still names the spec in progress (#730).
+        webfront_add_driver_test(WfDriverTestStage 71 "test|hangs"
+            OUTPUT "time limit of the driver elapsed \\(wf test stage: specs running, 0 specs done, in arithmetic hangs on purpose\\)"
+            COMMAND_TIMEOUT 30 REQUIRES WfDriverInstalled)
         # The entry module is the one environment.json declares, not a fixed name.
         webfront_add_driver_test(WfDriverRenamedEntry 0 "list" RENAME_ENTRY runner.mjs)
         # The pinned bootstrap environment, downloaded and verified at configure time, runs a command by itself.

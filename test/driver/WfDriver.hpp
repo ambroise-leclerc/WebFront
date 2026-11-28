@@ -12,7 +12,8 @@
 // browser integration test (JasmineTest.cpp) adds the callbacks its specs call and checks what C++ observed.
 //
 // Exit status: the command's own status; 64 usage; 70 bootstrap failure (archive missing, wrong integrity, incompatible
-// protocol or API); 71 time limit of the driver; 72 the browser closed without a result.
+// protocol or API); 71 time limit of the driver, with the stage `wf test` reached when it ran; 72 the browser closed without
+// a result.
 
 #pragma once
 
@@ -264,10 +265,19 @@ public:
             failure = std::move(message);
         });
     }
+    // The stage that `wf test` reached, which the driver's page reads from the runner frame: named if the driver's limit
+    // elapses during the run, which ends it before `wf test` can report its own stage (#730).
+    void stage(std::string text) {
+        std::scoped_lock lock{mutex};
+        if (!done)
+            testStage = std::move(text);
+    }
     void timedOut() {
         finish([&] {
             status  = timeoutStatus;
             failure = "The time limit of the driver elapsed";
+            if (!testStage.empty())
+                failure += " (wf test " + testStage + ")";
         });
     }
     bool finished() const {
@@ -306,6 +316,7 @@ private:
     int                     status    = noResultStatus;
     std::string             resultJson;
     std::string             failure;
+    std::string             testStage;
 };
 
 // Waits for the environment, runs the command and reports to C++; C++ closes the window when the page says it is done.
@@ -313,11 +324,28 @@ inline constexpr auto driverScript = R"JS(
 (async () => {
     const report = (name, ...args) => webFront.cppFunction(name)(...args);
     const stop = () => report('wf.finished').catch(() => window.close());
+    // The stages that the wf test runner posts to this page, kept by C++ for a run that the driver's limit ends (#730):
+    // the last stage, the specs finished, and the spec in progress or the suite whose hook runs between specs.
+    const watchStages = frame => {
+        let specs = 0;
+        addEventListener('message', ({source, origin, data}) => {
+            const message = data?.webfrontTest;
+            if (source !== frame.contentWindow || origin !== location.origin || !message) return;
+            if (message.type === 'spec' && message.status !== 'excluded') ++specs;
+            if (message.type !== 'stage' || typeof message.stage !== 'string') return;
+            const clip = value => typeof value === 'string' ? value.slice(0, 256) : '';
+            let text = `stage: ${clip(message.stage)}, ${specs} spec${specs === 1 ? '' : 's'} done`;
+            if (message.stage === 'specs running' && clip(message.spec)) text += `, in ${clip(message.spec)}`;
+            else if (message.stage === 'between specs' && clip(message.suite)) text += `, in suite ${clip(message.suite)}`;
+            report('wf.stage', text).catch(() => {});
+        });
+    };
     // Tests that own a DOM must stay in the viewport, including the nested wf test runner.
     const createFrame = () => {
         const frame = document.createElement('iframe');
         frame.title = 'WebFront tests';
         frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483647;background:white';
+        watchStages(frame);
         return frame;
     };
     try {
@@ -468,6 +496,9 @@ int run(const Options& options, Setup&& setup = {}) {
     });
     app.cppFunction("wf.progress", [](std::string message) {
         std::cout << "wf spec: " << message << std::endl;
+    });
+    app.cppFunction("wf.stage", [&outcome](std::string text) {
+        outcome.stage(std::move(text));
     });
     app.cppFunction("wf.finished", [&deadlines] {
         deadlines.finish();
