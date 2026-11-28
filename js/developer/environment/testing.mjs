@@ -66,16 +66,26 @@ try {
     boot();
     const env = jasmine.getEnv();
     env.configure({random: false, specFilter: spec => spec.getFullName().includes(pattern)});
+    // The suites entered, innermost last: outside a spec, the run is in the hooks of the innermost one (beforeAll, afterAll).
+    const open = [];
+    const between = () => post({type: 'stage', stage: 'between specs', suite: open.at(-1) ?? ''});
     env.addReporter({
+        suiteStarted(result) {
+            open.push(clip(result.fullName, 256));
+            between();
+        },
         specStarted(result) {
-            post({type: 'stage', stage: 'specs running', spec: clip(result.fullName, 256)});
+            post({type: 'stage', stage: 'specs running', spec: clip(result.fullName, 256), suite: open.at(-1) ?? ''});
         },
         specDone(result) {
             specs.push({name: clip(result.fullName, 1024), status: result.status, reason: clip(result.pendingReason, 1024),
                 failures: problems(result.failedExpectations)});
             post({type: 'spec', status: result.status});
+            between();
         },
         suiteDone(result) {
+            open.pop();
+            between();
             // An afterAll that throws is reported here, not by any spec.
             if (result.failedExpectations?.length) suites.push({name: clip(result.fullName, 1024), failures: problems(result.failedExpectations)});
         },
@@ -181,11 +191,12 @@ export const runnerResources = ['index.html', 'specs.css', 'WebFront.js', 'jasmi
  * How far the runner frame got, for a run stopped before its report (#690): `reached` is the last stage the runner
  * posted ('page requested' when it posted none: it did not start; 'between specs' after a spec finished, in a suite's
  * hook or before the next spec), `specs` the specs it finished, `current` the spec in progress (the one that hangs when
- * the stage is 'specs running'), `loaded` the runner's
+ * the stage is 'specs running'), `suite` the innermost suite entered (whose beforeAll or afterAll hangs when the stage is
+ * 'between specs'), `loaded` the runner's
  * files whose response the frame received completely, and `missing` those it did not (never requested, or a response
  * still incomplete). A frame that cannot be read leaves both lists empty.
  */
-export function frameStage(frameWindow, {reached = 'page requested', specs = 0, current = '', resources = runnerResources} = {}) {
+export function frameStage(frameWindow, {reached = 'page requested', specs = 0, current = '', suite = '', resources = runnerResources} = {}) {
     let loaded = [];
     let missing = [];
     try {
@@ -202,14 +213,15 @@ export function frameStage(frameWindow, {reached = 'page requested', specs = 0, 
         loaded = expected.filter(file => names.has(file));
         missing = expected.filter(file => !names.has(file));
     } catch { /* a frame that navigated away or was never attached: only the stage is known */ }
-    return {reached, specs, current, loaded, missing};
+    return {reached, specs, current, suite, loaded, missing};
 }
 
 /** The stage of a stopped run in words: "stage: specs running, 3 specs done, in suite spec" or "stage: page requested; not loaded: runner.js, specs.js". */
-export function describeStage({reached, specs, current, missing}) {
+export function describeStage({reached, specs, current, suite, missing}) {
     const parts = [`stage: ${reached}`];
     if (specs) parts[0] += `, ${plural(specs, 'spec')} done`;
     if (current && reached === 'specs running') parts[0] += `, in ${current}`;
+    else if (suite && reached === 'between specs') parts[0] += `, in suite ${suite}`;
     if (missing.length) parts.push(`not loaded: ${missing.join(', ')}`);
     return parts.join('; ');
 }
@@ -235,8 +247,9 @@ export function runInFrame({pattern, timeout, runId, signal, write = () => {}, c
         let reached;
         let specs = 0;
         let current = '';
+        let suite = '';
         // Known once the frame is in the page; a run stopped before that has no stage to give.
-        const stage = () => frame.isConnected ? frameStage(frame.contentWindow, {reached, specs, current}) : undefined;
+        const stage = () => frame.isConnected ? frameStage(frame.contentWindow, {reached, specs, current, suite}) : undefined;
         const finish = (error, report) => {
             clearTimeout(timer);
             removeEventListener('message', receive);
@@ -248,13 +261,12 @@ export function runInFrame({pattern, timeout, runId, signal, write = () => {}, c
             if (source !== frame.contentWindow || origin !== location.origin) return;
             const message = data?.webfrontTest;
             if (message?.type === 'stage' && typeof message.stage === 'string') {
+                // A stage replaces the spec and the suite of the previous one: between specs, no spec is running.
                 reached = message.stage.slice(0, 64);
-                if (typeof message.spec === 'string') current = message.spec.slice(0, 256);
+                current = typeof message.spec === 'string' ? message.spec.slice(0, 256) : '';
+                suite = typeof message.suite === 'string' ? message.suite.slice(0, 256) : '';
             } else if (message?.type === 'spec') {
-                // Until the next spec starts, the run is in a suite's hook or between two specs: no spec is running.
                 specs += 1;
-                reached = 'between specs';
-                current = '';
                 write(progress[message.status] ?? '');
             }
             else if (message?.type === 'done' || message?.type === 'error') finish(null, buildReport(message, {pattern}));

@@ -793,10 +793,10 @@ The result sent to C++ is cut to 60,000 bytes when it is larger (a bridge string
 The report is structured: `{status, exitCode, total, passed, failed, pending, excluded, durationMs, jasmine, failures:
 [{name, messages: [{message, stack}]}], pendingSpecs, suites, global, incomplete}`, bounded (100 failures, 8 messages of 16 KiB
 each per spec). `status` is `passed`, `failed`, `incomplete`, `error` (the specs did not load), `timeout` or `interrupted`.
-A run stopped at the time limit or by Ctrl+C once its frame was in the page also has `stage: {reached, specs, current,
+A run stopped at the time limit or by Ctrl+C once its frame was in the page also has `stage: {reached, specs, current, suite,
 loaded, missing}`, which its message repeats: the last step the runner reached (`page requested` when it never started,
 `runner started`, `bridge settled`, `specs loaded`, `specs running`, `between specs` in a suite's hook or after a spec),
-the specs it finished, the spec in progress, and
+the specs it finished, the spec in progress or the innermost suite whose hooks run, and
 the runner's files (`index.html`, `specs.css`, `WebFront.js`, `jasmine.js`, `runner.js`, `specs.js`) whose response the
 frame received in full or not: a file that is missing was never requested or never completely received.
 
