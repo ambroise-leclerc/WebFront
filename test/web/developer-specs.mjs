@@ -1050,6 +1050,7 @@ try {
                     assert(lines.every(line => line.textContent.length === 32) && lines[0].textContent.startsWith('.#.')
                         && !gridBlock().querySelector('.label, .kind'), `The block must show the rows alone: ${lines[0]?.textContent}`);
                     const gridBox = gridBlock().getBoundingClientRect();
+                    await progress(`Life grid block: ${gridBox.width} x ${gridBox.height} px in a frame of ${frame.contentWindow.innerWidth} x ${frame.contentWindow.innerHeight}`);
                     assert(Math.abs(gridBox.width / gridBox.height - 1) < 0.08,
                         `A grid of 32 by 32 characters must be square: ${gridBox.width} x ${gridBox.height}`);
                     assert(gridBox.left >= 0 && gridBox.right <= frame.contentWindow.innerWidth && gridBox.height <= frame.contentWindow.innerHeight,
