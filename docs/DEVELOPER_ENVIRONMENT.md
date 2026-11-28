@@ -539,7 +539,10 @@ environment's `mount`, not to the embedded bootstrap page):
   The inspectors' own calls are not shown. Attached, the panel reads the page directly; detached, its window does not
   see the page, so the page publishes the same state to C++ every 250 ms while the panel reads, and stops within
   fifteen seconds of its last read (`webfront.inspector.bridgeSource`, `publishBridge` and `bridge`, admitted pages
-  only).
+  only). The panel detaches like the others, to a native secondary window with WebKitGTK, WKWebView and WebView2. C++
+  knows 256 connected pages at most, and keeps the published state of 16 of them: beyond 256 connected pages, a page's
+  announcement is refused with `webfront.inspector.unavailable`, and its detached panel says that the page is not
+  connected.
 
 The tab is a button (`aria-expanded`, `aria-haspopup="menu"`, 44 px target), its menu a `menu` of `menuitem`s of 44 px,
 and the window a non-modal dialog. The interface stays in the preview
