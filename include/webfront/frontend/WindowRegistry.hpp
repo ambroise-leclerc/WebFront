@@ -15,6 +15,7 @@
 #include "NativeWindow.hpp"
 #include "UIExecutor.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <exception>
 #include <functional>
@@ -34,6 +35,9 @@ namespace webfront::frontend::detail {
  *
  * `Session` is a frontend's window with a `bool closed`, a `std::exception_ptr failure` (why it closed, if it did not
  * end normally) and a `std::function<void()> closedHook` that it calls once, from its own callback, when its window closes.
+ * A window that closes in two steps (WebView2 ends its page first, #708) also has a `std::function<void()> closingHook`,
+ * which it calls once when the first step starts: the window leaves the table at once, so that its page can be opened
+ * again, and stays alive until its closedHook.
  *
  * `Hooks` holds what depends on the toolkit (it is a member, `hooks`, so it can keep state):
  * - `static constexpr std::string_view name`: the frontend's name, the prefix of its messages;
@@ -45,24 +49,50 @@ namespace webfront::frontend::detail {
  */
 template <typename Session, typename Hooks>
 class WindowRegistry {
+    // Its hooks no longer reach the registry: the session is destroyed with it.
+    static void forget(Session& session) {
+        session.closedHook = nullptr;
+        if constexpr (requires { session.closingHook; })
+            session.closingHook = nullptr;
+    }
+
 public:
     /// The first window, `nullptr` when none runs.
     Session*                                        primary = nullptr;
     std::map<std::string, std::shared_ptr<Session>> secondary;
     std::vector<std::shared_ptr<Session>>           finished;          // closed, destroyed by reap()
+    std::vector<std::shared_ptr<Session>>           closing;           // out of the table, closing: kept until their closedHook
     Hooks                                           hooks;
     bool                                            clearing = false;  // clear() is destroying the windows
 
-    /// A session closed (its closedHook): takes it out of the table, reports why it failed, and reaps it later.
-    void retire(const std::string& page) {
-        const auto found = secondary.find(page);
-        if (found == secondary.end())
+    /// The session `which` started to close in two steps (its closingHook): it leaves the table, so that a new open() of
+    /// its page creates another window, and is kept until it closes.
+    void detach(const Session* which) {
+        for (auto entry = secondary.begin(); entry != secondary.end(); ++entry)
+            if (entry->second.get() == which) {
+                closing.push_back(std::move(entry->second));
+                secondary.erase(entry);
+                return;
+            }
+    }
+
+    /// The session `which`, showing `page`, closed (its closedHook): takes it out of the table, or out of the closing
+    /// windows, reports why it failed, and reaps it later. Found by identity: a window opened since for the same page stays.
+    void retire(const std::string& page, const Session* which) {
+        std::shared_ptr<Session> session;
+        if (const auto found = secondary.find(page); found != secondary.end() && found->second.get() == which) {
+            session = std::move(found->second);
+            secondary.erase(found);
+        } else if (const auto found = std::ranges::find(closing, which, &std::shared_ptr<Session>::get); found != closing.end()) {
+            session = std::move(*found);
+            closing.erase(found);
+        } else
             return;
         // open() returned long ago, so nothing else can report a page that failed (navigation, runtime, process lost):
         // the failure is written, then the window is reaped.
-        if (found->second->failure) {
+        if (session->failure) {
             try {
-                std::rethrow_exception(found->second->failure);
+                std::rethrow_exception(session->failure);
             } catch (const std::exception& error) {
                 std::fprintf(stderr,
                              "%.*s: the secondary window of '%s' closed: %s\n",
@@ -72,8 +102,7 @@ public:
                              error.what());
             } catch (...) { }
         }
-        finished.push_back(std::move(found->second));
-        secondary.erase(found);
+        finished.push_back(std::move(session));
         hooks.scheduleReap(*this);
     }
 
@@ -91,10 +120,15 @@ public:
         hooks.cancelReap();
         auto windows = std::move(secondary);
         secondary.clear();
+        auto ending = std::move(closing);
+        closing.clear();
         for (auto& entry : windows)
-            entry.second->closedHook = nullptr;
+            forget(*entry.second);
+        for (auto& session : ending)
+            forget(*session);
         finished.clear();
         windows.clear();
+        ending.clear();
         primary  = nullptr;
         clearing = false;
     }
@@ -126,9 +160,13 @@ public:
         if (!primary || primary->closed)
             throw std::logic_error(std::string(Hooks::name) + ": no window of the application is open; show() it before opening another");
         std::shared_ptr<Session> session = create(*primary);
-        session->closedHook              = [this, page] {
-            retire(page);
+        session->closedHook              = [this, page, which = session.get()] {
+            retire(page, which);
         };
+        if constexpr (requires { session->closingHook; })
+            session->closingHook = [this, which = session.get()] {
+                detach(which);
+            };
         start(*session, *primary);
         // One that closed during start() retired itself from a table that did not hold it yet, without a word: the caller
         // is still waiting, so the failure is thrown to it.
@@ -141,7 +179,8 @@ public:
         return true;
     }
 
-    /// On the interface thread: asks the secondary window showing `page` to close, as its user would. False when there is none.
+    /// On the interface thread: asks the secondary window showing `page` to close, as its user would. False when there is
+    /// none (a window that closes in two steps is no longer there once the first step started).
     bool close(const std::string& page) {
         const auto found = secondary.find(page);
         if (found == secondary.end() || found->second->closed)

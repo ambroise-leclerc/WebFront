@@ -301,8 +301,11 @@ public:
     UINT_PTR            startupTimer = 0;
     // A window opened beside the application's own (#616): it shares the environment (profile, browser process) of the first,
     // runs no loop of its own and reports its closing to closedHook, once, instead of ending the session.
-    bool                          secondary = false;
-    std::function<void()>         closedHook;
+    bool                  secondary = false;
+    std::function<void()> closedHook;
+    // Called once when a secondary window starts to end its page (#708): the registry takes it out of its table, so that
+    // its page can be opened again while it closes.
+    std::function<void()>         closingHook;
     std::shared_ptr<CaptureQueue> captureQueue = std::make_shared<CaptureQueue>();
     CaptureRegistration           captureRegistration;
 
@@ -547,6 +550,12 @@ private:
                 throw std::runtime_error("WebView2: cannot start the unload delay");
             check(view->Navigate(L"about:blank"), "unloading the page of a closing window");
             trace("unloading");
+            if (closingHook) {
+                auto hook = std::exchange(closingHook, {});
+                try {
+                    hook();
+                } catch (...) { }
+            }
             return true;
         } catch (...) {
             stopUnloadTimer();
