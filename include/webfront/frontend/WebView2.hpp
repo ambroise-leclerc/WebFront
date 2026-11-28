@@ -563,9 +563,10 @@ private:
         }
     }
     void finishUnload() noexcept {
-        stopUnloadTimer();
-        if (window)
-            PostMessageW(window, WM_CLOSE, unloadedClose, 0);
+        // The delay repeats until the close is posted: a full message queue refuses the post, and the next expiry tries
+        // again instead of leaving the hidden window and its controller until the first window ends.
+        if (window && PostMessageW(window, WM_CLOSE, unloadedClose, 0))
+            stopUnloadTimer();
     }
     void stopUnloadTimer() noexcept {
         if (unloadTimer && window)
