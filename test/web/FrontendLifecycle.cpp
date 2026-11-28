@@ -459,8 +459,9 @@ int expectNavigationFailure() {
 }
 
 // Report the engine's actual cancellation to the surviving document. Chromium does not
-// consistently expose embedder cancellation through the JavaScript Navigation API.
-constexpr auto cancellationScript = "globalThis.dispatchEvent(new Event('webfront-policy-cancelled'))";
+// consistently expose embedder cancellation through the JavaScript Navigation API. The frontends that do not name the
+// cancelled URL use it; a build with CEF alone does not.
+[[maybe_unused]] constexpr auto cancellationScript = "globalThis.dispatchEvent(new Event('webfront-policy-cancelled'))";
 
 #ifdef WEBFRONT_EMBED_CEF
 // CEF names the navigation it cancelled: the page counts only the one it started, and reports any other one (#731), such as
