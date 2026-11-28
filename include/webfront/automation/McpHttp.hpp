@@ -607,8 +607,10 @@ private:
         const auto closing = std::chrono::steady_clock::now() + closingGrace;
         while (!pending.empty() && std::chrono::steady_clock::now() < closing)
             step(connections, pending, false, closing);
+        // A last pass without waiting: a request completed within the grace is served even if this thread ran late.
         for (auto& peer : pending)
-            discard(peer);
+            if (receive(connections, peer, wholeRequestReads))
+                discard(peer);
     }
     // One round: reads the readable peers, dispatches their complete requests and, while `accepting`, takes a batch of
     // connections. A peer is closed at its deadline or at `limit`, after what it sent has been read: bytes left unread
