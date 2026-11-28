@@ -371,6 +371,8 @@ describe('the stage of a stopped wf test run', () => {
         expect([stopped.report.status, stopped.report.stage, stopped.report.error]).toEqual(['timeout', stage, stopped.message]);
         expect(describeStage({reached: 'page requested', specs: 0, current: '', loaded: ['index.html'], missing: ['runner.js', 'specs.js']}))
             .toBe('stage: page requested; not loaded: runner.js, specs.js');
+        // A run stopped in a suite's hook or between specs names no spec as running.
+        expect(describeStage({reached: 'between specs', specs: 2, current: '', loaded: [], missing: []})).toBe('stage: between specs, 2 specs done');
         // Stopped before the frame existed: no stage, and the message stays the plain one.
         const early = stoppedRun('interrupted', '');
         expect([early.exitCode, early.message, 'stage' in early.report]).toEqual([130, 'Tests stopped by Ctrl+C', false]);

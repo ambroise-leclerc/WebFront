@@ -795,7 +795,8 @@ The report is structured: `{status, exitCode, total, passed, failed, pending, ex
 each per spec). `status` is `passed`, `failed`, `incomplete`, `error` (the specs did not load), `timeout` or `interrupted`.
 A run stopped at the time limit or by Ctrl+C once its frame was in the page also has `stage: {reached, specs, current,
 loaded, missing}`, which its message repeats: the last step the runner reached (`page requested` when it never started,
-`runner started`, `bridge settled`, `specs loaded`, `specs running`), the specs it finished, the spec it was running, and
+`runner started`, `bridge settled`, `specs loaded`, `specs running`, `between specs` in a suite's hook or after a spec),
+the specs it finished, the spec in progress, and
 the runner's files (`index.html`, `specs.css`, `WebFront.js`, `jasmine.js`, `runner.js`, `specs.js`) whose response the
 frame received in full or not: a file that is missing was never requested or never completely received.
 

@@ -179,8 +179,9 @@ export const runnerResources = ['index.html', 'specs.css', 'WebFront.js', 'jasmi
 
 /**
  * How far the runner frame got, for a run stopped before its report (#690): `reached` is the last stage the runner
- * posted ('page requested' when it posted none: it did not start), `specs` the specs it finished, `current` the last spec
- * it started (the one that hangs when the stage is 'specs running'), `loaded` the runner's
+ * posted ('page requested' when it posted none: it did not start; 'between specs' after a spec finished, in a suite's
+ * hook or before the next spec), `specs` the specs it finished, `current` the spec in progress (the one that hangs when
+ * the stage is 'specs running'), `loaded` the runner's
  * files whose response the frame received completely, and `missing` those it did not (never requested, or a response
  * still incomplete). A frame that cannot be read leaves both lists empty.
  */
@@ -249,7 +250,13 @@ export function runInFrame({pattern, timeout, runId, signal, write = () => {}, c
             if (message?.type === 'stage' && typeof message.stage === 'string') {
                 reached = message.stage.slice(0, 64);
                 if (typeof message.spec === 'string') current = message.spec.slice(0, 256);
-            } else if (message?.type === 'spec') { specs += 1; write(progress[message.status] ?? ''); }
+            } else if (message?.type === 'spec') {
+                // Until the next spec starts, the run is in a suite's hook or between two specs: no spec is running.
+                specs += 1;
+                reached = 'between specs';
+                current = '';
+                write(progress[message.status] ?? '');
+            }
             else if (message?.type === 'done' || message?.type === 'error') finish(null, buildReport(message, {pattern}));
         };
         const interrupt = () => finish(stoppedRun('interrupted', pattern, stage()));
