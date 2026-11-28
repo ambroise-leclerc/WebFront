@@ -259,7 +259,8 @@ export const layoutState = frame => layouts.get(frame)?.workspace?.state;
 
 /**
  * Lays the page out around the terminal's `element` and the preview `frame`, which starts hidden. Call it before the
- * terminal opens in `element`, then attach({focus, fit}) with the functions that focus the terminal and fit it to `element`.
+ * terminal opens in `element`, then attach({focus, fit, stop}) with the functions that focus the terminal and fit it to `element`,
+ * and the terminal's Stop button, which the workspace puts in the floating window's bar.
  * The result gives the `state`, `interfaceExists` (the page opened on an existing interface, to load in the frame),
  * the `status` shown on the tab and command(running) to say that a command runs, toggle(), open({focus}) and close(), `button` and `panel`, the `shortcut` in use ("F9") and placeSaved().
  * The tab's context menu (menu.mjs) is `menu`, and `inspectorAccess` resolves to what webfront.inspector.containers()
@@ -275,7 +276,7 @@ export async function createWorkspace({bridge, element, frame, openInspector = n
     const viewport = () => ({width: root.clientWidth, height: root.clientHeight});
     let state = initialState(interfaceExists);
     let place = remembered;  // as chosen; what is displayed is fitted to the viewport
-    let focusTerminal = () => {}, fitTerminal = () => {};
+    let focusTerminal = () => {}, fitTerminal = () => {}, stopButton = null;
     const session = {command: false, dev: null};
     // Asked once: whether this page may reach the inspectors does not change while its connection lives.
     let access = null;
@@ -329,10 +330,18 @@ export async function createWorkspace({bridge, element, frame, openInspector = n
         button.dataset.status = status;
         button.setAttribute('aria-label', `${open ? 'Hide' : 'Show'} the WebFront terminal${words && `: ${words}`}`);
         button.title = `${open ? 'Hide' : 'Show'} the terminal (${keys})${words && `: ${words}`}`;
+        placeStop();
         const rect = state === State.terminal ? null : shown();
         Object.assign(panel.style, rect ? {left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px`}
             : {left: '', top: '', width: '', height: ''});
         fitTerminal();  // its window may have changed size
+    }
+    // The Stop button of the terminal (runtime.mjs) is in the window's bar, before the close button, while the bar shows;
+    // over the terminal's corner while the terminal fills the window.
+    function placeStop() {
+        if (!stopButton) return;
+        if (state === State.terminal) { if (stopButton.parentNode !== element) element.append(stopButton); }
+        else if (stopButton.nextSibling !== closeButton) bar.insertBefore(stopButton, closeButton);
     }
     function choose(rect) {
         place = clampRect(rect, viewport());
@@ -440,9 +449,11 @@ export async function createWorkspace({bridge, element, frame, openInspector = n
             render();
         },
         interfaceExists, button, panel, bar, shortcut: keys, menu, inspectorAccess,
-        attach({focus, fit = () => {}}) {
+        attach({focus, fit = () => {}, stop = null}) {
             focusTerminal = focus;
             fitTerminal = fit;
+            stopButton = stop;
+            placeStop();
             if (state === State.interface) frame.focus(); else focus();
         },
         toggle: () => apply('toggle'),

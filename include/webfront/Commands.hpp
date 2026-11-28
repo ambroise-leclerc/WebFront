@@ -8,7 +8,8 @@
 // LLM: public API; read the command contract and reserved names before the registration code
 
 // Terminal commands of an application: coroutines that the developer environment's terminal discovers and
-// runs, one browser session at a time, streaming their output and cancelled by Ctrl+C, a disconnection or shutdown.
+// runs, one browser session at a time, streaming their output and cancelled by an interruption (Escape or the
+// terminal's Stop button), a disconnection or shutdown.
 
 #pragma once
 
@@ -49,7 +50,8 @@ inline constexpr std::size_t maxChunkBytes = 60000;
 /// Frames that print() lets wait for the network before it suspends the command.
 inline constexpr std::size_t maxPendingOutput = 32;
 
-/// Exit code of a command stopped by Ctrl+C, a disconnection or the application's shutdown.
+/// Exit code of a command stopped by an interruption (Escape or the terminal's Stop button), a disconnection or the
+/// application's shutdown.
 inline constexpr int interruptedExitCode = 130;
 
 /// Names the terminal itself handles, which an application cannot register: wf, the terminal's own commands (help,
@@ -157,8 +159,8 @@ public:
 
     /// Writes like write(), one piece at a time: after each piece, the command is suspended while more than
     /// maxPendingOutput frames wait for a browser that reads slower than the command writes. Each wait is a point where
-    /// Ctrl+C stops the command. Prefer it to write() for large or unbounded output. The returned task does not need
-    /// this Context: it may be awaited after it is gone.
+    /// an interruption stops the command. Prefer it to write() for large or unbounded output. The returned task does not
+    /// need this Context: it may be awaited after it is gone.
     [[nodiscard]] Task print(std::string text) const {
         return printPieces(run, std::move(text));
     }
@@ -168,7 +170,7 @@ public:
         run->exitCode = code;
     }
 
-    /// True once Ctrl+C, a disconnection or the application's shutdown asked the command to stop. Awaited senders
+    /// True once an interruption, a disconnection or the application's shutdown asked the command to stop. Awaited senders
     /// observe it themselves; loops that do not await check it.
     [[nodiscard]] bool stopRequested() const noexcept {
         return run->stop.stop_requested();
@@ -252,7 +254,8 @@ public:
         }
     }
 
-    /// Ctrl+C: asks the command to stop. The browser no longer waits for it; a command that already ended is ignored.
+    /// An interruption (Escape or the terminal's Stop button): asks the command to stop. The browser no longer waits for
+    /// it; a command that already ended is ignored.
     void cancel(const UI& ui, std::uint32_t id) {
         std::optional<TaskHandle> handle;
         {
@@ -334,7 +337,7 @@ private:
 
     static Task execute(std::weak_ptr<Registry> registry, std::shared_ptr<Handler> handler, std::shared_ptr<Run<UI>> run) {
         const auto taskStop = co_await ex::read_env(ex::get_stop_token);
-        // Forwards the task's stop request (Ctrl+C, disconnection, shutdown) to the command's source while it runs.
+        // Forwards the task's stop request (interruption, disconnection, shutdown) to the command's source while it runs.
         const ex::stop_callback_for_t<std::remove_cvref_t<decltype(taskStop)>, ForwardStop> forward{taskStop, ForwardStop{run.get()}};
         bool                                                                                stopped = false;
         std::string                                                                         error;
@@ -369,9 +372,10 @@ private:
 /// `webfront::Task(webfront::commands::Context<UI>)`, spawned on the server thread like ui.spawn:
 ///   - it streams its output with Context::write, never through one blocking reply; co_await Context::print also waits
 ///     while a slow browser has not read the output;
-///   - Ctrl+C in the terminal, the browser's disconnection or the application's shutdown requests its stop, which the
-///     senders it awaits observe (ui.resumeAfter, ui.jsFunctionSender, ...). The terminal does not wait for a stopped
-///     command: its late output and exit report are ignored, and the next command can start at once;
+///   - an interruption in the terminal (Escape or its Stop button), the browser's disconnection or the application's
+///     shutdown requests its stop, which the senders it awaits observe (ui.resumeAfter, ui.jsFunctionSender, ...). The
+///     terminal does not wait for a stopped command: its late output and exit report are ignored, and the next command
+///     can start at once;
 ///   - an exception it throws is shown as an error in the terminal, with exit code 1.
 /// A command must not block the server thread, which serves every browser: synchronous handlers are refused at
 /// compile time, and long computations belong on another thread. Create one Commands object per application (a second

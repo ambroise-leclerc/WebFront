@@ -377,6 +377,6 @@ describe('the stage of a stopped wf test run', () => {
             .toBe('stage: between specs, in suite slow setup');
         // Stopped before the frame existed: no stage, and the message stays the plain one.
         const early = stoppedRun('interrupted', '');
-        expect([early.exitCode, early.message, 'stage' in early.report]).toEqual([130, 'Tests stopped by Ctrl+C', false]);
+        expect([early.exitCode, early.message, 'stage' in early.report]).toEqual([130, 'Tests interrupted', false]);
     });
 });

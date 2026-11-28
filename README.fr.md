@@ -235,7 +235,7 @@ wf dev ui/main.tsx
 
 `wf create life` écrit le [starter TSX et CSS](examples/life/ui) dans `ui/` sans écraser un répertoire existant. `wf init` crée le manifeste `webfront.project.json`. `wf install` résout et vérifie les paquets, puis verrouille leurs versions dans `webfront-packages.lock.json`, sans lancer de scripts d'installation. `wf restore` reconstruit le cache depuis ce verrou ; `wf restore --offline` le vérifie sans réseau.
 
-`wf dev` compile le TSX avec esbuild-wasm, ouvre l'interface et la reconstruit à chaque sauvegarde. Les erreurs apparaissent dans le terminal et l'aperçu, qui conserve sa dernière version valide. Ctrl+C l'arrête ; `wf build` compile une fois.
+`wf dev` compile le TSX avec esbuild-wasm, ouvre l'interface et la reconstruit à chaque sauvegarde. Les erreurs apparaissent dans le terminal et l'aperçu, qui conserve sa dernière version valide. Échap ou le bouton Stop du terminal l'arrête ; `wf build` compile une fois.
 
 Éditez `life-project/ui/main.tsx` et `style.css` avec votre éditeur habituel. React dessine la grille ; chaque génération attend C++ :
 

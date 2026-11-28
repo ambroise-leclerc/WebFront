@@ -229,14 +229,14 @@ export async function dev(args, {bridge, signal, preview: frame, write = () => {
                     const files = await session.rebuild({entry, lock: project.lock ?? {format: 1, roots: {}, packages: {}}});
                     files.set('index.html', previewPage(files));
                     await publish(bridge, '.webfront/developer/preview', files, {signal: active});
-                    // Once commit succeeds, display its publication even if Ctrl+C arrived while awaiting it.
+                    // Once commit succeeds, display its publication even if an interruption arrived while awaiting it.
                     diagnostic = '';
                     previewDiagnostics(frame, '');
                     showPreview(frame);
                     // A successful build can drop dependencies that are no longer imported.
                     observed = new Map(session.observed);
                     report('ready');
-                    write(syncNotice(project) + 'Preview ready. Watching inputs (Ctrl+C to stop).\n');
+                    write(syncNotice(project) + 'Preview ready. Watching inputs (Escape or the Stop button ends wf dev).\n');
                 });
             } catch (error) {
                 if (active.aborted) throw stopped();

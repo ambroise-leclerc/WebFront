@@ -179,7 +179,7 @@ export function abortable(promise, signal) {
  * says how far it got (frameStage) and is added to the message and to the report.
  */
 export const stoppedRun = (reason, pattern, stage) => {
-    const [stopped, exitCode] = reason === 'timeout' ? ['Tests stopped at their time limit', 124] : ['Tests stopped by Ctrl+C', 130];
+    const [stopped, exitCode] = reason === 'timeout' ? ['Tests stopped at their time limit', 124] : ['Tests interrupted', 130];
     const message = stage ? `${stopped} (${describeStage(stage)})` : stopped;
     return Object.assign(new ScriptExit(message, exitCode), {report: emptyReport(reason, exitCode, {pattern, error: message, ...(stage ? {stage} : {})})});
 };

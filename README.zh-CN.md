@@ -279,7 +279,7 @@ wf dev ui/main.tsx
 - `wf create life` 将可编辑的 [TSX 和 CSS 模板](examples/life/ui)写入 `ui/`，已有目录会保留。参数是模板名。`wf create app` 可为新项目生成最小的 TypeScript 界面。
 - `wf init` 写入 `webfront.project.json`。其他命令从该清单读取依赖、入口、资源提供器、脚本和权限。
 - `wf install` 从包仓库解析依赖，校验完整性，并将确切版本写入 `webfront-packages.lock.json`。安装过程不会执行软件包的安装脚本。`wf restore` 可在其他机器上按锁文件重建缓存，`wf restore --offline` 可离线验证缓存。
-- `wf dev` 用 esbuild-wasm 编译 TSX，在应用中打开界面，并在保存源码后重新构建。构建错误会显示在终端和预览上，预览保留最近一次成功的版本。按 Ctrl+C 停止。若只需编译一次，可运行 `wf build`。
+- `wf dev` 用 esbuild-wasm 编译 TSX，在应用中打开界面，并在保存源码后重新构建。构建错误会显示在终端和预览上，预览保留最近一次成功的版本。按 Esc 键或终端的 Stop 按钮停止。若只需编译一次，可运行 `wf build`。
 
 用常用编辑器修改 `life-project/ui/main.tsx` 和 `style.css`。React 绘制网格和控件，每一代的计算都等待 C++ 回调完成。
 

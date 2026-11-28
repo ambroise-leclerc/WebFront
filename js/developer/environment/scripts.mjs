@@ -1,5 +1,5 @@
 // wf run and wf exec: WebFront scripts run in a dedicated Worker; the page answers their context calls under the
-// manifest permissions, publishes with developer::Store and stops the Worker on Ctrl+C or at the time limit.
+// manifest permissions, publishes with developer::Store and stops the Worker on an interruption or at the time limit.
 import {call, readProject, writeChunks} from './io.mjs';
 import {checkRead, checkWrite, listable} from './permissions.mjs';
 import {manifestPath} from './manifest.mjs';
@@ -94,7 +94,7 @@ const decoder = new TextDecoder();
 
 /**
  * The page side of a run: answers the Worker's context calls. Each write is a transaction of its own. When the
- * script ends by itself, finish() lets the writes it did not await complete; after stop() (Ctrl+C, time limit), a
+ * script ends by itself, finish() lets the writes it did not await complete; after stop() (an interruption, the time limit), a
  * transaction still staging is aborted, and one whose commit was sent completes or fails atomically in C++.
  */
 export function scriptHost({bridge, permissions, lock}) {
@@ -165,7 +165,7 @@ export function scriptHost({bridge, permissions, lock}) {
 }
 
 /**
- * Runs compiled script code in a Worker. Ctrl+C (signal) or the time limit first aborts the script's context.signal;
+ * Runs compiled script code in a Worker. An interruption (signal) or the time limit first aborts the script's context.signal;
  * a script still running after the grace period is terminated with worker.terminate(), which also stops one that
  * never returns to its event loop. Resolves with {code, reason, error}; reason is 'exit', 'interrupted' or 'timeout'.
  */
@@ -233,7 +233,7 @@ function publicationReport(all, stopped) {
  * ScriptExit otherwise. A write that was not applied, even one the script did not await, is never silent.
  */
 export function runResult(label, outcome, publications) {
-    const stopped = {interrupted: 'stopped by Ctrl+C', timeout: 'stopped at its time limit'}[outcome.reason];
+    const stopped = {interrupted: 'interrupted', timeout: 'stopped at its time limit'}[outcome.reason];
     const report = publicationReport(publications, stopped !== undefined);
     if (outcome.code === 0 && !stopped && !report.length) return `${label} completed.`;
     const forced = outcome.forced ? ` (terminated after the ${outcome.forced / 1000} s grace period)` : '';

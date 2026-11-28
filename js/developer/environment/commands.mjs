@@ -1,5 +1,5 @@
 // The application's C++ commands (webfront::Commands): discovered through the bridge and run in this browser's session.
-// Their output streams in through fire-and-forget calls; Ctrl+C cancels them in C++ without waiting for them to end.
+// Their output streams in through fire-and-forget calls; an interruption cancels them in C++ without waiting for them to end.
 
 /**
  * Names the terminal itself handles; webfront::commands::reservedNames refuses them to C++ commands. After wf and the
@@ -77,7 +77,7 @@ export function runCommand(bridge, name, args, {signal, write = () => {}} = {}) 
             finish();
             reject(error);
         };
-        // The start is sent now, before any cancel that Ctrl+C sends; a bridge that throws instead of rejecting must
+        // The start is sent now, before any cancel that an interruption sends; a bridge that throws instead of rejecting must
         // not leave the command registered.
         try { bridge.cppFunction('webfront.commands.start')(id, name, JSON.stringify(args)).catch(failed); }
         catch (error) { failed(error); }

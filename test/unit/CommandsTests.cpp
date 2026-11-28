@@ -401,7 +401,7 @@ const Scenario printTask{"A print task may be awaited after its context is gone"
                              });
                          }};
 
-const Scenario ctrlC{"Ctrl+C stops a running command and the next one runs at once", [] {
+const Scenario ctrlC{"An interruption stops a running command and the next one runs at once", [] {
                          given("a command waiting in a browser", [&] {
                              Fixture fixture;
                              auto&   app = fixture.app;

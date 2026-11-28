@@ -78,8 +78,8 @@ command. The window of `DeveloperBrowserIntegration` also shows, in place of its
 run with its outcome and duration, as if it had been typed. Only the `wf` subcommand is shown, never an argument, an
 option value or a path. A failed command appears as `rejected`, with its exit code when it has one, whether or not the
 spec expected the refusal. A wait is labelled `timeout (expected)` only for a time limit the spec announces and fires,
-and `cancelled (expected)` only when the spec pressed Ctrl+C; any other time limit or cancellation appears as `timeout`
-or `cancelled`. This trace comes from the specs (`test/web/developer-specs.mjs`), not from the published environment.
+and `cancelled (expected)` only when the spec interrupted the command (aborted its signal); any other time limit or
+cancellation appears as `timeout` or `cancelled`. This trace comes from the specs (`test/web/developer-specs.mjs`), not from the published environment.
 
 ## A quick local build by default
 
