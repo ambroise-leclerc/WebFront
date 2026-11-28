@@ -849,10 +849,12 @@ appels. Cet état vit dans la page de l'application.
   lecture les appels en attente, apprend l'issue de `ready` par la Promise elle-même, et le panneau dit que l'historique
   manque. Une exception du moniteur ne retient jamais le règlement d'une Promise de l'application. Les appels de l'inspecteur lui-même
   (`webfront.inspector.*`, `wfInspect.*`) ne sont pas suivis. Un appel suivi l'est jusqu'à sa réponse, même après le
-  retrait de la sonde : il faut de toute façon le retirer des appels en attente, et son rejet éventuel reste donc listé. L'état est borné : 100 appels en attente (les plus
+  retrait de la sonde : il faut de toute façon le retirer des appels en attente, et son rejet éventuel reste donc listé. L'état rendu est borné : 100 appels en attente (les plus
   anciens), 50 rejets (les plus récents), 100 fonctions JavaScript (les plus appelées, sur 1 000 noms comptés un par un),
   textes de 256 octets coupés sur une frontière de caractère, caractères de contrôle rendus visibles ; un nom long est
-  compté sous son libellé borné.
+  compté sous son libellé borné. Pour savoir quand un appel
+  se termine, le moniteur en enveloppe chacun et garde une entrée par appel en attente, comme le pont lui-même : ce
+  stockage suit `pendingCalls`, que les identifiants d'appel sur 16 bits bornent à 65 535 entrées.
 - **Panneau rattaché.** L'iframe de la fenêtre flottante lit le moniteur de sa page hôte
   (`window.parent.webfrontInspectorHost.bridgeState`), sans passer par C++.
 - **Panneau détaché : relais par C++.** Une autre fenêtre ne voit pas la page, et `BroadcastChannel` n'est pas garanti
