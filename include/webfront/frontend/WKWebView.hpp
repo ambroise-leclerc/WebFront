@@ -1019,6 +1019,29 @@ inline void contentProcessTerminated(id self, SEL, id) {
         s->fail("web content process terminated");
 }
 
+/// Why WebKit ended the web content process, in words (`_WKProcessTerminationReason`, WebKit's private headers).
+inline std::string contentTerminationReason(long reason) {
+    switch (reason) {
+        case 0:
+            return "it exceeded its memory limit";
+        case 1:
+            return "it exceeded its CPU limit";
+        case 2:
+            return "at the request of the application";
+        case 3:
+            return "it crashed, a fault of the WebKit engine rather than of the page (see its com.apple.WebKit.WebContent crash report)";
+        default:
+            return "reason " + std::to_string(reason);
+    }
+}
+
+// What the page's end of an engine fault looks like (#706): WebKit calls this private method of the navigation delegate,
+// with the reason, instead of webViewWebContentProcessDidTerminate:, which remains for a WebKit that would not call it.
+inline void contentProcessTerminatedWithReason(id self, SEL, id, long reason) {
+    if (auto s = session(self))
+        s->fail("web content process terminated: " + contentTerminationReason(reason));
+}
+
 inline void addApplicationMethods(Class cls) {
     addMethod(cls, "windowWillClose:", sessionClosed, "v@:@");
     addMethod(cls, "webViewDidClose:", sessionClosed, "v@:@");
@@ -1154,6 +1177,7 @@ inline void addNavigationMethods(Class cls) {
     addMethod(cls, "webView:didFailProvisionalNavigation:withError:", failed, "v@:@@@");
     addMethod(cls, "webView:didFailNavigation:withError:", failed, "v@:@@@");
     addMethod(cls, "webViewWebContentProcessDidTerminate:", contentProcessTerminated, "v@:@");
+    addMethod(cls, "_webView:webContentProcessDidTerminateWithReason:", contentProcessTerminatedWithReason, "v@:@q");
 }
 
 inline Class delegateClass() {

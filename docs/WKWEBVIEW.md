@@ -89,6 +89,10 @@ query and fragment. WebFront's existing HTTP/WebSocket bridge is the only bridge
 Pages without the bridge and pages handling a rejected `webFront.ready` can close normally.
 
 Initial network/HTTP errors and web-content-process termination close the session and throw.
+The termination's message gives WebKit's reason, which it passes to a private method of the navigation delegate: the
+memory or CPU limit, the application's request, or a crash, which is a fault of the engine rather than of the page and
+leaves a `com.apple.WebKit.WebContent` crash report in `~/Library/Logs/DiagnosticReports` (#706). A WebKit that does not
+call that method still ends the session, without the reason.
 An internal error document finishing without a valid HTTP response is also a failure.
 The initial document has a 30-second loading deadline, cancelled after successful navigation;
 later navigation errors leave the session open. Direct callers can override the deadline with
