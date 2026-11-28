@@ -43,17 +43,20 @@ const Scenario webView2Waits{"WebView2 waits for view association registration b
                                  require(browser.completion);
                                  require(browser.navigations == 0);
                                  require(session->startupTimer != 0);
+                                 require(!session->loadStarted());  // a secondary window still waits for it (#716)
                                  when("registration completes successfully", [&] {
                                      require(browser.completion->Invoke(S_OK, L"script") == S_OK);
                                      require(browser.navigations == 1);
                                      require(session->startupTimer == 0);
                                      require(!session->failure);
+                                     require(session->loadStarted());
                                  });
                                  when("registration fails", [&] {
                                      require(browser.completion->Invoke(E_FAIL, nullptr) == S_OK);
                                      require(browser.navigations == 0);
                                      require(session->failure);
                                      require(session->startupTimer == 0);
+                                     require(!session->loadStarted());
                                  });
                                  when("registration never completes", [&] {
                                      requireThrows(
@@ -72,6 +75,7 @@ const Scenario webView2Waits{"WebView2 waits for view association registration b
                                      browser.navigationResult = E_FAIL;
                                      require(browser.completion->Invoke(S_OK, L"script") == S_OK);
                                      require(session->failure);
+                                     require(!session->loadStarted());
                                  });
                              }};
 

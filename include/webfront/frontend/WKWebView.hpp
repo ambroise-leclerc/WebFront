@@ -1257,6 +1257,7 @@ inline void openSecondary(std::string_view address, std::string_view port, std::
             options.inherit(primary.options);
             auto child             = std::make_shared<Session>(applicationUrl(address, port, page, options.launch.origin), std::move(options));
             child->secondary       = true;
+            child->trace.label     = std::string(page);  // its milestones are told from the first window's (#716)
             child->sharedDataStore = send(send(primary.view, "configuration"), "websiteDataStore");
             child->create();
             return child;

@@ -1050,6 +1050,7 @@ inline void openSecondary(const std::string& address, const std::string& port, c
                 webfront::detail::BoundContentPolicy{applicationUrl(address, port, "", options.launch.origin), options.contentPolicy},
                 options.window);
             session->secondary          = true;
+            session->trace.label        = file;  // its milestones are told from the first window's (#716)
             session->sharedNetwork      = primary.network;
             session->launch             = options.launch;
             session->startupTimeout     = primary.startupTimeout;  // the first window's delay and test injections
