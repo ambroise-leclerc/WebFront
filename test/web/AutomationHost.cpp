@@ -19,7 +19,8 @@
 // With --called, the application registers `consumer.render` (which appends its argument to the file) and
 // `consumer.secret` (never allow-listed by the tests). Closing its standard input closes the window, on every platform and
 // whatever the engine does with signals. The status is 0 after a normal closing, 70 when the developer environment failed
-// to start (its reason on stderr), 71 when the native deadline of an operation revoked the session; a window that does not
+// to start (its reason on stderr), 71 when a native deadline (of an operation, or of the startup) revoked the session and the
+// window then closed; a window that does not
 // close after a deadline ends the process with enableAutomation's own status 72. An occupied MCP port exits with 73 so
 // the test client can retry a port lost between reservation and bind.
 
@@ -196,9 +197,12 @@ int main(int argc, char** argv) {
         const webfront::automation::Object state{automation->controller()->describe()};
         const auto                         failure = state.string("failure");
         int                                status  = 0;
-        if (failure == "Native automation deadline exceeded")
+        // A native deadline revoked the session and the window closed before the grace ended. The session names that
+        // deadline; its reason text differs from one deadline to the other (#709).
+        if (const auto deadline = automation->controller()->revokedBy(); !deadline.empty()) {
+            std::cerr << "Automation " << deadline << ": " << failure << '\n';
             status = 71;
-        else if (!automation->controller()->wasReady() && !failure.empty()) {
+        } else if (!automation->controller()->wasReady() && !failure.empty()) {
             std::cerr << "Automation startup: " << failure << '\n';
             status = 70;
         }
