@@ -371,6 +371,17 @@ describe('The panel of the bridge in the page', () => {
             expect(digest('a')).toBe('af63dc4c8601ec8c');  // FNV-1a 64 of "a"
         });
 
+        it('shows a short name with its control characters made visible, as the relay shows it', () => {
+            const bridge = fakeWebFront(), time = manualTime();
+            const monitor = monitorOf(bridge, time);
+            monitor.read();
+            bridge.called('draw\nframe');
+            bridge.called('draw\nframe');
+            const [called] = monitor.read().jsFunctions;
+            expect(called).toEqual(jasmine.objectContaining({name: 'draw\u240aframe', calls: 2}));
+            expect(fromRows(toRows(monitor.read())).jsFunctions[0].name).toBe('draw\u240aframe');
+        });
+
         it('keeps of a long name no more than its bounded label', () => {
             const bridge = fakeWebFront(), time = manualTime();
             const monitor = monitorOf(bridge, time);

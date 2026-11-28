@@ -388,6 +388,42 @@ const Scenario bridgeStateBounds{
                 require(std::get<0>(states.read(name(0), 0, 200, 32768, start + 101s).page) == someRows(2));
             });
         });
+        given("a connection that announces itself under another identifier", [&] {
+            States                          states;
+            Page                            page;
+            const States::Clock::time_point start{1000s};
+            page.announce(states, "first", start);
+            page.announce(states, "second", start);
+            then("its earlier identifier is dropped: a connection has one page at most", [&] {
+                requireEqual(states.sourceCount(), std::size_t{1});
+                requireEqual(flagsOf(states.read("first", 0, 0, 32768, start).page), 0.0);
+                requireEqual(flagsOf(states.read("second", 0, 0, 32768, start).page), double{inspect::bridge_flag::source});
+            });
+        });
+        given("a page read within its lease, which disconnects, then another page announces itself", [&] {
+            States                          states;
+            Page                            gone, other;
+            const States::Clock::time_point start{1000s};
+            gone.announce(states, "host-a", start);
+            static_cast<void>(states.read("host-a", 0, 0, 32768, start + 1s));
+            gone.alive = false;
+            other.announce(states, "host-b", start + 2s);
+            then("the page is dropped, but the reader's lease waits for the page that comes back under its identifier", [&] {
+                requireEqual(states.sourceCount(), std::size_t{1});
+                Page back;
+                require(back.announce(states, "host-a", start + 3s));
+            });
+        });
+        given("two reads of a page not yet announced that take the lock in the reverse order of their time", [&] {
+            States                          states;
+            const States::Clock::time_point start{1000s};
+            static_cast<void>(states.read("host-c", 0, 0, 32768, start + 10s));
+            static_cast<void>(states.read("host-c", 0, 0, 32768, start));
+            then("the later lease is kept for the page that announces itself", [&] {
+                Page page;
+                require(page.announce(states, "host-c", start + inspect::bridgeLease + 5s));
+            });
+        });
         given("more pages announced than the relay knows", [&] {
             States                          states;
             std::vector<Page>               pages(inspect::maxBridgeAnnouncements + 1);
@@ -397,13 +433,17 @@ const Scenario bridgeStateBounds{
                 if (index > 0)
                     static_cast<void>(states.read("host" + std::to_string(index), 0, 0, 32768, start + std::chrono::seconds(index)));
             }
-            when("one more announces itself", [&] {
-                pages.back().announce(states, "last", start + 1000s);
-                then("it takes the place of the page that was read the longest ago", [&] {
+            when("one more announces itself while all of them are connected", [&] {
+                then("it is refused as unavailable, and no connected page loses its place", [&] {
+                    std::string code;
+                    try {
+                        pages.back().announce(states, "last", start + 1000s);
+                    } catch (const BridgeError& error) {
+                        code = error.code();
+                    }
+                    requireEqual(code, std::string{inspect::code::unavailable});
                     requireEqual(states.sourceCount(), inspect::maxBridgeAnnouncements);
-                    requireEqual(flagsOf(states.read("host0", 0, 0, 32768, start + 1000s).page), 0.0);
-                    requireEqual(flagsOf(states.read("host1", 0, 0, 32768, start + 1000s).page), double{inspect::bridge_flag::source});
-                    requireEqual(flagsOf(states.read("last", 0, 0, 32768, start + 1000s).page), double{inspect::bridge_flag::source});
+                    requireEqual(flagsOf(states.read("host0", 0, 0, 32768, start + 1000s).page), double{inspect::bridge_flag::source});
                 });
             });
             when("pages disconnected before another one announces itself", [&] {

@@ -141,7 +141,7 @@ export function createBridgeMonitor({target, clock = () => performance.now(), no
                         : `${boundedText(name, limits.text - 17)}#${digest(String(name))}`;
                     const known = state.js.get(key);
                     if (known) ++known.calls;
-                    else if (state.js.size < limits.jsNames) state.js.set(key, {id: ++sequence, name: key, calls: 1});
+                    else if (state.js.size < limits.jsNames) state.js.set(key, {id: ++sequence, name: boundedText(key), calls: 1});
                     else ++state.jsOthers;
                 } catch { /* never the application's problem */ }
             },

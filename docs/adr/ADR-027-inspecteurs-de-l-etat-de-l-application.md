@@ -874,9 +874,11 @@ appels. Cet état vit dans la page de l'application.
 - **Bornes du relais.** Un état de plus de 256 lignes est refusé (`std::invalid_argument`) sans remplacer le précédent ;
   chaque texte est borné par `boundedText` (256 octets, 16 pour le genre). C++ connaît 256 pages au plus (un identifiant
   et deux rappels chacune) et garde l'état publié de 16 d'entre elles : au-delà de 16 états, la page lue le moins
-  récemment perd son état mais pas sa place, et une lecture la relance ; au-delà de 256 pages, elle perd sa place. Une page
-  déconnectée est oubliée à la première lecture ou annonce qui la constate : une lecture la trouve déconnectée et rend une
-  page vide, sans drapeau de source. Une page qui a perdu sa place s'annonce de nouveau quand son panneau est détaché, ou quand sa
+  récemment perd son état mais pas sa place, et une lecture la relance. Une connexion a une page au plus (une annonce
+  sous un autre identifiant retire la précédente) et une page connectée ne perd jamais sa place : au-delà de 256 pages
+  connectées, une annonce est refusée (`webfront.inspector.unavailable`). Une page déconnectée est oubliée à la première
+  lecture ou annonce qui la constate, en gardant pour son identifiant le bail d'un lecteur : une lecture la trouve
+  déconnectée et rend une page vide, sans drapeau de source. Une page qui a perdu sa place s'annonce de nouveau quand son panneau est détaché, ou quand sa
   publication est refusée (`unknown`) ; une nouvelle annonce garde le bail d'un lecteur, et celle de la même connexion
   garde aussi son état. Un état appartient à la connexion qui s'est annoncée la dernière sous cet
   identifiant : la publication d'une autre connexion est refusée (`webfront.inspector.unavailable`). Une publication sans annonce est
