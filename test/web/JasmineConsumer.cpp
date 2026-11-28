@@ -15,12 +15,14 @@
 
 int main(int argc, char** argv) {
     using Frontend = WEBFRONT_DRIVER_FRONTEND;
-    if (argc != 2)
-        return 64;
     // A failure before the report (the configuration, the server, the engine) is said and ends with status 1, which
     // RunWebFrontJasmine.cmake reports with this message; uncaught, it would end the process with no word (#707).
     try {
+        // First: CEF runs its subprocesses (GPU, network, renderer) from this executable, with their own arguments, and
+        // they must end in this call before main() looks at the arguments.
         webfront::detail::ensureFrontendInitialized<Frontend>();
+        if (argc != 2)
+            return 64;
         using App = webfront::
             BasicWF<webfront::NetProvider, webfront::fs::DefaultFS, webfront::http::DefaultBuffersPolicy, webfront::testdriver::DriverFrontend<Frontend>>;
         App app{
