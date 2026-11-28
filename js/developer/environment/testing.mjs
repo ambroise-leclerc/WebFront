@@ -266,7 +266,7 @@ export function runInFrame({pattern, timeout, runId, signal, write = () => {}, c
                 current = typeof message.spec === 'string' ? message.spec.slice(0, 256) : '';
                 suite = typeof message.suite === 'string' ? message.suite.slice(0, 256) : '';
             } else if (message?.type === 'spec') {
-                specs += 1;
+                if (message.status !== 'excluded') specs += 1;  // like the report's total: a spec filtered out did not run
                 write(progress[message.status] ?? '');
             }
             else if (message?.type === 'done' || message?.type === 'error') finish(null, buildReport(message, {pattern}));
