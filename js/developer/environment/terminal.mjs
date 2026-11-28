@@ -1,8 +1,10 @@
 // The environment's line editor: multi-row redraw, grapheme clusters and their cell widths, history, multi-line paste,
-// completion and Ctrl+C. The cell widths are also given to xterm.js (unicodeProvider), so both agree on every row.
+// completion, the interruption of a command and the system's shortcuts (copy, paste, cut, select all). The cell widths are
+// also given to xterm.js (unicodeProvider), so both agree on every row.
 
 const ansi = {
     red: text => `\x1b[31m${text}\x1b[0m`,
+    dim: text => `\x1b[2m${text}\x1b[0m`,
     up: count => count > 0 ? `\x1b[${count}A` : '',
     right: count => count > 0 ? `\x1b[${count}C` : '',
     clearBelow: '\x1b[J',
@@ -209,9 +211,87 @@ function commonPrefix(words) {
     });
 }
 
+// --- System shortcuts ------------------------------------------------------------------------------------------
+
+/** What Escape sends in onData: the key that interrupts a command while no text of the terminal is selected. */
+export const interruptKey = '\x1b';
+
+const shortcutLetters = {c: 'copy', v: 'paste', x: 'cut', a: 'selectAll'};
+const shortcutCodes = {KeyC: 'copy', KeyV: 'paste', KeyX: 'cut', KeyA: 'selectAll'};
+
+/**
+ * The system shortcut that a key event of the terminal is, or null when it is a key for the line editor:
+ *   copy, paste, cut, selectAll: Ctrl or ⌘ (Meta) with C, V, X or A, Shift allowed (Ctrl+Shift+C as in other terminals)
+ *     but not Alt, which AltGr sets with Ctrl on Windows. The letter is the one the layout gives (Ctrl+A on AZERTY is
+ *     the key labelled A), or the key's place for a layout without Latin letters, as the system does;
+ *   clearSelection: Escape alone while text of the terminal is selected; without a selection, Escape goes to the editor
+ *     (interruptKey).
+ */
+export function shortcutOf(event, hasSelection) {
+    const bare = !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey;
+    if (event.key === 'Escape') return bare && hasSelection ? 'clearSelection' : null;
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) return null;
+    const key = String(event.key ?? '').toLowerCase();
+    return /^[a-z]$/.test(key) ? shortcutLetters[key] ?? null : shortcutCodes[event.code] ?? null;
+}
+
+/**
+ * Lets the system's shortcuts work in an xterm.js `terminal`, instead of becoming control characters for the editor
+ * (Ctrl+C would send \x03, Ctrl+V \x16): the engine runs its own copy, cut and paste, whichever the frontend (CEF,
+ * WebView2, WebKitGTK, WKWebView through its Edit menu, a system browser), and xterm.js answers them:
+ *   - copy and cut put the selection on the clipboard; nothing of the terminal can be removed, so a cut copies. The
+ *     selection is also put in xterm.js's hidden textarea and selected there, as xterm.js does for its context menu,
+ *     so that an engine that enables Copy only for a selection of the page (a native Edit menu) enables it;
+ *   - paste reaches xterm.js's paste handler, which gives the text to onData: a pasted line break submits the line, and
+ *     the lines after it wait for the command before them (LineEditor.insertText);
+ *   - select all selects the whole terminal, not the page;
+ *   - Escape clears a selection; without one, it reaches the editor and interrupts the command that runs.
+ * Without a selection, Ctrl+C does nothing. Returns a function that removes the listeners.
+ */
+export function attachShortcuts(terminal) {
+    const element = terminal.element, textarea = terminal.textarea;
+    let staged = false;  // the selection waits in the textarea for the engine's copy or cut
+    const unstage = () => {
+        if (!staged) return;
+        staged = false;
+        textarea.value = '';
+    };
+    terminal.attachCustomKeyEventHandler(event => {
+        const action = shortcutOf(event, terminal.hasSelection());
+        if (event.type !== 'keydown') return action === null;
+        unstage();
+        if (action === null) return true;
+        if (action === 'selectAll' || action === 'clearSelection') {
+            event.preventDefault();  // the page's own selection stays as it is
+            if (action === 'selectAll') terminal.selectAll(); else terminal.clearSelection();
+        } else if ((action === 'copy' || action === 'cut') && terminal.hasSelection()) {
+            textarea.value = terminal.getSelection();
+            textarea.select();
+            staged = true;
+        }
+        return false;  // xterm.js leaves the event to the engine, which copies, cuts or pastes
+    });
+    // The engine enables Copy and Cut for a selection of the page; cancelling beforecopy and beforecut enables them for
+    // the terminal's own selection too. xterm.js fills the clipboard on copy; a cut does the same, the terminal unchanged.
+    const enable = event => { if (terminal.hasSelection()) event.preventDefault(); };
+    const cut = event => {
+        if (!terminal.hasSelection()) return;
+        event.clipboardData?.setData('text/plain', terminal.getSelection());
+        event.preventDefault();
+    };
+    const listeners = [['beforecopy', enable], ['beforecut', enable], ['cut', cut], ['copy', unstage], ['cut', unstage], ['blur', unstage]];
+    for (const [type, listener] of listeners) (type === 'blur' ? textarea : element).addEventListener(type, listener);
+    return () => {
+        terminal.attachCustomKeyEventHandler(() => true);
+        unstage();
+        for (const [type, listener] of listeners) (type === 'blur' ? textarea : element).removeEventListener(type, listener);
+    };
+}
+
 // --- Line editor -----------------------------------------------------------------------------------------------
 
-// Editing keys, as xterm.js reports them in onData, mapped to LineEditor actions.
+// Editing keys, as xterm.js reports them in onData, mapped to LineEditor actions. Ctrl+C is not one of them: it copies
+// (attachShortcuts), and the interruption of a command is Escape or the Stop button.
 const keyActions = new Map([
     ['\r', editor => editor.submit()],
     ['\x7f', editor => editor.erase(-1)],
@@ -228,7 +308,6 @@ const keyActions = new Map([
     ['\x1b[A', editor => editor.recall(-1)],
     ['\x1b[B', editor => editor.recall(1)],
     ['\t', editor => editor.track(editor.completeThenReplay())],
-    ['\x03', editor => editor.cancelLine()],
     ['\x0c', editor => editor.clearScreen()],
     ['\x15', editor => editor.killBeforeCursor()],
     ['\x0b', editor => editor.killAfterCursor()],
@@ -240,7 +319,7 @@ export const historyLimit = 500;
  * Line editor driven by the terminal's input data.
  *   write(text): displays text; columns() and rows(): the terminal's size;
  *   run(line, signal): a Promise of the command's output; it rejects with an Error whose exitCode (1 by default, 130
- *     once Ctrl+C aborted `signal`) becomes the status;
+ *     once interrupt() aborted `signal`) becomes the status;
  *   complete(line): a Promise of {candidates}, the full words that can replace the word at the end of the line (its
  *     value as wordAtEnd reads it);
  *   remember(line): persists a line added to the history.
@@ -319,10 +398,10 @@ export class LineEditor {
         if (!data.startsWith('\x1b')) return this.insertText(data);
     }
 
-    // While a command runs, Ctrl+C aborts it and drops the keys typed after it; other keys, typed or pasted, wait for
-    // the command and are applied after it.
+    // While a command runs, Escape (a lone ESC, which no other key sends) interrupts it and drops the keys typed after
+    // it; other keys, typed or pasted, wait for the command and are applied after it.
     whileBusy(data) {
-        if (data === '\x03') return this.interrupt();
+        if (data === interruptKey) return this.interrupt();
         this.typeAhead(data);
     }
 
@@ -355,10 +434,20 @@ export class LineEditor {
         return null;
     }
 
+    /** Whether a command runs that interrupt() would stop: it has not been interrupted yet. */
+    get interruptible() {
+        return this.abort?.signal.aborted === false;
+    }
+
+    /**
+     * Interrupts the command that runs (Escape, the Stop button): its signal is aborted, it ends with 130, and the keys
+     * typed after it are dropped. Nothing happens while no command runs.
+     */
     interrupt() {
+        if (!this.running) return;
         this.ahead = [];
-        if (this.abort?.signal.aborted !== false) return;
-        this.write('^C\r\n');
+        if (!this.interruptible) return;
+        this.write(`${this.atLineStart ? '' : '\r\n'}${ansi.dim('Interrupted')}\r\n`);
         this.abort.abort(new Error('Interrupted'));
     }
 
@@ -418,15 +507,6 @@ export class LineEditor {
         if (index < 0 || index > this.history.length) return;
         this.historyIndex = index;
         this.setLine(index === this.history.length ? '' : this.history[index]);
-    }
-
-    cancelLine() {
-        this.moveTo(this.cells.length);
-        this.write('^C\r\n');
-        this.cells = [];
-        this.cursor = 0;
-        this.historyIndex = this.history.length;
-        this.showPrompt();
     }
 
     clearScreen() {
@@ -526,7 +606,7 @@ export class LineEditor {
         } catch (error) {
             this.status = error?.exitCode ?? (signal.aborted ? 130 : 1);
             const message = String(error?.message ?? error);
-            // Ctrl+C already shows ^C: a bare interruption adds nothing. A code other than 1 is shown, unless the
+            // interrupt() already said so: a bare interruption adds nothing. A code other than 1 is shown, unless the
             // message already gives it ("exited with code 3").
             const stated = this.status === 1 || new RegExp(`\\bcode ${this.status}\\b`).test(message);
             if (!(signal.aborted && message === 'Interrupted'))
@@ -539,7 +619,7 @@ export class LineEditor {
     }
 
     // Keys typed while the completion is pending are kept and applied once it is inserted, in order: once one of them
-    // submits the line, the next ones act on its command like keys typed while it runs (Ctrl+C interrupts it).
+    // submits the line, the next ones act on its command like keys typed while it runs (Escape interrupts it).
     async completeThenReplay() {
         this.completing = [];
         try { await this.completeLine(); }

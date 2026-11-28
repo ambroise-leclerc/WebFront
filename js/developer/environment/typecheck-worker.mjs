@@ -38,7 +38,7 @@ async function run({lock, typescript, entries, bounds: given}) {
     const {snapshot, rootNames} = loaded;
     print(`Checking ${rootNames.length} root file${rootNames.length === 1 ? '' : 's'} with TypeScript ${ts.version} ` +
         `(snapshot: ${snapshot.files.size} files, ${(snapshot.bytes / 1048576).toFixed(1)} MiB)`);
-    // Synchronous from here: Ctrl+C can only terminate the Worker.
+    // Synchronous from here: an interruption can only terminate the Worker.
     const {lines, code, diagnostics} = checkReport(ts, snapshot, checkProgram(ts, loaded, typescript), bounds);
     for (const line of lines) print(line, code ? 'err' : 'out');
     self.postMessage({type: 'exit', code, diagnostics});

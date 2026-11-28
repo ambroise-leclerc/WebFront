@@ -1,6 +1,8 @@
 import {Terminal} from '@xterm/xterm';
 import {FitAddon} from '@xterm/addon-fit';
-import {LineEditor, tokenize, wordAtEnd, unicodeProvider, clearScreen, historyLimit, inline} from './terminal.mjs';
+import {LineEditor, tokenize, wordAtEnd, unicodeProvider, clearScreen, historyLimit, inline, attachShortcuts} from './terminal.mjs';
+// The line editor and its interruption key, for a page that drives a command like the terminal (the integration specs).
+export {LineEditor, interruptKey} from './terminal.mjs';
 import {manifestPath, setManifestDirectory} from './manifest.mjs';
 import {discoverCommands, runCommand, reservedNames} from './commands.mjs';
 export {discoverCommands, reservedNames};
@@ -218,13 +220,13 @@ const cleanupRetryDelays = [20, 40, 80, 160, 320, undefined];
 
 // wf test [--timeout <seconds>] [pattern]: the specs of "test.specs" under the Jasmine of the lock, in a frame of this page.
 // context.onReport receives the structured report, also when the run fails. --timeout, never later than the deadline
-// of the wf script that runs this command, covers the whole command: no step waits for the bridge past it, and Ctrl+C
-// ends every step as well.
+// of the wf script that runs this command, covers the whole command: no step waits for the bridge past it, and an
+// interruption ends every step as well.
 async function test(args, {bridge, signal, write = () => {}, createFrame, onReport, deadline: inherited}) {
     const {timeout, pattern} = parseTestOptions(args);
     const deadline = runDeadline(timeout, inherited);
     const limit = new AbortController();
-    // Forward Ctrl+C into the deadline controller: older supported WebKit lacks AbortSignal.any.
+    // Forward an interruption into the deadline controller: older supported WebKit lacks AbortSignal.any.
     const interrupt = () => limit.abort(signal.reason);
     const preparing = limit.signal;
     const step = promise => abortable(promise, preparing);
@@ -253,7 +255,7 @@ async function test(args, {bridge, signal, write = () => {}, createFrame, onRepo
         write('\n');
         return reportResult(report);
     } catch (error) {
-        // An abort of the preparation ends the command like it ends a run: Ctrl+C with 130, the limit with 124, and a report.
+        // An abort of the preparation ends the command like it ends a run: an interruption with 130, the limit with 124, and a report.
         if (!error.report) {
             if (signal?.aborted) error = stoppedRun('interrupted', pattern);
             else if (limit.signal.aborted) error = stoppedRun('timeout', pattern);
@@ -325,7 +327,7 @@ const purposes = {
     why: 'Shows which dependencies of the manifest bring a package, as chains of requirements.',
     info: 'Describes an installed package: license, integrity, files, dependencies and dependents.',
     build: 'Compiles the entries once into .webfront/developer/build/.',
-    dev: 'Compiles a TypeScript/TSX entry (ui/main.tsx), shows the interface in the window and rebuilds on every save. Ctrl+C stops it.',
+    dev: 'Compiles a TypeScript/TSX entry (ui/main.tsx), shows the interface in the window and rebuilds on every save. Escape or the Stop button stops it.',
     preview: 'Compiles an entry once and shows the interface in the window.',
     embed: 'Compiles an entry and packages it as a C++ header for the distributed application.',
     help: 'Lists the commands, describes one, or with agents gives the sequence for an agent.'};
@@ -359,7 +361,7 @@ function help([topic, ...extra] = [], {config} = {}) {
         return `${usage[topic]}\n${typeof purpose === 'function' ? purpose(config) : purpose}`;
     }
     return Object.values(usage).join('\n') + '\nAgents: wf help agents (the sequence, and how to run wf through MCP).' +
-        '\nCtrl+C interrupts a command. No system shell is exposed.' + automationHelp();
+        '\nEscape or the Stop button interrupts a command. No system shell is exposed.' + automationHelp();
 }
 const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, check, test, build, dev, preview, embed, list, why, info, help};
 
@@ -529,7 +531,7 @@ const builtins = {
             line('history', 'List the commands typed in this project; history -c clears them'),
             line('exit', 'End the session [with an exit code]'), line('help', 'List the commands'),
             ...[...cppCommands].map(([name, text]) => line(name, text)),
-            'Paths are relative to the project. Ctrl+C interrupts a command. No system shell is exposed.'].join('\n');
+            'Paths are relative to the project. Escape or the Stop button interrupts a command. No system shell is exposed.'].join('\n');
     },
     ls: (args, {bridge, editor}) => ls(args, {bridge, width: editor?.columns?.() ?? 80, manifest: () => cachedManifest(bridge)}),
     cat: (args, {bridge, signal}) => cat(args, {bridge, signal}),
@@ -645,6 +647,56 @@ export async function complete(line, {bridge, cppCommands = new Map()}) {
     return matching(await projectPaths(bridge, word));
 }
 
+// The Stop button: in the bar of the floating terminal window, else over the terminal's top right corner.
+const stopStyles = `
+.webfront-terminal-stop{box-sizing:border-box;height:24px;margin:0;padding:0 10px;display:inline-flex;align-items:center;gap:6px;border:1px solid #8a3d3d;border-radius:4px;background:#5a1f1f;color:#ffe3e3;font:12px system-ui;cursor:pointer}
+.webfront-terminal-stop::before{content:'';width:8px;height:8px;background:currentColor}
+.webfront-terminal-stop:hover:not(:disabled){background:#7a2626}
+.webfront-terminal-stop:focus-visible{outline:2px solid #d7fa85;outline-offset:1px}
+.webfront-terminal-stop:disabled{opacity:.55;cursor:default}
+.webfront-terminal-stop[hidden]{display:none}
+:not(.webfront-terminal-bar)>.webfront-terminal-stop{position:absolute;top:6px;right:18px;z-index:10}
+.webfront-terminal-bar>.webfront-terminal-stop{margin:0 6px 0 auto}`;
+const styledPages = new WeakSet();
+
+/**
+ * The Stop button of a terminal: shown while a command runs, it interrupts it like Escape (`interrupt`), then stays
+ * disabled until the command has ended. Pressing it leaves the focus in the terminal.
+ */
+function stopButton(page, {interrupt, focus}) {
+    if (!styledPages.has(page)) {
+        styledPages.add(page);
+        const style = page.createElement('style');
+        style.textContent = stopStyles;
+        page.head.append(style);
+    }
+    const button = page.createElement('button');
+    button.type = 'button';
+    button.className = 'webfront-terminal-stop';
+    button.textContent = 'Stop';
+    button.title = 'Stop the command (Esc)';
+    button.setAttribute('aria-label', 'Stop the running command');
+    button.setAttribute('aria-keyshortcuts', 'Escape');
+    button.hidden = true;
+    button.addEventListener('mousedown', event => event.preventDefault());  // the terminal keeps the focus
+    button.addEventListener('click', () => {
+        interrupt();
+        focus();
+    });
+    return {
+        button,
+        /** A command starts: the button stops it until its signal is aborted. */
+        running(signal) {
+            Object.assign(button, {hidden: false, disabled: signal.aborted});
+            signal.addEventListener('abort', () => { button.disabled = true; }, {once: true});
+        },
+        ended() {
+            if (button.contains(page.activeElement)) focus();  // a hidden button would hold the keys
+            Object.assign(button, {hidden: true, disabled: false});
+        },
+    };
+}
+
 /** The terminal of each page that had the focus last: the one a click on the page around the terminals gives it back to. */
 const focusedTerminal = new WeakMap();
 
@@ -685,6 +737,11 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
         inspectorUrl: new URL('./inspector.html', import.meta.url).href});
     terminal.open(element);
     fit.fit();
+    // Ctrl+C and ⌘C copy, Ctrl+V and ⌘V paste, Ctrl+A and ⌘A select all; Escape or the Stop button interrupts a command.
+    attachShortcuts(terminal);
+    const stop = stopButton(element.ownerDocument, {interrupt: () => editor?.interrupt(), focus: () => terminal.focus()});
+    if (element.ownerDocument.defaultView.getComputedStyle(element).position === 'static') element.style.position = 'relative';
+    element.append(stop.button);
     const write = text => terminal.write(text);
     // Keys typed while the commands and the history load are applied once the editor is ready.
     const early = [];
@@ -701,8 +758,12 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
         remember: line => rememberLine(bridge, line),
         run: async (line, signal) => {
             workspace?.command(true);  // the tab shows that a command runs, also while the terminal is collapsed
+            stop.running(signal);
             try { return await runLine(line, {...context, editor, signal, write: text => editor.write(text)}); }
-            finally { workspace?.command(false); }
+            finally {
+                stop.ended();
+                workspace?.command(false);
+            }
         },
         complete: line => complete(line, context)});
     terminal.onResize(() => editor.resized());
@@ -759,7 +820,7 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
     if (workspace) {
         // The interface the project already has fills the window; the keys go to it while the terminal is collapsed.
         if (workspace.interfaceExists) showPreview(preview);
-        workspace.attach({focus: () => terminal.focus(), fit: fitToElement ? fitTerminal : undefined});
+        workspace.attach({focus: () => terminal.focus(), fit: fitToElement ? fitTerminal : undefined, stop: stop.button});
     } else terminal.focus();
-    return {terminal, editor, workspace, inspectors: () => inspectors?.host() ?? null};
+    return {terminal, editor, workspace, stop: stop.button, inspectors: () => inspectors?.host() ?? null};
 }

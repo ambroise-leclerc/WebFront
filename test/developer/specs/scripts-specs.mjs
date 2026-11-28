@@ -178,7 +178,7 @@ describe('wf run and wf exec', () => {
         expect(failed).toEqual({reason: 'exit', code: 1, error: 'Error: boom'});
     });
 
-    it('Ctrl+C aborts the script cooperatively, then terminates one that does not stop', async () => {
+    it('an interruption aborts the script cooperatively, then terminates one that does not stop', async () => {
         const controller = new AbortController();
         const cooperative = fastRun((message, w) => { if (message.type === 'abort') w.emit({type: 'error', error: 'Error: Interrupted'}); }, {signal: controller.signal});
         controller.abort();
@@ -192,11 +192,11 @@ describe('wf run and wf exec', () => {
         expect(looping.worker.received.some(message => message.type === 'abort')).withContext('the signal is emitted before the termination').toBeTruthy();
         const publications = [{path: 'generated/a', state: 'applied'}, {path: 'generated/b', state: 'abandoned'}];
         throws(() => runResult('Script loop', outcome, publications), error => error.exitCode === 130
-            && /stopped by Ctrl\+C \(terminated after the 0.02 s grace period\)/.test(error.message)
+            && /interrupted \(terminated after the 0.02 s grace period\)/.test(error.message)
             && /Applied before the stop: generated\/a/.test(error.message) && /Abandoned, unchanged: generated\/b/.test(error.message));
     });
 
-    it('the time limit stops a script the same way, without Ctrl+C', async () => {
+    it('the time limit stops a script the same way, without an interruption', async () => {
         const {worker, outcome} = fastRun(() => {}, {timeout: 0.01});
         expect(await outcome).toEqual({reason: 'timeout', code: 124, forced: 20});
         expect(worker.terminated && worker.received.some(message => message.type === 'abort')).toBeTruthy();

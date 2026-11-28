@@ -72,7 +72,7 @@ declare `"entries": {"main": "ui/main.ts"}`; the rest of the loop is the same.
 wf create app            # writes ui/main.ts, ui/style.css and ui/AGENTS.md; never replaces an existing ui/
 wf init                  # writes webfront.project.json, the manifest every other command reads
 wf install <package>     # only when the interface imports npm packages (wf create lists the starter's)
-wf dev ui/main.ts        # builds, shows the interface in the window and rebuilds on every save; Ctrl+C stops it
+wf dev ui/main.ts        # builds, shows the interface in the window and rebuilds on every save; Escape or the Stop button stops it
 wf check                 # type check: needs tsconfig.json and `wf install typescript`
 wf test                  # the Jasmine specs of "test": {"specs": [...]}: needs `wf install jasmine-core`
 wf build                 # compiles the manifest's entries once

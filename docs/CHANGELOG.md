@@ -11,11 +11,13 @@ these entries stays in the GitHub releases and the Git history.
 ## Unreleased
 
 ### Breaking
+- In the developer environment's terminal, Ctrl+C no longer interrupts a command nor clears the line: press Escape (with no text selected) or the terminal's **Stop** button; the interruption is unchanged (exit code 130, `webfront.commands.cancel`, the grace period of scripts, status `interrupted`), its messages say `interrupted` (#721, `docs/DEVELOPER_ENVIRONMENT.md`).
 - A custom frontend whose `open()` takes `const ViewLaunch&` declares `static bool providesViewProof()`, `true` when it gives the proof to its view and `false` otherwise, or the developer environment no longer compiles with it: undeclared, its proven view would leave project writes and C++ commands unguarded (#680, ADR-027, `docs/FRONTENDS.md`).
 - `cppFunction` (and `Space::cppFunction`) refuses the names starting with `webfront.inspector.`, reserved to the inspectors, with `std::invalid_argument`: rename such a function, and its `webFront.cppFunction(...)` calls in the page, to a name of your own (#680, ADR-027).
 - An external tool that writes the project (`webfront.developer.*` writes) or starts terminal commands (`webfront.commands.start`, `cancel`) through the bridge is refused with `webfront.inspector.denied` when the frontend proves its view: run it in that view, use MCP automation, or set `trustLoopbackClients` knowingly (#680, ADR-027, `docs/DEVELOPER_ENVIRONMENT.md`).
 
 ### Added
+- Copy, paste, cut and select all in the terminal of the developer environment with the system's shortcuts, Ctrl+C/V/X/A (Cmd on macOS), on CEF, WebView2, WebKitGTK, WKWebView and a system browser: they no longer become control characters, and a paste of several lines still runs them one after the other (#721, `docs/DEVELOPER_ENVIRONMENT.md`).
 - Open the inspectors from the WebFront tab's menu of the developer environment: each panel shows in a floating window of the page and can be detached to a native secondary window (WebKitGTK, WKWebView, WebView2) or, with `trustLoopbackClients`, a tab of the system browser; the choice and the place are kept per project (#680, ADR-027, `docs/DEVELOPER_ENVIRONMENT.md`).
 - See in the **Functions** panel of the inspectors what the application registered: each `cppFunction` with its signature written in TypeScript, the file and line of its registration, whether it receives the calling `UI`, its calls, failures, last error and durations, then the JavaScript functions that C++ calls; sort, search, and choose the refresh period (#681, ADR-027, `docs/DEVELOPER_ENVIRONMENT.md`).
 - See in the **Browsers and tasks** panel the connected browsers (embedded view or external browser, local client, pending writes and calls), the running tasks of the server and the application's terminal commands (#681, ADR-027).
@@ -43,7 +45,7 @@ these entries stays in the GitHub releases and the Git history.
 
 ### Changed
 - Detach and attach an inspector panel with small icons, a frame with an arrow leaving it or entering it, instead of the **Detach** and **Attach** words; their tooltip and accessible name say the action, and a greyed detach icon still says why (#722, `docs/DEVELOPER_ENVIRONMENT.md`).
-- `wf test` stopped at its time limit or by Ctrl+C says how far its runner got, in its message and in the report's new `stage`: the last step reached, the spec in progress, and the runner files that never finished loading (#690, `docs/DEVELOPER_ENVIRONMENT.md`).
+- `wf test` stopped at its time limit or by an interruption says how far its runner got, in its message and in the report's new `stage`: the last step reached, the spec in progress, and the runner files that never finished loading (#690, `docs/DEVELOPER_ENVIRONMENT.md`).
 - Destroying the handle of a watch (`inspect::Watch`) waits for an operation of the inspectors in progress on another thread: destroy it outside every lock its source takes, or declare the watch with the state it owns (#682, ADR-027, `docs/WATCHES.md`).
 - `cppFunction` and `Space::cppFunction` take a last, defaulted `std::source_location`, which the inspectors show; existing calls compile unchanged, the explicit `cppFunction<R, Args...>` form included (#681, ADR-027).
 - Document the security contract of the application's callbacks: one that writes the project or what the server serves, starts a process or exposes a sensitive state takes the calling `UI` and checks `ui.isLocalClient()`, since WebFront guards only its own functions (#686, ADR-027, `docs/DEVELOPING_WITH_AGENTS.md`).
