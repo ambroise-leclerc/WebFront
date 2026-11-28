@@ -487,6 +487,8 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
         get bridge() { return bridge; },
         /** The monitor of the bridge in this page (inspector-bridge.mjs): the frame reads it, the detached panels read what it publishes. */
         get bridgeState() { return bridgeState; },
+        /** Whether this page publishes the state of its bridge now: a detached Bridge panel reads it. */
+        get bridgePublishing() { return publisher.running; },
         get shownPanel() { return shownPanel; },
         get frame() { return frame; },
         panel, bar, detachButton, closeButton, notice,

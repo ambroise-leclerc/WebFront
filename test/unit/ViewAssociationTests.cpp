@@ -851,7 +851,6 @@ const Scenario inspectorBridgeRelay{
        });
        then("the inspector reads the same rows back, encoded as a list of tuples", [&] {
        require(answer.contains(encodedValue(rows)));
-       require(!answer.contains("wfInspect.publish"));
        });
        });
        });

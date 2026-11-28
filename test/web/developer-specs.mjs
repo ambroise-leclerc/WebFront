@@ -1118,6 +1118,22 @@ try {
                     const rejected = () => tableRows(1).find(row => row[1] === 'test.noSuchFunction');
                     await until(rejected, () => `A rejected Promise must be shown: ${JSON.stringify(tableRows(1))}`);
                     assert(/^webfront\.notFound: /.test(rejected()[2]), `A rejection must be shown with its reason: ${rejected()[2]}`);
+                    if (secondaryWindow) {
+                        // Detached in a native window, the panel reads the relay for this page: its first read asks this page to
+                        // publish, which proves that it named this page and reached C++. The window's document is not reachable
+                        // from here; what it reads is checked below through the same relay.
+                        assert(!window.webfrontInspectorHost.bridgePublishing, 'A page must not publish while no detached panel reads');
+                        const views = await webFront.cppFunction('test.views')();
+                        floating().querySelector('.webfront-inspector-detach').click();
+                        await until(() => floating().hidden, 'A detached Bridge panel must leave the floating window');
+                        await until(async () => await webFront.cppFunction('test.views')() === views + 1, 'The detached Bridge panel must be a proven view');
+                        await until(() => window.webfrontInspectorHost.bridgePublishing,
+                            'The detached Bridge panel must read the state of this page, which then publishes it');
+                        await webFront.cppFunction('webfront.inspector.closeWindow')('typescript.bridge', window.webfrontInspectorHost.id);
+                        window.webfrontInspectorHost.attach('typescript.bridge');
+                        await window.webfrontInspectorHost.saved();
+                        await until(rejected, 'The Bridge panel attached again must show the rejection');
+                    }
                     // Detached, the panel reads the relay: this page publishes once a reader asks, and the state is the same.
                     const {readPublishedState} = await import(`${location.origin}/webfront/developer/environment/inspector.mjs`);
                     let relayed = null;

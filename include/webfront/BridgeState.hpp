@@ -35,8 +35,9 @@ inline constexpr std::size_t maxBridgeRows = 256;
 /// The states of at most this many pages are kept: past it, the state of the page read the longest ago is dropped, and that
 /// page publishes it again when it is read.
 inline constexpr std::size_t maxBridgeSources = 16;
-/// At most this many pages are known at once, each by its identifier and the two callbacks of its connection; past it, a
-/// page that announces itself takes the place of the one that was read the longest ago.
+/// At most this many pages are known at once, each by its identifier and the two callbacks of its connection. A connection
+/// has one page at most (announcing another identifier drops its previous one), and a page whose connection is gone is
+/// dropped first: past the bound, an announcement is refused, and no connected page ever loses its place.
 inline constexpr std::size_t maxBridgeAnnouncements = 256;
 /// A page publishes for this long after an inspector read its state: longer than the slowest period of a panel (5 s), so
 /// that a panel that reads keeps its page publishing, and a panel that is paused or closed lets it stop.
@@ -92,17 +93,27 @@ public:
      * Bridge panel was detached again) keeps its state; another connection under the same identifier (the page was loaded
      * again) replaces it and its state is forgotten. A reader's lease is kept either way. Returns whether a reader is
      * waiting for it now.
+     * @throws BridgeError `webfront.inspector.unavailable` when maxBridgeAnnouncements connected pages are known already
      */
     template <typename Owner>
     bool announce(const std::string& host, Owner owner, std::function<void()> ask, std::function<bool()> alive, Clock::time_point now = Clock::now()) {
         std::scoped_lock lock{mutex};
-        std::erase_if(sources, [&](const auto& entry) {
-            return entry.first != host && !entry.second.alive();
+        // Dropped: the pages whose connection is gone (a reader's lease is kept for the page that comes back under that
+        // identifier), and the earlier page of this connection under another identifier.
+        std::erase_if(sources, [&](auto& entry) {
+            if (entry.first == host)
+                return false;
+            const auto same = std::any_cast<Owner>(&entry.second.owner);
+            if (same && *same == owner)
+                return true;
+            if (entry.second.alive())
+                return false;
+            if (now < entry.second.wantedUntil)
+                keepReader(entry.first, entry.second.wantedUntil);
+            return true;
         });
         if (!sources.contains(host) && sources.size() >= maxBridgeAnnouncements)
-            sources.erase(std::ranges::min_element(sources, {}, [](const auto& entry) {
-                return entry.second.wantedUntil;
-            }));
+            throw webfront::detail::makeBridgeError(code::unavailable, "Too many pages publish the state of their bridge");
         // A reader may have asked before the page announced itself (a detached panel outlives a reload of its page).
         auto wanted = readers.contains(host) ? readers[host] : Clock::time_point{};
         readers.erase(host);
@@ -189,17 +200,14 @@ public:
         if (found == sources.end() || !found->second.alive()) {
             if (found != sources.end())
                 sources.erase(found);
-            // Kept for the page that announces itself next under this identifier, within the same bound as the sources.
-            if (readers.size() >= maxBridgeSources && !readers.contains(host))
-                readers.erase(std::ranges::min_element(readers, {}, [](const auto& entry) {
-                    return entry.second;
-                }));
-            readers[host] = now + bridgeLease;
-            result.page   = BridgePage{std::vector<BridgeRow>{}, 0.0, 0.0, 0.0, 0.0};
+            // Kept for the page that announces itself next under this identifier.
+            keepReader(host, now + bridgeLease);
+            result.page = BridgePage{std::vector<BridgeRow>{}, 0.0, 0.0, 0.0, 0.0};
             return result;
         }
-        auto& source       = found->second;
-        source.wantedUntil = now + bridgeLease;
+        auto& source = found->second;
+        // The latest lease wins: a read whose time was taken earlier but that takes the lock last never shortens it.
+        source.wantedUntil = (std::max)(source.wantedUntil, now + bridgeLease);
         const bool fresh   = source.publication != 0 && now - source.publishedAt < bridgeAskAgain;
         if (!fresh && (source.askedAt == Clock::time_point{} || now - source.askedAt >= bridgeAskAgain)) {
             source.askedAt = now;
@@ -251,6 +259,20 @@ public:
     }
 
 private:
+    /// Keeps a reader's lease for an identifier that no page holds now: the latest of the leases, within the bound of
+    /// maxBridgeSources identifiers (past it, the one whose lease ends first is dropped).
+    void keepReader(const std::string& host, Clock::time_point until) {
+        if (const auto found = readers.find(host); found != readers.end()) {
+            found->second = (std::max)(found->second, until);
+            return;
+        }
+        if (readers.size() >= maxBridgeSources)
+            readers.erase(std::ranges::min_element(readers, {}, [](const auto& entry) {
+                return entry.second;
+            }));
+        readers.emplace(host, until);
+    }
+
     struct Source {
         std::any               owner;
         std::function<void()>  ask;

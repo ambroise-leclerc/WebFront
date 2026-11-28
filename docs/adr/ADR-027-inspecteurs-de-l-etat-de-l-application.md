@@ -849,10 +849,12 @@ appels. Cet état vit dans la page de l'application.
   lecture les appels en attente, apprend l'issue de `ready` par la Promise elle-même, et le panneau dit que l'historique
   manque. Une exception du moniteur ne retient jamais le règlement d'une Promise de l'application. Les appels de l'inspecteur lui-même
   (`webfront.inspector.*`, `wfInspect.*`) ne sont pas suivis. Un appel suivi l'est jusqu'à sa réponse, même après le
-  retrait de la sonde : il faut de toute façon le retirer des appels en attente, et son rejet éventuel reste donc listé. L'état est borné : 100 appels en attente (les plus
+  retrait de la sonde : il faut de toute façon le retirer des appels en attente, et son rejet éventuel reste donc listé. L'état rendu est borné : 100 appels en attente (les plus
   anciens), 50 rejets (les plus récents), 100 fonctions JavaScript (les plus appelées, sur 1 000 noms comptés un par un),
   textes de 256 octets coupés sur une frontière de caractère, caractères de contrôle rendus visibles ; un nom long est
-  compté sous son libellé borné.
+  compté sous son libellé borné. Pour savoir quand un appel
+  se termine, le moniteur en enveloppe chacun et garde une entrée par appel en attente, comme le pont lui-même : ce
+  stockage suit `pendingCalls`, que les identifiants d'appel sur 16 bits bornent à 65 535 entrées.
 - **Panneau rattaché.** L'iframe de la fenêtre flottante lit le moniteur de sa page hôte
   (`window.parent.webfrontInspectorHost.bridgeState`), sans passer par C++.
 - **Panneau détaché : relais par C++.** Une autre fenêtre ne voit pas la page, et `BroadcastChannel` n'est pas garanti
@@ -872,8 +874,11 @@ appels. Cet état vit dans la page de l'application.
 - **Bornes du relais.** Un état de plus de 256 lignes est refusé (`std::invalid_argument`) sans remplacer le précédent ;
   chaque texte est borné par `boundedText` (256 octets, 16 pour le genre). C++ connaît 256 pages au plus (un identifiant
   et deux rappels chacune) et garde l'état publié de 16 d'entre elles : au-delà de 16 états, la page lue le moins
-  récemment perd son état mais pas sa place, et une lecture la relance ; au-delà de 256 pages, elle perd sa place. Une page
-  déconnectée est oubliée. Une page qui a perdu sa place s'annonce de nouveau quand son panneau est détaché, ou quand sa
+  récemment perd son état mais pas sa place, et une lecture la relance. Une connexion a une page au plus (une annonce
+  sous un autre identifiant retire la précédente) et une page connectée ne perd jamais sa place : au-delà de 256 pages
+  connectées, une annonce est refusée (`webfront.inspector.unavailable`). Une page déconnectée est oubliée à la première
+  lecture ou annonce qui la constate, en gardant pour son identifiant le bail d'un lecteur : une lecture la trouve
+  déconnectée et rend une page vide, sans drapeau de source. Une page qui a perdu sa place s'annonce de nouveau quand son panneau est détaché, ou quand sa
   publication est refusée (`unknown`) ; une nouvelle annonce garde le bail d'un lecteur, et celle de la même connexion
   garde aussi son état. Un état appartient à la connexion qui s'est annoncée la dernière sous cet
   identifiant : la publication d'une autre connexion est refusée (`webfront.inspector.unavailable`). Une publication sans annonce est

@@ -359,10 +359,27 @@ describe('The panel of the bridge in the page', () => {
             const state = monitor.read();
             expect(state.jsFunctions.map(entry => entry.calls)).toEqual([2, 1]);
             expect(state.jsTotal).toBe(2);
+            // Shown apart too: each label keeps the digest of its whole name, within the bound.
+            const [first, second] = state.jsFunctions.map(entry => entry.name);
+            expect(first).not.toBe(second);
+            expect(first.endsWith(`#${digest(`${shared}.first`)}`)).toBeTrue();
+            expect(second.endsWith(`#${digest(`${shared}.second`)}`)).toBeTrue();
+            for (const label of [first, second]) expect(new TextEncoder().encode(label).length).toBeLessThanOrEqual(limits.text);
             expect(digest(`${shared}.first`)).not.toBe(digest(`${shared}.second`));
             expect(digest('a')).toMatch(/^[0-9a-f]{16}$/);
             expect(digest('')).toBe('cbf29ce484222325');  // the FNV-1a offset basis
             expect(digest('a')).toBe('af63dc4c8601ec8c');  // FNV-1a 64 of "a"
+        });
+
+        it('shows a short name with its control characters made visible, as the relay shows it', () => {
+            const bridge = fakeWebFront(), time = manualTime();
+            const monitor = monitorOf(bridge, time);
+            monitor.read();
+            bridge.called('draw\nframe');
+            bridge.called('draw\nframe');
+            const [called] = monitor.read().jsFunctions;
+            expect(called).toEqual(jasmine.objectContaining({name: 'draw\u240aframe', calls: 2}));
+            expect(fromRows(toRows(monitor.read())).jsFunctions[0].name).toBe('draw\u240aframe');
         });
 
         it('keeps of a long name no more than its bounded label', () => {
