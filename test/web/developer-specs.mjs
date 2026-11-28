@@ -750,6 +750,10 @@ try {
                 clock.fire(60000);
                 const hung = await hanging;
                 assert(hung.error?.exitCode === 124 && hung.report?.status === 'timeout' && /time limit/.test(hung.error.message), `A hanging run must stop at its time limit: ${hung.error}`);
+                // It names how far the runner got (#690): every runner file loaded, and the spec that hangs.
+                const stage = hung.report.stage;
+                assert(stage?.reached === 'specs running' && stage.current === 'hanging never ends' && stage.specs === 0 && stage.missing.length === 0 &&
+                    /stage: specs running, in hanging never ends/.test(hung.error.message), `A hanging run must name its stage: ${JSON.stringify(stage)}`);
                 assert(!document.querySelector('iframe[title="WebFront tests"]'), 'A timed out run must remove its frame');
             } finally { started.dispose(); }
         });

@@ -18,7 +18,9 @@
 #include <iostream>
 #include <iterator>
 #include <map>
+#include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <netinet/in.h>
@@ -349,6 +351,41 @@ void committedNavigation() {
     Session initial("http://127.0.0.1:9002/", {.visible = false});
     initial.rejectNavigation("initial navigation was denied by contentPolicy");
     require(initial.closed && initial.failure, "A denied initial navigation was not reported");
+}
+
+// A web content process that ends fails the session with WebKit's reason (#706): an engine crash says it is one, not a
+// failure of the page. WebKit calls the private delegate method with the reason; the public one, without, remains.
+void contentProcessTermination() {
+    Object                                               pool(send(type("NSAutoreleasePool"), "new"));
+    const std::vector<std::pair<long, std::string_view>> reasons{
+        {0,                                     "web content process terminated: it exceeded its memory limit"},
+        {1,                                        "web content process terminated: it exceeded its CPU limit"},
+        {2,                                "web content process terminated: at the request of the application"},
+        {3, "web content process terminated: it crashed, a fault of the WebKit engine rather than of the page"},
+        {9,                                                         "web content process terminated: reason 9"}
+    };
+    for (const auto& [reason, diagnostic] : reasons) {
+        Session session("http://127.0.0.1:0/", {.visible = webfront::testdriver::visibleWindows});
+        session.create();
+        require(send<BOOL>(session.delegate, "respondsToSelector:", sel_registerName("_webView:webContentProcessDidTerminateWithReason:")),
+                "The delegate does not receive WebKit's termination reason");
+        send<void>(session.delegate, "_webView:webContentProcessDidTerminateWithReason:", session.view, reason);
+        require(session.closed, "A terminated web content process did not end the session");
+        expectFailure(
+            [&] {
+                session.run();
+            },
+            diagnostic);
+    }
+    Session session("http://127.0.0.1:0/", {.visible = webfront::testdriver::visibleWindows});
+    session.create();
+    send<void>(session.delegate, "webViewWebContentProcessDidTerminate:", session.view);
+    require(session.closed, "A terminated web content process without a reason did not end the session");
+    expectFailure(
+        [&] {
+            session.run();
+        },
+        "web content process terminated");
 }
 
 void agentApplication() {
@@ -727,39 +764,40 @@ int main(int argc, char** argv) {
     try {
         checkWKWebViewHeader();
         const std::map<std::string_view, void (*)()> cases{
-            {           "repeated-show",repeatedShow                                        },
-            {             "main-thread",            mainThread},
-            {            "native-close",      nativeEarlyClose},
-            {                    "quit",                  quit},
-            {         "startup-timeout",        startupTimeout},
-            {         "redirect-policy",        redirectPolicy},
-            {                "settings",              settings},
-            {       "hidden-scheduling",      hiddenScheduling},
-            {        "hidden-secondary",       hiddenSecondary},
-            {    "secondary-scheduling",   secondaryScheduling},
-            {  "translucent-background", translucentBackground},
-            {   "navigation-diagnostic",  navigationDiagnostic},
-            {        "missing-response",       missingResponse},
-            {    "committed-navigation",   committedNavigation},
-            {       "agent-application",      agentApplication},
-            {                "download",              download},
-            {             "choose-file",             chooseOne},
-            {           "cancel-choose",          chooseCancel},
-            {       "replaced-download",      replacedDownload},
-            {         "choose-in-blank",    chooseInBlankFrame},
-            {        "choose-in-srcdoc",   chooseInSrcdocFrame},
-            {   "close-with-open-panel",    closeWithOpenPanel},
-            {   "close-with-save-panel",    closeWithSavePanel},
-            {          "script-dialogs",         scriptDialogs},
-            {"close-with-script-dialog", closeWithScriptDialog},
-            { "sandboxed-script-dialog", sandboxedScriptDialog},
-            {             "load-reveal",
+            {              "repeated-show",repeatedShow                                           },
+            {                "main-thread",                mainThread},
+            {               "native-close",          nativeEarlyClose},
+            {                       "quit",                      quit},
+            {            "startup-timeout",            startupTimeout},
+            {            "redirect-policy",            redirectPolicy},
+            {                   "settings",                  settings},
+            {          "hidden-scheduling",          hiddenScheduling},
+            {           "hidden-secondary",           hiddenSecondary},
+            {       "secondary-scheduling",       secondaryScheduling},
+            {     "translucent-background",     translucentBackground},
+            {      "navigation-diagnostic",      navigationDiagnostic},
+            {           "missing-response",           missingResponse},
+            {       "committed-navigation",       committedNavigation},
+            {          "agent-application",          agentApplication},
+            {"content-process-termination", contentProcessTermination},
+            {                   "download",                  download},
+            {                "choose-file",                 chooseOne},
+            {              "cancel-choose",              chooseCancel},
+            {          "replaced-download",          replacedDownload},
+            {            "choose-in-blank",        chooseInBlankFrame},
+            {           "choose-in-srcdoc",       chooseInSrcdocFrame},
+            {      "close-with-open-panel",        closeWithOpenPanel},
+            {      "close-with-save-panel",        closeWithSavePanel},
+            {             "script-dialogs",             scriptDialogs},
+            {   "close-with-script-dialog",     closeWithScriptDialog},
+            {    "sandboxed-script-dialog",     sandboxedScriptDialog},
+            {                "load-reveal",
              [] {
              loadRevealPresentation(false);
-             }                                                },
-            {         "present-timeout",         [] {
-         loadRevealPresentation(true);
-         }            }
+             }                                                       },
+            {            "present-timeout",             [] {
+             loadRevealPresentation(true);
+             }            }
         };
         cases.at(argc == 2 ? argv[1] : "")();
         return 0;
