@@ -1236,7 +1236,15 @@ try {
         const session = page.querySelector('#terminal .xterm');
         assert(session, 'The terminal must be mounted while it is collapsed');
         const sessionText = () => page.querySelector('#terminal .xterm-rows')?.textContent ?? '';
-        await until(() => sessionText().includes('>'), 'The collapsed terminal must have its prompt');
+        // The prompt is in the terminal's buffer once the page says it is ready (mount writes it before returning), but
+        // xterm.js draws its rows at the page's next animation frames, which a loaded runner can hold back for more than
+        // the 10 s of until (#729): the drawing gets the bound of a launch, and a failure says whether frames still come.
+        await eventually(() => sessionText().includes('>'), async () => {
+            const frame = await Promise.race([new Promise(resolve => page.defaultView.requestAnimationFrame(() => resolve('came'))),
+                delay(1000).then(() => 'did not come in 1 s')]);
+            return `The collapsed terminal must have its prompt in ${bootstrapLimitMs / 1000} s; its rows: ${JSON.stringify(sessionText())}, `
+                + `visibility: ${page.visibilityState}, an animation frame ${frame}`;
+        }, {attempts: bootstrapLimitMs / 100, every: 100});
         const before = sessionText();
 
         // The tab's context menu (#679): a right click opens it beside the tab, inside the window, with the focus on its
