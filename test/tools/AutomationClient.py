@@ -25,8 +25,11 @@ import urllib.parse
 class Client:
     """MCP over the Streamable HTTP listener of an application, from its private mcp.json."""
 
-    def __init__(self, configuration, timeout=30):
-        self.timeout = timeout  # seconds for the session to become ready and for one operation to finish
+    def __init__(self, configuration, timeout=30, startup=90):
+        self.timeout = timeout  # seconds for one operation to finish
+        # Seconds for the session to become ready. Each launch starts its own WebView2 browser process on a new profile
+        # (host_environment): on a loaded Windows runner its first page takes far longer than a warm one (#720).
+        self.startup = max(startup, timeout)
         server = json.loads(pathlib.Path(configuration).read_text())["mcpServers"]["webfront"]
         assert server["type"] == "http", server
         self.url = urllib.parse.urlsplit(server["url"])
@@ -87,7 +90,7 @@ class Client:
         assert "webfront.session" in result["instructions"], result
         self.send("notifications/initialized", notification=True)
         assert len(self.send("tools/list")["tools"]) == tools
-        end = time.monotonic() + self.timeout
+        end = time.monotonic() + self.startup
         while time.monotonic() < end:
             state = self.tool("session")
             if state["state"] == "ready":
@@ -321,7 +324,8 @@ def watchdog(args):
         project = root / "project"
         shutil.copytree(args.fixture, project)
         directory = root / "forced-window"
-        options = ["--directory", str(directory), "--grants", "build", "--timeout", "2", "--startup-timeout", "30"]
+        # The startup deadline leaves a cold browser profile time to load the page (#720); no case here expects it to expire.
+        options = ["--directory", str(directory), "--grants", "build", "--timeout", "2", "--startup-timeout", "90"]
         # An operation that never completes in a renderer that stays responsive: the deadline revokes the session, the
         # page runs the request to close, show() returns and the host reports the deadline with 71, before any grace (#709).
         environment, integrity = operation_archive(args, root, "waiting",
@@ -374,7 +378,7 @@ def watchdog(args):
         with (pathlib.Path(args.work) / "watchdog-failed.log").open("w", encoding="utf-8") as log:
             host = Host(args, project, root, "failed", log, options, str(failed_environment), failed_integrity)
             try:
-                assert host.wait(timeout=45) == 70, host.logs()
+                assert host.wait(timeout=120) == 70, host.logs()
             finally:
                 host.close()
             assert "Automation startup: B" + "é" * 511 + "\n" in host.logs(), host.logs()
@@ -585,7 +589,7 @@ def session(args):
         setup.mkdir()
         with (root / "setup.log").open("w") as log:
             host = Host(args, setup, root, "setup", log,
-                        ["--grants", "init,create,install,restore,embed,packages,state", "--timeout", "60", "--startup-timeout", "60"])
+                        ["--grants", "init,create,install,restore,embed,packages,state", "--timeout", "60", "--startup-timeout", "90"])
             try:
                 client = host.client(timeout=60)
                 client.initialize(tools=14)  # the four tools of the session and the ten reads of the state
