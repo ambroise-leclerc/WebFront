@@ -317,7 +317,8 @@ public:
     }
 
     void navigationStarting(ICoreWebView2NavigationStartingEventArgs* args) noexcept {
-        if (closed)
+        // The navigation of an unloading window is its own to about:blank, which no content policy lists.
+        if (closed || unloading)
             return;
         try {
             LPWSTR raw = nullptr;
@@ -358,6 +359,7 @@ public:
     void close() noexcept {
         stopStartupTimer();
         stopPresentTimer();
+        stopUnloadTimer();
         if (closed)
             return;
         closed              = true;
@@ -518,7 +520,57 @@ private:
     // (moving or resizing by the title bar), which dispatch window messages without going through dispatchNextMessage().
     static constexpr UINT_PTR presentTimerId = 0x5746;
     static constexpr UINT_PTR startupTimerId = 0x5747;
-    void                      stopPresentTimer() noexcept {
+    static constexpr UINT_PTR unloadTimerId  = 0x5748;
+    // The wParam of the WM_CLOSE that finishUnload() posts: the page has ended, the window closes now.
+    static constexpr WPARAM unloadedClose = 0x5748;
+    // The longest wait for a closing secondary window's page to end, after which it closes all the same.
+    static constexpr UINT unloadMilliseconds = 1000;
+    bool                  unloading          = false;
+    UINT_PTR              unloadTimer        = 0;
+
+    /**
+     * A secondary window ends its page before its controller (#708). The controller's Close() releases the view, but
+     * the page, and with it its WebSocket, ends only when its renderer gets to it: the renderer of the shared environment
+     * may outlive the controller, and a closed inspector window then stayed connected for more than thirty seconds.
+     * Navigating to about:blank unloads the document, which closes its connections, at once. The window is hidden
+     * meanwhile; it closes when about:blank completes, or after unloadMilliseconds. False when the window closes at once:
+     * the first window (its process ends its pages), a window that failed or has no view, or a navigation refused.
+     */
+    bool beginUnload() noexcept {
+        if (!secondary || closed || failure || !hasLiveController() || !view || !window)
+            return false;
+        try {
+            unloading = true;
+            ShowWindow(window, SW_HIDE);
+            unloadTimer = SetTimer(window, unloadTimerId, unloadMilliseconds, nullptr);
+            if (!unloadTimer)
+                throw std::runtime_error("WebView2: cannot start the unload delay");
+            check(view->Navigate(L"about:blank"), "unloading the page of a closing window");
+            trace("unloading");
+            return true;
+        } catch (...) {
+            stopUnloadTimer();
+            return false;  // closed at once, as before
+        }
+    }
+    void finishUnload() noexcept {
+        stopUnloadTimer();
+        if (window)
+            PostMessageW(window, WM_CLOSE, unloadedClose, 0);
+    }
+    void stopUnloadTimer() noexcept {
+        if (unloadTimer && window)
+            KillTimer(window, unloadTimer);
+        unloadTimer = 0;
+    }
+    bool showsBlankPage() const noexcept {
+        LPWSTR raw = nullptr;
+        if (!view || FAILED(view->get_Source(&raw)) || !raw)
+            return false;
+        const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> source(raw, CoTaskMemFree);
+        return std::wstring_view{source.get()} == L"about:blank";
+    }
+    void stopPresentTimer() noexcept {
         if (presentTimer && window)
             KillTimer(window, presentTimer);
         presentTimer = 0;
@@ -646,7 +698,7 @@ private:
     }
 
     void processFailed(ICoreWebView2ProcessFailedEventArgs* args) noexcept {
-        if (closed)
+        if (closed || unloading)  // the page is being ended on purpose: its process may go with it
             return;
         try {
             COREWEBVIEW2_PROCESS_FAILED_KIND kind{};
@@ -672,6 +724,12 @@ private:
     }
 
     void navigationCompleted(ICoreWebView2NavigationCompletedEventArgs* args) noexcept {
+        if (!closed && unloading) {
+            // An earlier navigation that the unloading one cancelled also completes: only about:blank ends the window.
+            if (showsBlankPage())
+                finishUnload();
+            return;
+        }
         if (closed || !initialNavigationPending)
             return;
         try {
@@ -739,7 +797,7 @@ private:
             throw std::runtime_error("WebView2: cannot apply DPI window bounds");
     }
 
-    bool handleWindowMessage(HWND handle, UINT message, LPARAM lParam) {
+    bool handleWindowMessage(HWND handle, UINT message, WPARAM wParam, LPARAM lParam) {
         switch (message) {
             case WM_DPICHANGED:
                 applyDpiBounds(handle, lParam);
@@ -763,6 +821,10 @@ private:
                 reapSecondaryWindows();
                 return true;
             case WM_CLOSE:
+                // A secondary window first ends its page (#708); the WM_CLOSE of finishUnload() then closes it. Any
+                // other WM_CLOSE meanwhile (the user, requestClose(), a failure) waits for that one.
+                if (unloading ? wParam != unloadedClose : beginUnload())
+                    return true;
                 close();
                 DestroyWindow(handle);
                 return true;
@@ -787,6 +849,11 @@ private:
             self->secondaryStartupTimedOut();
             return 0;
         }
+        if (self && message == WM_TIMER && wParam == unloadTimerId && self->unloadTimer) {
+            self->trace("unload delay expired");
+            self->finishUnload();
+            return 0;
+        }
         if (self && message == WM_TIMER && wParam == presentTimerId && self->presentTimer) {
             self->trace("present delay expired");
             self->presentWindow();
@@ -794,7 +861,7 @@ private:
         }
         if (self) {
             try {
-                if (self->handleWindowMessage(handle, message, lParam))
+                if (self->handleWindowMessage(handle, message, wParam, lParam))
                     return 0;
             } catch (...) {
                 self->fail();
@@ -1039,7 +1106,9 @@ struct WindowHooks {
     bool close(Session& session) {
         if (!session.window)
             return false;
-        SendMessageW(session.window, WM_CLOSE, 0, 0);  // the same thread: closed and retired when this returns
+        // The same thread: the window is closed and retired when this returns, or, for a secondary window whose page
+        // ends first (#708), hidden and closed within Session::unloadMilliseconds.
+        SendMessageW(session.window, WM_CLOSE, 0, 0);
         return true;
     }
 };
