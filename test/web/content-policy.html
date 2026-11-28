@@ -15,13 +15,21 @@ if (popup !== null) {
     window.close();
 } else {
     // The lifecycle frontend reports successful native cancellation. An allowed navigation
-    // destroys this document instead and the destination reports policyNavigated.
-    addEventListener('webfront-policy-cancelled', async () => {
-        await webFront.cppFunction('policyCompleted')();
-        window.close();
-    }, { once: true });
+    // destroys this document instead and the destination reports policyNavigated. A frontend
+    // that names the cancelled navigation (CEF) lets the page ignore one it did not start (#731).
     const target = new URL('/policy-escaped.html?navigation', location.href);
     target.hostname = 'localhost';
+    const ownCancellation = url => { try { return new URL(url).href === target.href; } catch { return false; } };
+    const cancelled = async event => {
+        if (typeof event.detail === 'string' && !ownCancellation(event.detail)) {
+            await webFront.cppFunction('policyOtherCancellation')(event.detail, target.href).catch(() => {});
+            return;
+        }
+        removeEventListener('webfront-policy-cancelled', cancelled);
+        await webFront.cppFunction('policyCompleted')();
+        window.close();
+    };
+    addEventListener('webfront-policy-cancelled', cancelled);
     // Keep one history entry so WebView2 permits the destination's script closure.
     reportStage(stage.policyNavigation);
     location.replace(target.href);

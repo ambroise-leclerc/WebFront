@@ -10,6 +10,7 @@
 #include "../driver/TestFrontend.hpp"
 #include <webfront/system/NativeFS.hpp>
 #include <webfront/UIThread.hpp>
+#include <webfront/utils/Json.hpp>
 #include <webfront/WebFront.hpp>
 
 #include <atomic>
@@ -458,17 +459,24 @@ int expectNavigationFailure() {
 }
 
 // Report the engine's actual cancellation to the surviving document. Chromium does not
-// consistently expose embedder cancellation through the JavaScript Navigation API.
-constexpr auto cancellationScript = "globalThis.dispatchEvent(new Event('webfront-policy-cancelled'))";
+// consistently expose embedder cancellation through the JavaScript Navigation API. The frontends that do not name the
+// cancelled URL use it; a build with CEF alone does not.
+[[maybe_unused]] constexpr auto cancellationScript = "globalThis.dispatchEvent(new Event('webfront-policy-cancelled'))";
 
 #ifdef WEBFRONT_EMBED_CEF
+// CEF names the navigation it cancelled: the page counts only the one it started, and reports any other one (#731), such as
+// a navigation of the main frame to a page outside the allow-list that the engine starts by itself on a loaded machine.
+inline std::string cancellationScriptFor(const std::string& url) {
+    return "globalThis.dispatchEvent(new CustomEvent('webfront-policy-cancelled', {detail: " + webfront::json::quote(url) + "}))";
+}
+
 class PolicyLifecycleClient : public webfront::cef::SimpleCEFClient {
 public:
     using SimpleCEFClient::SimpleCEFClient;
     bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request, bool gesture, bool redirect) override {
         const bool cancelled = SimpleCEFClient::OnBeforeBrowse(browser, frame, request, gesture, redirect);
         if (cancelled && frame->IsMain())
-            frame->ExecuteJavaScript(cancellationScript, frame->GetURL(), 0);
+            reportCancellation(frame, request->GetURL().ToString(), redirect ? "a redirect" : "a navigation");
         return cancelled;
     }
     bool OnOpenURLFromTab(CefRefPtr<CefBrowser>         browser,
@@ -478,8 +486,14 @@ public:
                           bool                          gesture) override {
         const bool cancelled = SimpleCEFClient::OnOpenURLFromTab(browser, frame, target, disposition, gesture);
         if (cancelled && disposition == CEF_WOD_CURRENT_TAB && frame && frame->IsMain())
-            frame->ExecuteJavaScript(cancellationScript, frame->GetURL(), 0);
+            reportCancellation(frame, target.ToString(), "an opening in the current tab");
         return cancelled;
+    }
+
+private:
+    static void reportCancellation(CefRefPtr<CefFrame> frame, const std::string& url, std::string_view kind) {
+        std::cerr << "The content policy cancelled " << kind << " of the main frame to " << url << " (from " << frame->GetURL().ToString() << ")" << std::endl;
+        frame->ExecuteJavaScript(cancellationScriptFor(url), frame->GetURL(), 0);
     }
 };
 #endif
@@ -577,6 +591,11 @@ int checkContentPolicy(bool allowNavigation) {
     app.cppFunction("policyNavigated", [&] {
         lifecycleStage = LifecycleStage::pageCompleted;
         navigated      = true;
+    });
+    // A cancellation that the page did not provoke is not the outcome of the case: it is logged, and the page keeps waiting
+    // for the navigation it started (#731).
+    app.cppFunction("policyOtherCancellation", [](std::string url, std::string target) {
+        std::cerr << "The page ignored the cancellation of a navigation to " << url << ", which is not its own to " << target << std::endl;
     });
     app.show("content-policy.html");
     lifecycleStage = LifecycleStage::windowClosed;
