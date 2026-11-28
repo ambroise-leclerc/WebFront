@@ -21,6 +21,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace webfront::bdd;
@@ -36,6 +37,7 @@ struct FakeSession {
     bool                                closed = false;
     std::exception_ptr                  failure;
     std::function<void()>               closedHook;
+    std::function<void()>               closingHook;           // a window that closes in two steps (#708)
     bool                                inCallback   = false;  // true while its own closedHook runs
     bool                                closeOnStart = false;
     std::exception_ptr                  failOnStart;
@@ -48,7 +50,7 @@ struct FakeSession {
             destroyProbe();
         if (inCallback)
             events.push_back("destroyed in its own callback");
-        if (closedHook)
+        if (closedHook || closingHook)
             events.push_back("hook still set " + page);
     }
     void start() {
@@ -72,6 +74,7 @@ struct FakeHooks {
     static constexpr std::string_view name           = "FakeFrontend";
     int                               reapsScheduled = 0;
     bool                              canClose       = true;
+    bool                              twoSteps       = false;  // close() only starts closing, as WebView2 ending its page
 
     template <typename Registry>
     void scheduleReap(Registry&) {
@@ -88,7 +91,11 @@ struct FakeHooks {
         events.push_back("close " + session.page);
         if (!canClose)
             return false;
-        session.close();
+        if (twoSteps) {
+            if (session.closingHook)
+                std::exchange(session.closingHook, {})();
+        } else
+            session.close();
         return true;
     }
 };
@@ -169,6 +176,41 @@ const Scenario secondaryWindowRegistry{
                     then("it answers false", [&] {
                         check(!windows.close("b.html"));
                         check(!windows.close("a.html"));
+                    });
+                });
+            });
+
+            when("a window closes in two steps (#708)", [&] {
+                openPage(windows, "a.html");
+                auto* const old        = windows.secondary.at("a.html").get();
+                windows.hooks.twoSteps = true;
+                require(windows.close("a.html"));
+                then("it leaves the table at once and is kept until it closes", [&] {
+                    check(windows.secondary.empty());
+                    check(windows.closing.size() == 1);
+                    check(!happened("destroy a.html"));
+                    check(!windows.close("a.html"));
+                });
+                andWhen("its page is opened again before it closed, then it closes", [&] {
+                    openPage(windows, "a.html");
+                    auto* const fresh = windows.secondary.at("a.html").get();
+                    old->close();
+                    then("the new window stays, and only the old one is reaped", [&] {
+                        check(std::ranges::count(events, "create a.html") == 2);
+                        check(windows.secondary.size() == 1 && windows.secondary.at("a.html").get() == fresh);
+                        check(windows.closing.empty() && windows.finished.size() == 1);
+                        windows.reap();
+                        check(std::ranges::count(events, "destroy a.html") == 1);
+                        check(!happened("destroyed in its own callback"));
+                    });
+                });
+                andWhen("the first window ends before it closed", [&] {
+                    events.clear();
+                    windows.clear();
+                    then("it is destroyed with its hooks cleared", [&] {
+                        check(happened("destroy a.html"));
+                        check(!happened("hook still set a.html"));
+                        check(windows.closing.empty());
                     });
                 });
             });

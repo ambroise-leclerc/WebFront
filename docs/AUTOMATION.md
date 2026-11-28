@@ -200,7 +200,7 @@ Tool results include both `structuredContent` and its JSON spelling as text.
 
 | Tool | Arguments | Result |
 | --- | --- | --- |
-| `webfront.session` | `{}` | API version, session ID, canonical project, state, native grants, failure reason and bounded audit metadata. |
+| `webfront.session` | `{}` | API version, session ID, canonical project, state, native grants, failure reason, the native deadline that revoked the session (`revocation`: `operation-deadline`, `startup-deadline`, or empty) and bounded audit metadata. |
 | `webfront.start` | `{session, operation, arguments?}` | A new run ID and initial state, returned immediately. |
 | `webfront.result` | `{session, runId}` | Run state, bounded streamed output and final result. |
 | `webfront.cancel` | `{session, runId}` | Cooperative cancellation request and current state. |
@@ -381,8 +381,9 @@ Python's standard library HTTP client:
 - `AutomationMcpWindow`: structured errors, file correction, check/build/test, preview inspection and actions, cross-frame
   rejection, a second client sharing the session and cancelling the first one's run, a project set up from nothing
   (`create`, `init`, `install`, `restore`, `embed`), and the withdrawal of the listener, record and directory when the window closes.
-- `AutomationMcpWatchdog`: a real renderer blocked inside a test-archive operation body, without loading Jasmine to provoke
-  the hang. It exercises the production signed callback and runner, the native two-second deadline, the five-second close
+- `AutomationMcpWatchdog`: first an operation that never completes in a responsive renderer, whose window closes after the
+  deadline revoked the session (status 71, the deadline named by `revocation`); then a real renderer blocked inside a
+  test-archive operation body, without loading Jasmine to provoke the hang. It exercises the production signed callback and runner, the native two-second deadline, the five-second close
   grace and the withdrawal of the listener, record and directory; a relaunch on the same directory then checks its reuse and
   Unicode failure reporting. It delays bootstrap by three seconds to verify that the operation deadline starts after startup.
 - `AutomationConsumerWindow`: two applications side by side, each driven through its own URL: refusals of web pages,

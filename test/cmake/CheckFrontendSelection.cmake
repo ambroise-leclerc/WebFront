@@ -437,7 +437,7 @@ foreach(case webkitgtk-display webkitgtk-linux cef-linux cef-macos cef-windows c
             continue()
         endif()
         if(case STREQUAL "webview2-windows")
-            set(expected_count 19)  # with StartupTime-cold and -warm (#611)
+            set(expected_count 20)  # with StartupTime-cold and -warm (#611), and secondary-close (#708)
         elseif(case STREQUAL "extension")
             set(expected_count 17)  # an engine without STARTUP_TRACE has no start-up case
         elseif(case STREQUAL "cef-linux")
