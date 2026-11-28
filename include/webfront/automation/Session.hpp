@@ -15,6 +15,7 @@
 
 #include <chrono>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <optional>
 
@@ -25,6 +26,9 @@ struct SessionOptions {
     std::chrono::seconds     timeout{120};
     /// Application callbacks that `call` may invoke, fixed by the native owner. They need the `call` grant, and none refuses every call.
     std::vector<std::string> callbacks{};
+    /// What reads the state of the application for the `webfront.state.*` tools (StateTools.hpp): the tool's name and its
+    /// arguments give a JSON object. The `state` grant needs one; without the grant it is never called.
+    std::function<std::string(std::string_view tool, const Object& arguments)> state{};
 };
 
 class Session {
@@ -48,6 +52,8 @@ public:
                 throw std::invalid_argument("Invalid allow-listed callback name: " + callback);
         if (!this->options.callbacks.empty() && std::ranges::find(this->options.allow, "call") == this->options.allow.end())
             throw std::invalid_argument("Allow-listed callbacks need the call grant");
+        if (offersState() && !this->options.state)
+            throw std::invalid_argument("The state grant needs the inspectors of the developer environment: call bootstrap(\"developer\") first");
         identity = channel::nonce();
     }
 
@@ -102,6 +108,39 @@ public:
         active = id;
         audit("allowed", operation, id);
         return snapshot(runs.back());
+    }
+
+    /// Whether the native owner granted the reads of the application's state (`webfront.state.*`).
+    bool offersState() const {
+        return std::ranges::find(options.allow, statePermission) != options.allow.end();
+    }
+
+    /**
+     * Runs a `webfront.state.*` tool: the session and the `state` grant are checked first, then the read answers at once,
+     * outside the session's lock (a read of a watch waits for the application). The reads do not need the developer window
+     * and take no run: they answer while an operation runs. The audit keeps authorization decisions, as for start(): a
+     * refusal of the session or of the grant is audited. A read is not, nor what the read itself answers (invalid arguments,
+     * a refusal of the inspectors, a closed session): a client that polls would otherwise evict the decisions the audit keeps.
+     */
+    std::string read(std::string_view tool, const Object& request) {
+        {
+            std::scoped_lock lock{mutex};
+            try {
+                authorize(request);
+            } catch (const OperationError&) {
+                audit("denied", tool, "");
+                throw;
+            }
+            if (!offersState()) {
+                audit("denied", tool, "");
+                throw OperationError("not_authorized", "Reading the application's state is not authorized");
+            }
+            if (closed)
+                throw OperationError("not_ready", "Developer session is closed");
+        }
+        auto members = request.members();
+        members.erase("session");
+        return options.state(tool, Object(objectJson(members)));
     }
 
     std::string result(const Object& request) const {
@@ -266,6 +305,8 @@ private:
         });
     }
     static bool knownPermission(std::string_view name) {
+        if (name == statePermission)
+            return true;
         for (const auto& [operation, definition] : operationDefinitions())
             if (definition.permission == name)
                 return true;

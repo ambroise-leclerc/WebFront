@@ -81,7 +81,7 @@ export function createWatchTree({bridge, watch, count = pageCount, onUpdate = ()
     const call = name => bridge.cppFunction(name);
     const nodes = new Map();
     const expanded = new Set();
-    let revision = 0, limits = null, gone = false, stopped = false, passes = 0, problem = null;
+    let revision = 0, limits = null, gone = false, stopped = false, passes = 0, problem = null, rebuilding = false;
     // The calls that change C++'s memory, sent one at a time. A pass in progress stops when one is waiting.
     const waiting = [];
     let running = null;
@@ -144,7 +144,11 @@ export function createWatchTree({bridge, watch, count = pageCount, onUpdate = ()
     async function resynchronize(answered) {
         revision = answered;
         nodes.clear();
-        if (!stopped) await list('', 0);
+        rebuilding = true;  // until the root is read again: a reading that fails is tried again at the next refresh
+        onUpdate();
+        if (stopped) return;
+        await list('', 0);
+        rebuilding = !nodes.has('');
     }
 
     /** One page of the children of `path` from `start`, then the unfolded children that came back. Runs inside the queue. */
@@ -156,7 +160,13 @@ export function createWatchTree({bridge, watch, count = pageCount, onUpdate = ()
         catch (error) {
             // A node that is no longer in the memory, or too deep, stays folded; the tree goes on.
             if (error?.code === codes.unknown && path !== '') { expanded.delete(path); return; }
-            if (error?.code === codes.limit) { problem = error.message; expanded.delete(path); return; }
+            // The memory is full, or the node too deep. A node whose children are partly loaded stays unfolded: folding it
+            // is what frees the memory.
+            if (error?.code === codes.limit) {
+                problem = error.message;
+                if (start === 0 && !nodes.get(path)?.positions.size) expanded.delete(path);
+                return;
+            }
             return fail(error);
         }
         if (page.resync) return resynchronize(page.revision);
@@ -249,7 +259,11 @@ export function createWatchTree({bridge, watch, count = pageCount, onUpdate = ()
         open() {
             return enqueue(async () => {
                 limits ??= readLimits(await call(functions.limits)());
+                // A tree closed while it waited sends nothing more: its reset would empty the memory of a tree of the
+                // same watch opened since on this connection.
+                if (stopped) return;
                 revision = await call(functions.reset)(watch).catch(fail);
+                if (stopped) return;
                 nodes.clear();
                 expanded.add('');
                 await list('', 0);
@@ -283,7 +297,10 @@ export function createWatchTree({bridge, watch, count = pageCount, onUpdate = ()
         },
         /** A pass of differences, unless a call is already running or waiting: the period only reads when nothing else does. */
         refresh() {
-            if (tree.busy || gone || stopped || !nodes.size) return Promise.resolve(false);
+            if (tree.busy || gone || stopped) return Promise.resolve(false);
+            // A resynchronization whose reading of the root failed: the tree is built again from the root.
+            if (rebuilding) return enqueue(async () => { await resynchronize(revision); onUpdate(); return true; });
+            if (!nodes.size) return Promise.resolve(false);
             return enqueue(async () => { await pass(); onUpdate(); return true; });
         },
         /**
@@ -327,11 +344,15 @@ export function createWatchTree({bridge, watch, count = pageCount, onUpdate = ()
          * replaced starts again, a few times at most.
          */
         async fullValue(path, {attempts = 3} = {}) {
+            const closed = () => Object.assign(new Error('The tree is closed'), {code: codes.unknown});
             for (let attempt = 0; ; ++attempt) {
+                // Before each attempt too: a fragment refused as stale after the tree was closed starts no new reading.
+                if (stopped) throw closed();
                 try {
                     let [part, total, next, capped, snapshot] = await call(functions.value)(watch, path, 0, 0);
                     let text = part;
                     while (next !== 0) {
+                        if (stopped) throw closed();
                         [part, total, next, capped] = await call(functions.value)(watch, path, snapshot, next);
                         text += part;
                     }

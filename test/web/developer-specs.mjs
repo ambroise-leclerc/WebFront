@@ -895,26 +895,42 @@ try {
                 // The tab's context menu (#679): its panels, the root first, and the entries of one of them.
                 menus: () => [...page.querySelectorAll('.webfront-menu')],
                 entries: level => [...(page.querySelectorAll('.webfront-menu')[level]?.querySelectorAll('[role=menuitem]') ?? [])],
-                press: (target, init) => target.dispatchEvent(new view.KeyboardEvent('keydown', {bubbles: true, cancelable: true, ...init})),
-                rightClick: (target, x, y) => target.dispatchEvent(new view.MouseEvent('contextmenu', {bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y})),
+                // An absent target is a mistake of the spec, said as such: the probes below press only what is rendered.
+                press: (target, init) => {
+                    if (!target) throw new Error(`press(${init?.key}): no such element in the menu`);
+                    return target.dispatchEvent(new view.KeyboardEvent('keydown', {bubbles: true, cancelable: true, ...init}));
+                },
+                rightClick: (target, x, y) => {
+                    if (!target) throw new Error('rightClick: no such element');
+                    return target.dispatchEvent(new view.MouseEvent('contextmenu', {bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y}));
+                },
             };
+        };
+        // Opens the submenu of `group` again: closes an open submenu, then opens the group's. False, for `until` to try again,
+        // while the root menu or the submenu is not (or no longer) rendered: a probe presses only what is there.
+        const reopenSubmenu = (layoutOf, group) => {
+            if (layoutOf.menus().length > 1) {
+                const inner = layoutOf.entries(1)[0];
+                if (!inner) return false;
+                layoutOf.press(inner, {key: 'ArrowLeft'});
+            }
+            const entry = layoutOf.entries(0)[group];
+            if (!entry) return false;
+            layoutOf.press(entry, {key: 'ArrowRight'});
+            return true;
         };
         // Opens the submenu of `group` until its entries are available: the page is admitted and the menu read its access.
         const availableEntries = async (layoutOf, group) => {
-            await until(() => {
-                layoutOf.menus().slice(1).forEach(() => layoutOf.press(layoutOf.entries(1)[0], {key: 'ArrowLeft'}));
-                layoutOf.press(layoutOf.entries(0)[group], {key: 'ArrowRight'});
-                return layoutOf.entries(1).length > 0 && layoutOf.entries(1).every(entry => entry.getAttribute('aria-disabled') !== 'true');
-            }, 'The inspector entries of an admitted page must be available');
+            await until(() => reopenSubmenu(layoutOf, group)
+                && layoutOf.entries(1).length > 0 && layoutOf.entries(1).every(entry => entry.getAttribute('aria-disabled') !== 'true'),
+            'The inspector entries of an admitted page must be available');
             return layoutOf.entries(1);
         };
         // Opens the submenu of `group` (1: C++ state, 2: TypeScript state) until the menu has read the page's access.
         const inspectorEntries = async (layoutOf, group, expected) => {
-            await until(() => {
-                layoutOf.menus().slice(1).forEach(() => layoutOf.press(layoutOf.entries(1)[0], {key: 'ArrowLeft'}));
-                layoutOf.press(layoutOf.entries(0)[group], {key: 'ArrowRight'});
-                return expected.test(layoutOf.menus()[1]?.querySelector('.webfront-menu-reason')?.textContent ?? '');
-            }, 'The inspector entries must give the reason they are unavailable');
+            await until(() => reopenSubmenu(layoutOf, group)
+                && expected.test(layoutOf.menus()[1]?.querySelector('.webfront-menu-reason')?.textContent ?? ''),
+            'The inspector entries must give the reason they are unavailable');
             return layoutOf.entries(1);
         };
         const here = layout(document);

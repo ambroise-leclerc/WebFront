@@ -8,6 +8,7 @@
 | 1.1 | 2026-11-22 | Acceptée (livraison à faire) | Ambroise Leclerc | Décision acceptée avant le code de transport, comme l'exige #632. Précision d'implémentation du point 2 : l'écouteur reprend le modèle d'admission du canal actuel (file, délais, workers) et l'analyseur `http::Request` de `HTTPServer.hpp`, plutôt qu'une instance de `http::Server`, qui n'a ni file bornée ni délai de réception. | Issue #632. |
 | 1.2 | 2026-11-22 | Acceptée (livraison à faire) | Ambroise Leclerc | Étape 4, arbitrée par le propriétaire : le but de #632 est un seul exécutable, l'application de l'utilisateur. `webfront-agent` est retiré en entier (relais stdio, CLI JSON, `--serve`, `--attach`, `--list`, `--print-mcp-config`, `webfront_add_agent()`, `WEBFRONT_BUILD_AUTOMATION`), sans exemple `agent-host` ; le canal JSON-lines disparaît avec lui. HTTP devenant le seul transport, l'option `.http` est supprimée et `listen` devient `directory`, facultatif. Les régressions pilotent un programme de test (`automation_host`) qui appelle `enableAutomation`. Les statuts 70 et 71 du lanceur disparaissent avec lui ; le 72 d'`onUnresponsive` reste. | Issue #632. |
 | 1.3 | 2026-11-22 | Acceptée (livraison en cours) | Ambroise Leclerc | Revue de la PR #636 : `MCP-Protocol-Version` est aussi vérifié pour `DELETE` et pour les réponses du client, et un message refusé ne compte pas comme activité pour l'éviction ; une réponse du client doit être une réponse JSON-RPC 2.0 ; `Accept` est analysé par type de média et qualité ; la garde de distribution couvre l'inclusion de `Enable.hpp`, pas seulement l'appel. | PR #636. |
+| 1.4 | 2026-11-28 | Acceptée (livraison en cours) | Ambroise Leclerc | Le grant `state` ajoute au catalogue les dix lectures `webfront.state.*` de l'ADR-027 (section 10), servies sans exécution ; les opérations `list`, `why` et `info` lisent le lock sous le grant `packages`. | Issue #685. |
 
 ## État et portée
 
@@ -147,6 +148,8 @@ Profil Streamable HTTP de MCP **2025-11-25**, réduit :
   réponse JSON-RPC 2.0 (un `id`, exactement un de `result` et `error`), sinon 400.
 - Le catalogue reste à quatre outils : `webfront.session`, `webfront.start`, `webfront.result`, `webfront.cancel`. Une
   opération longue se suit par interrogation de `webfront.result` ; aucune notification de progression n'est poussée.
+  Le grant `state` y ajoute les dix lectures `webfront.state.*` de l'[ADR-027](ADR-027-inspecteurs-de-l-etat-de-l-application.md)
+  (section 10), servies sans exécution.
 - La réponse à `initialize` porte des `instructions` courtes (celles de `Instructions.hpp`). Les ressources MCP
   (`resources/list`) relèvent d'une évolution indépendante du transport.
 
@@ -249,6 +252,6 @@ Les menaces, actifs et risques résiduels de l'ADR-019 restent valables. Ce qui 
 - [MCP 2025-11-25, transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) (Streamable HTTP,
   `Mcp-Session-Id`, `MCP-Protocol-Version`, validation d'`Origin`).
 - [MCP, bonnes pratiques de sécurité](https://modelcontextprotocol.io/docs/2025-11-25/tutorials/security/security_best_practices).
-- [ADR-027](ADR-027-inspecteurs-de-l-etat-de-l-application.md) : si la story #685 est retenue, les lectures des inspecteurs
-  deviennent des outils MCP de l'application, sous les grants et l'authentification de cette décision ; leur écriture n'est
-  pas exposée en MCP.
+- [ADR-027](ADR-027-inspecteurs-de-l-etat-de-l-application.md) : les lectures des inspecteurs sont des outils MCP de
+  l'application (`webfront.state.*`, grant `state`, #685), sous les grants et l'authentification de cette décision ; leur
+  écriture n'est pas exposée en MCP.

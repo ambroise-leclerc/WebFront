@@ -52,7 +52,8 @@ endif()
 foreach(text guide page)
     foreach(needle "ui/" "wf dev" "documentRoot" "app.bootstrap(\"developer\")" "enableAutomation" "webfront.start"
             "webfront.result" "not\nthe name of your project" "http://127.0.0.1:PORT/mcp" "mcp.json" "Bearer"
-            "webfront.cancel" "claude --mcp-config" "mcpPort" "mcpToken")
+            "webfront.cancel" "claude --mcp-config" "mcpPort" "mcpToken" "webfront.state.watches" "webfront.state.children"
+            "`state` grant" "`packages`")
         string(REPLACE "\n" " " flat "${${text}}")
         string(REPLACE "\n" " " flat_needle "${needle}")
         _require("${flat}" "${flat_needle}" "${text}")

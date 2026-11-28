@@ -55,6 +55,9 @@ const Scenario inspectorsAbsent{"A distribution build registers no inspector fun
                                                                      "webfront.inspector.write"})
                                                 require(!app.hasCppFunction(name));
                                         });
+                                        then("native code gets no reads of the inspectors either (ADR-027, section 10)", [&] {
+                                            require(app.inspectorReads() == nullptr);
+                                        });
                                         then("nothing is recorded of the functions or of the calls to JavaScript", [&] {
                                             app.cppFunction("ping", [](int value) {
                                                 return value;

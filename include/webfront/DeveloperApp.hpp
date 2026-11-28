@@ -10,6 +10,7 @@
 #pragma once
 
 #include "BridgeState.hpp"
+#include "InspectorReads.hpp"
 #include "system/DeveloperFS.hpp"
 #include "system/DeveloperReleaseData.hpp"
 #include "system/SafePath.hpp"
@@ -18,6 +19,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
+#include <memory>
 #include <optional>
 #include <tuple>
 
@@ -154,6 +157,15 @@ public:
 
     void show(std::string_view page = {}) {
         Base::show(page.empty() ? (store ? "webfront-bootstrap.html" : "index.html") : page);
+    }
+
+    /**
+     * @brief What the inspectors read, for native code that is no page of the application: automation's MCP tools
+     * (ADR-027, section 10). Null until `bootstrap("developer")` mounted the environment, and always null in a distribution
+     * build, which has no inspector. The reads use the application: call none once it is shut down or destroyed.
+     */
+    [[nodiscard]] std::shared_ptr<inspect::Reads> inspectorReads() const {
+        return reads;
     }
 
 private:
@@ -366,6 +378,57 @@ private:
                     return this->isCurrentShowSession(bound) && this->requestClose(page);
                 });
             });
+        installReads(registry, limits);
+    }
+
+    /// The same reads for native code that is no page (inspectorReads()), with a memory of the watches of their own.
+    void installReads(const std::shared_ptr<inspect::WatchRegistry>& registry, const inspect::Limits& limits) {
+        using Policy = http::DefaultBuffersPolicy;
+        // No connection has this identifier: the generations of the connections count up from 1.
+        static constexpr auto memoryOfReads = (std::numeric_limits<std::uint64_t>::max)();
+        auto                  installed     = std::make_shared<inspect::Reads>();
+        installed->limits                   = limits;
+        installed->functions                = [functions = this->inspectedFunctions()](double after, double count) {
+            return functions->page(after, count, inspect::responseBudget<Policy>);
+        };
+        installed->jsFunctions = [calls = this->inspectedJsCalls()](double after, double count) {
+            return calls->page(after, count, inspect::responseBudget<Policy>);
+        };
+        installed->browsers = [this](double from, double count) {
+            return inspect::browserPage(this->inspectedBrowsers(nullptr), from, count, this->inspectedTasks(), inspect::responseBudget<Policy>);
+        };
+        installed->watches = [registry](double revision, double after, double count) {
+            return registry->page(revision, after, count, inspect::responseBudget<Policy>);
+        };
+        installed->children = [registry, limits](double watch, std::string path, double revision, double start, double count) {
+            return inspect::onWatch<inspect::Page>(registry, watch, [=, session = registry->session(memoryOfReads)] {
+                return registry->children(session, watch, path, revision, start, count, limits);
+            });
+        };
+        installed->changes = [registry, limits](double watch, double revision, double cursor, double count) {
+            return inspect::onWatch<inspect::Page>(registry, watch, [=, session = registry->session(memoryOfReads)] {
+                return registry->changes(session, watch, revision, cursor, count, limits);
+            });
+        };
+        installed->value = [registry, limits](double watch, std::string path, double snapshot, double offset) {
+            return inspect::onWatch<inspect::ValueAnswer>(registry, watch, [=, session = registry->session(memoryOfReads)] {
+                return registry->value(session, watch, path, snapshot, offset, limits);
+            });
+        };
+        installed->fold = [registry](double watch, std::string path, double revision) {
+            return inspect::onWatch<inspect::Page>(registry, watch, [=, session = registry->session(memoryOfReads)] {
+                return registry->fold(session, watch, path, revision);
+            });
+        };
+        installed->reset = [registry](double watch) {
+            return inspect::onWatch<double>(registry, watch, [=, session = registry->session(memoryOfReads)] {
+                return registry->reset(session, watch);
+            });
+        };
+        installed->spawn = [this](Task task) {
+            return this->spawn(std::move(task));
+        };
+        reads = std::move(installed);
     }
 
 #endif
@@ -406,6 +469,7 @@ private:
 
     std::filesystem::path             project;
     std::shared_ptr<developer::Store> store;
+    std::shared_ptr<inspect::Reads>   reads;  // set by the developer bootstrap, never in a distribution build
 };
 
 template <frontend::FrontendType Frontend = frontend::DefaultFrontend, fs::Provider... Extra>

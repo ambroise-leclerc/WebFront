@@ -345,6 +345,10 @@ and the Bearer token for the MCP client; never copy that file or its token into 
   webfront.result {session: S, runId}                                        until the run ends; one run at a time
   webfront.start {session: S, operation: "preview", arguments: {entry: "ui/main.ts"}}    after each edit, in place of wf dev
   webfront.result {session: S, runId}                                        until the preview run ends
+With the state grant, an agent also reads the running application, at once and without a run (reads only):
+  webfront.state.functions {session: S}                                      what cppFunction registered, calls and errors
+  webfront.state.watches {session: S}                                        the objects declared with app.watch
+  webfront.state.children {session: S, watch, revision}                      a page of a watch's tree, from its root
 Guide: docs/DEVELOPING_WITH_AGENTS.md`;
 function help([topic, ...extra] = [], {config} = {}) {
     if (extra.length) throw new Error(`Usage: ${usage.help}`);
@@ -403,7 +407,7 @@ export async function execute(args, context) {
 }
 
 /** Automation operations this environment runs beyond the 0.6.3 set; the native owner refuses a grant it does not list. */
-export const automationOperations = ['call', 'init', 'create', 'install', 'restore', 'embed'];
+export const automationOperations = ['call', 'init', 'create', 'install', 'restore', 'embed', 'list', 'why', 'info'];
 // The launcher's native configuration has no starters: they come from the environment's own manifest, as in the terminal.
 export const connectAutomation = ({environment, ...context}) => connectAgent({...context, run:runNonInteractive, exclusive,
     config:{...context.config, starters:pinnedStarters(environment, new URL(context.config.environment, location.href))}});

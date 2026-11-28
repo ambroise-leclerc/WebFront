@@ -57,6 +57,8 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   owner's allow-listed callbacks (`call`). Several instances run side by side, each with its own URL and discovery record.
   A fixed MCP port and application-supplied token can keep a client configuration stable; authentication can also be
   explicitly disabled for development, with the local-process risks described in [Automation](AUTOMATION.md) (#637).
+  With the `state` grant, the `webfront.state.*` tools read what the inspectors show (functions, browsers, tasks, watches),
+  never write, and keep one memory of the watches for all the MCP clients of the application.
   Remote access is out of scope and automation does not compile with `WEBFRONT_DISTRIBUTION`. This does not isolate
   untrusted project code. [Automation](AUTOMATION.md) documents the listener, lifecycle, limits and the supported MCP profile.
   The `webfront-agent` launcher, its JSON CLI and MCP on stdio were removed. The environment 1.0.2 pinned in
