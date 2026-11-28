@@ -250,6 +250,49 @@ def install(args, project):
     assert installed.returncode == 0, installed.stdout + installed.stderr
 
 
+def operation_archive(args, root, name, body, startup_gap):
+    """The environment archive with the operation body replaced by `body`; with `startup_gap`, its startup is delayed past
+    the operation's deadline and a bridge RangeError consumes a JS sequence first. Returns (archive, integrity)."""
+    environment = root / f"{name}-environment.tgz"
+    replaced = False
+    with tarfile.open(args.environment, "r:gz") as archive, tarfile.open(environment, "w:gz", compresslevel=1) as output:
+        for member in archive.getmembers():
+            data = archive.extractfile(member).read() if member.isfile() else None
+            if member.name == "package/runtime.mjs":
+                # Locate the named export, rather than hard-coding a minifier's local identifier.
+                exports = re.findall(rb"([A-Za-z_$][A-Za-z0-9_$]*) as runNonInteractive(?=[,}])", data)
+                assert len(exports) == 1, "The watchdog fixture needs the real runNonInteractive export"
+                data += b"\n" + exports[0] + body
+                if startup_gap:
+                    connect = re.findall(rb"([A-Za-z_$][A-Za-z0-9_$]*) as connectAutomation(?=[,}])", data)
+                    assert len(connect) == 1
+                    # A bridge RangeError (a message past the bridge's maximum, lowered for this call) consumes a JS
+                    # sequence without reaching native code.
+                    data += (b"\nconst beforeGap=" + connect[0] + b";" + connect[0] +
+                             b"=context=>{const limit=context.bridge.maxMessageBytes;context.bridge.maxMessageBytes=70000;"
+                             b"void context.call('poll','x'.repeat(70000)).then(()=>window.close(),"
+                             b"()=>{context.bridge.maxMessageBytes=limit;beforeGap(context);});};")
+                    # Only this startup test needs a delay longer than the operation's two-second deadline.
+                    data = b"await new Promise(resolve => setTimeout(resolve,3000));\n" + data
+                member.size = len(data)
+                replaced = True
+            output.addfile(member, io.BytesIO(data) if data is not None else None)
+    assert replaced
+    return environment, "sha512-" + base64.b64encode(hashlib.sha512(environment.read_bytes()).digest()).decode()
+
+
+def operation_body(marker, wait):
+    """An operation that records `marker` in the project through the real signed writes, then never completes: `wait` is
+    the JavaScript that keeps it running."""
+    return (b""" = async (_argv,context) => {
+            const call=(name,...args) => context.bridge.cppFunction('webfront.developer.'+name)(...args);
+            const id=await call('begin','""" + marker + b"""',false);
+            await call('write',id,'output',0,new Uint8Array([1]));
+            await call('commit',id);
+            """ + wait + b"""
+        };""")
+
+
 def watchdog(args):
     """Exercise native revocation with a real blocked renderer, without compiling Jasmine first.
 
@@ -262,40 +305,27 @@ def watchdog(args):
         root = pathlib.Path(temporary)
         project = root / "project"
         shutil.copytree(args.fixture, project)
-        environment = root / "watchdog-environment.tgz"
-        blocked = b""" = async (_argv,context) => {
-            const call=(name,...args) => context.bridge.cppFunction('webfront.developer.'+name)(...args);
-            const id=await call('begin','renderer.started',false);
-            await call('write',id,'output',0,new Uint8Array([1]));
-            await call('commit',id);
-            while(true) {}
-        };"""
-        replaced = False
-        with tarfile.open(args.environment, "r:gz") as archive, tarfile.open(environment, "w:gz", compresslevel=1) as output:
-            for member in archive.getmembers():
-                data = archive.extractfile(member).read() if member.isfile() else None
-                if member.name == "package/runtime.mjs":
-                    # Locate the named export, rather than hard-coding a minifier's local identifier.
-                    exports = re.findall(rb"([A-Za-z_$][A-Za-z0-9_$]*) as runNonInteractive(?=[,}])", data)
-                    assert len(exports) == 1, "The watchdog fixture needs the real runNonInteractive export"
-                    data += b"\n" + exports[0] + blocked
-                    connect = re.findall(rb"([A-Za-z_$][A-Za-z0-9_$]*) as connectAutomation(?=[,}])", data)
-                    assert len(connect) == 1
-                    # A bridge RangeError (a message past the bridge's maximum, lowered for this call) consumes a JS
-                    # sequence without reaching native code.
-                    data += (b"\nconst beforeGap=" + connect[0] + b";" + connect[0] +
-                             b"=context=>{const limit=context.bridge.maxMessageBytes;context.bridge.maxMessageBytes=70000;"
-                             b"void context.call('poll','x'.repeat(70000)).then(()=>window.close(),"
-                             b"()=>{context.bridge.maxMessageBytes=limit;beforeGap(context);});};")
-                    # Only this startup test needs a delay longer than the operation's two-second deadline.
-                    data = b"await new Promise(resolve => setTimeout(resolve,3000));\n" + data
-                    member.size = len(data)
-                    replaced = True
-                output.addfile(member, io.BytesIO(data) if data is not None else None)
-        assert replaced
-        integrity = "sha512-" + base64.b64encode(hashlib.sha512(environment.read_bytes()).digest()).decode()
         directory = root / "forced-window"
         options = ["--directory", str(directory), "--grants", "build", "--timeout", "2", "--startup-timeout", "30"]
+        # An operation that never completes in a renderer that stays responsive: the deadline revokes the session, the
+        # page runs the request to close, show() returns and the host reports the deadline with 71, before any grace (#709).
+        environment, integrity = operation_archive(args, root, "waiting",
+                                                   operation_body(b"renderer.waiting", b"await new Promise(() => {});"), False)
+        with (pathlib.Path(args.work) / "watchdog-waiting.log").open("w") as log:
+            host = Host(args, project, root, "waiting", log, options, str(environment), integrity)
+            try:
+                record = host.record()
+                client = host.client()
+                client.initialize()
+                client.start("build")
+                status = host.wait(timeout=30)
+                assert status == 71, f"exit {status}\n{host.logs()}"
+                assert "Automation operation-deadline: Native operation deadline exceeded" in host.full_log(), host.logs()
+            finally:
+                host.close()
+        assert (project / "renderer.waiting").is_file(), "The deadline expired before the operation started"
+        check_withdrawn(record, client.url.port, host.sessions)
+        environment, integrity = operation_archive(args, root, "blocked", operation_body(b"renderer.started", b"while(true) {}"), True)
         with (pathlib.Path(args.work) / "watchdog.log").open("w") as log:
             host = Host(args, project, root, "blocked", log, options, str(environment), integrity)
             try:
