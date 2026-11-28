@@ -402,7 +402,8 @@ ul.tree.block>li>.row{display:block;min-height:0;line-height:1em;white-space:pre
 ul.tree.block .value{display:inline-block;vertical-align:top;letter-spacing:calc(1em - 1ch);white-space:pre;overflow-wrap:normal}
 ul.tree.block .value.writable{border-bottom:0;text-decoration:underline dotted #46536a}
 ul.tree.block .changed>.row .value{background:#4a3d12}
-ul.tree.block .row button.full{min-height:0;height:1em;padding:0 4px;font-size:inherit;line-height:1}
+ul.tree.block>li>.row.control{line-height:24px}
+ul.tree.block .row button.full{height:24px;min-height:24px;vertical-align:top;line-height:1;letter-spacing:normal}
 ul.tree.block .row .note{white-space:normal;letter-spacing:normal}
 @media (pointer:coarse){
 ul.watches button.toggle,ul.tree button.toggle{width:44px;height:44px}
@@ -446,7 +447,8 @@ export function blockWidth(tree, path) {
         if (!node) continue;
         if (node.kind !== blockKind || node.children !== 0 || node.label !== `[${position}]`) return 0;
         const length = columns(node.value);
-        if (!length || (count && length !== width)) return 0;
+        // A line break would show one element on several lines, which a block, without indices, could not tell apart.
+        if (!length || (count && length !== width) || /[\n\r\u2028\u2029]/.test(node.value)) return 0;
         width = length;
         ++count;
     }
@@ -618,6 +620,8 @@ export function createTreeView({tree, list, view = globalThis, name = null}) {
         const line = element('div', 'row');
         valueOf(path, node, line, item);
         if (line.querySelector('button, input, [role=button]')) line.classList.add('target');
+        // A button keeps 24 px: the line of a value that is cut is as high as its Full value button.
+        if (line.querySelector('button')) line.classList.add('control');
         return item;
     }
 

@@ -689,6 +689,10 @@ describe('The view of a tree', () => {
         // Strings of different lengths are no grid: no block is offered.
         expect(list.querySelector('ul.block')).toBeNull();
         expect(list.querySelector('button.layout')).toBeNull();
+        // Nor strings that break their line, which a block would show as more lines than elements.
+        const broken = await shown(['a\nb', 'cde']);
+        expect(blockWidth(broken.tree, '')).toBe(0);
+        expect(broken.list.querySelector('ul.block')).toBeNull();
     });
 
     it('shows a container of strings of the same length as a block, and goes back to the tree with its button', async () => {
@@ -796,6 +800,14 @@ describe('The view of a tree', () => {
             return page;
         };
         await tree.load('', 0);
+        const style = document.createElement('style');
+        style.textContent = watchTreeStyles;
+        document.head.append(style);
+        try {
+            // Its button keeps a target of 24 px, and so does its line.
+            expect(list.querySelector('ul.block button.full').getBoundingClientRect().height).toBeGreaterThanOrEqual(24);
+            expect(list.querySelector('ul.block > li').getBoundingClientRect().height).toBeGreaterThanOrEqual(24);
+        } finally { style.remove(); }
         list.querySelector('ul.block button.full').click();
         await new Promise(resolve => setTimeout(resolve));
         expect(list.querySelector('ul.block pre.full').textContent).toBe('ababab');
