@@ -409,6 +409,8 @@ ul.watches button.toggle,ul.tree button.toggle{width:44px;height:44px}
 ul.tree .row.target{min-height:44px}
 ul.tree .spacer{width:44px}
 ul.tree button.more,ul.tree button.full,ul.tree button.layout{min-height:44px;padding:0 10px}
+ul.tree.block>li>.row.target{line-height:44px}
+ul.tree.block>li>.row.target button.full{height:44px;min-height:44px}
 }`;
 
 /** The most characters of a full value that the page shows; the rest is told by its size. */
@@ -602,14 +604,20 @@ export function createTreeView({tree, list, view = globalThis, name = null}) {
         }
     }
 
-    /** A node as one line of a block: its value only, its label and kind being those of the block. */
+    /**
+     * A node as one line of a block: its value only, its kind being the block's. Its index is not shown, but it names the line
+     * for assistive technologies. A line with a control is a target of 44 px under a coarse pointer.
+     */
     function blockLine(path) {
         const {node, changed} = tree.nodes.get(path);
         const item = element('li');
         item.setAttribute('role', 'treeitem');
+        item.setAttribute('aria-label', `${node.label}: ${node.value}`);
         item.dataset.path = path;
         if (changed && changed === tree.pass) item.classList.add('changed');
-        valueOf(path, node, element('div', 'row'), item);
+        const line = element('div', 'row');
+        valueOf(path, node, line, item);
+        if (line.querySelector('button, input, [role=button]')) line.classList.add('target');
         return item;
     }
 

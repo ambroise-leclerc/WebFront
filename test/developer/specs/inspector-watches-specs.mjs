@@ -703,6 +703,8 @@ describe('The view of a tree', () => {
         expect([...block.children].map(line => line.textContent)).toEqual(grid);
         expect(block.querySelector('.label, .kind')).toBeNull();
         expect([...block.children].map(line => line.dataset.path)).toEqual(['/#0', '/#1', '/#2']);
+        // The index is not shown, but names each line for assistive technologies.
+        expect([...block.children].map(line => line.getAttribute('aria-label'))).toEqual(['[0]: #..', '[1]: .#.', '[2]: ..#']);
         const layout = list.querySelector('button.layout');
         expect(layout.textContent).toBe('Tree');
         layout.focus();
