@@ -323,17 +323,17 @@ export const commandColumns = [
 ];
 
 export const registryStyles = `
-.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:0 0 8px}
-.toolbar input[type=search]{flex:1 1 160px;min-width:0;min-height:32px;padding:0 8px;border:1px solid #46536a;border-radius:4px;background:#0f131b;color:inherit;font:inherit}
-.toolbar select{min-height:32px;padding:0 6px;border:1px solid #46536a;border-radius:4px;background:#2f3a50;color:inherit;font:inherit}
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin:0 0 4px}
+.toolbar input[type=search]{flex:1 1 160px;min-width:0;min-height:26px;padding:0 6px;border:1px solid #46536a;border-radius:4px;background:#0f131b;color:inherit;font:inherit}
+.toolbar select{min-height:26px;padding:0 4px;border:1px solid #46536a;border-radius:4px;background:#2f3a50;color:inherit;font:inherit}
 .toolbar label{display:flex;align-items:center;gap:6px;color:#a9b3c4;font-size:12px}
 .toolbar :focus-visible{outline:2px solid #d7fa85;outline-offset:1px}
-.scroll{overflow-x:auto;margin:0 0 16px}
-table.registry{border-collapse:collapse;width:100%;font-size:13px}
-table.registry caption{text-align:left;font-weight:600;padding:4px 0}
-table.registry th,table.registry td{padding:4px 8px;border-bottom:1px solid #2f3a50;text-align:left;vertical-align:top;white-space:nowrap}
+.scroll{overflow-x:auto;margin:0 0 8px}
+table.registry{border-collapse:collapse;width:100%;font-size:12px;line-height:16px}
+table.registry caption{text-align:left;font-weight:600;padding:2px 0}
+table.registry th,table.registry td{padding:2px 6px;border-bottom:1px solid #2f3a50;text-align:left;vertical-align:top;white-space:nowrap}
 table.registry th{position:sticky;top:0;background:#202737;padding:0}
-table.registry th button{width:100%;min-height:32px;padding:0 8px;border:0;background:none;color:inherit;font:inherit;font-weight:600;text-align:inherit;cursor:pointer}
+table.registry th button{width:100%;min-height:24px;padding:0 6px;border:0;background:none;color:inherit;font:inherit;font-weight:600;text-align:inherit;cursor:pointer}
 table.registry th button:focus-visible{outline:2px solid #d7fa85;outline-offset:-2px}
 table.registry th[aria-sort=ascending] button::after{content:" ▲";color:#d7fa85}
 table.registry th[aria-sort=descending] button::after{content:" ▼";color:#d7fa85}
@@ -342,7 +342,8 @@ table.registry .name{font-weight:600}
 table.registry .code{font-family:ui-monospace,monospace;font-size:12px;color:#d7fa85}
 table.registry .location{color:#a9b3c4;font-size:12px}
 table.registry .error-text{color:#ffbd2e;white-space:normal;overflow-wrap:anywhere;min-width:12em}
-.summary{margin:0 0 8px}`;
+.summary{margin:0 0 4px}
+@media (pointer:coarse){.toolbar input[type=search],.toolbar select,table.registry th button{min-height:44px}}`;
 
 // --- Panels ----------------------------------------------------------------------------------------------------
 

@@ -50,11 +50,11 @@ export function searchPackages(lock, query) {
 const pathOf = (parent, id) => parent ? `${parent}>${id}` : id;
 
 export const packagesStyles = `
-.packages-layout{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
+.packages-layout{display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
 @media (min-width:720px){.packages-layout{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
 ul.packages,ul.packages ul,ul.matches,ol.chains,ul.files{list-style:none;margin:0;padding:0}
-ul.packages ul{padding-left:18px}
-ul.packages li>.row{display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px;min-height:28px;padding:0 4px;border-radius:4px;cursor:pointer}
+ul.packages ul{padding-left:14px}
+ul.packages li>.row{display:flex;flex-wrap:wrap;align-items:center;gap:0 6px;min-height:24px;padding:0 4px;border-radius:4px;cursor:pointer}
 ul.packages li:focus{outline:none}
 ul.packages li:focus-visible>.row{outline:2px solid #d7fa85;outline-offset:-2px}
 ul.packages li[aria-selected=true]>.row,ul.matches button[aria-pressed=true]{background:#2f3a50}
@@ -65,21 +65,22 @@ ul.packages li[aria-expanded=false]>ul{display:none}
 .badge{padding:0 6px;border:1px solid #46536a;border-radius:8px;color:#a9b3c4;font-size:11px;white-space:nowrap}
 .badge.peer{color:#8fd0ff;border-color:#8fd0ff}
 .badge.versions{color:#ffbd2e;border-color:#ffbd2e}
-ul.matches button,.package-detail button.package-link{min-height:28px;padding:0 6px;border:0;border-radius:4px;background:none;color:#8fd0ff;font:13px ui-monospace,monospace;text-align:left;cursor:pointer;overflow-wrap:anywhere}
+ul.matches button,.package-detail button.package-link{min-height:24px;padding:0 6px;border:0;border-radius:4px;background:none;color:#8fd0ff;font:13px ui-monospace,monospace;text-align:left;cursor:pointer;overflow-wrap:anywhere}
 ul.matches li{display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px}
 ul.matches button:focus-visible,.package-detail button:focus-visible{outline:2px solid #d7fa85;outline-offset:-2px}
-.package-detail{min-width:0;padding:8px 12px;border:1px solid #2f3a50;border-radius:4px;align-self:start}
+.package-detail{min-width:0;padding:4px 8px;border:1px solid #2f3a50;border-radius:4px;align-self:start}
 .package-detail h2:focus{outline:none}
 .package-detail h2{margin:0 0 4px;font:600 14px ui-monospace,monospace;overflow-wrap:anywhere}
-.package-detail h3{margin:12px 0 4px;font-size:12px;font-weight:600;color:#a9b3c4}
-.package-detail p{margin:0 0 8px}
-.package-detail dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;margin:0}
+.package-detail h3{margin:8px 0 2px;font-size:12px;font-weight:600;color:#a9b3c4}
+.package-detail p{margin:0 0 4px}
+.package-detail dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 8px;margin:0}
 .package-detail dt{color:#a9b3c4;font-size:12px}
 .package-detail dd{margin:0;overflow-wrap:anywhere}
 .package-detail .code{font-family:ui-monospace,monospace;font-size:12px}
 .package-detail .note,ul.matches .note{color:#a9b3c4;font-size:12px}
-ol.chains li{padding:2px 0;border-bottom:1px solid #2f3a50}
-ul.files{max-height:12em;overflow:auto;font-family:ui-monospace,monospace;font-size:12px}`;
+ol.chains li{padding:1px 0;border-bottom:1px solid #2f3a50}
+ul.files{max-height:12em;overflow:auto;font-family:ui-monospace,monospace;font-size:12px}
+@media (pointer:coarse){ul.packages li>.row,ul.matches button,.package-detail button.package-link{min-height:44px}}`;
 
 /**
  * Shows the panel in `body`. `load(bridge)` reads the project and `state(bridge)` the token of its state (tests replace
