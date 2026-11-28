@@ -8,12 +8,14 @@
 // LLM: real-browser test; fixtures are served locally, no public network
 
 #include "../../examples/life/Life.hpp"
+#include "../../examples/life/LifeWatches.hpp"
 #include "../driver/RequestLog.hpp"
 #include "../unit/TemporaryDirectory.hpp"
 #include <webfront/Commands.hpp>
 #include <webfront/utils/Json.hpp>
 #include <webfront/WebFront.hpp>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -402,6 +404,20 @@ public:
         app.cppFunction("test.unwatch", [this](std::string name) {
             watches.erase(name);
         });
+        // The watches of the Life example (#723): its grid, 32 strings of 32 characters, here holding a glider.
+        app.cppFunction("test.watchLife", [this] {
+            {
+                std::scoped_lock lock{lifeObserved.mutex};
+                lifeObserved.grid[0][1] = '#';
+                lifeObserved.grid[1][2] = '#';
+                lifeObserved.grid[2].replace(0, 3, "###");
+            }
+            lifeWatches.reset();  // a name is unique while its handle lives
+            lifeWatches.emplace(webfront::demo::watchLife(app, lifeObserved));
+        });
+        app.cppFunction("test.unwatchLife", [this] {
+            lifeWatches.reset();
+        });
         // A call that answers only once the page lets it go: the Bridge panel shows it pending meanwhile (#684).
         app.cppFunction("test.hold", [this] {
             held = true;
@@ -424,6 +440,7 @@ public:
 
     ~Part() {
         watches.clear();
+        lifeWatches.reset();
         states->releaseAll();
         app.stop();
         // Drain while the commands, callback state and project are still alive.
@@ -476,14 +493,16 @@ private:
         return config;
     }
 
-    std::atomic<bool>                               passed{false};
-    bool                                            reported = false;
-    std::mutex                                      reportMutex;
-    std::shared_ptr<CommandStates>                  states;
-    webfront::Commands<App>                         commands;
-    webfront::UISubscription                        subscription;
-    std::map<std::string, webfront::inspect::Watch> watches;      // used on the server thread only
-    std::atomic<bool>                               held{false};  // test.hold answers once test.letGo cleared it
+    std::atomic<bool>                                      passed{false};
+    bool                                                   reported = false;
+    std::mutex                                             reportMutex;
+    std::shared_ptr<CommandStates>                         states;
+    webfront::Commands<App>                                commands;
+    webfront::UISubscription                               subscription;
+    std::map<std::string, webfront::inspect::Watch>        watches;       // used on the server thread only
+    webfront::demo::LifeObserved                           lifeObserved;  // declared before its watches, destroyed after them
+    std::optional<std::array<webfront::inspect::Watch, 2>> lifeWatches;   // used on the server thread only
+    std::atomic<bool>                                      held{false};   // test.hold answers once test.letGo cleared it
 };
 }  // namespace
 

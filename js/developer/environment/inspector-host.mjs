@@ -5,7 +5,7 @@
 // the floating window's place are kept in the project, as the terminal's place is.
 import {readProject, call} from './io.mjs';
 import {clampRect, step, minimumSize, windowControls} from './workspace.mjs';
-import {inspectorPanels as panels, panelTitle, inspectorChannel} from './menu.mjs';
+import {inspectorPanels as panels, panelTitle, inspectorChannel, inspectorMoves, makeMoveButton} from './menu.mjs';
 import {createBridgeMonitor, createBridgePublisher} from './inspector-bridge.mjs';
 
 const encoder = new TextEncoder();
@@ -199,6 +199,7 @@ const styles = `
 .webfront-inspector-bar button:hover:not([aria-disabled=true]){background:#2f3a50}
 .webfront-inspector-bar button[aria-disabled=true]{color:#8d97aa;cursor:default}
 .webfront-inspector-close{font-size:20px!important;line-height:1}
+.webfront-inspector-detach>svg{display:block;margin:auto;pointer-events:none}
 .webfront-inspector-notice{display:flex;gap:8px;align-items:center;padding:6px 12px;background:#3a2f12;color:#f4e3b5;font:12px system-ui}
 .webfront-inspector-notice[hidden]{display:none}
 .webfront-inspector-notice button{margin:0 0 0 auto;padding:4px 8px;border:1px solid #f4e3b5;border-radius:4px;background:none;color:inherit;font:inherit;cursor:pointer}
@@ -290,7 +291,7 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
     const detachButton = page.createElement('button');
     detachButton.type = 'button';
     detachButton.className = 'webfront-inspector-detach';
-    detachButton.textContent = 'Detach';
+    makeMoveButton(page, detachButton, 'detach');
     const closeButton = page.createElement('button');
     closeButton.type = 'button';
     closeButton.className = 'webfront-inspector-close';
@@ -348,7 +349,8 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
         panel.setAttribute('aria-label', `WebFront inspector: ${panelTitle(id)}`);
         const why = reason();
         detachButton.setAttribute('aria-disabled', String(Boolean(why)));
-        detachButton.title = why || 'Open this panel in a window of its own';
+        // Greyed, it keeps its name and its tooltip says why it cannot detach.
+        detachButton.title = why || inspectorMoves.detach;
         // The frame opens no connection of its own: the page reads ?frame and borrows this page's bridge.
         const url = urlOf(id, {frame: '1'});
         if (frame.getAttribute('src') !== url) {

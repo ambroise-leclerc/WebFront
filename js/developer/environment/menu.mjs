@@ -31,6 +31,39 @@ export const panelTitle = id => inspectorPanels.has(id) ? `${inspectorPanels.get
  */
 export const inspectorChannel = 'webfront-inspector';
 
+/** What the icon buttons that move a panel say, as their accessible name and their tooltip (#722). */
+export const inspectorMoves = {
+    detach: 'Detach this panel to a window of its own',
+    attach: 'Show this panel in the floating window of the main page',
+};
+
+// A frame open at its top right, and an arrow that leaves it (detach, ↗) or enters it (attach, ↙), drawn in currentColor.
+const iconPaths = {
+    detach: ['M7 3H3v10h10V9', 'M9 3h4v4', 'M13 3 7 9'],
+    attach: ['M7 3H3v10h10V9', 'M13 3 7 9', 'M7 5v4h4'],
+};
+const svgSpace = 'http://www.w3.org/2000/svg';
+
+/**
+ * Makes `button` (of `page`) the icon button `move` ('detach' or 'attach'): a 16 px inline SVG in the color of the text,
+ * hidden from assistive technologies, the button being named by its aria-label and its tooltip (inspectorMoves).
+ */
+export function makeMoveButton(page, button, move) {
+    const svg = page.createElementNS(svgSpace, 'svg');
+    const attributes = {viewBox: '0 0 16 16', width: '16', height: '16', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5',
+        'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false'};
+    for (const [name, value] of Object.entries(attributes)) svg.setAttribute(name, value);
+    for (const d of iconPaths[move]) {
+        const path = page.createElementNS(svgSpace, 'path');
+        path.setAttribute('d', d);
+        svg.append(path);
+    }
+    button.replaceChildren(svg);
+    button.setAttribute('aria-label', inspectorMoves[move]);
+    button.title = inspectorMoves[move];
+    return button;
+}
+
 // --- Access to the inspectors ----------------------------------------------------------------------------------
 
 /** The reserved function that says which containers would reach the inspectors; the only one that checks no access. */
@@ -107,18 +140,19 @@ export const longPress = {delay: 550, distance: 10, settle: 1000};
 // --- Menu ------------------------------------------------------------------------------------------------------
 
 export const menuStyles = `
-.webfront-menu{position:fixed;z-index:2147483647;box-sizing:border-box;min-width:min(220px,100vw);max-width:min(360px,100vw);max-height:100vh;overflow:auto;padding:4px;background:#202737;color:#e8edf4;border:1px solid #46536a;border-radius:8px;box-shadow:0 8px 32px #000a;font:14px system-ui}
+.webfront-menu{position:fixed;z-index:2147483647;box-sizing:border-box;min-width:min(176px,100vw);max-width:min(320px,100vw);max-height:100vh;overflow:auto;padding:3px;background:#202737;color:#e8edf4;border:1px solid #46536a;border-radius:8px;box-shadow:0 8px 32px #000a;font:13px/1.3 system-ui}
 .webfront-menu[hidden]{display:none}
 .webfront-menu [role=menu]{display:flex;flex-direction:column}
-.webfront-menu-item{box-sizing:border-box;display:flex;align-items:center;gap:16px;width:100%;min-height:44px;margin:0;padding:0 12px;border:0;border-radius:4px;background:none;color:inherit;font:inherit;text-align:start;cursor:pointer}
+.webfront-menu-item{box-sizing:border-box;display:flex;align-items:center;gap:12px;width:100%;min-height:28px;margin:0;padding:0 10px;border:0;border-radius:4px;background:none;color:inherit;font:inherit;text-align:start;cursor:pointer}
 .webfront-menu-item>span:first-child{flex:1 1 auto}
 .webfront-menu-item:focus{outline:none}
 .webfront-menu-item:hover,.webfront-menu-item:focus-visible,.webfront-menu-item[aria-expanded=true]{background:#2f3a50}
 .webfront-menu-item:focus-visible{outline:2px solid #d7fa85;outline-offset:-2px}
 .webfront-menu-item[aria-disabled=true]{color:#8d97aa;cursor:default}
 .webfront-menu-hint{color:#a9b3c4;font-size:12px}
-.webfront-menu-reason{margin:4px 0 0;padding:8px 12px;border-top:1px solid #46536a;color:#c8cfdb;font-size:12px;line-height:1.4}
+.webfront-menu-reason{margin:3px 0 0;padding:6px 10px;border-top:1px solid #46536a;color:#c8cfdb;font-size:12px;line-height:1.4}
 .webfront-menu-reason:empty{display:none}
+@media (pointer:coarse){.webfront-menu{min-width:min(220px,100vw);padding:4px;font-size:14px}.webfront-menu-item{min-height:44px;gap:16px;padding:0 12px}}
 `;
 
 let menus = 0;
