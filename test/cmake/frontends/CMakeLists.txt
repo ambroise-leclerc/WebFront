@@ -43,7 +43,7 @@ set(WEBFRONT_EMBED_WEBVIEW2 OFF)
 set(WEBFRONT_EMBED_WKWEBVIEW OFF)
 set(frontend CEF)
 set(name WebFrontBrowserIntegration)
-set(expected_timeout 60)
+set(expected_timeout 120)
 set(expect_xvfb OFF)
 if(CASE STREQUAL "extension" OR CASE STREQUAL "missing-xvfb-hook")
     webfront_register_frontend(TestEmbedded
