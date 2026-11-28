@@ -12,6 +12,7 @@
 | 1.5 | 2026-10-24 | Acceptée | Ambroise Leclerc | Documentation consolidée (#317) : la formulation courante décrit directement l'environnement et ses commandes (`wf init`, `install`, `dev`, `check`, `test`, `embed`), sans comparaison avec d'autres outils ; les versions et décisions antérieures de ce tableau et de l'historique Git restent l'historique de la décision. | [#317](https://github.com/ambroise-leclerc/WebFront/issues/317) |
 | 1.6 | 2026-10-26 | Acceptée | Ambroise Leclerc | Ajout du module DOM optionnel `DomInterpreterData`, commande bornée de l’ADR-003 (#380) ; budget inchangé. | — |
 | 1.7 | 2026-11-25 | Proposée | Ambroise Leclerc | Portée des permissions : quand le frontend transmet la preuve de vue, les callbacks `webfront.developer.*` qui écrivent dans le projet exigent une connexion prouvée (`isLocalClient`), par [ADR-027](ADR-027-inspecteurs-de-l-etat-de-l-application.md) (#678). | À renseigner après intégration. |
+| 1.8 | 2026-11-28 | Acceptée | Ambroise Leclerc | La version 1.7 est acceptée avec l'ADR-027 (version 1.6), après l'intégration de l'épique #677 : les écritures de l'environnement et les commandes du terminal sont gardées quand le frontend prouve sa vue (#680). | [#692](https://github.com/ambroise-leclerc/WebFront/pull/692), [#704](https://github.com/ambroise-leclerc/WebFront/pull/704) |
 
 ## Statut et date
 
@@ -80,7 +81,7 @@ l'[ADR-008](ADR-008-contenu-de-confiance-et-origines.md) : le code téléchargé
 autorisés ont l'autorité du bridge et du projet désigné. Un durcissement ultérieur (CSP
 `connect-src` servie avec le script du Worker) reste possible mais n'est pas promis.
 
-Proposé en 1.7 par l'[ADR-027](ADR-027-inspecteurs-de-l-etat-de-l-application.md) : quand le frontend actif transmet la
+Proposé en 1.7 par l'[ADR-027](ADR-027-inspecteurs-de-l-etat-de-l-application.md), accepté en 1.8 (2026-11-28) : quand le frontend actif transmet la
 preuve de vue (`ViewLaunch`), les callbacks `webfront.developer.*` qui écrivent dans le projet (`begin`, `beginNew`,
 `write`, `commit`, `commitGroup`, `abort`) exigent une connexion prouvée, ou un pair de boucle locale avec
 `trustLoopbackClients` (`isLocalClient`). Un client non prouvé ne peut ainsi plus réécrire ce que la vue prouvée
