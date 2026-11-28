@@ -19,6 +19,7 @@
 #include "../unit/TemporaryDirectory.hpp"
 #include "DriverDeadline.hpp"
 #include "RequestLog.hpp"
+#include "TerminationReport.hpp"
 #include "TestFrontend.hpp"
 #include <webfront/system/SafePath.hpp>
 #include <webfront/utils/Json.hpp>
