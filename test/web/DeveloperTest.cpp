@@ -318,7 +318,7 @@ private:
 /// Presses keys in the view as the keyboard does: [[key, code, windowsKeyCode, modifiers], ...], modifiers as DevTools
 /// counts them (2 for Ctrl). "sent", "unsupported" on a frontend other than CEF, or why the keys could not be sent.
 template <typename App>
-std::string pressKeys(App& app, const std::string& json) {
+std::string pressKeys([[maybe_unused]] App& app, const std::string& json) {
     std::vector<std::tuple<std::string, std::string, int, int>> keys;
     webfront::json::Reader                                      reader{json};
     reader.array([&] {
