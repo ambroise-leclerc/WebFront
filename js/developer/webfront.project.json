@@ -32,6 +32,7 @@
       "test/developer/specs/testing-specs.mjs",
       "test/developer/specs/timers-specs.mjs",
       "test/developer/specs/workspace-specs.mjs",
+      "test/developer/specs/terminal-specs.mjs",
       "test/developer/specs/inspector-specs.mjs",
       "test/developer/specs/inspector-registry-specs.mjs",
       "test/developer/specs/inspector-watches-specs.mjs",

@@ -145,8 +145,8 @@ application: `ui/main.ts` calls one C++ callback, `app.greet`, and each of its e
 The starter contains editable TSX/CSS and a recipe of exact versions; `wf init` does not copy it, so list the dependencies with `wf install` and declare `test.specs`, `entries` and `providers` in the manifest yourself.
 `wf create life another-directory` selects a different new destination; existing directories
 are never replaced. React DOM pulls scheduler transitively and checks its React peer.
-Edit the local files in your normal editor and use `wf dev` for automatic rebuilds, or run `wf preview` again. Ctrl+C interrupts
-commands, including downloads and builds.
+Edit the local files in your normal editor and use `wf dev` for automatic rebuilds, or run `wf preview` again. Escape (while no
+text of the terminal is selected) or the terminal's Stop button interrupts commands, including downloads and builds.
 
 The interface draws an isometric field with raised living cells, soft lighting and translucent
 panels. Play/pause, single step, tempo, glider/blinker/galaxy seeds, clear, cell painting and a plan
@@ -265,7 +265,7 @@ when it is damaged, `wf restore` rebuilds it from the lock alone:
 - each locked package is downloaded at its exact locked version (no range is resolved again) and checked
   against the lock's SHA-512 integrity; packages already valid in the cache are not downloaded again, so the
   command is idempotent;
-- every package is published on its own: Ctrl+C or an error (changed archive, package absent from the
+- every package is published on its own: an interruption or an error (changed archive, package absent from the
   registry) keeps the packages already restored and never writes the manifest or the lock; run the command again;
 - `wf restore --offline` contacts no registry at all: it checks the cache against the lock and fails with the
   list of missing or corrupted packages, without downloading anything.
@@ -320,7 +320,7 @@ and runs in a dedicated Worker; only the package files it imports are read from 
 | Member | Behavior |
 | --- | --- |
 | `args` | The arguments, as an array of strings. |
-| `signal` | An `AbortSignal` aborted by Ctrl+C and by the time limit. |
+| `signal` | An `AbortSignal` aborted by an interruption (Escape or the Stop button) and by the time limit. |
 | `console` | `log`/`info`/`debug` and `warn`/`error`, streamed to the terminal; the Worker's global `console` too. |
 | `project.read(path)`, `readText(path)` | A project file as bytes or text, under `permissions.files` or `publish`. |
 | `project.list(path = '')` | The names in a project directory (directories end with `/`). A readable directory is listed whole; the root and the directories leading to granted paths list only the entries leading to them. |
@@ -338,14 +338,14 @@ provided. A script cannot run a native program, and no manifest permission can g
 program (a CLI under test, a converter's output checked by the binary that reads it) is a spec of the consumer Jasmine path,
 where the test's owner authorizes the program ([native programs and temporary files](CONSUMER_TESTING.md#native-programs-and-temporary-files-from-the-specs)).
 
-Ctrl+C first aborts `context.signal`; a script still running two seconds later (the grace period) is terminated with
+An interruption first aborts `context.signal`; a script still running two seconds later (the grace period) is terminated with
 `worker.terminate()`, which also stops a loop that never returns to the event loop. The time limit (`--timeout`,
 600 seconds by default, from 1 to 3600) applies the same sequence; it also bounds the scripts that the script runs
 through `wf` commands, whatever their own limit. The terminal stays usable. Each write is a transaction of its own:
 at a stop, one still staging is aborted and leaves the file unchanged, and one whose commit was already sent
 completes atomically; the terminal lists the publications applied and abandoned. When a script ends by itself, the
 writes it did not await complete first; if one of them fails, the run ends with code 1 and names it. A script that
-returns ends with code 0, a thrown error with 1, `exit(code)` with that code, Ctrl+C with 130 and the time limit with
+returns ends with code 0, a thrown error with 1, `exit(code)` with that code, an interruption with 130 and the time limit with
 124; a non-zero code is an error carrying `exitCode`.
 
 ## Type checking (`wf check`)
@@ -383,9 +383,9 @@ wf check
   snapshot that reaches its bounds still compiles but reports the files it left out and fails; a listing past its
   bound fails at once. TypeScript itself (about 9 MiB) is read from the cache and is not counted. The Worker's memory
   is the browser's; it is not limited further.
-- **Time**: `--timeout` (600 seconds by default, from 1 to 3600) and Ctrl+C stop the check like `wf run`: a check
+- **Time**: `--timeout` (600 seconds by default, from 1 to 3600) and an interruption stop the check like `wf run`: a check
   still loading its snapshot stops at its next read, and one compiling, which never returns to its event loop, is
-  terminated with `worker.terminate()` after the two-second grace period. The exit code is 130 (Ctrl+C) or 124 (time
+  terminated with `worker.terminate()` after the two-second grace period. The exit code is 130 (interruption) or 124 (time
   limit), and the terminal stays usable.
 
 ## The page: interface and floating terminal
@@ -448,14 +448,17 @@ environment's `mount`, not to the embedded bootstrap page):
   to C++ through the bridge. An entry of the menu opens its panel where the project keeps it: at first, and whenever its
   detached container is unavailable, in a **floating window** of the page (moved and resized like the terminal's window,
   with the mouse or with the arrow keys on its title bar), whose frame opens no connection of its own and borrows the page's
-  bridge, since the adapters give the proof of the view to the main frame only. **Detach** moves the panel to a window of its
-  own, and the next opening of that panel goes there again; **Attach**, in that window, brings it back to the floating
-  window, where it then opens. The containers follow the access each frontend actually gives, never its name alone:
+  bridge, since the adapters give the proof of the view to the main frame only. The **detach** icon of its title bar, a frame
+  with an arrow leaving to the top right (↗, tooltip "Detach this panel to a window of its own"), moves the panel to a
+  window of its own, and the next opening of that panel goes there again; the **attach** icon of that window's header, an
+  arrow entering a frame (↙, tooltip "Show this panel in the floating window of the main page"), brings it back to the
+  floating window, where it then opens. Both icons take the color of the text and carry their action as their accessible
+  name. The containers follow the access each frontend actually gives, never its name alone:
 
   | Frontend of the page | Inspectors | Panel opens in | Detached container |
   | --- | --- | --- | --- |
   | WebKitGTK, WKWebView, WebView2 | admitted: the view proves itself | the floating window | a native secondary window (`webfront.inspector.openWindow`, `openSecondaryWindow`), which carries the proof of the view; opening the panel again brings it to the front, and closing the main window closes it |
-  | CEF | admitted: the view proves itself | the floating window | none: CEF opens no secondary window, and `window.open` there would open a frame without the proof; Detach is greyed, with the reason in its tooltip |
+  | CEF | admitted: the view proves itself | the floating window | none: CEF opens no secondary window, and `window.open` there would open a frame without the proof; the detach icon is greyed, with the reason in its tooltip |
   | System browser (default of `webfront::WebFront`) | **refused by default**: the entries are greyed and say how to enable them | none | none |
   | System browser with `trustLoopbackClients` | admitted: any loopback page | the floating window | a tab of the system browser (`window.open`), with its own loopback connection; when the pop-up blocker refuses it, the panel stays in the floating window and a message offers to try again; the tab closes when the page that opened it is gone |
 
@@ -475,10 +478,10 @@ environment's `mount`, not to the embedded bootstrap page):
   Every loopback connection is then a local client: it reads the inspectors, and it also passes the `ui.isLocalClient()`
   check of the application's own callbacks (below). The option is the application's choice; the environment never sets it.
 
-  Attach brings the panel back to the page that detached it only, even when other pages of the application are open on
+  The attach icon brings the panel back to the page that detached it only, even when other pages of the application are open on
   the same origin. A page keeps its identifier across a reload through Web Locks; in a browser without them, a reloaded
   page has a new one, and a tab detached before the reload asks the old page in vain: it says that the main page did not
-  answer. Close that tab, open the panel from the menu of the reloaded page, then use Attach in the window it opens. The project keeps the detached panels and the floating window's place in
+  answer. Close that tab, open the panel from the menu of the reloaded page, then use the attach icon in the window it opens. The project keeps the detached panels and the floating window's place in
   `.webfront/developer/inspector-window.json`. A save that reaches C++ completes or releases its transaction there,
   even when its page closes. A page closed before the save reaches C++ may lose its latest choice.
   With a frontend that proves its view, developer file writes and starting or cancelling native terminal commands
@@ -489,6 +492,12 @@ environment's `mount`, not to the embedded bootstrap page):
   The arrow beside a watch unfolds its content as a tree: scalars, strings, containers, described and formattable types,
   read by pages of 200 children and refreshed at the chosen period, the values that changed highlighted. A value the
   application made writable is edited in place (Enter writes, Escape cancels); a value that is cut offers its full text.
+  Elements that are all leaves of one kind show that kind once, on their container (`sequence [3] of string`), with their
+  indices in a narrow column and their values aligned. A sequence of strings of the same length, such as the grid of
+  Life, shows as a **block**: one line per element, without index or kind, in square character cells, so that a grid of
+  32 by 32 characters is square. The lines keep the highlighting of what changed, the full value and the edition in place.
+  Its **Tree** button shows the elements one by one again and **Block** returns to the block; the choice is kept per watch
+  in this browser, as the period is. The layout changes only what is shown: the pages read are the same.
   [Watches](WATCHES.md) tells how to declare them, under which lock or on which thread they are read, and their bounds.
 
   The **Functions** panel lists what the application registered with `cppFunction`, the functions of its spaces included
@@ -544,8 +553,10 @@ environment's `mount`, not to the embedded bootstrap page):
   announcement is refused with `webfront.inspector.unavailable`, and its detached panel says that the page is not
   connected.
 
-The tab is a button (`aria-expanded`, `aria-haspopup="menu"`, 44 px target), its menu a `menu` of `menuitem`s of 44 px,
-and the window a non-modal dialog. The interface stays in the preview
+The tab is a button (`aria-expanded`, `aria-haspopup="menu"`, 44 px target), its menu a `menu` of compact `menuitem`s
+(28 px, 24 px at least, and 44 px under a coarse pointer such as a touch screen), and the window a non-modal dialog. The
+inspector panels are dense in the same way: their controls keep 24 px at least, 44 px under a coarse pointer, and a
+visible focus. The interface stays in the preview
 frame, as before: the layout adds nothing to the application's documents except the shortcut's listener and the preview page's announcement, installed in the interface
 and in the same-origin frames it embeds (not in a frame of another origin, nor one inside a shadow tree: click the interface
 or the tab first). This is a layout, not a
@@ -647,22 +658,33 @@ scheduler@0.28.0
 unknown starter lists the starters. The line under the terminal that reports the bootstrap ends with `Agents: docs/DEVELOPING_WITH_AGENTS.md`;
 it comes from the library's embedded loader, not from the environment.
 
-- **Editing:** left/right, Home/End (Ctrl+A/Ctrl+E), Backspace/Delete, Ctrl+U/Ctrl+K, Ctrl+L, up/down through the
+- **Editing:** left/right, Home/End (Ctrl+E for End), Backspace/Delete, Ctrl+U/Ctrl+K, Ctrl+L, up/down through the
   history. A line wider than the terminal wraps over several rows and is redrawn in place; a line taller than the
   terminal is drawn a screen of rows at a time around the cursor, since rows that left the screen cannot be rewritten. The editor moves over
   grapheme clusters: CJK characters and emoji (ZWJ sequences, flags, skin tones, presentation selector) take two
   cells, combining marks none. The same widths are registered in xterm.js, so both always agree.
+- **System shortcuts:** Ctrl+C/⌘C copies the selection, Ctrl+V/⌘V pastes, Ctrl+A/⌘A selects the whole terminal and
+  Ctrl+X/⌘X copies the selection, since nothing of the terminal can be cut (Shift may be held, as Ctrl+Shift+C in other
+  terminals). The terminal does not turn them into control characters: the engine copies and pastes, with CEF, WebView2,
+  WebKitGTK, WKWebView (through its Edit menu) and a system browser alike. Without a selection, Ctrl+C does nothing: it
+  neither clears the line nor interrupts a command. A paste keeps the multi-line behaviour below.
+- **Interruption:** while a command runs, Escape (when no text of the terminal is selected; with a selection, Escape
+  clears it) or the **Stop** button interrupts it. The button shows while a command runs, in the bar of the floating
+  terminal window or at the top right of the terminal when it fills the window, and is disabled once the command is
+  interrupted. The command's `signal` is aborted, a C++ command receives `webfront.commands.cancel`, a script gets
+  its grace period, and the command ends with exit code 130 (status `interrupted` in the reports of `wf test`).
+  The `@webfront/pty` adapter ([PTY](PTY.md)) is a separate terminal and is unchanged: Ctrl+C still sends `^C` to its shell.
 - **History:** kept per project in `.webfront/developer/history.json` (500 lines), restored by the next terminal. Each
   line is added to the file as it is, with a conditional publication tried again on conflict, so terminals of several
   pages on the same project keep each other's lines. A history file that cannot be read is never replaced.
 - **Typing ahead and paste:** keys typed or pasted while a command runs are applied after it, line by line; a last
-  line without a line break waits on the prompt. Ctrl+C drops the keys still waiting.
+  line without a line break waits on the prompt. Interrupting the command drops the keys still waiting.
 - **Completion (Tab):** command names, `wf` subcommands, the manifest's scripts after `wf run`, the installed packages after
   `wf why` and `wf info`, its entries and
   entries/providers after `wf build`, `wf dev`, `wf preview` and `wf embed`, and project paths, also when the word is escaped (`my\ dir/`) or
   quoted (`"my dir/`); the completion is written the same way and closes the quote. Several candidates are completed
   to their common prefix, or listed.
-- **Exit codes:** a failed command prints `Error: <message>`, with `(exit code N)` when N is not 1. Ctrl+C gives 130.
+- **Exit codes:** a failed command prints `Error: <message>`, with `(exit code N)` when N is not 1. An interruption gives 130.
 - **Output streams** while a command runs, for `wf` and C++ commands alike, without a size limit: C++ output is
   sent in pieces below the 65,535-byte limit of bridge strings.
 
@@ -689,10 +711,10 @@ of its browser with `webfront.commands.start`. In C++, the command is spawned li
 
 - `context.write(text)` streams output with fire-and-forget calls; `co_await context.print(text)` sends it piece by
   piece and, after each piece, suspends the command while more than 32 frames wait for a browser that reads slower
-  (`ui.writesAtMost`, woken by the write that drains the queue); each wait is a point where Ctrl+C stops it.
+  (`ui.writesAtMost`, woken by the write that drains the queue); each wait is a point where an interruption stops it.
   `context.args()` holds the words after the command name, split like a shell line; `context.exit(code)` sets the
   exit code. A command that returns once asked to stop reports 130, whatever it returned.
-- Ctrl+C sends `webfront.commands.cancel`: the command's stop token is requested, which the senders it awaits
+- An interruption sends `webfront.commands.cancel`: the command's stop token is requested, which the senders it awaits
   observe (`ui.resumeAfter`, `ui.jsFunctionSender`, ...); loops check `context.stopRequested()`. The terminal does
   not wait for the command to end: the prompt returns at once and the next command runs, while the first one
   unwinds. Its late output and exit report are ignored.
@@ -722,7 +744,7 @@ Publication replaces the directory only after every entry succeeds. Build output
 files; the developer HTTP provider serves only the environment and preview directories.
 
 `wf dev [entry.tsx|name]` selects `entries.main` or the sole entry when omitted, builds, opens the preview
-and keeps running until Ctrl+C. It reuses one compiler Worker and esbuild context across rebuilds.
+and keeps running until it is interrupted (Escape or the Stop button). It reuses one compiler Worker and esbuild context across rebuilds.
 At startup only a missing project or an omitted entry that cannot be selected ends the command with exit
 code 1 and restores the terminal prompt. Any other error (an unreadable or malformed manifest or lock, a
 compilation error, including a failed first build) keeps the watcher running so that editing the inputs can recover.
@@ -741,7 +763,7 @@ the next poll; polling can miss a change that is reverted completely between rea
 Only a successful build and publication reload the preview, replacing its session history entry. A build
 error leaves its last successful files and running document intact. Diagnostics (`file:line:column`, with
 one-based line and column numbers) stream to the terminal and appear as a text overlay in the preview.
-Fixing the source resumes rebuilding and clears the overlay. Ctrl+C ends with exit code 130, terminates
+Fixing the source resumes rebuilding and clears the overlay. An interruption ends it with exit code 130, terminates
 the Worker, cancels polling and aborts staged publication; a publication already committed finishes and reloads
 the preview before stopping.
 The last successful preview stays available. Browser disconnection also stops the loop.
@@ -774,7 +796,7 @@ and integrity. Nothing else is needed, and no public network once the package is
   spec can call `webFront.cppFunction`). The runner page, Jasmine and everything the specs built (JS, CSS imported by a spec, assets) are published to a
   directory of the run's own, `.webfront/developer/test/<run id>/`, and served by the developer HTTP provider; two
   sessions on a project never run each other's specs. The files are removed when the run ends (an empty directory
-  remains) and the frame is removed at the end, on a time limit and on Ctrl+C.
+  remains) and the frame is removed at the end, on a time limit and on an interruption.
 - `pattern` keeps the specs whose full name (suites and spec names) contains it; the others count as filtered out.
   The order is fixed: no random shuffling.
 - The terminal shows `.`, `F` and `*` (passed, failed, pending) as specs end, then a summary line (`PASSED: 3 specs,
@@ -783,17 +805,17 @@ and integrity. Nothing else is needed, and no public network once the package is
 - Exit codes: 0 when every executed spec passed; 1 for a failed spec, a failure outside the specs, an unhandled
   asynchronous exception or rejection (Jasmine reports both as failures), a spec file that does not build or load,
   `fit`/`fdescribe`, and a run that executed nothing (no specs, or a pattern matching none); 124 at the time limit
-  (`--timeout`, default 60 s, 1 to 3600, covering the build and the publication as well as the run, and never later than the `--timeout` of a `wf run` script that runs `wf test`); 130 on Ctrl+C, at any step. Jasmine's own per-spec timeout (5 s by default) still ends a
+  (`--timeout`, default 60 s, 1 to 3600, covering the build and the publication as well as the run, and never later than the `--timeout` of a `wf run` script that runs `wf test`); 130 on an interruption, at any step. Jasmine's own per-spec timeout (5 s by default) still ends a
   spec that never completes, which fails.
 - A synchronous infinite loop in a spec blocks the page that hosts the frame, as it would in any same-origin frame:
-  the time limit cannot fire. Use asynchronous waits, which the time limit and Ctrl+C do stop.
+  the time limit cannot fire. Use asynchronous waits, which the time limit and an interruption do stop.
 
 The result sent to C++ is cut to 60,000 bytes when it is larger (a bridge string holds 65,535): the output first, then stack frames, messages and the lists, never the counts or the status; `truncated` is then `true`.
 
 The report is structured: `{status, exitCode, total, passed, failed, pending, excluded, durationMs, jasmine, failures:
 [{name, messages: [{message, stack}]}], pendingSpecs, suites, global, incomplete}`, bounded (100 failures, 8 messages of 16 KiB
 each per spec). `status` is `passed`, `failed`, `incomplete`, `error` (the specs did not load), `timeout` or `interrupted`.
-A run stopped at the time limit or by Ctrl+C once its frame was in the page also has `stage: {reached, specs, current, suite,
+A run stopped at the time limit or by an interruption once its frame was in the page also has `stage: {reached, specs, current, suite,
 loaded, missing}`, which its message repeats: the last step the runner reached (`page requested` when it never started,
 `runner started`, `bridge settled`, `specs loaded`, `specs running`, `between specs` in a suite's hook or after a spec),
 the specs it finished, the spec in progress or the innermost suite whose hooks run, and
@@ -1004,7 +1026,7 @@ WKWebView and all 14 Linux CEF/Xvfb cases with both GCC and Clang in
 The packed 0.3.0 version passes WKWebView and all 14 GCC CEF/Xvfb cases in
 [run 39490581423](https://github.com/ambroise-leclerc/WebFront/actions/runs/39490581423).
 For Linux, select CEF and Xvfb instead; the same developer tests use the selected test frontend.
-`DeveloperBrowserIntegration` (the application part: starter, build, `wf dev`, Life preview, embedding) and `DeveloperBrowserIntegration-scripts`, `-typescript`, `-jasmine`, `-terminal` and `-workspace` (the page layout: first launch, launch on an existing interface, floating terminal and its session) exercise, in parallel and each from its own project, the real WASM compiler, local registry, `wf test` under the locked jasmine-core (pass, fail, pending, asynchronous failures, pattern, time limit, Ctrl+C, non-interactive report to C++), build without navigation, incremental dev reload/error/recovery/Ctrl+C, the Life preview, C++ generation/animation and repeatable header generation. The developer journey (`Journey*`) then
+`DeveloperBrowserIntegration` (the application part: starter, build, `wf dev`, Life preview, embedding) and `DeveloperBrowserIntegration-scripts`, `-typescript`, `-jasmine`, `-terminal` and `-workspace` (the page layout: first launch, launch on an existing interface, floating terminal and its session) exercise, in parallel and each from its own project, the real WASM compiler, local registry, `wf test` under the locked jasmine-core (pass, fail, pending, asynchronous failures, pattern, time limit, interruption, non-interactive report to C++), build without navigation, incremental dev reload/error/recovery/interruption, keyboard copy and paste in the terminal (CEF), the Life preview, C++ generation/animation and repeatable header generation. The developer journey (`Journey*`) then
 builds the header that its own `wf embed` generated and runs `JourneyEmbeddedRun` from an empty working directory
 with no developer callbacks.
 Deadline and grace-period regressions advance a scoped clock instead of sleeping for seconds; Worker startup,

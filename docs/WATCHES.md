@@ -224,6 +224,23 @@ write never waits for the end of a pass: it interrupts it, and the next pass fin
 (`webfront.inspector.children`, `changes`, `value`, `fold`, `reset`, `limits`, `write`) is described in section 3 of the
 ADR; it uses the bridge's existing types only.
 
+## How the panel shows a container
+
+Elements that are all leaves of one kind show that kind once, on their container (`sequence [32] of string`), with their
+indices in a narrow column and their values aligned, so that more of them fit in the window.
+
+A sequence (a vector, an array) of two or more strings of the same length, labelled by their index, such as `grid`
+above, shows as a **block**: one line per element, without index or kind, in a monospace font whose letter spacing
+widens the advance of a character to the line height, so that each character is a square cell and a grid of 32 by 32
+characters is square; the grid of Life fits in the default inspector window. The block keeps what the tree offers: the
+lines that the last pass changed are highlighted, a line that is cut offers its full value (with a 24 px button, which
+makes that line as high), and a line of a writable watch is edited in place (click it, or Enter or F2; with a mouse it
+is as high as its line of text, and **Tree** gives rows of 24 px, 44 px under a coarse pointer as in the block). Its
+**Tree** button shows the elements one by one again, and **Block** returns to the block; the choice is kept per watch
+and container in this browser, as the period is. A line that no longer has the length of the others turns the block back
+into a tree until they agree. The fields of an object, the entries of a map and strings that break their line keep the
+tree. The layout changes only what is shown: the pages of 200 elements and the passes are the same (ADR-027, section 3).
+
 ## Reading a watch from an agent
 
 An application that enables [automation](AUTOMATION.md#reading-the-applications-state) with the `state` grant gives an MCP

@@ -15,7 +15,7 @@ describe('wf dev', () => {
     for (const [label, manifest, message] of [
         ['without a project', null, /No webfront.project.json: run wf init/],
         ['without an entry', {format: 1, name: 'empty', version: '0.1.0'}, /Usage: wf dev <entry.tsx>/],
-    ]) it(`rejects ${label} without waiting for Ctrl+C or starting a compiler`, async () => {
+    ]) it(`rejects ${label} without waiting for an interruption or starting a compiler`, async () => {
         const {bridge} = memoryBridge(new Map(manifest ? [['webfront.project.json', encode(JSON.stringify(manifest))]] : []));
         const controller = new AbortController();
         // Bound the regression: the broken command stays in its polling loop until this aborts it.
@@ -98,7 +98,7 @@ describe('wf dev', () => {
         await rejects(inputsChanged(broken, new Map([['file', 'old']])), /Connection closed/);
     });
 
-    it('Ctrl+C terminates an active compiler, rejects once, and drops late read answers', async () => {
+    it('an interruption terminates an active compiler, rejects once, and drops late read answers', async () => {
         let callback, terminated = 0;
         const messages = [];
         const worker = {postMessage: message => messages.push(message), terminate: () => ++terminated,
@@ -152,7 +152,7 @@ describe('wf dev', () => {
     });
 
 
-    it('Ctrl+C during commit still displays the committed preview before stopping dev', async () => {
+    it('an interruption during commit still displays the committed preview before stopping dev', async () => {
         const project = memoryBridge(new Map([['webfront.project.json', encode(JSON.stringify({
             format: 1, name: 'commit-race', version: '0.1.0', entries: {main: 'main.ts'},
         }))]]));
@@ -179,7 +179,7 @@ describe('wf dev', () => {
         try {
             await rejects(dev([], {bridge, signal: controller.signal, preview: frame}), error => error.exitCode === 130);
             expect(project.storage.get('.webfront/developer/preview/app.js')).toEqual(encode('console.log("committed")'));
-            expect(navigations.length).withContext('a completed publication must be displayed even when Ctrl+C arrived during commit').toBe(1);
+            expect(navigations.length).withContext('a completed publication must be displayed even when an interruption arrived during commit').toBe(1);
             expect(navigations[0]).toMatch(/^\/webfront\/developer\/preview\/index.html\?build=/);
             expect(frame.hidden).toBe(false);
             expect(project.pending()).toBe(0);

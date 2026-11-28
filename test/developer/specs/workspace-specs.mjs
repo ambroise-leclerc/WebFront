@@ -306,7 +306,11 @@ describe('The developer page layout', () => {
                 expect(items(0)[1].getAttribute('aria-haspopup')).toBe('menu');
                 expect(items(0)[0].getAttribute('aria-keyshortcuts')).toBe('F9');
                 expect(document.activeElement).toBe(items(0)[0]);
-                expect(items(0).every(item => item.getBoundingClientRect().height >= 44)).toBeTrue();
+                // Compact for a mouse (#723), never below 24 px (WCAG 2.2, 2.5.8); 44 px again under a coarse pointer.
+                const heights = items(0).map(item => item.getBoundingClientRect().height);
+                if (matchMedia('(pointer: coarse)').matches) expect(heights.every(height => height >= 44)).withContext(String(heights)).toBeTrue();
+                else expect(heights.every(height => height >= 24 && height <= 32)).withContext(String(heights)).toBeTrue();
+                expect(items(0).every(item => item.getBoundingClientRect().width >= 24)).toBeTrue();
                 const box = menu.panels[0].getBoundingClientRect();
                 expect(box.right).toBeLessThanOrEqual(document.documentElement.clientWidth + 0.5);
                 expect(box.left).toBeGreaterThanOrEqual(0);

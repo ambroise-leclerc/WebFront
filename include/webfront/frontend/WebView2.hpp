@@ -410,6 +410,12 @@ public:
         return initialNavigationPending;
     }
 
+    /// Whether the window navigates to its page: its view is created and its own load has started. Until then a secondary
+    /// window waits (#716): it starts as the windows opened later do, not beside the creation of the first one's view.
+    [[nodiscard]] bool loadStarted() const noexcept {
+        return navigating;
+    }
+
     static void checkProcessFailure(COREWEBVIEW2_PROCESS_FAILED_KIND kind) {
         // An unresponsive renderer can recover; WebView2 also recovers auxiliary processes itself.
         // Main renderer/browser exits deliberately fail the session: automatic reload could repeat application actions.
@@ -479,6 +485,12 @@ public:
                 throw std::runtime_error("WebView2: cannot start presentation timer");
             ShowWindow(window, SW_SHOW);
         }
+    }
+
+    /// Names the milestones of WEBFRONT_STARTUP_TRACE after `label` (a secondary window's page): two windows opening
+    /// together are told apart (#716).
+    void traceAs(std::string label) {
+        trace.label = std::move(label);
     }
 
     /// Whether the window is shown (the first window's choice, which a secondary window follows).
@@ -597,6 +609,7 @@ private:
     WindowOptions windowOptions;
     bool          registered                 = false;
     bool          initialNavigationPending   = true;
+    bool          navigating                 = false;  // Navigate() to the page was called (loadStarted())
     UINT          startupTimeoutMilliseconds = 30'000;
 
     void requestWindowClose() noexcept {
@@ -672,6 +685,7 @@ private:
             if (!created)
                 throw std::runtime_error("WebView2: no environment returned");
             environment = created;
+            trace("environment created");
             createController();
         } catch (...) {
             fail();
@@ -746,11 +760,13 @@ private:
             BOOL success = FALSE;
             check(args->get_IsSuccess(&success), "reading navigation result");
             if (!success) {
+                trace("navigation failed");
                 presentWindow();
                 handleInitialNavigationFailure(args);
                 return;
             }
             initialNavigationPending = false;
+            trace("document loaded");
         } catch (...) {
             fail();
         }
@@ -895,6 +911,7 @@ private:
                 return S_OK;
             }).Get());
         check(started, "starting controller creation");
+        trace("view requested");
     }
 
     void registerLifecycleHandlers() {
@@ -1083,6 +1100,7 @@ public:
                                   self->stopStartupTimer();
                                   self->trace("load started");
                                   check(browser->Navigate(self->url.c_str()), "navigating to application");
+                                  self->navigating = true;
                               } catch (...) {
                                   self->fail();
                               }
@@ -1141,11 +1159,16 @@ inline void openSecondary(std::string_view address, std::string_view port, std::
     Windows::instance().open(
         std::string(page),
         [&](Session& primary) {
-            if (!primary.environment)
+            // Not before the first window's own load has started (#716): a window requested while the first one's view was
+            // still being created once never connected, which no window opened later ever did. Waiting gives it the state
+            // those windows meet (one view creation at a time, the first page loading first). The wait is bounded by the
+            // first window's startup deadline, which runs until its load starts.
+            if (!primary.environment || !primary.loadStarted())
                 throw WindowNotReady("WebView2Frontend: the first window is not ready (its browser is being created); call it later");
             // The first window's delay, which the application configured (WebView2FrontendWithOptions), not this call's default.
-            auto session                = std::make_shared<Session>(primary.startupTimeout());
-            session->secondary          = true;
+            auto session       = std::make_shared<Session>(primary.startupTimeout());
+            session->secondary = true;
+            session->traceAs(std::string(page));
             session->contentPolicy      = webfront::detail::BoundContentPolicy{frontend::detail::applicationUrl(address, port, "", options.launch.origin),
                                                                                options.contentPolicy};
             session->viewLaunch         = options.launch;

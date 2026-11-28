@@ -8,17 +8,20 @@
 // LLM: real-browser test; fixtures are served locally, no public network
 
 #include "../../examples/life/Life.hpp"
+#include "../../examples/life/LifeWatches.hpp"
 #include "../driver/RequestLog.hpp"
 #include "../unit/TemporaryDirectory.hpp"
 #include <webfront/Commands.hpp>
 #include <webfront/utils/Json.hpp>
 #include <webfront/WebFront.hpp>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <future>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -26,7 +29,9 @@
 #include <optional>
 #include <set>
 #include <tuple>
+#include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace {
 std::string readFixtureText(const std::filesystem::path& path) {
@@ -107,7 +112,7 @@ void registerCallbacks(App& app, const std::filesystem::path& project, std::atom
     });
 }
 
-// What the test's long commands went through, by tag: running, stopping (a lingering command after Ctrl+C), cancelled.
+// What the test's long commands went through, by tag: running, stopping (a lingering command after an interruption), cancelled.
 class CommandStates {
 public:
     void set(const std::string& tag, std::string state) {
@@ -161,7 +166,7 @@ webfront::Task waitUntilStopped(Context context, std::shared_ptr<CommandStates> 
         co_await context.ui().resumeAfter(20ms);
 }
 
-// After Ctrl+C, remains deaf to the stop request until the test releases it.
+// After an interruption, remains deaf to the stop request until the test releases it.
 template <typename Context>
 webfront::Task lingerAfterStop(Context context, std::shared_ptr<CommandStates> states) {
     const auto tag = context.args().at(0);
@@ -216,7 +221,7 @@ void registerCommands(webfront::Commands<App>& commands, const std::shared_ptr<C
     commands.add("wait", "Wait until stopped", [states](Context context) {
         return waitUntilStopped(std::move(context), states);
     });
-    commands.add("linger", "Linger after Ctrl+C", [states](Context context) {
+    commands.add("linger", "Linger after an interruption", [states](Context context) {
         return lingerAfterStop(std::move(context), states);
     });
 }
@@ -262,6 +267,85 @@ void copyHeaders(const std::filesystem::path& project, const std::filesystem::pa
     std::filesystem::copy_file(project / "generated/LifeUI.hpp", output / "LifeUI.hpp", std::filesystem::copy_options::overwrite_existing);
 }
 
+#ifdef WEBFRONT_EMBED_CEF
+// One key pressed and released in the CEF view as the keyboard sends it, through DevTools (Input.dispatchKeyEvent): the
+// events are trusted, so the engine runs its own copy and paste for Ctrl+C and Ctrl+V, which a script's synthetic events
+// never trigger (#721). Runs on the interface thread, where the view's browser is published.
+template <typename App>
+class KeyPressTask : public CefTask {
+public:
+    KeyPressTask(App& application, std::vector<std::tuple<std::string, std::string, int, int>> pressed, std::shared_ptr<std::promise<std::string>> result)
+        : app(application), keys(std::move(pressed)), done(std::move(result)) { }
+
+    void Execute() override {
+        const auto window = app.nativeWindow().get();
+        if (!window || !window->pointer) {
+            done->set_value("the view is not open");
+            return;
+        }
+        const auto host = static_cast<CefBrowser*>(window->pointer)->GetHost();
+        for (const auto& [key, code, keyCode, modifiers] : keys)
+            for (const auto* type : {"rawKeyDown", "keyUp"}) {
+                auto params = CefDictionaryValue::Create();
+                params->SetString("type", type);
+                params->SetString("key", key);
+                params->SetString("code", code);
+                params->SetInt("windowsVirtualKeyCode", keyCode);
+                params->SetInt("nativeVirtualKeyCode", keyCode);
+                params->SetInt("modifiers", modifiers);
+                if (!host->ExecuteDevToolsMethod(0, "Input.dispatchKeyEvent", params)) {
+                    done->set_value("the engine refused a key event");
+                    return;
+                }
+            }
+        done->set_value("sent");
+    }
+
+private:
+    App&                                                        app;
+    std::vector<std::tuple<std::string, std::string, int, int>> keys;
+    std::shared_ptr<std::promise<std::string>>                  done;
+
+    #ifdef __clang__
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wextra-semi"
+    #endif
+    IMPLEMENT_REFCOUNTING(KeyPressTask);
+    #ifdef __clang__
+        #pragma clang diagnostic pop
+    #endif
+};
+#endif
+
+/// Presses keys in the view as the keyboard does: [[key, code, windowsKeyCode, modifiers], ...], modifiers as DevTools
+/// counts them (2 for Ctrl). "sent", "unsupported" on a frontend other than CEF, or why the keys could not be sent.
+template <typename App>
+std::string pressKeys([[maybe_unused]] App& app, const std::string& json) {
+    std::vector<std::tuple<std::string, std::string, int, int>> keys;
+    webfront::json::Reader                                      reader{json};
+    reader.array([&] {
+        std::vector<std::string> fields;
+        reader.array([&] {
+            fields.push_back(fields.size() < 2 ? reader.string() : std::string(reader.rawValue()));
+        });
+        if (fields.size() != 4)
+            throw std::invalid_argument("A key is [key, code, keyCode, modifiers]");
+        keys.emplace_back(fields[0], fields[1], std::stoi(fields[2]), std::stoi(fields[3]));
+    });
+#ifdef WEBFRONT_EMBED_CEF
+    if constexpr (std::is_same_v<WEBFRONT_TEST_FRONTEND, webfront::frontend::CEFFrontend>) {
+        auto done   = std::make_shared<std::promise<std::string>>();
+        auto result = done->get_future();
+        if (!CefPostTask(TID_UI, new KeyPressTask<App>(app, std::move(keys), done)))
+            return "the interface thread is gone";
+        if (result.wait_for(std::chrono::seconds(10)) != std::future_status::ready)
+            return "the interface thread did not send the keys";
+        return result.get();
+    }
+#endif
+    return "unsupported";
+}
+
 constexpr auto runScript =
     "import('/fixtures/run.mjs').catch(async e => { await webFront.cppFunction('test.report')(false, String(e.stack || e)); window.close(); });";
 
@@ -288,6 +372,9 @@ public:
         });
         app.cppFunction("test.part", [part = mode.part] {
             return part;
+        });
+        app.cppFunction("test.keys", [this](std::string keys) {
+            return pressKeys(app, keys);
         });
         // What the inspectors must offer this page, known from the frontend type and not from webfront.inspector.containers(),
         // which the spec checks against it: the view of an embedded frontend is admitted, and a frontend that has secondary
@@ -317,6 +404,20 @@ public:
         app.cppFunction("test.unwatch", [this](std::string name) {
             watches.erase(name);
         });
+        // The watches of the Life example (#723): its grid, 32 strings of 32 characters, here holding a glider.
+        app.cppFunction("test.watchLife", [this] {
+            {
+                std::scoped_lock lock{lifeObserved.mutex};
+                lifeObserved.grid[0][1] = '#';
+                lifeObserved.grid[1][2] = '#';
+                lifeObserved.grid[2].replace(0, 3, "###");
+            }
+            lifeWatches.reset();  // a name is unique while its handle lives
+            lifeWatches.emplace(webfront::demo::watchLife(app, lifeObserved));
+        });
+        app.cppFunction("test.unwatchLife", [this] {
+            lifeWatches.reset();
+        });
         // A call that answers only once the page lets it go: the Bridge panel shows it pending meanwhile (#684).
         app.cppFunction("test.hold", [this] {
             held = true;
@@ -339,6 +440,7 @@ public:
 
     ~Part() {
         watches.clear();
+        lifeWatches.reset();
         states->releaseAll();
         app.stop();
         // Drain while the commands, callback state and project are still alive.
@@ -391,14 +493,16 @@ private:
         return config;
     }
 
-    std::atomic<bool>                               passed{false};
-    bool                                            reported = false;
-    std::mutex                                      reportMutex;
-    std::shared_ptr<CommandStates>                  states;
-    webfront::Commands<App>                         commands;
-    webfront::UISubscription                        subscription;
-    std::map<std::string, webfront::inspect::Watch> watches;      // used on the server thread only
-    std::atomic<bool>                               held{false};  // test.hold answers once test.letGo cleared it
+    std::atomic<bool>                                      passed{false};
+    bool                                                   reported = false;
+    std::mutex                                             reportMutex;
+    std::shared_ptr<CommandStates>                         states;
+    webfront::Commands<App>                                commands;
+    webfront::UISubscription                               subscription;
+    std::map<std::string, webfront::inspect::Watch>        watches;       // used on the server thread only
+    webfront::demo::LifeObserved                           lifeObserved;  // declared before its watches, destroyed after them
+    std::optional<std::array<webfront::inspect::Watch, 2>> lifeWatches;   // used on the server thread only
+    std::atomic<bool>                                      held{false};   // test.hold answers once test.letGo cleared it
 };
 }  // namespace
 

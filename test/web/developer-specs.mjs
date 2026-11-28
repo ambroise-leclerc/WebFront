@@ -57,7 +57,7 @@ const echo = text => {
 };
 // Only the wf subcommand is shown, never an argument, an option value or a path; `execute` runs help for no argument.
 const subcommand = ([command = 'help']) => /^[a-z][a-z-]*$/.test(command) ? command : '?';
-// A wait is labelled expected only when the spec caused it: it pressed Ctrl+C (aborted its signal), or announced the time
+// A wait is labelled expected only when the spec caused it: it interrupted the command (aborted its signal), or announced the time
 // limit it fires. Many specs also expect a rejection, which the trace cannot tell from a defect.
 const outcomeOf = (exitCode, {signal, expect}) =>
     exitCode === 0 ? 'done'
@@ -126,12 +126,30 @@ try {
         }
     }
     const runtime = await import('/webfront/developer/environment/runtime.mjs');
+    // The interruption of the terminal (#721): Escape in its line editor aborts the signal of the command that runs, as
+    // a key of the terminal or its Stop button does. abort() presses Escape; an older published environment (--public),
+    // which interrupts on Ctrl+C, has its signal aborted directly.
+    const interruption = () => {
+        const {LineEditor, interruptKey} = runtime;
+        if (!interruptKey) {
+            const controller = new AbortController();
+            return {signal: controller.signal, abort: () => controller.abort(new Error('Interrupted'))};
+        }
+        let signal;
+        const editor = new LineEditor({write: () => {}, run: (line, given) => {
+            signal = given;
+            return new Promise(resolve => given.addEventListener('abort', resolve, {once: true}));
+        }});
+        editor.handle('command\r');
+        return {signal, abort: () => editor.handle(interruptKey)};
+    };
     runtimeExecute = runtime.execute;
     runtimeNonInteractive = runtime.runNonInteractive;
     const config = JSON.parse(await webFront.cppFunction('webfront.developer.config')());
     showTrace();
     const environment = await (await fetch('/webfront/developer/environment/environment.json')).json();
     const currentDistribution = !config.environment.startsWith('https:');
+    assert(!currentDistribution || runtime.interruptKey === '\x1b', 'The environment must interrupt a command on Escape');
     if (currentDistribution) assert(JSON.stringify(Object.keys(environment.starters)) === JSON.stringify(['app', 'life']), 'Only the application and Life starters must be shipped');
     config.starters = Object.fromEntries(Object.entries(environment.starters).map(([name, value]) => [name, {url: new URL(value.archive, new URL(config.environment, location.href)).href, integrity: value.integrity}]));
     const createFrame = () => {
@@ -177,6 +195,12 @@ try {
             await eventually(() => /No installed packages/.test(panel()?.querySelector('.status:not(.attach-status)')?.textContent ?? ''),
                 () => `The Packages panel must say that a project without a lock has no package: ${shown()}`, slowly);
             assert(tree().length === 0, `A project without a lock has no tree: ${shown()}`);
+            // Detached, the panel offers to go back to the floating window with an icon named by its action (#722).
+            const attach = panel().querySelector('header button.attach');
+            assert(attach && attach.textContent === '' && attach.querySelector('svg[aria-hidden="true"]'),
+                `A detached panel must offer Attach as an icon: ${attach?.outerHTML}`);
+            assert(attach.getAttribute('aria-label') === 'Show this panel in the floating window of the main page' && attach.title === attach.getAttribute('aria-label'),
+                `The Attach icon must be named by its action: ${attach.getAttribute('aria-label')} / ${attach.title}`);
 
             await execute(['install', 'react@19.3.1', 'react-dom@19.3.1'], context);
             lock = await runtime.readLock(webFront);
@@ -268,7 +292,7 @@ try {
         await writeFile('watch/main.ts', "import {value} from './value'; document.getElementById('root').textContent = value;\n");
         await writeFile('watch/value.ts', "export const value: string = 'watch-one';\n");
         let devOutput = '';
-        const devStop = new AbortController();
+        const devStop = interruption();
         await withTimers([750], async clock => {
             const poll = async () => {
                 await waitDev(() => clock.pending() > 0, 'Dev polling deadline was not armed');
@@ -301,7 +325,7 @@ try {
                 await waitDev(() => frame.contentDocument?.getElementById('root')?.textContent === 'watch-created', 'Creating a missing import must recover');
                 assert(history.length === historyLength, 'Dev reloads must replace session history');
             } finally { devStop.abort(); }
-            assert((await devResult)?.exitCode === 130, 'Ctrl+C must stop dev with exit code 130');
+            assert((await devResult)?.exitCode === 130, 'An interruption must stop dev with exit code 130');
             const afterStop = frame.contentDocument;
             await writeFile('watch/created.ts', "export const value = 'must-not-rebuild';\n");
             assert(clock.pending() === 0, 'Stopped dev must remove its polling timer');
@@ -455,20 +479,20 @@ try {
         assert(/"fs" is a Node\.js API/.test(node?.message), `A Node.js import must be refused while loading: ${node}`);
         const exited = await failure(execute(['run', 'fail'], runContext()));
         assert(exited?.exitCode === 3 && /exited with code 3/.test(exited.message), 'A non-zero exit code must be propagated');
-        const cooperative = new AbortController();
+        const cooperative = interruption();
         const waiting = failure(execute(['run', 'coop'], runContext(cooperative.signal)));
         await printed('waiting');
         cooperative.abort(new Error('Interrupted'));
         const stopped = await waiting;
-        assert(stopped?.exitCode === 130 && !/grace period/.test(stopped.message), `Ctrl+C must stop a cooperative script: ${stopped}`);
-        const interrupt = new AbortController();
+        assert(stopped?.exitCode === 130 && !/grace period/.test(stopped.message), `An interruption must stop a cooperative script: ${stopped}`);
+        const interrupt = interruption();
         const looping = failure(execute(['run', 'loop'], runContext(interrupt.signal)));
         await printed('looping');
         await withTimers([2000], async clock => {
             interrupt.abort(new Error('Interrupted'));
             clock.fire(2000);
             const killed = await looping;
-            assert(killed?.exitCode === 130 && /terminated after the 2 s grace period/.test(killed.message), `A busy script must be terminated after Ctrl+C: ${killed}`);
+            assert(killed?.exitCode === 130 && /terminated after the 2 s grace period/.test(killed.message), `A busy script must be terminated after an interruption: ${killed}`);
         });
         // Real Worker/bridge preparation gets a generous bound; only the deadline under test is advanced.
         for (const target of ['loop', 'nested']) {
@@ -490,7 +514,7 @@ try {
         await execute(['run', 'jsx'], runContext());
         assert(scriptOutput.includes('jsx b\r\n'), 'A TSX script must compile its JSX with the automatic runtime');
         // A stop during a large write: the file is either untouched or complete, and no staging is left.
-        const writing = new AbortController();
+        const writing = interruption();
         const big = failure(execute(['run', 'big'], runContext(writing.signal)));
         await printed('writing');
         writing.abort(new Error('Interrupted'));
@@ -622,13 +646,13 @@ try {
         assert(modDeclared.text && modDeclared.output.includes('No type errors in 4 project files'),
             `.d.mts and .d.cts declarations must be checked with the entries: ${modDeclared.error}\n${modDeclared.output}`);
         await writeFile('webfront.project.json', manifestBeforeDeclarations);
-        // A long check is synchronous in its Worker: Ctrl+C terminates it after the grace period, and nothing is written.
+        // A long check is synchronous in its Worker: an interruption terminates it after the grace period, and nothing is written.
         const slow =['type Build<N extends number, T extends 0[] = []> = T["length"] extends N ? T : Build<N, [...T, 0]>;'];
         for (let n = 400; n < 1000; ++n) slow.push(`export const v${n}: Build<${n}>['length'] = ${n};`);
         await writeFile('check/slow.ts', slow.join('\n') + '\n');
         const listing = async path => new TextDecoder().decode(await call('list', path));
         const before = [await listing(''), await listing('check')];
-        const stopCheck = new AbortController();
+        const stopCheck = interruption();
         scriptOutput.length = 0;
         const longCheck = failure(execute(['check'], {...runContext(stopCheck.signal), bridge: checkBridge}));
         await printed('Checking 3 root files');
@@ -636,8 +660,8 @@ try {
             stopCheck.abort(new Error('Interrupted'));
             clock.fire(2000);
             const checkStopped = await longCheck;
-            assert(checkStopped?.exitCode === 130 && /Type check stopped by Ctrl\+C \(terminated after the 2 s grace period\)/.test(checkStopped.message),
-                `Ctrl+C must terminate a long check after the grace period: ${checkStopped}`);
+            assert(checkStopped?.exitCode === 130 && /Type check interrupted \(terminated after the 2 s grace period\)/.test(checkStopped.message),
+                `An interruption must terminate a long check after the grace period: ${checkStopped}`);
         });
         assert(JSON.stringify([await listing(''), await listing('check')]) === JSON.stringify(before), 'A check must not write any project file');
         assert(JSON.parse(await listing('.webfront/developer/staging')).length === 0, 'A check must leave no staged files');
@@ -722,7 +746,7 @@ try {
         await specsOf(['tests/throws.spec.js']);
         const unloaded = await tested();
         assert(unloaded.error?.exitCode === 1 && unloaded.report?.status !== 'passed' && /loading boom/.test(unloaded.error.message), `A spec that throws while loading must fail: ${unloaded.error}\n${JSON.stringify(unloaded.report)}`);
-        // A time limit and Ctrl+C end a run that does not return, remove the frame and report it.
+        // A time limit and an interruption end a run that does not return, remove the frame and report it.
         const hangingToken = crypto.randomUUID();
         await writeFile('tests/hang.spec.js', `describe('hanging', () => {\n    it('never ends', () => {\n` +
             `        parent.postMessage({hangingSpec: ${JSON.stringify(hangingToken)}}, location.origin);\n` +
@@ -757,14 +781,14 @@ try {
                 assert(!document.querySelector('iframe[title="WebFront tests"]'), 'A timed out run must remove its frame');
             } finally { started.dispose(); }
         });
-        const stopTests = new AbortController();
+        const stopTests = interruption();
         const started = hangingStarted();
         try {
             const interrupted = tested([], {signal: stopTests.signal});
             await untilReady(started.ready, interrupted);
             stopTests.abort(new Error('Interrupted'));
             const interruptedRun = await interrupted;
-            assert(interruptedRun.error?.exitCode === 130 && interruptedRun.report?.status === 'interrupted' && !document.querySelector('iframe[title="WebFront tests"]'), `Ctrl+C must stop a run: ${interruptedRun.error}`);
+            assert(interruptedRun.error?.exitCode === 130 && interruptedRun.report?.status === 'interrupted' && !document.querySelector('iframe[title="WebFront tests"]'), `An interruption must stop a run: ${interruptedRun.error}`);
         } finally { started.dispose(); }
         // The command must stop even when the bridge read never settles. Wait for the read, not wall time.
         const blockedRead = () => {
@@ -784,12 +808,12 @@ try {
             assert(result.error?.exitCode === 124 && result.report?.status === 'timeout', `A blocked bridge must report the preparation timeout: ${result.error}`);
         });
         const blocked = blockedRead();
-        const interruptPreparing = new AbortController();
+        const interruptPreparing = interruption();
         const preparingRun = tested([], {bridge: blocked.bridge, signal: interruptPreparing.signal});
         await untilReady(blocked.ready, preparingRun);
         interruptPreparing.abort(new Error('Interrupted'));
         const preparingResult = await preparingRun;
-        assert(preparingResult.error?.exitCode === 130 && preparingResult.report?.status === 'interrupted', `Ctrl+C during preparation must end with 130 and a report: ${preparingResult.error}`);
+        assert(preparingResult.error?.exitCode === 130 && preparingResult.report?.status === 'interrupted', `An interruption during preparation must end with 130 and a report: ${preparingResult.error}`);
         // macOS 13.3 supports WKWebView, but its WebKit need not provide AbortSignal.any (Safari 17.4).
         const signalAny = Object.getOwnPropertyDescriptor(AbortSignal, 'any');
         Object.defineProperty(AbortSignal, 'any', {configurable: true, value: undefined});
@@ -797,7 +821,7 @@ try {
             const legacyPassing = await tested([], {signal: new AbortController().signal});
             assert(legacyPassing.report?.status === 'passed' && legacyPassing.report.exitCode === 0,
                 `A terminal run must work without AbortSignal.any: ${legacyPassing.error}`);
-            const alreadyStopped = new AbortController();
+            const alreadyStopped = interruption();
             alreadyStopped.abort(new Error('Interrupted'));
             const legacyStopped = await tested([], {signal: alreadyStopped.signal});
             assert(legacyStopped.error?.exitCode === 130 && legacyStopped.report?.status === 'interrupted',
@@ -811,14 +835,14 @@ try {
                 assert(result.error?.exitCode === 124 && result.report?.status === 'timeout',
                     `The preparation deadline must report timeout without AbortSignal.any: ${result.error}`);
             });
-            const legacyStop = new AbortController();
+            const legacyStop = interruption();
             const blocked = blockedRead();
             const legacyPreparing = tested([], {bridge: blocked.bridge, signal: legacyStop.signal});
             await untilReady(blocked.ready, legacyPreparing);
             legacyStop.abort(new Error('Interrupted'));
             const legacyInterrupted = await legacyPreparing;
             assert(legacyInterrupted.error?.exitCode === 130 && legacyInterrupted.report?.status === 'interrupted',
-                `Ctrl+C during preparation must report interruption without AbortSignal.any: ${legacyInterrupted.error}`);
+                `An interruption during preparation must be reported without AbortSignal.any: ${legacyInterrupted.error}`);
         } finally {
             if (signalAny) Object.defineProperty(AbortSignal, 'any', signalAny);
             else delete AbortSignal.any;
@@ -954,7 +978,7 @@ try {
             // A first build that fails shows its diagnostic in the terminal: no interface was published, so the page keeps
             // the terminal alone, without the icon or an empty frame, also once wf dev is stopped.
             await writeFile('layout/value.ts', 'export const value = ;\n');
-            const failedStop = new AbortController();
+            const failedStop = interruption();
             let failedOutput = '';
             const failedDev = execute(['dev', 'layout/main.ts'], {...context, signal: failedStop.signal,
                 write: text => { failedOutput += text; }}).then(() => null, error => error);
@@ -1037,11 +1061,41 @@ try {
                     await until(() => !inShownList(), `A removed watch must disappear from the inspector: ${listed()}`);
                     assert(shownList.isConnected && frame.isConnected && frame.contentDocument === shownDocument,
                         'The watch must have disappeared from the list that showed it, still in the inspector');
+                    // The watches of Life (#723): its grid, 32 strings of 32 characters, shows as a block of square character
+                    // cells, one line per row, without label or kind, inside the default window; its Tree button shows the rows
+                    // one by one, and Block brings the block back.
+                    await webFront.cppFunction('test.watchLife')();
+                    await until(() => listed().includes('grid'), `The watches of Life must appear in the inspector: ${listed()}`);
+                    const gridItem = () => [...shownList.querySelectorAll(':scope > li')].find(item => item.querySelector('.name')?.textContent === 'grid');
+                    gridItem().querySelector('button.toggle').click();
+                    const gridBlock = () => gridItem()?.querySelector('ul.tree.block');
+                    await until(() => gridBlock()?.querySelectorAll(':scope > li').length === 32, 'The grid of Life must show as a block of 32 lines');
+                    const lines = [...gridBlock().querySelectorAll(':scope > li')];
+                    assert(lines.every(line => line.textContent.length === 32) && lines[0].textContent.startsWith('.#.')
+                        && !gridBlock().querySelector('.label, .kind'), `The block must show the rows alone: ${lines[0]?.textContent}`);
+                    const gridBox = gridBlock().getBoundingClientRect();
+                    await progress(`Life grid block: ${gridBox.width} x ${gridBox.height} px in a frame of ${frame.contentWindow.innerWidth} x ${frame.contentWindow.innerHeight}`);
+                    assert(Math.abs(gridBox.width / gridBox.height - 1) < 0.08,
+                        `A grid of 32 by 32 characters must be square: ${gridBox.width} x ${gridBox.height}`);
+                    assert(gridBox.left >= 0 && gridBox.right <= frame.contentWindow.innerWidth && gridBox.height <= frame.contentWindow.innerHeight,
+                        `The grid of Life must fit in the default window: ${JSON.stringify(gridBox)} in ${frame.contentWindow.innerWidth} x ${frame.contentWindow.innerHeight}`);
+                    gridItem().querySelector('button.layout').click();
+                    await until(() => !gridBlock() && gridItem().querySelectorAll('ul.tree ul.tree > li .label').length === 32,
+                        'The Tree button must show the rows of the grid one by one');
+                    gridItem().querySelector('button.layout').click();
+                    await until(() => gridBlock()?.querySelectorAll(':scope > li').length === 32, 'The Block button must show the grid as a block again');
+                    await webFront.cppFunction('test.unwatchLife')();
+                    await until(() => !listed().includes('grid'), `The watches of Life must disappear once removed: ${listed()}`);
                     const detach = floating().querySelector('.webfront-inspector-detach');
+                    // An icon named by its action, whether it can detach or not (#722).
+                    assert(detach.textContent === '' && detach.querySelector('svg[aria-hidden="true"]')
+                        && detach.getAttribute('aria-label') === 'Detach this panel to a window of its own',
+                        `Detach must be an icon named by its action: ${detach.outerHTML}`);
                     if (secondaryWindow) {
                         // A frontend that opens windows: Detach moves the panel to a native window with its own proven connection.
                         const views = await webFront.cppFunction('test.views')();
-                        assert(detach.getAttribute('aria-disabled') === 'false', 'A frontend that opens windows must offer to detach the panel');
+                        assert(detach.getAttribute('aria-disabled') === 'false' && detach.title === detach.getAttribute('aria-label'),
+                            `A frontend that opens windows must offer to detach the panel: ${detach.title}`);
                         detach.click();
                         await until(() => floating().hidden, 'A detached panel must leave the floating window');
                         await until(async () => await webFront.cppFunction('test.views')() === views + 1,
@@ -1192,8 +1246,17 @@ try {
         assert(again.menus().length === 1 && again.menus()[0].querySelector('[role=menu]'), 'A right click on the tab must open its menu');
         assert(again.entries(0).map(entry => entry.firstChild.textContent).join() === 'Terminal,C++ state,TypeScript state',
             `The menu must offer the terminal and the inspectors: ${again.entries(0).map(entry => entry.textContent)}`);
-        assert(again.inside('.webfront-menu') && again.entries(0).every(entry => entry.getBoundingClientRect().height >= 44),
-            'The menu must stay inside the window, with targets of 44 px');
+        // Compact for a mouse (#723): entries of 24 to 32 px, never less than 24 px (WCAG 2.2, 2.5.8), and 44 px again under a
+        // coarse pointer; each is the element a pointer finds at its centre.
+        const coarse = page.defaultView.matchMedia('(pointer: coarse)').matches;
+        const entryBoxes = () => again.entries(0).map(entry => entry.getBoundingClientRect());
+        assert(again.inside('.webfront-menu') && entryBoxes().every(box => box.width >= 24
+            && (coarse ? box.height >= 44 : box.height >= 24 && box.height <= 32)),
+        `The menu must stay inside the window, with compact targets of 24 px at least: ${JSON.stringify(entryBoxes().map(box => box.height))}`);
+        assert(again.entries(0).every((entry, index) => {
+            const box = entryBoxes()[index];
+            return page.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)?.closest('[role=menuitem]') === entry;
+        }), 'Each entry of the menu must be reachable by the pointer');
         assert(page.activeElement === again.entries(0)[0] && again.state() === 'interface', 'The menu must take the focus, and leave the terminal collapsed');
         // The arrows move in the menu and open a submenu. This page is a frame of the test page: its connection is not
         // the proven view, so no container is admitted and the entries say how to admit one.
@@ -1220,6 +1283,13 @@ try {
         again.press(page.activeElement, {key: 'Escape'});
         again.press(button, {key: 'F10', shiftKey: true});
         assert(again.menus().length === 1, 'Shift+F10 must open the menu on the tab');
+        // With the mouse: a click on an entry with a submenu opens it, a press elsewhere closes the menu.
+        again.entries(0)[1].dispatchEvent(new page.defaultView.MouseEvent('click', {bubbles: true, cancelable: true, button: 0}));
+        assert(again.menus().length === 2 && again.entries(1).length === 3, 'A click on C++ state must open its submenu');
+        page.body.dispatchEvent(new page.defaultView.PointerEvent('pointerdown', {bubbles: true, cancelable: true, pointerType: 'mouse'}));
+        assert(again.menus().length === 0, 'A press outside the menu must close it');
+        again.press(button, {key: 'F10', shiftKey: true});
+        assert(again.menus().length === 1, 'Shift+F10 must open the menu again');
         again.press(again.entries(0)[0], {key: 'Enter'});
         assert(again.menus().length === 0 && again.state() === 'floating' && again.panel().contains(page.activeElement),
             'The Terminal entry must open the terminal and give it the keys');
@@ -1349,7 +1419,7 @@ try {
         inner.remove();
 
         // wf dev with the terminal collapsed: the full-window interface reloads and shows the build diagnostics.
-        const devStop = new AbortController();
+        const devStop = interruption();
         let devOutput = '';
         await withTimers([750], async clock => {
             const poll = async () => {
@@ -1389,7 +1459,7 @@ try {
                 assert(page.elementFromPoint(icon.left + icon.width / 2, icon.top + icon.height / 2)?.closest('button') === button && overlay.width > 0,
                     'The icon must stay over the diagnostic');
             } finally { devStop.abort(); }
-            assert((await devResult)?.exitCode === 130, 'Ctrl+C must stop dev with exit code 130');
+            assert((await devResult)?.exitCode === 130, 'An interruption must stop dev with exit code 130');
         });
         assert(button.dataset.status === 'idle', `The tab must show that wf dev stopped: ${button.dataset.status}`);
         // A failed build keeps the last interface published: the next launch still opens on it.
@@ -1476,13 +1546,22 @@ try {
             `The tab must show a running command while the terminal is collapsed: ${toggleButton.dataset.status}`);
         workspace.open();
         assert((await commandState('layout')) === 'running', 'Opening must not interrupt a running command');
-        terminal.input('\x03');
+        // The Stop button of the floating window (#721): in its bar, before the close button, while a command runs.
+        const stop = mounted.stop;
+        assert(stop.parentNode === workspace.bar && stop.nextSibling === otherPage.querySelector('.webfront-terminal-close') && !stop.hidden && !stop.disabled
+            && there.box('.webfront-terminal-stop').width > 0, `The Stop button must show in the window's bar while a command runs: ${stop.parentNode?.className}`);
+        assert(Math.round(there.box('.webfront-terminal-stop').top) >= Math.round(there.box('.webfront-terminal-bar').top)
+            && Math.round(there.box('.webfront-terminal-stop').bottom) <= Math.round(there.box('.webfront-terminal-bar').bottom), 'The Stop button must be inside the bar');
+        terminal.input('ignored');
+        stop.click();
+        assert(stop.disabled && otherPage.activeElement === terminal.textarea, 'An interrupted command must disable the button and leave the keys in the terminal');
         await editor.whenIdle();
         await rendered();
-        await until(async () => (await commandState('layout')) === 'cancelled', 'Ctrl+C must still reach the command');
+        await until(async () => (await commandState('layout')) === 'cancelled', 'The Stop button must reach the command');
+        assert(stop.hidden && editor.status === 130 && editor.line === '', `The Stop button must interrupt the command with 130, drop the keys typed after it and hide: ${editor.status} ${editor.line}`);
         assert(toggleButton.dataset.status === 'idle', `The tab must show that the command ended: ${toggleButton.dataset.status}`);
-        assert(/waiting layout/.test(screen()) && /^layout kept$/m.test(screen()),
-            'Ctrl+C must still reach the command, in the same session');
+        assert(/waiting layout/.test(screen()) && /^Interrupted$/m.test(screen()) && /^layout kept$/m.test(screen()),
+            'The Stop button must reach the command, in the same session');
         await mounted.workspace.placeSaved();
         terminal.dispose();
         sessionFrame.remove();
@@ -1491,8 +1570,8 @@ try {
     if (wants('terminal')) {
         // The completions below name a script and a file that the `scripts` part creates in a single-session run.
         if (part === 'terminal') {
-            for (const path of ['tools/gen.ts', 'tools/jsx.tsx']) await writeFile(path, scripts[path]);
-            await writeFile('webfront.project.json', JSON.stringify({...manifest, scripts: {gen: 'tools/gen.ts', jsx: 'tools/jsx.tsx'}}, null, 2));
+            for (const path of ['tools/gen.ts', 'tools/jsx.tsx', 'tools/coop.mjs']) await writeFile(path, scripts[path]);
+            await writeFile('webfront.project.json', JSON.stringify({...manifest, scripts: {gen: 'tools/gen.ts', jsx: 'tools/jsx.tsx', coop: 'tools/coop.mjs'}}, null, 2));
         }
         await progress('terminal and sessions');
         // The terminal: the application's C++ commands, run in this browser's session.
@@ -1543,21 +1622,21 @@ try {
         assert(['ls', 'cat', 'tree', 'mounts', 'wf', 'echo'].every(name => firstWords.includes(name)) && !firstWords.includes('rm'), `Completion must offer the commands that exist: ${firstWords}`);
         assert((await runtime.complete('wf li', {bridge: webFront})).candidates.join() === 'list' && (await runtime.complete('wf list ', {bridge: webFront})).candidates.join() === '--tree',
             'Completion must offer wf list and its option');
-        // Ctrl+C: the terminal stops waiting at once, the next command answers while the first is still ending in C++.
-        const interruptLinger = new AbortController();
+        // An interruption: the terminal stops waiting at once, the next command answers while the first is still ending in C++.
+        const interruptLinger = interruption();
         const lingering = failure(runtime.runLine('linger first', lineContext(interruptLinger.signal)));
         await waitState('first', 'running');
         interruptLinger.abort(new Error('Interrupted'));
         assert((await lingering)?.exitCode === 130, 'An interrupted C++ command must end with exit code 130');
         const echoed = [];
-        await runtime.runLine('echo "after Ctrl+C"', lineContext(undefined, echoed));
-        assert(echoed.join('') === 'after Ctrl+C\r\n', `The next command must run normally: ${echoed}`);
+        await runtime.runLine('echo "after the interruption"', lineContext(undefined, echoed));
+        assert(echoed.join('') === 'after the interruption\r\n', `The next command must run normally: ${echoed}`);
         assert(['running', 'stopping'].includes(await commandState('first')), 'The second command must answer before the first one ends');
         await waitState('first', 'stopping');
         await webFront.cppFunction('test.release')('first');
         await waitState('first', 'cancelled');
-        // Sessions: a second browser has its own commands; a long command there does not delay this one, Ctrl+C here does
-        // not stop it, and its disconnection does.
+        // Sessions: a second browser has its own commands; a long command there does not delay this one, an interruption
+        // here does not stop it, and its disconnection does.
         const sessionFrame = document.createElement('iframe');
         sessionFrame.src = '/fixtures/session.html';
         document.body.append(sessionFrame);
@@ -1566,7 +1645,7 @@ try {
         const second = await sessionFrame.contentWindow.session;
         const secondWait = failure(second.runtime.runLine('wait second', {bridge: second.bridge, cppCommands: second.cppCommands, signal: new AbortController().signal}));
         await waitState('second', 'running');
-        const interruptFirst = new AbortController();
+        const interruptFirst = interruption();
         const firstWait = failure(runtime.runLine('wait here', lineContext(interruptFirst.signal)));
         await waitState('here', 'running');
         const echoStarted = performance.now();
@@ -1575,7 +1654,7 @@ try {
         interruptFirst.abort(new Error('Interrupted'));
         await firstWait;
         await waitState('here', 'cancelled');
-        assert(await commandState('second') === 'running', 'Ctrl+C in one browser must not stop the command of another');
+        assert(await commandState('second') === 'running', 'An interruption in one browser must not stop the command of another');
         const browsers = await webFront.cppFunction('test.browsers')();
         // Its connection closes while its acknowledged command runs: the terminal stops waiting for an exit that cannot come.
         second.bridge.socket.close();
@@ -1600,7 +1679,7 @@ try {
             }};
         // The test sets the terminal's size itself: an observer following the element would race with it.
         const mounted = async () => runtime.mount({bridge: terminalBridge, config, terminal: host, preview: context.preview, onExit: code => { exitedWith = code; }, fitToElement: false});
-        const {terminal, editor} = await mounted();
+        const {terminal, editor, stop} = await mounted();
         terminal.resize(80, 12);
         const buffer = () => terminal.buffer.active;
         const rendered = () => new Promise(resolve => terminal.write('', resolve));
@@ -1611,6 +1690,14 @@ try {
                 await editor.whenIdle();
             }
             await rendered();
+        };
+        // A key pressed in the terminal, through xterm.js and its key handler (#721); xterm.js reads keyCode, which
+        // KeyboardEvent's constructor does not set. The engine runs no default action for it: test.keys sends real keys.
+        const press = init => {
+            const event = new KeyboardEvent('keydown', {bubbles: true, cancelable: true, ...init});
+            Object.defineProperty(event, 'keyCode', {get: () => ({Escape: 27, c: 67})[init.key] ?? 0});
+            terminal.textarea.dispatchEvent(event);
+            return event;
         };
         const rows = () => {
             const lines = [];
@@ -1714,14 +1801,14 @@ try {
                 terminal.focus();
             }
         }
-        // Initial dev errors must finish the session command, without requiring Ctrl+C (#560).
+        // Initial dev errors must finish the session command, without an interruption (#560).
         for (const [manifest, message] of [[null, 'No webfront.project.json: run wf init'],
             [{format: 1, name: 'empty', version: '0.1.0'}, 'Usage: wf dev <entry.tsx>']]) {
             startupFiles = new Map(manifest ? [['webfront.project.json', new TextEncoder().encode(JSON.stringify(manifest))]] : []);
             try {
                 terminal.input('wf dev\r');
                 await delay(10);
-                await eventually(() => !editor.busy, 'An invalid wf dev invocation must finish without Ctrl+C', {every: 10});
+                await eventually(() => !editor.busy, 'An invalid wf dev invocation must finish without an interruption', {every: 10});
                 await editor.whenIdle();
                 await rendered();
                 assert(editor.status === 1 && rows().some(row => row.includes(message)) && lastRows(1)[0] === '> ',
@@ -1730,7 +1817,7 @@ try {
                 assert(editor.status === 0 && lastRows(2)[0] === 'recovered', 'The next command must run after the startup error');
             } finally {
                 startupFiles = undefined;
-                if (editor.busy) await type('\x03');
+                if (editor.busy) await type('\x1b');
             }
         }
         // Cell widths: CJK, emoji, a flag, a ZWJ sequence and a combining mark.
@@ -1745,8 +1832,12 @@ try {
         assert(buffer().cursorX === 12 && editor.line === '漢字😀🇫🇷👨‍👩‍👧', `Backspace must erase whole clusters: ${buffer().cursorX} ${editor.line}`);
         await type('\x1b[D', '\x1b[D');
         assert(buffer().cursorX === 8, `The cursor must move over whole clusters: ${buffer().cursorX}`);
-        await type('\x03');
-        assert(lastRows(2)[0].endsWith('^C') && lastRows(1)[0] === '> ' && editor.line === '', 'Ctrl+C must drop the line');
+        // Ctrl+C is the system's copy (#721): with nothing selected, it neither sends \x03 nor clears the line.
+        const copyKey = press({key: 'c', code: 'KeyC', ctrlKey: true});
+        await rendered();
+        assert(!copyKey.defaultPrevented && editor.line === '漢字😀🇫🇷👨‍👩‍👧' && buffer().cursorX === 8, `Ctrl+C must leave the line as it is: ${editor.line}`);
+        await type('\x05', '\x15');
+        assert(lastRows(1)[0] === '> ' && editor.line === '', 'Ctrl+U at the end must erase the line');
         // A line over several rows: wrapping, editing in the middle, a row filled exactly and a wide character at a row end.
         terminal.resize(20, 12);
         await rendered();
@@ -1774,7 +1865,7 @@ try {
         assert(editor.status === 1 && lastRows(2)[0] === 'Error: command failed on purpose', `A C++ exception must be shown as an error: ${lastRows(2)}`);
         await type('partial\r', 'x');
         assert(JSON.stringify(lastRows(2)) === JSON.stringify(['partial', '> x']), `Output without a final line break must not hold the prompt: ${lastRows(2)}`);
-        await type('\x03');
+        await type('\x15');
         // Keys typed while a completion is pending are applied after it, Enter included.
         terminal.input('ec');
         terminal.input('\t');
@@ -1789,15 +1880,68 @@ try {
         assert(lastRows(3)[0] === '> echo ho typed-ahead' && editor.ahead.length === 0, `The completed line must run once: ${lastRows(3)}`);
         await type('echo ok\r');
         assert(editor.status === 0, 'A successful command must reset the status');
-        // Ctrl+C in the terminal: the prompt comes back at once, and a command typed then runs while the first one ends.
+        // Escape in the terminal (#721): the prompt comes back at once, and a command typed then runs while the first one
+        // ends. The Stop button shows over the terminal's corner while the command runs: this terminal has no window bar.
+        assert(stop.hidden && stop.parentNode === host, 'The Stop button must be hidden while no command runs');
         terminal.input('linger terminal\r');
         await waitState('terminal', 'running');
-        await type('\x03');
+        const corner = stop.getBoundingClientRect(), area = host.getBoundingClientRect();
+        assert(!stop.hidden && !stop.disabled && corner.width > 0 && corner.top - area.top < 40 && area.right - corner.right < 60,
+            `The Stop button must show at the terminal's top right while a command runs: ${JSON.stringify(corner)}`);
+        const escape = press({key: 'Escape', code: 'Escape'});
+        await editor.whenIdle();
+        await rendered();
+        assert(escape.key === 'Escape' && editor.status === 130 && lastRows(2)[0] === 'Interrupted' && stop.hidden,
+            `Escape must interrupt a C++ command with 130: ${lastRows(3)} ${editor.status}`);
         await type('echo next\r');
         const lingerState = await commandState('terminal');
-        assert(editor.status === 0 && lastRows(2)[0] === 'next' && ['running', 'stopping'].includes(lingerState), `Ctrl+C must interrupt a C++ command: ${lastRows(3)} ${editor.status} ${lingerState}`);
+        assert(editor.status === 0 && lastRows(2)[0] === 'next' && ['running', 'stopping'].includes(lingerState), `The next command must run while the first one ends: ${lastRows(3)} ${editor.status} ${lingerState}`);
         await waitState('terminal', 'stopping');
         await webFront.cppFunction('test.release')('terminal');
+        // The Stop button interrupts a wf run script like Escape: its signal is aborted and it ends with 130.
+        terminal.input('wf run coop\r');
+        await eventually(() => rows().some(row => row === 'waiting') && !stop.hidden, () => `The script did not start: ${lastRows(3)}`, {every: 20});
+        stop.click();
+        assert(stop.disabled && host.ownerDocument.activeElement === terminal.textarea, 'The Stop button must disable itself and leave the keys in the terminal');
+        await editor.whenIdle();
+        await rendered();
+        assert(editor.status === 130 && rows().some(row => /Script coop interrupted/.test(row)) && stop.hidden && lastRows(1)[0] === '> ',
+            `The Stop button must interrupt wf run with 130: ${lastRows(4)} ${editor.status}`);
+        // The system's copy and paste with real keys, where the frontend can send them (CEF): the engine copies the
+        // terminal's selection on Ctrl+C, pastes it on Ctrl+V, Ctrl+A selects the terminal, Escape clears the selection and
+        // interrupts a command.
+        const native = async (...keys) => {
+            const sent = await webFront.cppFunction('test.keys')(JSON.stringify(keys));
+            assert(sent === 'sent' || sent === 'unsupported', `The keys could not be sent: ${sent}`);
+            return sent === 'sent';
+        };
+        const ctrl = 2;
+        terminal.focus();
+        await type('echo clip-board\r');
+        const copied = cursorRow() - 1;
+        assert(rows()[copied] === 'clip-board', `The text to copy must be on screen: ${rows()[copied]}`);
+        terminal.select(0, copied, 'clip-board'.length);
+        if (await native(['c', 'KeyC', 67, ctrl])) {
+            await progress('copy and paste with real keys');
+            await delay(100);
+            assert(editor.line === '' && terminal.getSelection() === 'clip-board', `Ctrl+C must copy without typing anything: ${JSON.stringify(editor.line)}`);
+            await native(['Escape', 'Escape', 27, 0]);
+            await eventually(() => !terminal.hasSelection(), 'Escape must clear the selection', {every: 20});
+            await native(['v', 'KeyV', 86, ctrl]);
+            await eventually(() => editor.line === 'clip-board', () => `Ctrl+V must paste the copied selection: ${JSON.stringify(editor.line)}`, {every: 20});
+            await native(['a', 'KeyA', 65, ctrl]);
+            await eventually(() => terminal.getSelection().includes('> echo clip-board'), 'Ctrl+A must select the terminal', {every: 20});
+            assert(host.ownerDocument.getSelection()?.toString() === '', 'Ctrl+A must not select the page');
+            await native(['Escape', 'Escape', 27, 0]);
+            await eventually(() => !terminal.hasSelection(), 'Escape must clear the selection made by Ctrl+A', {every: 20});
+            await type('\x15');
+            terminal.input('linger keys\r');
+            await waitState('keys', 'running');
+            await native(['Escape', 'Escape', 27, 0]);
+            await eventually(() => !editor.busy && editor.status === 130, () => `A real Escape must interrupt the command: ${editor.status}`, {every: 20});
+            await waitState('keys', 'stopping');
+            await webFront.cppFunction('test.release')('keys');
+        } else terminal.clearSelection();
         // Pasted lines run one after the other; the last one, without a line break, waits on the prompt.
         // Keys typed one by one while a command runs are applied after it, Enter included.
         terminal.input('sleep 300\r');
@@ -1815,7 +1959,7 @@ try {
         const completed = async (text, expected) => {
             await type(text, '\t');
             assert(editor.line === expected, `${JSON.stringify(text)} must complete to ${JSON.stringify(expected)}: ${JSON.stringify(editor.line)}`);
-            await type('\x03');
+            await type('\x15');
         };
         await completed('ec', 'echo ');
         await completed('wf ru', 'wf run ');
@@ -1834,7 +1978,7 @@ try {
         await completed("echo 'my dir/f", "echo 'my dir/f");
         await type('h', '\t');
         assert(editor.line === 'h' && lastRows(2)[0].includes('help') && lastRows(2)[0].includes('history'), `Several candidates must be listed: ${lastRows(2)}`);
-        await type('\x03');
+        await type('\x15');
         await type('clear\r');
         assert(buffer().length === terminal.rows && rows()[0] === '> ', `clear must empty the screen and the scrollback: ${rows()[0]}`);
         // A line taller than the screen is drawn a screen at a time around the cursor, never duplicated on it.
@@ -1859,15 +2003,15 @@ try {
         assert(lastRows(2)[0] === digits.slice(80) && lastRows(1)[0] === '> ', `A tall line must run: ${screen()}`);
         terminal.resize(80, 12);
         await type('clear\r');
-        // Enter and Ctrl+C typed while a completion is pending: the command starts, then is interrupted at once.
+        // Enter and Escape typed while a completion is pending: the command starts, then is interrupted at once.
         terminal.input('lin');
         terminal.input('\t');
         terminal.input('replay');
         terminal.input('\r');
-        terminal.input('\x03');
+        terminal.input('\x1b');
         await waitState('replay', 'stopping');
         await webFront.cppFunction('test.release')('replay');
-        await eventually(() => !editor.busy, () => `Ctrl+C typed during a completion must interrupt the replayed command: ${lastRows(3)}`,
+        await eventually(() => !editor.busy, () => `Escape typed during a completion must interrupt the replayed command: ${lastRows(3)}`,
             {attempts: 100, every: 20});
         assert(editor.status === 130 && lastRows(3)[0] === '> linger replay', `The replayed command must be interrupted: ${lastRows(3)} ${editor.status}`);
         // The history is kept per project: a new terminal recalls it.
@@ -1888,7 +2032,7 @@ try {
         again.terminal.input('\x1b[A');
         await new Promise(resolve => again.terminal.write('', resolve));
         assert(again.editor.line === 'exit 4', `A new terminal must recall the project's history: ${again.editor.line}`);
-        again.terminal.input('\x03');
+        again.terminal.input('\x15');
         // Two terminals on the same project: each one adds its lines to the history, neither erases the other's.
         const otherHost = document.createElement('div');
         otherHost.style.cssText = 'width:640px;height:240px';
