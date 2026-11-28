@@ -189,23 +189,26 @@ export function createWatchDiscovery({bridge, onChange, onError = () => {}, onRe
 
 const styles = `
 :root{color-scheme:dark}
-body{margin:0;background:#141821;color:#e8edf4;font:14px system-ui}
-header{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#202737;border-bottom:1px solid #46536a}
-header h1{flex:1 1 auto;margin:0;font-size:14px;font-weight:600}
-header button{min-height:32px;padding:0 10px;border:1px solid #46536a;border-radius:4px;background:#2f3a50;color:inherit;font:inherit;cursor:pointer}
-header button:focus-visible{outline:2px solid #d7fa85;outline-offset:1px}
-header button.attach{min-width:32px;padding:0 8px}
+body{margin:0;background:#141821;color:#e8edf4;font:13px/1.35 system-ui}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:4px 8px;background:#202737;border-bottom:1px solid #46536a}
+header h1{flex:1 1 auto;margin:0;font-size:13px;font-weight:600}
+header label{display:flex;align-items:center;gap:4px;color:#a9b3c4;font-size:12px}
+header button,header select{min-height:26px;padding:0 8px;border:1px solid #46536a;border-radius:4px;background:#2f3a50;color:inherit;font:inherit;cursor:pointer}
+header select{padding:0 4px}
+header button:focus-visible,header select:focus-visible{outline:2px solid #d7fa85;outline-offset:1px}
+header button.attach{min-width:26px;padding:0 4px}
 header button.attach>svg{display:block;margin:auto;pointer-events:none}
-main{padding:8px 12px}
-.status{color:#a9b3c4;font-size:12px;margin:4px 0 8px}
+main{padding:4px 8px}
+.status{color:#a9b3c4;font-size:12px;margin:2px 0 4px}
 .status:empty{display:none}
 .error{color:#ffbd2e}
 ul.watches{list-style:none;margin:0;padding:0}
-ul.watches li{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;padding:8px;border-bottom:1px solid #2f3a50}
+ul.watches li{display:grid;grid-template-columns:auto 1fr;gap:0 8px;padding:2px 4px;border-bottom:1px solid #2f3a50}
 ul.watches .name{font-weight:600}
 ul.watches .kind{color:#d7fa85;font-family:ui-monospace,monospace;font-size:12px;justify-self:end}
-ul.watches .location{grid-column:1/3;color:#a9b3c4;font-size:12px;overflow-wrap:anywhere}
-ul.watches .writable{color:#8fd0ff;font-size:12px}`;
+ul.watches .location{grid-column:1/3;color:#a9b3c4;font-size:11px;overflow-wrap:anywhere}
+ul.watches .writable{color:#8fd0ff;font-size:11px}
+@media (pointer:coarse){header button,header select{min-height:44px;padding:0 12px}}`;
 
 /**
  * Renders the list of the watches in `list`, one item per watch, kept by id so that a removal removes its item. With
@@ -238,8 +241,16 @@ export function renderWatches(list, watches, {onToggle = null} = {}) {
             toggle.addEventListener('click', () => onToggle(watch, item));
             head.append(toggle);
         }
-        head.append(cell('name', watch.name), cell('kind', watch.kind), cell('location', watch.location));
+        head.append(cell('name', watch.name), cell('kind', watch.kind));
         if (watch.writable) head.append(cell('writable', 'writable'));
+        // On the line of its name, cut at its start when the panel is narrow: its title gives it whole.
+        const location = cell('location', '');
+        const path = page.createElement('span');
+        path.dir = 'ltr';
+        path.textContent = watch.location;
+        location.append(path);
+        location.title = watch.location;
+        head.append(location);
         item.append(head);
         list.append(item);
     }
@@ -385,7 +396,7 @@ export async function main(view = window) {
             // A watch that C++ no longer knows leaves the list at once, without waiting for the next discovery.
             onGone: () => { close(watch.id); discovery.forget(watch.id); },
         });
-        shown = createTreeView({tree, list: element, view});
+        shown = createTreeView({tree, list: element, view, name: watch.name});
         trees.set(watch.id, {tree, view: shown, element});
         button.textContent = '▾';
         button.setAttribute('aria-expanded', 'true');

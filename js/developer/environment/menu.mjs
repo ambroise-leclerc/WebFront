@@ -140,18 +140,19 @@ export const longPress = {delay: 550, distance: 10, settle: 1000};
 // --- Menu ------------------------------------------------------------------------------------------------------
 
 export const menuStyles = `
-.webfront-menu{position:fixed;z-index:2147483647;box-sizing:border-box;min-width:min(220px,100vw);max-width:min(360px,100vw);max-height:100vh;overflow:auto;padding:4px;background:#202737;color:#e8edf4;border:1px solid #46536a;border-radius:8px;box-shadow:0 8px 32px #000a;font:14px system-ui}
+.webfront-menu{position:fixed;z-index:2147483647;box-sizing:border-box;min-width:min(176px,100vw);max-width:min(320px,100vw);max-height:100vh;overflow:auto;padding:3px;background:#202737;color:#e8edf4;border:1px solid #46536a;border-radius:8px;box-shadow:0 8px 32px #000a;font:13px/1.3 system-ui}
 .webfront-menu[hidden]{display:none}
 .webfront-menu [role=menu]{display:flex;flex-direction:column}
-.webfront-menu-item{box-sizing:border-box;display:flex;align-items:center;gap:16px;width:100%;min-height:44px;margin:0;padding:0 12px;border:0;border-radius:4px;background:none;color:inherit;font:inherit;text-align:start;cursor:pointer}
+.webfront-menu-item{box-sizing:border-box;display:flex;align-items:center;gap:12px;width:100%;min-height:28px;margin:0;padding:0 10px;border:0;border-radius:4px;background:none;color:inherit;font:inherit;text-align:start;cursor:pointer}
 .webfront-menu-item>span:first-child{flex:1 1 auto}
 .webfront-menu-item:focus{outline:none}
 .webfront-menu-item:hover,.webfront-menu-item:focus-visible,.webfront-menu-item[aria-expanded=true]{background:#2f3a50}
 .webfront-menu-item:focus-visible{outline:2px solid #d7fa85;outline-offset:-2px}
 .webfront-menu-item[aria-disabled=true]{color:#8d97aa;cursor:default}
 .webfront-menu-hint{color:#a9b3c4;font-size:12px}
-.webfront-menu-reason{margin:4px 0 0;padding:8px 12px;border-top:1px solid #46536a;color:#c8cfdb;font-size:12px;line-height:1.4}
+.webfront-menu-reason{margin:3px 0 0;padding:6px 10px;border-top:1px solid #46536a;color:#c8cfdb;font-size:12px;line-height:1.4}
 .webfront-menu-reason:empty{display:none}
+@media (pointer:coarse){.webfront-menu{min-width:min(220px,100vw);padding:4px;font-size:14px}.webfront-menu-item{min-height:44px;gap:16px;padding:0 12px}}
 `;
 
 let menus = 0;
