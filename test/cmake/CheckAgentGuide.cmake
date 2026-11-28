@@ -61,6 +61,20 @@ foreach(text guide page)
     _refuse("${${text}}" "webfront-agent" "${text}")
 endforeach()
 
+# The security contract of the application's callbacks (ADR-027, section 2, #686): a callback that acts takes the calling
+# UI and checks ui.isLocalClient(), in what an agent reads and in the guide of the inspectors.
+_read(inspectors docs/DEVELOPER_ENVIRONMENT.md)
+foreach(text guide page inspectors)
+    string(REGEX REPLACE "[ \n]+" " " flat "${${text}}")
+    foreach(needle "ui.isLocalClient()" "webfront::NativeApp::UI ui" "starts a process" "what the server serves")
+        _require("${flat}" "${needle}" "${text}: callback security contract")
+    endforeach()
+endforeach()
+string(REGEX REPLACE "[ \n]+" " " flat "${inspectors}")
+foreach(needle "webfront.commands.start" "trustLoopbackClients = true" "**refused by default**")
+    _require("${flat}" "${needle}" "inspectors: access and guard")
+endforeach()
+
 # The helper writes the guide once and leaves any existing file alone.
 file(REMOVE_RECURSE "${WORK}")
 file(MAKE_DIRECTORY "${WORK}/fresh" "${WORK}/owned")

@@ -450,13 +450,30 @@ environment's `mount`, not to the embedded bootstrap page):
   with the mouse or with the arrow keys on its title bar), whose frame opens no connection of its own and borrows the page's
   bridge, since the adapters give the proof of the view to the main frame only. **Detach** moves the panel to a window of its
   own, and the next opening of that panel goes there again; **Attach**, in that window, brings it back to the floating
-  window, where it then opens:
+  window, where it then opens. The containers follow the access each frontend actually gives, never its name alone:
 
-  | Frontend of the page | Detached container |
-  | --- | --- |
-  | WebKitGTK, WKWebView, WebView2 | a native secondary window (`webfront.inspector.openWindow`, `openSecondaryWindow`), which carries the proof of the view; opening the panel again brings it to the front, and closing the main window closes it |
-  | System browser with `trustLoopbackClients` | a tab of the system browser (`window.open`), with its own loopback connection; when the pop-up blocker refuses it, the panel stays in the floating window and a message offers to try again; the tab closes when the page that opened it is gone |
-  | CEF, or an embedded view without secondary windows | none: Detach is greyed, with the reason in its tooltip (`window.open` there would open a frame without the proof) |
+  | Frontend of the page | Inspectors | Panel opens in | Detached container |
+  | --- | --- | --- | --- |
+  | WebKitGTK, WKWebView, WebView2 | admitted: the view proves itself | the floating window | a native secondary window (`webfront.inspector.openWindow`, `openSecondaryWindow`), which carries the proof of the view; opening the panel again brings it to the front, and closing the main window closes it |
+  | CEF | admitted: the view proves itself | the floating window | none: CEF opens no secondary window, and `window.open` there would open a frame without the proof; Detach is greyed, with the reason in its tooltip |
+  | System browser (default of `webfront::WebFront`) | **refused by default**: the entries are greyed and say how to enable them | none | none |
+  | System browser with `trustLoopbackClients` | admitted: any loopback page | the floating window | a tab of the system browser (`window.open`), with its own loopback connection; when the pop-up blocker refuses it, the panel stays in the floating window and a message offers to try again; the tab closes when the page that opened it is gone |
+
+  `NativeOrBrowserFrontend` behaves as its native engine while it opens a native window, and as the system browser once it
+  falls back to it. A custom frontend gives the proof only if it implements the `open(..., const ViewLaunch&)` overload and
+  declares `providesViewProof()` ([frontends](FRONTENDS.md#view-association)).
+
+  **Enabling the inspectors with the system browser.** Prefer an embedded frontend (`webfront::NativeApp`, or
+  `WebFrontWithFrontend<...>`): its view proves itself and nothing else is admitted. Otherwise, set `trustLoopbackClients`
+  in a development build only, on a machine with one user and no local proxy or tunnel:
+
+  ```cpp
+  webfront::BasicDeveloperApp<> app{"my-project", {.trustLoopbackClients = true}};   // system browser
+  app.bootstrap("developer");
+  ```
+
+  Every loopback connection is then a local client: it reads the inspectors, and it also passes the `ui.isLocalClient()`
+  check of the application's own callbacks (below). The option is the application's choice; the environment never sets it.
 
   Attach brings the panel back to the page that detached it only, even when other pages of the application are open on
   the same origin. A page keeps its identifier across a reload through Web Locks; in a browser without them, a reloaded
@@ -522,7 +539,10 @@ environment's `mount`, not to the embedded bootstrap page):
   The inspectors' own calls are not shown. Attached, the panel reads the page directly; detached, its window does not
   see the page, so the page publishes the same state to C++ every 250 ms while the panel reads, and stops within
   fifteen seconds of its last read (`webfront.inspector.bridgeSource`, `publishBridge` and `bridge`, admitted pages
-  only).
+  only). The panel detaches like the others, to a native secondary window with WebKitGTK, WKWebView and WebView2. C++
+  knows 256 connected pages at most, and keeps the published state of 16 of them: beyond 256 connected pages, a page's
+  announcement is refused with `webfront.inspector.unavailable`, and its detached panel says that the page is not
+  connected.
 
 The tab is a button (`aria-expanded`, `aria-haspopup="menu"`, 44 px target), its menu a `menu` of `menuitem`s of 44 px,
 and the window a non-modal dialog. The interface stays in the preview
@@ -531,6 +551,39 @@ and in the same-origin frames it embeds (not in a frame of another origin, nor o
 or the tab first). This is a layout, not a
 sandbox (see [limitations](#dependencies-storage-and-limitations)). A page that mounts the terminal itself (`runtime.mount`) with a preview frame gets
 the same layout; `workspace: false` keeps the page as it is.
+
+### The inspectors and the application's callbacks
+
+The inspectors exist only in the developer environment: `bootstrap("developer")` registers the reserved
+`webfront.inspector.*` functions, an application without it has none, and a distribution build
+(`WEBFRONT_DISTRIBUTION=ON`) compiles none of them; `app.watch` then returns an empty handle. They read what the application
+shows them and write only the [watched values](WATCHES.md#writing-a-value) that the application made writable. They are
+not a sandbox: an admitted page shares the authority of the bridge.
+
+When the frontend proves its view, WebFront guards its own entry points that change what the view runs or what the server
+serves: the project writes (`webfront.developer.begin`, `beginNew`, `write`, `commit`, `commitGroup`, `abort`) and
+starting or cancelling a terminal command (`webfront.commands.start`, `cancel`) require an admitted page, like the
+inspectors, and are refused with `webfront.inspector.denied` otherwise. The reads of the project and
+`webfront.commands.list` keep the origin check. With the system browser no view is proven, so these operations stay open
+to every connection that the [content policy](CONTENT_POLICY.md) admits.
+
+**The callbacks of the application are its own contract** (ADR-027, section 2). WebFront does not know what a
+`cppFunction` does and does not guard it. A callback that writes the project or what the server serves, starts a process,
+or exposes a state the application would not show to an unproven client takes the calling `UI` as its first parameter and
+checks it before acting:
+
+```cpp
+app.cppFunction("app.saveScript", [&](webfront::NativeApp::UI ui, std::string text) {
+    if (!ui.isLocalClient())                     // not the application's view, nor a trusted loopback page
+        throw std::runtime_error("app.saveScript requires the application's view");   // the Promise rejects
+    saveScript(text);
+});
+```
+
+Without that check, such a callback opens again the door the guard above closes: a local process could call it, then let
+the proven view load what it wrote. The **Caller** column of the Functions panel shows which callbacks receive the `UI`,
+and so can make the check. An agent reads the same state through MCP, with the `state` grant, and never writes it
+([Developing with an agent](DEVELOPING_WITH_AGENTS.md#reading-the-running-application-webfrontstate)).
 
 ## The terminal and the application's commands
 

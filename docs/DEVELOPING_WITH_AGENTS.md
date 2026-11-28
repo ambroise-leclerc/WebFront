@@ -36,6 +36,29 @@ not how the interface is shipped. An application that serves a document root wit
 line on stderr at its first `show()` saying so. Only [scalars, strings, tuples, typed arrays, bitsets and lists](../README.md#contracts-and-limitations)
 cross the bridge.
 
+### A callback that acts checks its caller
+
+WebFront guards its own functions, not the application's: it does not know what a `cppFunction` does. **A callback that
+writes the project or what the server serves, starts a process, or exposes a state the application would not show to any
+client takes the calling `UI` as its first parameter and checks `ui.isLocalClient()` before acting** (ADR-027, section 2).
+`isLocalClient()` is true for the view of an embedded frontend, which proves itself, and for a loopback page only when the
+application sets `trustLoopbackClients`.
+
+```cpp
+app.cppFunction("app.saveScript", [&](webfront::NativeApp::UI ui, std::string text) {
+    if (!ui.isLocalClient())
+        throw std::runtime_error("app.saveScript requires the application's view");   // the Promise rejects
+    saveScript(text);
+});
+```
+
+The calling `UI` is not a parameter on the JavaScript side: the page still calls `webFront.cppFunction('app.saveScript')(text)`.
+A callback that only computes and returns a value needs no check. Without it, a callback that acts can be called by a
+local process that forges the page's origin (the origin check alone cannot tell it from the page), then the proven view
+may load what it wrote. The Functions panel of the
+[inspectors](DEVELOPER_ENVIRONMENT.md#the-inspectors-and-the-applications-callbacks) shows which callbacks receive the
+caller.
+
 ## The development loop
 
 `wf create <starter>` takes the name of a **starter**, not the name of your project: `app` is a minimal TypeScript
