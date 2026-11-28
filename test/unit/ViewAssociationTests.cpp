@@ -811,6 +811,84 @@ std::string answerOf(Ask ask) {
 }
 }  // namespace
 
+const Scenario inspectorBridgeRelay{
+    "The state of a page's bridge is published and read by admitted pages only, with the existing wire types (#684, ADR-003)",
+    {"view-association", "inspector", "bridge-state"},
+    [] {
+        using Rows = std::vector<inspect::BridgeRow>;
+        // Two rows: the test socket carries client frames of less than 126 bytes.
+        const Rows rows{
+            {                  "pending",                  "save",                  "",                  7.0,                  125.5},
+            {                  "js",                  "draw",                  "\xC3\xA9",                  9.0,       3.0}};
+       given("the proven view of a bootstrapped application", [&] {
+       freshNetwork();
+       AdmittedBrowser<InspectorApp> browser{false, true};
+       then("the three functions of the relay exist", [&] {
+       for (const auto* name : {"webfront.inspector.bridgeSource", "webfront.inspector.publishBridge", "webfront.inspector.bridge"})
+       require(browser.app.hasCppFunction(name));
+       });
+       when("it announces the state of its bridge while nobody reads", [&] {
+       callWith("webfront.inspector.bridgeSource", 21, std::string{"h1"});
+       then("it is told not to publish", [&] {
+       require(ViewSocket::wrote(booleanAnswer(21, false)));
+       require(!ViewSocket::writtenText().contains("wfInspect.publish"));
+       });
+       andWhen("an inspector reads that state", [&] {
+       const auto empty = answerOf([] {
+       callWith("webfront.inspector.bridge", 22, std::string{"h1"}, 0.0, 200.0);
+       });
+       then("the page is asked to publish, by a call to its JavaScript function", [&] {
+       require(empty.contains("wfInspect.publish"));
+       require(!empty.contains(inspect::code::denied));
+       });
+       andWhen("the page publishes its rows", [&] {
+       callWith("webfront.inspector.publishBridge", 23, std::string{"h1"}, rows);
+       then("it is told to go on publishing", [&] {
+       require(ViewSocket::wrote(booleanAnswer(23, true)));
+       });
+       const auto answer = answerOf([] {
+       callWith("webfront.inspector.bridge", 24, std::string{"h1"}, 0.0, 200.0);
+       });
+       then("the inspector reads the same rows back, encoded as a list of tuples", [&] {
+       require(answer.contains(encodedValue(rows)));
+       });
+       });
+       });
+       });
+       when("it publishes without having announced itself", [&] {
+       const auto answer = answerOf([&] {
+       callWith("webfront.inspector.publishBridge", 25, std::string{"h2"}, rows);
+       });
+       then("the publication is refused as unknown", [&] {
+       require(answer.contains(inspect::code::unknown));
+       });
+       });
+       when("it names a host with an identifier that is not one", [&] {
+       const auto answer = answerOf([] {
+       callWith("webfront.inspector.bridge", 26, std::string{"../host"}, 0.0, 200.0);
+       });
+       then("the call is refused", [&] {
+       require(answer.contains("Invalid inspector host identifier"));
+       });
+       });
+       });
+       given("a page that is not admitted, such as the frame of the interface or an external browser", [&] {
+       freshNetwork();
+       AdmittedBrowser<InspectorApp> browser{false, false};
+       then("it can neither announce, nor publish, nor read a state", [&] {
+       require(answerOf([] {
+       callWith("webfront.inspector.bridgeSource", 21, std::string{"h1"});
+       }).contains(inspect::code::denied));
+       require(answerOf([&] {
+       callWith("webfront.inspector.publishBridge", 22, std::string{"h1"}, rows);
+       }).contains(inspect::code::denied));
+       require(answerOf([] {
+       callWith("webfront.inspector.bridge", 23, std::string{"h1"}, 0.0, 200.0);
+       }).contains(inspect::code::denied));
+       });
+       });                                             }
+};
+
 const Scenario inspectorRegistryAccess{
     "The functions, the JavaScript calls and the browsers are told to an admitted page only (ADR-027, sections 2 and 7)",
     {"view-association", "inspector"},
@@ -967,6 +1045,15 @@ const Scenario inspectorRegistryAccess{
                 });
                 using namespace inspect::browser_flag;
                 require(browsers.contains(encodedValue(std::tuple{0.0, double{localClient | started | caller}, std::string{"/"}}).substr(2)));
+            });
+        });
+        given("a developer application that is not bootstrapped, asked for the relay of the bridge", [&] {
+            freshNetwork();
+            webfront::test::TemporaryDirectory project;
+            InspectorApp                       app(project.path(), WebFrontConfig{.port = "0"});
+            then("it has none of its functions", [&] {
+                for (const auto* name : {"webfront.inspector.bridgeSource", "webfront.inspector.publishBridge", "webfront.inspector.bridge"})
+                    require(!app.hasCppFunction(name));
             });
         });
         given("a developer application that is not bootstrapped", [&] {

@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include "BridgeState.hpp"
 #include "InspectorReads.hpp"
 #include "system/DeveloperFS.hpp"
 #include "system/DeveloperReleaseData.hpp"
@@ -307,6 +308,41 @@ private:
                 admit(ui);
                 return inspect::browserPage(this->inspectedBrowsers(ui), from, count, this->inspectedTasks(), inspect::responseBudget<Policy>);
             });
+        // The state of the bridge in a page (#684, section 8): a detached panel is another window, which does not see the page
+        // of the application, so that page publishes its state here and the panel reads it, both under the inspectors' access.
+        // A page publishes only while a panel reads: bridgeSource() announces it and says whether one does, a read asks an
+        // idle page to start (wfInspect.publish, inspector-bridge.mjs), and each publication is told whether to go on.
+        const auto bridges = std::make_shared<inspect::BridgeStates>();
+        this->template reservedCppFunction<bool, Caller, std::string>("webfront.inspector.bridgeSource", [bridges](Caller ui, std::string host) {
+            admit(ui);
+            requireHost(host);
+            return bridges->announce(
+                host,
+                ui,
+                [ui] {
+                    ui.jsFunction("wfInspect.publish")();
+                },
+                [ui] {
+                    return ui.isLocalClient();
+                });
+        });
+        this->template reservedCppFunction<bool, Caller, std::string, std::vector<inspect::BridgeRow>>(
+            "webfront.inspector.publishBridge",
+            [bridges](Caller ui, std::string host, std::vector<inspect::BridgeRow> rows) {
+                admit(ui);
+                requireHost(host);
+                return bridges->publish(host, ui, std::move(rows));
+            });
+        this->template reservedCppFunction<inspect::BridgePage, Caller, std::string, double, double>(
+            "webfront.inspector.bridge",
+            [bridges](Caller ui, std::string host, double from, double count) {
+                admit(ui);
+                requireHost(host);
+                auto read = bridges->read(host, from, count, inspect::responseBudget<Policy>);
+                if (read.ask)
+                    read.ask();
+                return std::move(read.page);
+            });
         // A secondary window of the panel for the host page, with the proof of the view (section 8); opening it again brings it to the front.
         // The window is opened on the interface thread, where openSecondaryWindow() does not hold the server's thread.
         this->template reservedCppFunction<ResultTask<void>, Caller, std::string, std::string, double, double>(
@@ -396,6 +432,12 @@ private:
     }
 
 #endif
+
+    /// Refuses an identifier that does not name a host page (developer::inspectorHostIdentifier).
+    static void requireHost(std::string_view host) {
+        if (!developer::inspectorHostIdentifier(host))
+            throw std::invalid_argument("Invalid inspector host identifier");
+    }
 
     /// Refuses a page that is neither the proven view nor, with trustLoopbackClients, a loopback page (ADR-027, section 2).
     static void admit(const typename Base::UI& ui) {

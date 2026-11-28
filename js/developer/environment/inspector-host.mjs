@@ -6,6 +6,7 @@
 import {readProject, call} from './io.mjs';
 import {clampRect, step, minimumSize, windowControls} from './workspace.mjs';
 import {inspectorPanels as panels, panelTitle, inspectorChannel} from './menu.mjs';
+import {createBridgeMonitor, createBridgePublisher} from './inspector-bridge.mjs';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -250,8 +251,9 @@ export async function claimHostIdentifier(view) {
  * webfront.inspector.embedded(); an error counts as embedded, which never offers a tab). `open(panel)` shows a panel in its
  * container, `detach(panel)` and `attach(panel)` move it, and `reason(panel)` says why it cannot be detached ('' when it
  * can). `windowOpen` replaces window.open (tests). `hostId` names this page in its detached windows (claimHostIdentifier()).
+ * `inspected()` gives the bridge whose state the Bridge panel shows, as `{bridge, label, path}`, or null for this page's own.
  */
-export async function createInspectorHost({bridge, page, inspectorUrl, access, embedded = null, windowOpen = null, hostId = null}) {
+export async function createInspectorHost({bridge, page, inspectorUrl, access, embedded = null, windowOpen = null, hostId = null, inspected = null}) {
     const view = page.defaultView, root = page.documentElement;
     const self = hostId ?? await claimHostIdentifier(view);
     const viewport = () => ({width: root.clientWidth, height: root.clientHeight});
@@ -378,6 +380,8 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
      * window closed meanwhile) is closed then: the panel stays in the floating window, or closed.
      */
     async function openDetached(id, container) {
+        // The relay keeps a bounded number of pages: one that lost its place announces itself again when its panel is detached.
+        if (id === 'typescript.bridge' && containers?.host) publisher.announce();
         if (container === 'window') {
             const rect = shown(), started = action;
             const attempt = {cancelled: false};
@@ -467,6 +471,13 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
         if (shownPanel === id && preferences.detached.has(id) && action === started) hideFloating();
     }
 
+    // The state of the bridge in the page (#684): of the interface when it has a bridge (`inspected`), else of this page. It is
+    // followed only while a panel reads, and published to C++ for the detached panels of an admitted page.
+    const bridgeState = createBridgeMonitor({target: () => inspected?.() ?? {bridge, label: 'this page', path: view.location?.pathname ?? ''},
+        timers: view, clock: () => view.performance?.now() ?? Date.now()});
+    const publisher = createBridgePublisher({monitor: bridgeState, bridge, host: self, view});
+    if (containers?.host) publisher.announce();
+
     const host = {
         get containers() { return containers; },
         get embedded() { return isEmbedded; },
@@ -474,6 +485,10 @@ export async function createInspectorHost({bridge, page, inspectorUrl, access, e
         get id() { return self; },
         /** The bridge this host was created with: the frame of the floating window borrows it (inspector.mjs, pageBridge). */
         get bridge() { return bridge; },
+        /** The monitor of the bridge in this page (inspector-bridge.mjs): the frame reads it, the detached panels read what it publishes. */
+        get bridgeState() { return bridgeState; },
+        /** Whether this page publishes the state of its bridge now: a detached Bridge panel reads it. */
+        get bridgePublishing() { return publisher.running; },
         get shownPanel() { return shownPanel; },
         get frame() { return frame; },
         panel, bar, detachButton, closeButton, notice,
