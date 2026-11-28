@@ -4,6 +4,7 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
+| 1.6 | 2026-11-28 | Acceptée | Ambroise Leclerc | Intégration de l'épique #677 : les stories #678 à #686 sont fusionnées dans `develop` avec leurs tests (unitaires, encodage des nœuds, Jasmine et `DeveloperBrowserIntegration`) ; `MinimalCoreAssets` est inchangé. La décision et ses versions 1.0 à 1.5 sont acceptées, avec la version 1.7 de l'ADR-016 qu'elle propose. | [#687](https://github.com/ambroise-leclerc/WebFront/pull/687), [#688](https://github.com/ambroise-leclerc/WebFront/pull/688), [#692](https://github.com/ambroise-leclerc/WebFront/pull/692), [#697](https://github.com/ambroise-leclerc/WebFront/pull/697), [#698](https://github.com/ambroise-leclerc/WebFront/pull/698), [#699](https://github.com/ambroise-leclerc/WebFront/pull/699), [#700](https://github.com/ambroise-leclerc/WebFront/pull/700), [#701](https://github.com/ambroise-leclerc/WebFront/pull/701), [#704](https://github.com/ambroise-leclerc/WebFront/pull/704), [#705](https://github.com/ambroise-leclerc/WebFront/pull/705) |
 | 1.5 | 2026-11-28 | Proposée | Ambroise Leclerc | État du pont dans la page (#684, section 8) : sonde `probe` de `WebFront.js`, posée seulement pendant qu'un inspecteur lit ; moniteur de la page hôte, qui suit le pont de l'interface ; relais `webfront.inspector.bridgeSource`, `publishBridge` et `bridge`, sous la règle d'accès de la section 2, où la page ne publie que pendant qu'un panneau détaché lit (bail de 15 s) ; état borné à 256 lignes de textes de 256 octets, pour 16 pages au plus. | À renseigner après intégration. |
 | 1.4 | 2026-11-28 | Proposée | Ambroise Leclerc | Outils MCP (#685) : la section 10 fixe les dix outils `webfront.state.*` sous le grant `state`, servis nativement et sans exécution ; lectures seules (ni `write`, ni préférences, ni fenêtres) ; une mémoire des observateurs propre à ces lectures, que `fold` et `reset` gèrent sans toucher l'application ni un panneau ; mêmes bornes que les pages ; refus aux codes `webfront.inspector.*` ; les packages passent par les opérations `list`, `why` et `info` de l'environnement, sous le grant `packages`. | Issue #685. |
 | 1.3 | 2026-11-27 | Proposée | Ambroise Leclerc | Observateurs (#682) : précisions de la section « Précisions des observateurs » (6 bis) — `fold` répond par une page vide, `limits` par six nombres, la source propriétaire reçoit son état, le mutateur reçoit le texte déjà validé, un parent signalé « enfants modifiés » perd ses enfants en mémoire, la mémoire de 10 000 nœuds se compte par connexion et par observateur, `maxWriteTextBytes` tient compte de l'en-tête réel du texte, un formateur écrit pour `std::format_context` est accepté. | À renseigner après intégration. |
@@ -13,7 +14,8 @@
 
 ## État et portée
 
-**Proposée le 2026-11-25.** Elle précède tout code de l'épique #677 (#679 à #686), dont elle fixe les contrats. Elle
+**Acceptée le 2026-11-28** (version 1.6), après l'intégration de l'épique #677 ; proposée le 2026-11-25. Elle a précédé tout
+code de l'épique (#679 à #686), dont elle fixe les contrats. Elle
 ne modifie pas le format binaire du pont ([ADR-003](ADR-003-protocole-binaire-et-bornes.md)), ni la liste des
 ressources embarquées du cœur ([ADR-016](ADR-016-bootstrap-comme-socle.md)), dont elle amende seulement la portée des
 permissions (version 1.7 : écritures de l'environnement gardées quand une vue est prouvée, section 2), ni le
